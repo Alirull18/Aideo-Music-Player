@@ -1,0 +1,1846 @@
+[Docs.rs](https://docs.rs/)
+- 
+            [cpal-0.17.3](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+
+
+                        cpal 0.17.3
+
+
+                        [Docs.rs crate page](https://docs.rs/crate/cpal/0.17.3)
+
+
+                            [Apache-2.0](https://spdx.org/licenses/Apache-2.0)
+
+
+
+
+
+                            Links
+
+
+                                    [Repository](https://github.com/RustAudio/cpal)
+
+                                [crates.io](https://crates.io/crates/cpal)
+
+
+
+
+                                [Source](https://docs.rs/crate/cpal/0.17.3/source/)
+
+
+
+
+                            Owners
+                                    [tomaka](https://crates.io/users/tomaka)
+
+                                    [github:rustaudio:cpal-maintainers](https://crates.io/teams/github:rustaudio:cpal-maintainers)
+
+
+
+
+
+
+
+                            Dependencies
+
+
+
+
+
+                                        [dasp_sample ^0.11
+
+                    normal](https://docs.rs/dasp_sample/%5E0.11/)
+        [anyhow ^1.0
+
+                    dev](https://docs.rs/anyhow/%5E1.0/)
+        [clap >=4.0, <=4.5
+
+                    dev](https://docs.rs/clap/%3E=4.0,%20%3C=4.5/)
+        [hound ^3.5
+
+                    dev](https://docs.rs/hound/%5E3.5/)
+        [ringbuf ^0.4
+
+                    dev](https://docs.rs/ringbuf/%5E0.4/)
+        [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+        [wasm-bindgen ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen/%5E0.2/)
+        [wasm-bindgen-futures ^0.4
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+        [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+        [alsa ^0.11
+
+                    normal](https://docs.rs/alsa/%5E0.11/)
+        [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [libc ^0.2
+
+                    normal](https://docs.rs/libc/%5E0.2/)
+        [jni ^0.21
+
+                    normal](https://docs.rs/jni/%5E0.21/)
+        [ndk ^0.9
+
+                    normal](https://docs.rs/ndk/%5E0.9/)
+        [ndk-context ^0.1
+
+                    normal](https://docs.rs/ndk-context/%5E0.1/)
+        [num-derive ^0.4
+
+                    normal](https://docs.rs/num-derive/%5E0.4/)
+        [num-traits ^0.2
+
+                    normal](https://docs.rs/num-traits/%5E0.2/)
+        [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+        [wasm-bindgen ^0.2
+
+                    normal](https://docs.rs/wasm-bindgen/%5E0.2/)
+        [wasm-bindgen-futures ^0.4
+
+                    normal](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+        [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+        [objc2-avf-audio ^0.3
+
+                    normal](https://docs.rs/objc2-avf-audio/%5E0.3/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [asio-sys ^0.2.6
+
+                    normal
+
+                        optional](https://docs.rs/asio-sys/%5E0.2.6/)
+        [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [num-traits ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/num-traits/%5E0.2/)
+        [windows >=0.59, <=0.62
+
+                    normal](https://docs.rs/windows/%3E=0.59,%20%3C=0.62/)
+        [coreaudio-rs ^0.14
+
+                    normal](https://docs.rs/coreaudio-rs/%5E0.14/)
+        [mach2 ^0.5
+
+                    normal](https://docs.rs/mach2/%5E0.5/)
+        [objc2 ^0.6
+
+                    normal](https://docs.rs/objc2/%5E0.6/)
+        [objc2-audio-toolbox ^0.3
+
+                    normal](https://docs.rs/objc2-audio-toolbox/%5E0.3/)
+        [objc2-core-audio ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio/%5E0.3/)
+        [objc2-core-audio-types ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio-types/%5E0.3/)
+        [objc2-core-foundation ^0.3
+
+normal](https://docs.rs/objc2-core-foundation/%5E0.3/)
+        [objc2-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-foundation/%5E0.3/)
+
+
+
+
+
+
+
+
+
+                            Versions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                    [80.32%
+                                        of the crate is documented](https://docs.rs/crate/cpal/0.17.3)
+
+
+
+
+
+- 
+                        cpal 0.17.3
+
+
+- 
+                        [Docs.rs crate page](https://docs.rs/crate/cpal/0.17.3)
+
+- 
+
+                            [Apache-2.0](https://spdx.org/licenses/Apache-2.0)
+
+- Links
+- 
+                                    [Repository](https://github.com/RustAudio/cpal)
+
+- 
+                                [crates.io](https://crates.io/crates/cpal)
+
+- 
+                                [Source](https://docs.rs/crate/cpal/0.17.3/source/)
+
+- Owners
+- 
+                                    [tomaka](https://crates.io/users/tomaka)
+
+- 
+                                    [github:rustaudio:cpal-maintainers](https://crates.io/teams/github:rustaudio:cpal-maintainers)
+
+- Dependencies
+- 
+
+
+                                        [dasp_sample ^0.11
+
+                    normal](https://docs.rs/dasp_sample/%5E0.11/)
+        [anyhow ^1.0
+
+                    dev](https://docs.rs/anyhow/%5E1.0/)
+        [clap >=4.0, <=4.5
+
+                    dev](https://docs.rs/clap/%3E=4.0,%20%3C=4.5/)
+        [hound ^3.5
+
+                    dev](https://docs.rs/hound/%5E3.5/)
+        [ringbuf ^0.4
+
+                    dev](https://docs.rs/ringbuf/%5E0.4/)
+        [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+        [wasm-bindgen ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen/%5E0.2/)
+        [wasm-bindgen-futures ^0.4
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+        [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+        [alsa ^0.11
+
+                    normal](https://docs.rs/alsa/%5E0.11/)
+        [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [libc ^0.2
+
+                    normal](https://docs.rs/libc/%5E0.2/)
+        [jni ^0.21
+
+                    normal](https://docs.rs/jni/%5E0.21/)
+        [ndk ^0.9
+
+                    normal](https://docs.rs/ndk/%5E0.9/)
+        [ndk-context ^0.1
+
+                    normal](https://docs.rs/ndk-context/%5E0.1/)
+        [num-derive ^0.4
+
+                    normal](https://docs.rs/num-derive/%5E0.4/)
+        [num-traits ^0.2
+
+                    normal](https://docs.rs/num-traits/%5E0.2/)
+        [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+        [wasm-bindgen ^0.2
+
+                    normal](https://docs.rs/wasm-bindgen/%5E0.2/)
+        [wasm-bindgen-futures ^0.4
+
+                    normal](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+        [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+        [objc2-avf-audio ^0.3
+
+                    normal](https://docs.rs/objc2-avf-audio/%5E0.3/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [asio-sys ^0.2.6
+
+                    normal
+
+                        optional](https://docs.rs/asio-sys/%5E0.2.6/)
+        [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [num-traits ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/num-traits/%5E0.2/)
+        [windows >=0.59, <=0.62
+
+                    normal](https://docs.rs/windows/%3E=0.59,%20%3C=0.62/)
+        [coreaudio-rs ^0.14
+
+                    normal](https://docs.rs/coreaudio-rs/%5E0.14/)
+        [mach2 ^0.5
+
+                    normal](https://docs.rs/mach2/%5E0.5/)
+        [objc2 ^0.6
+
+                    normal](https://docs.rs/objc2/%5E0.6/)
+        [objc2-audio-toolbox ^0.3
+
+                    normal](https://docs.rs/objc2-audio-toolbox/%5E0.3/)
+        [objc2-core-audio ^0.3
+
+normal](https://docs.rs/objc2-core-audio/%5E0.3/)
+        [objc2-core-audio-types ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio-types/%5E0.3/)
+        [objc2-core-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-core-foundation/%5E0.3/)
+        [objc2-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-foundation/%5E0.3/)
+
+
+
+
+- [dasp_sample ^0.11
+
+                    normal](https://docs.rs/dasp_sample/%5E0.11/)
+
+- [anyhow ^1.0
+
+                    dev](https://docs.rs/anyhow/%5E1.0/)
+
+- [clap >=4.0, <=4.5
+
+                    dev](https://docs.rs/clap/%3E=4.0,%20%3C=4.5/)
+
+- [hound ^3.5
+
+                    dev](https://docs.rs/hound/%5E3.5/)
+
+- [ringbuf ^0.4
+
+                    dev](https://docs.rs/ringbuf/%5E0.4/)
+
+- [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+
+- [wasm-bindgen ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen/%5E0.2/)
+
+- [wasm-bindgen-futures ^0.4
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+
+- [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+
+- [alsa ^0.11
+
+                    normal](https://docs.rs/alsa/%5E0.11/)
+
+- [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [libc ^0.2
+
+                    normal](https://docs.rs/libc/%5E0.2/)
+
+- [jni ^0.21
+
+                    normal](https://docs.rs/jni/%5E0.21/)
+
+- [ndk ^0.9
+
+                    normal](https://docs.rs/ndk/%5E0.9/)
+
+- [ndk-context ^0.1
+
+                    normal](https://docs.rs/ndk-context/%5E0.1/)
+
+- [num-derive ^0.4
+
+                    normal](https://docs.rs/num-derive/%5E0.4/)
+
+- [num-traits ^0.2
+
+                    normal](https://docs.rs/num-traits/%5E0.2/)
+
+- [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+
+- [wasm-bindgen ^0.2
+
+                    normal](https://docs.rs/wasm-bindgen/%5E0.2/)
+
+- [wasm-bindgen-futures ^0.4
+
+                    normal](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+
+- [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+
+- [objc2-avf-audio ^0.3
+
+                    normal](https://docs.rs/objc2-avf-audio/%5E0.3/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [asio-sys ^0.2.6
+
+                    normal
+
+                        optional](https://docs.rs/asio-sys/%5E0.2.6/)
+
+- [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [num-traits ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/num-traits/%5E0.2/)
+
+- [windows >=0.59, <=0.62
+
+                    normal](https://docs.rs/windows/%3E=0.59,%20%3C=0.62/)
+
+- [coreaudio-rs ^0.14
+
+                    normal](https://docs.rs/coreaudio-rs/%5E0.14/)
+
+- [mach2 ^0.5
+
+                    normal](https://docs.rs/mach2/%5E0.5/)
+
+- [objc2 ^0.6
+
+                    normal](https://docs.rs/objc2/%5E0.6/)
+
+- [objc2-audio-toolbox ^0.3
+
+                    normal](https://docs.rs/objc2-audio-toolbox/%5E0.3/)
+
+- [objc2-core-audio ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio/%5E0.3/)
+
+- [objc2-core-audio-types ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio-types/%5E0.3/)
+
+- [objc2-core-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-core-foundation/%5E0.3/)
+
+- [objc2-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-foundation/%5E0.3/)
+
+- Versions
+- 
+
+
+
+
+- 
+                                    [80.32%
+                                        of the crate is documented](https://docs.rs/crate/cpal/0.17.3)
+
+- 
+                [Platform](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+
+
+            [aarch64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+
+            [aarch64-apple-ios](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-ios/cpal/struct.SupportedStreamConfig.html)
+
+[aarch64-linux-android](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-linux-android/cpal/struct.SupportedStreamConfig.html)
+
+            [x86_64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+
+            [x86_64-pc-windows-msvc](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-pc-windows-msvc/cpal/struct.SupportedStreamConfig.html)
+
+            [x86_64-unknown-linux-gnu](https://docs.rs/crate/cpal/0.17.3/target-redirect/cpal/struct.SupportedStreamConfig.html)
+
+
+- 
+            [aarch64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [aarch64-apple-ios](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-ios/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [aarch64-linux-android](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-linux-android/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [x86_64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [x86_64-pc-windows-msvc](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-pc-windows-msvc/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [x86_64-unknown-linux-gnu](https://docs.rs/crate/cpal/0.17.3/target-redirect/cpal/struct.SupportedStreamConfig.html)
+
+- 
+                [Feature flags](https://docs.rs/crate/cpal/0.17.3/features)
+
+[cpal-0.17.3](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+- 
+                        cpal 0.17.3
+
+
+- 
+                        [Docs.rs crate page](https://docs.rs/crate/cpal/0.17.3)
+
+- 
+
+                            [Apache-2.0](https://spdx.org/licenses/Apache-2.0)
+
+[Docs.rs crate page](https://docs.rs/crate/cpal/0.17.3)
+[Apache-2.0](https://spdx.org/licenses/Apache-2.0)
+- Links
+- 
+                                    [Repository](https://github.com/RustAudio/cpal)
+
+- 
+                                [crates.io](https://crates.io/crates/cpal)
+
+- 
+                                [Source](https://docs.rs/crate/cpal/0.17.3/source/)
+
+[Repository](https://github.com/RustAudio/cpal)
+[crates.io](https://crates.io/crates/cpal)
+[Source](https://docs.rs/crate/cpal/0.17.3/source/)
+- Owners
+- 
+                                    [tomaka](https://crates.io/users/tomaka)
+
+- 
+                                    [github:rustaudio:cpal-maintainers](https://crates.io/teams/github:rustaudio:cpal-maintainers)
+
+[tomaka](https://crates.io/users/tomaka)
+[github:rustaudio:cpal-maintainers](https://crates.io/teams/github:rustaudio:cpal-maintainers)
+- Dependencies
+- 
+
+
+                                        [dasp_sample ^0.11
+
+                    normal](https://docs.rs/dasp_sample/%5E0.11/)
+        [anyhow ^1.0
+
+                    dev](https://docs.rs/anyhow/%5E1.0/)
+        [clap >=4.0, <=4.5
+
+                    dev](https://docs.rs/clap/%3E=4.0,%20%3C=4.5/)
+        [hound ^3.5
+
+                    dev](https://docs.rs/hound/%5E3.5/)
+        [ringbuf ^0.4
+
+                    dev](https://docs.rs/ringbuf/%5E0.4/)
+        [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+        [wasm-bindgen ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen/%5E0.2/)
+        [wasm-bindgen-futures ^0.4
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+        [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+        [alsa ^0.11
+
+                    normal](https://docs.rs/alsa/%5E0.11/)
+        [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [libc ^0.2
+
+                    normal](https://docs.rs/libc/%5E0.2/)
+        [jni ^0.21
+
+                    normal](https://docs.rs/jni/%5E0.21/)
+        [ndk ^0.9
+
+                    normal](https://docs.rs/ndk/%5E0.9/)
+        [ndk-context ^0.1
+
+                    normal](https://docs.rs/ndk-context/%5E0.1/)
+        [num-derive ^0.4
+
+                    normal](https://docs.rs/num-derive/%5E0.4/)
+        [num-traits ^0.2
+
+                    normal](https://docs.rs/num-traits/%5E0.2/)
+        [js-sys ^0.3
+
+normal](https://docs.rs/js-sys/%5E0.3/)
+        [wasm-bindgen ^0.2
+
+                    normal](https://docs.rs/wasm-bindgen/%5E0.2/)
+        [wasm-bindgen-futures ^0.4
+
+                    normal](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+        [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+        [objc2-avf-audio ^0.3
+
+                    normal](https://docs.rs/objc2-avf-audio/%5E0.3/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [asio-sys ^0.2.6
+
+                    normal
+
+                        optional](https://docs.rs/asio-sys/%5E0.2.6/)
+        [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+        [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+        [num-traits ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/num-traits/%5E0.2/)
+        [windows >=0.59, <=0.62
+
+                    normal](https://docs.rs/windows/%3E=0.59,%20%3C=0.62/)
+        [coreaudio-rs ^0.14
+
+                    normal](https://docs.rs/coreaudio-rs/%5E0.14/)
+        [mach2 ^0.5
+
+                    normal](https://docs.rs/mach2/%5E0.5/)
+        [objc2 ^0.6
+
+                    normal](https://docs.rs/objc2/%5E0.6/)
+        [objc2-audio-toolbox ^0.3
+
+                    normal](https://docs.rs/objc2-audio-toolbox/%5E0.3/)
+        [objc2-core-audio ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio/%5E0.3/)
+        [objc2-core-audio-types ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio-types/%5E0.3/)
+        [objc2-core-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-core-foundation/%5E0.3/)
+        [objc2-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-foundation/%5E0.3/)
+
+
+
+
+- [dasp_sample ^0.11
+
+                    normal](https://docs.rs/dasp_sample/%5E0.11/)
+
+- [anyhow ^1.0
+
+                    dev](https://docs.rs/anyhow/%5E1.0/)
+
+- [clap >=4.0, <=4.5
+
+                    dev](https://docs.rs/clap/%3E=4.0,%20%3C=4.5/)
+
+- [hound ^3.5
+
+                    dev](https://docs.rs/hound/%5E3.5/)
+
+- [ringbuf ^0.4
+
+                    dev](https://docs.rs/ringbuf/%5E0.4/)
+
+- [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+
+- [wasm-bindgen ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen/%5E0.2/)
+
+- [wasm-bindgen-futures ^0.4
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+
+- [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+
+- [alsa ^0.11
+
+                    normal](https://docs.rs/alsa/%5E0.11/)
+
+- [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [libc ^0.2
+
+                    normal](https://docs.rs/libc/%5E0.2/)
+
+- [jni ^0.21
+
+                    normal](https://docs.rs/jni/%5E0.21/)
+
+- [ndk ^0.9
+
+                    normal](https://docs.rs/ndk/%5E0.9/)
+
+- [ndk-context ^0.1
+
+                    normal](https://docs.rs/ndk-context/%5E0.1/)
+
+- [num-derive ^0.4
+
+                    normal](https://docs.rs/num-derive/%5E0.4/)
+
+- [num-traits ^0.2
+
+                    normal](https://docs.rs/num-traits/%5E0.2/)
+
+- [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+
+- [wasm-bindgen ^0.2
+
+                    normal](https://docs.rs/wasm-bindgen/%5E0.2/)
+
+- [wasm-bindgen-futures ^0.4
+
+                    normal](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+
+- [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+
+- [objc2-avf-audio ^0.3
+
+                    normal](https://docs.rs/objc2-avf-audio/%5E0.3/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [asio-sys ^0.2.6
+
+                    normal
+
+                        optional](https://docs.rs/asio-sys/%5E0.2.6/)
+
+- [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+
+- [jack ^0.13
+
+                    normal
+
+optional](https://docs.rs/jack/%5E0.13/)
+
+- [num-traits ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/num-traits/%5E0.2/)
+
+- [windows >=0.59, <=0.62
+
+                    normal](https://docs.rs/windows/%3E=0.59,%20%3C=0.62/)
+
+- [coreaudio-rs ^0.14
+
+                    normal](https://docs.rs/coreaudio-rs/%5E0.14/)
+
+- [mach2 ^0.5
+
+                    normal](https://docs.rs/mach2/%5E0.5/)
+
+- [objc2 ^0.6
+
+                    normal](https://docs.rs/objc2/%5E0.6/)
+
+- [objc2-audio-toolbox ^0.3
+
+                    normal](https://docs.rs/objc2-audio-toolbox/%5E0.3/)
+
+- [objc2-core-audio ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio/%5E0.3/)
+
+- [objc2-core-audio-types ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio-types/%5E0.3/)
+
+- [objc2-core-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-core-foundation/%5E0.3/)
+
+- [objc2-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-foundation/%5E0.3/)
+
+- [dasp_sample ^0.11
+
+                    normal](https://docs.rs/dasp_sample/%5E0.11/)
+
+- [anyhow ^1.0
+
+                    dev](https://docs.rs/anyhow/%5E1.0/)
+
+- [clap >=4.0, <=4.5
+
+                    dev](https://docs.rs/clap/%3E=4.0,%20%3C=4.5/)
+
+- [hound ^3.5
+
+                    dev](https://docs.rs/hound/%5E3.5/)
+
+- [ringbuf ^0.4
+
+                    dev](https://docs.rs/ringbuf/%5E0.4/)
+
+- [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+
+- [wasm-bindgen ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen/%5E0.2/)
+
+- [wasm-bindgen-futures ^0.4
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+
+- [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+
+- [alsa ^0.11
+
+                    normal](https://docs.rs/alsa/%5E0.11/)
+
+- [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [libc ^0.2
+
+                    normal](https://docs.rs/libc/%5E0.2/)
+
+- [jni ^0.21
+
+                    normal](https://docs.rs/jni/%5E0.21/)
+
+- [ndk ^0.9
+
+                    normal](https://docs.rs/ndk/%5E0.9/)
+
+- [ndk-context ^0.1
+
+                    normal](https://docs.rs/ndk-context/%5E0.1/)
+
+- [num-derive ^0.4
+
+                    normal](https://docs.rs/num-derive/%5E0.4/)
+
+- [num-traits ^0.2
+
+                    normal](https://docs.rs/num-traits/%5E0.2/)
+
+- [js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+
+- [wasm-bindgen ^0.2
+
+                    normal](https://docs.rs/wasm-bindgen/%5E0.2/)
+
+- [wasm-bindgen-futures ^0.4
+
+                    normal](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+
+- [web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+
+- [objc2-avf-audio ^0.3
+
+                    normal](https://docs.rs/objc2-avf-audio/%5E0.3/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [asio-sys ^0.2.6
+
+                    normal
+
+                        optional](https://docs.rs/asio-sys/%5E0.2.6/)
+
+- [audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+
+- [jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+
+- [num-traits ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/num-traits/%5E0.2/)
+
+- [windows >=0.59, <=0.62
+
+                    normal](https://docs.rs/windows/%3E=0.59,%20%3C=0.62/)
+
+- [coreaudio-rs ^0.14
+
+                    normal](https://docs.rs/coreaudio-rs/%5E0.14/)
+
+- [mach2 ^0.5
+
+                    normal](https://docs.rs/mach2/%5E0.5/)
+
+- [objc2 ^0.6
+
+                    normal](https://docs.rs/objc2/%5E0.6/)
+
+- [objc2-audio-toolbox ^0.3
+
+                    normal](https://docs.rs/objc2-audio-toolbox/%5E0.3/)
+
+- [objc2-core-audio ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio/%5E0.3/)
+
+- [objc2-core-audio-types ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio-types/%5E0.3/)
+
+- [objc2-core-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-core-foundation/%5E0.3/)
+
+- [objc2-foundation ^0.3
+
+normal](https://docs.rs/objc2-foundation/%5E0.3/)
+
+[dasp_sample ^0.11
+
+                    normal](https://docs.rs/dasp_sample/%5E0.11/)
+[anyhow ^1.0
+
+                    dev](https://docs.rs/anyhow/%5E1.0/)
+[clap >=4.0, <=4.5
+
+                    dev](https://docs.rs/clap/%3E=4.0,%20%3C=4.5/)
+[hound ^3.5
+
+                    dev](https://docs.rs/hound/%5E3.5/)
+[ringbuf ^0.4
+
+                    dev](https://docs.rs/ringbuf/%5E0.4/)
+[js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+[wasm-bindgen ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen/%5E0.2/)
+[wasm-bindgen-futures ^0.4
+
+                    normal
+
+                        optional](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+[web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+[alsa ^0.11
+
+                    normal](https://docs.rs/alsa/%5E0.11/)
+[audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+[jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+[libc ^0.2
+
+                    normal](https://docs.rs/libc/%5E0.2/)
+[jni ^0.21
+
+                    normal](https://docs.rs/jni/%5E0.21/)
+[ndk ^0.9
+
+                    normal](https://docs.rs/ndk/%5E0.9/)
+[ndk-context ^0.1
+
+                    normal](https://docs.rs/ndk-context/%5E0.1/)
+[num-derive ^0.4
+
+                    normal](https://docs.rs/num-derive/%5E0.4/)
+[num-traits ^0.2
+
+                    normal](https://docs.rs/num-traits/%5E0.2/)
+[js-sys ^0.3
+
+                    normal](https://docs.rs/js-sys/%5E0.3/)
+[wasm-bindgen ^0.2
+
+                    normal](https://docs.rs/wasm-bindgen/%5E0.2/)
+[wasm-bindgen-futures ^0.4
+
+                    normal](https://docs.rs/wasm-bindgen-futures/%5E0.4/)
+[web-sys ^0.3
+
+                    normal](https://docs.rs/web-sys/%5E0.3/)
+[objc2-avf-audio ^0.3
+
+                    normal](https://docs.rs/objc2-avf-audio/%5E0.3/)
+[jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+[asio-sys ^0.2.6
+
+                    normal
+
+                        optional](https://docs.rs/asio-sys/%5E0.2.6/)
+[audio_thread_priority ^0.34
+
+                    normal
+
+                        optional](https://docs.rs/audio_thread_priority/%5E0.34/)
+[jack ^0.13
+
+                    normal
+
+                        optional](https://docs.rs/jack/%5E0.13/)
+[num-traits ^0.2
+
+                    normal
+
+                        optional](https://docs.rs/num-traits/%5E0.2/)
+[windows >=0.59, <=0.62
+
+                    normal](https://docs.rs/windows/%3E=0.59,%20%3C=0.62/)
+[coreaudio-rs ^0.14
+
+                    normal](https://docs.rs/coreaudio-rs/%5E0.14/)
+[mach2 ^0.5
+
+                    normal](https://docs.rs/mach2/%5E0.5/)
+[objc2 ^0.6
+
+                    normal](https://docs.rs/objc2/%5E0.6/)
+[objc2-audio-toolbox ^0.3
+
+                    normal](https://docs.rs/objc2-audio-toolbox/%5E0.3/)
+[objc2-core-audio ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio/%5E0.3/)
+[objc2-core-audio-types ^0.3
+
+                    normal](https://docs.rs/objc2-core-audio-types/%5E0.3/)
+[objc2-core-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-core-foundation/%5E0.3/)
+[objc2-foundation ^0.3
+
+                    normal](https://docs.rs/objc2-foundation/%5E0.3/)
+- Versions
+- 
+
+
+
+
+- 
+                                    [80.32%
+                                        of the crate is documented](https://docs.rs/crate/cpal/0.17.3)
+
+[80.32%
+                                        of the crate is documented](https://docs.rs/crate/cpal/0.17.3)
+[Platform](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+- 
+            [aarch64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [aarch64-apple-ios](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-ios/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [aarch64-linux-android](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-linux-android/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [x86_64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+
+-
+
+[x86_64-pc-windows-msvc](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-pc-windows-msvc/cpal/struct.SupportedStreamConfig.html)
+
+- 
+            [x86_64-unknown-linux-gnu](https://docs.rs/crate/cpal/0.17.3/target-redirect/cpal/struct.SupportedStreamConfig.html)
+
+[aarch64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+[aarch64-apple-ios](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-apple-ios/cpal/struct.SupportedStreamConfig.html)
+[aarch64-linux-android](https://docs.rs/crate/cpal/0.17.3/target-redirect/aarch64-linux-android/cpal/struct.SupportedStreamConfig.html)
+[x86_64-apple-darwin](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-apple-darwin/cpal/struct.SupportedStreamConfig.html)
+[x86_64-pc-windows-msvc](https://docs.rs/crate/cpal/0.17.3/target-redirect/x86_64-pc-windows-msvc/cpal/struct.SupportedStreamConfig.html)
+[x86_64-unknown-linux-gnu](https://docs.rs/crate/cpal/0.17.3/target-redirect/cpal/struct.SupportedStreamConfig.html)
+[Feature flags](https://docs.rs/crate/cpal/0.17.3/features)
+- 
+                        [docs.rs](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+                        [About docs.rs](https://docs.rs/about)[Badges](https://docs.rs/about/badges)[Builds](https://docs.rs/about/builds)[Metadata](https://docs.rs/about/metadata)[Shorthand URLs](https://docs.rs/about/redirections)[Download](https://docs.rs/about/download)[Rustdoc JSON](https://docs.rs/about/rustdoc-json)[Build queue](https://docs.rs/releases/queue)[Privacy policy](https://foundation.rust-lang.org/policies/privacy-policy/#docs.rs)
+
+
+- [About docs.rs](https://docs.rs/about)
+- [Badges](https://docs.rs/about/badges)
+- [Builds](https://docs.rs/about/builds)
+- [Metadata](https://docs.rs/about/metadata)
+- [Shorthand URLs](https://docs.rs/about/redirections)
+- [Download](https://docs.rs/about/download)
+- [Rustdoc JSON](https://docs.rs/about/rustdoc-json)
+- [Build queue](https://docs.rs/releases/queue)
+- [Privacy policy](https://foundation.rust-lang.org/policies/privacy-policy/#docs.rs)
+[docs.rs](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+- [About docs.rs](https://docs.rs/about)
+- [Badges](https://docs.rs/about/badges)
+- [Builds](https://docs.rs/about/builds)
+- [Metadata](https://docs.rs/about/metadata)
+- [Shorthand URLs](https://docs.rs/about/redirections)
+- [Download](https://docs.rs/about/download)
+- [Rustdoc JSON](https://docs.rs/about/rustdoc-json)
+- [Build queue](https://docs.rs/releases/queue)
+- [Privacy policy](https://foundation.rust-lang.org/policies/privacy-policy/#docs.rs)
+[About docs.rs](https://docs.rs/about)
+[Badges](https://docs.rs/about/badges)
+[Builds](https://docs.rs/about/builds)
+[Metadata](https://docs.rs/about/metadata)
+[Shorthand URLs](https://docs.rs/about/redirections)
+[Download](https://docs.rs/about/download)
+[Rustdoc JSON](https://docs.rs/about/rustdoc-json)
+[Build queue](https://docs.rs/releases/queue)
+[Privacy policy](https://foundation.rust-lang.org/policies/privacy-policy/#docs.rs)
+- 
+                        [Rust](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+                            [Rust website](https://www.rust-lang.org/)
+                            [The Book](https://doc.rust-lang.org/book/)
+
+                            [Standard Library API Reference](https://doc.rust-lang.org/std/)
+
+                            [Rust by Example](https://doc.rust-lang.org/rust-by-example/)
+
+                            [The Cargo Guide](https://doc.rust-lang.org/cargo/guide/)
+
+                            [Clippy Documentation](https://doc.rust-lang.org/nightly/clippy)
+
+
+- [Rust website](https://www.rust-lang.org/)
+- [The Book](https://doc.rust-lang.org/book/)
+- [Standard Library API Reference](https://doc.rust-lang.org/std/)
+- [Rust by Example](https://doc.rust-lang.org/rust-by-example/)
+- [The Cargo Guide](https://doc.rust-lang.org/cargo/guide/)
+- [Clippy Documentation](https://doc.rust-lang.org/nightly/clippy)
+[Rust](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+- [Rust website](https://www.rust-lang.org/)
+- [The Book](https://doc.rust-lang.org/book/)
+- [Standard Library API Reference](https://doc.rust-lang.org/std/)
+- [Rust by Example](https://doc.rust-lang.org/rust-by-example/)
+- [The Cargo Guide](https://doc.rust-lang.org/cargo/guide/)
+
+- [Clippy Documentation](https://doc.rust-lang.org/nightly/clippy)
+[Rust website](https://www.rust-lang.org/)
+[The Book](https://doc.rust-lang.org/book/)
+[Standard Library API Reference](https://doc.rust-lang.org/std/)
+[Rust by Example](https://doc.rust-lang.org/rust-by-example/)
+[The Cargo Guide](https://doc.rust-lang.org/cargo/guide/)
+[Clippy Documentation](https://doc.rust-lang.org/nightly/clippy)
+[Skip to main content](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#main-content)
+
+## [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+## [cpal](https://docs.rs/cpal/0.17.3/cpal/index.html)0.17.3
+[cpal](https://docs.rs/cpal/0.17.3/cpal/index.html)
+
+## [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+### [Methods](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#implementations)
+[Methods](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#implementations)
+- [buffer_size](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.buffer_size)
+- [channels](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.channels)
+- [config](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.config)
+- [new](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.new)
+- [sample_format](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_format)
+- [sample_rate](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_rate)
+[buffer_size](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.buffer_size)
+[channels](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.channels)
+[config](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.config)
+[new](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.new)
+[sample_format](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_format)
+[sample_rate](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_rate)
+
+### [Trait Implementations](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#trait-implementations)
+[Trait Implementations](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#trait-implementations)
+- [Clone](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Clone-for-SupportedStreamConfig)
+- [Debug](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Debug-for-SupportedStreamConfig)
+- [Eq](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Eq-for-SupportedStreamConfig)
+- [From<SupportedStreamConfig>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-From%3CSupportedStreamConfig%3E-for-StreamConfig)
+- [PartialEq](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-PartialEq-for-SupportedStreamConfig)
+- [StructuralPartialEq](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-StructuralPartialEq-for-SupportedStreamConfig)
+[Clone](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Clone-for-SupportedStreamConfig)
+[Debug](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Debug-for-SupportedStreamConfig)
+[Eq](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Eq-for-SupportedStreamConfig)
+[From<SupportedStreamConfig>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-From%3CSupportedStreamConfig%3E-for-StreamConfig)
+[PartialEq](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-PartialEq-for-SupportedStreamConfig)
+[StructuralPartialEq](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-StructuralPartialEq-for-SupportedStreamConfig)
+
+### [Auto Trait Implementations](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#synthetic-implementations)
+
+[Auto Trait Implementations](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#synthetic-implementations)
+- [Freeze](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Freeze-for-SupportedStreamConfig)
+- [RefUnwindSafe](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-RefUnwindSafe-for-SupportedStreamConfig)
+- [Send](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Send-for-SupportedStreamConfig)
+- [Sync](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Sync-for-SupportedStreamConfig)
+- [Unpin](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Unpin-for-SupportedStreamConfig)
+- [UnsafeUnpin](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-UnsafeUnpin-for-SupportedStreamConfig)
+- [UnwindSafe](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-UnwindSafe-for-SupportedStreamConfig)
+[Freeze](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Freeze-for-SupportedStreamConfig)
+[RefUnwindSafe](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-RefUnwindSafe-for-SupportedStreamConfig)
+[Send](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Send-for-SupportedStreamConfig)
+[Sync](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Sync-for-SupportedStreamConfig)
+[Unpin](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Unpin-for-SupportedStreamConfig)
+[UnsafeUnpin](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-UnsafeUnpin-for-SupportedStreamConfig)
+[UnwindSafe](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-UnwindSafe-for-SupportedStreamConfig)
+
+### [Blanket Implementations](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#blanket-implementations)
+
+[Blanket Implementations](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#blanket-implementations)
+- [Any](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Any-for-T)
+- [Borrow<T>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Borrow%3CT%3E-for-T)
+- [BorrowMut<T>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-BorrowMut%3CT%3E-for-T)
+- [CloneToUninit](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-CloneToUninit-for-T)
+- [Duplex<S>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Duplex%3CS%3E-for-T)
+- [From<T>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-From%3CT%3E-for-T)
+- [FromSample<S>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-FromSample%3CS%3E-for-S)
+- [Into<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Into%3CU%3E-for-T)
+- [ToOwned](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-ToOwned-for-T)
+- [ToSample<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-ToSample%3CU%3E-for-T)
+- [TryFrom<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-TryFrom%3CU%3E-for-T)
+- [TryInto<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-TryInto%3CU%3E-for-T)
+[Any](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Any-for-T)
+[Borrow<T>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Borrow%3CT%3E-for-T)
+[BorrowMut<T>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-BorrowMut%3CT%3E-for-T)
+[CloneToUninit](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-CloneToUninit-for-T)
+[Duplex<S>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Duplex%3CS%3E-for-T)
+[From<T>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-From%3CT%3E-for-T)
+[FromSample<S>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-FromSample%3CS%3E-for-S)
+[Into<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Into%3CU%3E-for-T)
+[ToOwned](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-ToOwned-for-T)
+[ToSample<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-ToSample%3CU%3E-for-T)
+[TryFrom<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-TryFrom%3CU%3E-for-T)
+[TryInto<U>](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-TryInto%3CU%3E-for-T)
+
+## [In crate cpal](https://docs.rs/cpal/0.17.3/cpal/index.html)
+
+[In crate cpal](https://docs.rs/cpal/0.17.3/cpal/index.html)
+[cpal](https://docs.rs/cpal/0.17.3/cpal/index.html)
+
+# Struct SupportedStreamConfig Copy item path
+
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#454-459)
+
+```
+pub struct SupportedStreamConfig { /* private fields */ }
+```
+
+
+```
+pub struct SupportedStreamConfig { /* private fields */ }
+```
+
+Describes a single supported stream configuration, retrieved via either a [SupportedStreamConfigRange](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfigRange.html) instance or one of the [Device::default_input/output_config](https://docs.rs/cpal/0.17.3/cpal/traits/trait.DeviceTrait.html#required-methods) methods.
+
+```
+SupportedStreamConfigRange
+```
+
+
+```
+Device::default_input/output_config
+```
+
+## Implementations[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#implementations)
+
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#implementations)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#532-570)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-SupportedStreamConfig)
+
+### impl [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#533-545)
+
+#### pub fn [new](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.new)( channels: [ChannelCount](https://docs.rs/cpal/0.17.3/cpal/type.ChannelCount.html), sample_rate: [SampleRate](https://docs.rs/cpal/0.17.3/cpal/type.SampleRate.html), buffer_size: [SupportedBufferSize](https://docs.rs/cpal/0.17.3/cpal/enum.SupportedBufferSize.html), sample_format: [SampleFormat](https://docs.rs/cpal/0.17.3/cpal/enum.SampleFormat.html), ) -> Self
+[new](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.new)
+[ChannelCount](https://docs.rs/cpal/0.17.3/cpal/type.ChannelCount.html)
+[SampleRate](https://docs.rs/cpal/0.17.3/cpal/type.SampleRate.html)
+[SupportedBufferSize](https://docs.rs/cpal/0.17.3/cpal/enum.SupportedBufferSize.html)
+[SampleFormat](https://docs.rs/cpal/0.17.3/cpal/enum.SampleFormat.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#547-549)
+
+#### pub fn [channels](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.channels)(&self) -> [ChannelCount](https://docs.rs/cpal/0.17.3/cpal/type.ChannelCount.html)
+[channels](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.channels)
+[ChannelCount](https://docs.rs/cpal/0.17.3/cpal/type.ChannelCount.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#551-553)
+
+#### pub fn [sample_rate](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_rate)(&self) -> [SampleRate](https://docs.rs/cpal/0.17.3/cpal/type.SampleRate.html)
+[sample_rate](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_rate)
+[SampleRate](https://docs.rs/cpal/0.17.3/cpal/type.SampleRate.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#555-557)
+
+#### pub fn [buffer_size](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.buffer_size)(&self) -> &[SupportedBufferSize](https://docs.rs/cpal/0.17.3/cpal/enum.SupportedBufferSize.html)
+[buffer_size](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.buffer_size)
+[SupportedBufferSize](https://docs.rs/cpal/0.17.3/cpal/enum.SupportedBufferSize.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#559-561)
+
+#### pub fn [sample_format](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_format)(&self) -> [SampleFormat](https://docs.rs/cpal/0.17.3/cpal/enum.SampleFormat.html)
+[sample_format](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.sample_format)
+[SampleFormat](https://docs.rs/cpal/0.17.3/cpal/enum.SampleFormat.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#563-569)
+
+#### pub fn [config](https://docs.rs/cpal/0.17.3/cpal/struct.Supported[StreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.StreamConfig.html).html#method.config)(&self) -> StreamConfig
+[config](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.config)
+[StreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.StreamConfig.html)
+
+## Trait Implementations[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#trait-implementations)
+
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#trait-implementations)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Clone-for-SupportedStreamConfig)
+
+### impl [Clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.clone)
+
+#### fn [clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone)(&self) -> [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Read more](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone)
+[Source](https://doc.rust-lang.org/nightly/src/core/clone.rs.html#245-247)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.clone_from)
+
+#### fn [clone_from](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from)(&mut self, source: &Self)
+[clone_from](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from)
+
+```
+source
+```
+
+[Read more](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Debug-for-SupportedStreamConfig)
+
+### impl [Debug](https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Debug](https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.fmt)
+
+#### fn [fmt](https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt)(&self, f: &mut [Formatter](https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html)<'_>) -> [Result](https://doc.rust-lang.org/nightly/core/fmt/type.Result.html)
+[fmt](https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt)
+[Formatter](https://doc.rust-lang.org/nightly/core/fmt/struct.Formatter.html)
+[Result](https://doc.rust-lang.org/nightly/core/fmt/type.Result.html)
+[Read more](https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html#tymethod.fmt)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#994-998)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-From%3CSupportedStreamConfig%3E-for-StreamConfig)
+
+### impl [From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)<[Supported[StreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.StreamConfig.html)](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)> for StreamConfig
+[From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[StreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.StreamConfig.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#995-997)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.from)
+
+#### fn [from](https://doc.rust-lang.org/nightly/core/convert/trait.From.html#tymethod.from)(conf: [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)) -> Self
+[from](https://doc.rust-lang.org/nightly/core/convert/trait.From.html#tymethod.from)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-PartialEq-for-SupportedStreamConfig)
+
+### impl [PartialEq](https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[PartialEq](https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.eq)
+
+#### fn [eq](https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html#tymethod.eq)(&self, other: &[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)) -> [bool](https://doc.rust-lang.org/nightly/std/primitive.bool.html)
+[eq](https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html#tymethod.eq)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[bool](https://doc.rust-lang.org/nightly/std/primitive.bool.html)
+
+```
+self
+```
+
+
+```
+other
+```
+
+
+```
+==
+```
+
+[Source](https://doc.rust-lang.org/nightly/src/core/cmp.rs.html#264)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.ne)
+
+#### fn [ne](https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html#method.ne)(&self, other: [&Rhs](https://doc.rust-lang.org/nightly/std/primitive.reference.html)) -> [bool](https://doc.rust-lang.org/nightly/std/primitive.bool.html)
+[ne](https://doc.rust-lang.org/nightly/core/cmp/trait.PartialEq.html#method.ne)
+[&Rhs](https://doc.rust-lang.org/nightly/std/primitive.reference.html)
+[bool](https://doc.rust-lang.org/nightly/std/primitive.bool.html)
+
+```
+!=
+```
+
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Eq-for-SupportedStreamConfig)
+
+### impl [Eq](https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Eq](https://doc.rust-lang.org/nightly/core/cmp/trait.Eq.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Source](https://docs.rs/cpal/0.17.3/src/cpal/lib.rs.html#453)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-StructuralPartialEq-for-SupportedStreamConfig)
+
+### impl [StructuralPartialEq](https://doc.rust-lang.org/nightly/core/marker/trait.StructuralPartialEq.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[StructuralPartialEq](https://doc.rust-lang.org/nightly/core/marker/trait.StructuralPartialEq.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+## Auto Trait Implementations[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#synthetic-implementations)
+
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#synthetic-implementations)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Freeze-for-SupportedStreamConfig)
+
+### impl [Freeze](https://doc.rust-lang.org/nightly/core/marker/trait.Freeze.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Freeze](https://doc.rust-lang.org/nightly/core/marker/trait.Freeze.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-RefUnwindSafe-for-SupportedStreamConfig)
+
+### impl [RefUnwindSafe](https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.RefUnwindSafe.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[RefUnwindSafe](https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.RefUnwindSafe.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Send-for-SupportedStreamConfig)
+
+### impl [Send](https://doc.rust-lang.org/nightly/core/marker/trait.Send.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Send](https://doc.rust-lang.org/nightly/core/marker/trait.Send.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Sync-for-SupportedStreamConfig)
+
+### impl [Sync](https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Sync](https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Unpin-for-SupportedStreamConfig)
+
+### impl [Unpin](https://doc.rust-lang.org/nightly/core/marker/trait.Unpin.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[Unpin](https://doc.rust-lang.org/nightly/core/marker/trait.Unpin.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-UnsafeUnpin-for-SupportedStreamConfig)
+
+### impl [UnsafeUnpin](https://doc.rust-lang.org/nightly/core/marker/trait.UnsafeUnpin.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[UnsafeUnpin](https://doc.rust-lang.org/nightly/core/marker/trait.UnsafeUnpin.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-UnwindSafe-for-SupportedStreamConfig)
+
+### impl [UnwindSafe](https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.UnwindSafe.html) for [SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+[UnwindSafe](https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.UnwindSafe.html)
+[SupportedStreamConfig](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html)
+
+## Blanket Implementations[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#blanket-implementations)
+
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#blanket-implementations)
+[Source](https://doc.rust-lang.org/nightly/src/core/any.rs.html#138)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Any-for-T)
+
+### impl<T> [Any](https://doc.rust-lang.org/nightly/core/any/trait.Any.html) for Twhere T: 'static + ?[Sized](https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html),
+[Any](https://doc.rust-lang.org/nightly/core/any/trait.Any.html)
+[Sized](https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/any.rs.html#139)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.type_id)
+
+#### fn [type_id](https://doc.rust-lang.org/nightly/core/any/trait.Any.html#tymethod.type_id)(&self) -> [TypeId](https://doc.rust-lang.org/nightly/core/any/struct.TypeId.html)
+[type_id](https://doc.rust-lang.org/nightly/core/any/trait.Any.html#tymethod.type_id)
+[TypeId](https://doc.rust-lang.org/nightly/core/any/struct.TypeId.html)
+
+```
+TypeId
+```
+
+
+```
+self
+```
+
+[Read more](https://doc.rust-lang.org/nightly/core/any/trait.Any.html#tymethod.type_id)
+[Source](https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#212)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Borrow%3CT%3E-for-T)
+
+### impl<T> [Borrow](https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html)<T> for Twhere T: ?[Sized](https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html),
+[Borrow](https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html)
+[Sized](https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#214)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.borrow)
+
+#### fn [borrow](https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html#tymethod.borrow)(&self) -> [&T](https://doc.rust-lang.org/nightly/std/primitive.reference.html)
+[borrow](https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html#tymethod.borrow)
+[&T](https://doc.rust-lang.org/nightly/std/primitive.reference.html)
+[Read more](https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html#tymethod.borrow)
+[Source](https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#221)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-BorrowMut%3CT%3E-for-T)
+
+### impl<T> [BorrowMut](https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html)<T> for Twhere T: ?[Sized](https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html),
+[BorrowMut](https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html)
+[Sized](https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#222)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.borrow_mut)
+
+#### fn [borrow_mut](https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html#tymethod.borrow_mut)(&mut self) -> [&mut T](https://doc.rust-lang.org/nightly/std/primitive.reference.html)
+[borrow_mut](https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html#tymethod.borrow_mut)
+[&mut T](https://doc.rust-lang.org/nightly/std/primitive.reference.html)
+[Read more](https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html#tymethod.borrow_mut)
+[Source](https://doc.rust-lang.org/nightly/src/core/clone.rs.html#547)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-CloneToUninit-for-T)
+
+### impl<T> [[Clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html)ToUninit](https://doc.rust-lang.org/nightly/core/clone/trait.CloneToUninit.html) for Twhere T: Clone,
+[CloneToUninit](https://doc.rust-lang.org/nightly/core/clone/trait.CloneToUninit.html)
+[Clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/clone.rs.html#549)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.clone_to_uninit)
+
+#### unsafe fn [clone_to_uninit](https://doc.rust-lang.org/nightly/core/clone/trait.CloneToUninit.html#tymethod.clone_to_uninit)(&self, dest: [*mut](https://doc.rust-lang.org/nightly/std/primitive.pointer.html)[u8](https://doc.rust-lang.org/nightly/std/primitive.u8.html))
+[clone_to_uninit](https://doc.rust-lang.org/nightly/core/clone/trait.CloneToUninit.html#tymethod.clone_to_uninit)
+[*mut](https://doc.rust-lang.org/nightly/std/primitive.pointer.html)
+[u8](https://doc.rust-lang.org/nightly/std/primitive.u8.html)
+
+```
+clone_to_uninit
+```
+
+
+```
+self
+```
+
+
+```
+dest
+```
+
+[Read more](https://doc.rust-lang.org/nightly/core/clone/trait.CloneToUninit.html#tymethod.clone_to_uninit)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#785)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-From%3CT%3E-for-T)
+
+### impl<T> [From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)<T> for T
+[From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#788)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.from-1)
+
+#### fn [from](https://doc.rust-lang.org/nightly/core/convert/trait.From.html#tymethod.from)(t: T) -> T
+[from](https://doc.rust-lang.org/nightly/core/convert/trait.From.html#tymethod.from)
+Returns the argument unchanged.
+[Source](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/src/dasp_sample/conv.rs.html#574)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-FromSample%3CS%3E-for-S)
+
+### impl<S> [FromSample](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html)<S> for S
+[FromSample](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html)
+[Source](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/src/dasp_sample/conv.rs.html#576)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.from_sample_)
+
+#### fn [from_sample_](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html#tymethod.from_sample_)(s: S) -> S
+[from_sample_](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html#tymethod.from_sample_)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#767-769)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Into%3CU%3E-for-T)
+
+### impl<T, U> [Into](https://doc.rust-lang.org/nightly/core/convert/trait.Into.html)<U> for Twhere U: [From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)<T>,
+[Into](https://doc.rust-lang.org/nightly/core/convert/trait.Into.html)
+[From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#777)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.into)
+
+#### fn [into](https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into)(self) -> U
+[into](https://doc.rust-lang.org/nightly/core/convert/trait.Into.html#tymethod.into)
+Calls U::from(self).
+
+```
+U::from(self)
+```
+
+That is, this conversion is whatever the implementation of [From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)<T> for U chooses to do.
+
+```
+[From](https://doc.rust-lang.org/nightly/core/convert/trait.From.html)<T> for U
+```
+
+[Source](https://doc.rust-lang.org/nightly/src/alloc/borrow.rs.html#72-74)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-ToOwned-for-T)
+
+### impl<T> [ToOwned](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html) for Twhere T: [Clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html),
+[ToOwned](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html)
+[Clone](https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html)
+[Source](https://doc.rust-lang.org/nightly/src/alloc/borrow.rs.html#76)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#associatedtype.Owned)
+
+#### type [Owned](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#associatedtype.Owned) = T
+[Owned](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#associatedtype.Owned)
+[Source](https://doc.rust-lang.org/nightly/src/alloc/borrow.rs.html#77)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.to_owned)
+
+#### fn [to_owned](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#tymethod.to_owned)(&self) -> T
+[to_owned](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#tymethod.to_owned)
+[Read more](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#tymethod.to_owned)
+[Source](https://doc.rust-lang.org/nightly/src/alloc/borrow.rs.html#81)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.clone_into)
+
+#### fn [clone_into](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#method.clone_into)(&self, target: [&mut T](https://doc.rust-lang.org/nightly/std/primitive.reference.html))
+[clone_into](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#method.clone_into)
+[&mut T](https://doc.rust-lang.org/nightly/std/primitive.reference.html)
+[Read more](https://doc.rust-lang.org/nightly/alloc/borrow/trait.ToOwned.html#method.clone_into)
+[Source](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/src/dasp_sample/conv.rs.html#687-689)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-ToSample%3CU%3E-for-T)
+
+### impl<T, U> [ToSample](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.ToSample.html)<U> for Twhere U: [FromSample](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html)<T>,
+[ToSample](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.ToSample.html)
+[FromSample](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html)
+[Source](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/src/dasp_sample/conv.rs.html#692)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.to_sample_)
+
+#### fn [to_sample_](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.ToSample.html#tymethod.to_sample_)(self) -> U
+[to_sample_](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.ToSample.html#tymethod.to_sample_)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#827-829)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-TryFrom%3CU%3E-for-T)
+
+### impl<T, U> [TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)<U> for Twhere U: [Into](https://doc.rust-lang.org/nightly/core/convert/trait.Into.html)<T>,
+[TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)
+[Into](https://doc.rust-lang.org/nightly/core/convert/trait.Into.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#831)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#associatedtype.Error-1)
+
+#### type [Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error) = [Infallible](https://doc.rust-lang.org/nightly/core/convert/enum.Infallible.html)
+[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error)
+[Infallible](https://doc.rust-lang.org/nightly/core/convert/enum.Infallible.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#834)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.try_from)
+
+#### fn [try_from](https://doc.rust-lang.org/nightly/core/convert/trait.[TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html).html#tymethod.try_from)(value: U) -> [Result](https://doc.rust-lang.org/nightly/core/result/enum.Result.html)<T, <T as TryFrom<U>>::[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error)>
+[try_from](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#tymethod.try_from)
+[Result](https://doc.rust-lang.org/nightly/core/result/enum.Result.html)
+[TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)
+[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#811-813)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-TryInto%3CU%3E-for-T)
+
+### impl<T, U> [TryInto](https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html)<U> for Twhere U: [TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)<T>,
+[TryInto](https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html)
+[TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#815)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#associatedtype.Error)
+
+#### type [[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error)](https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html#associatedtype.Error) = <U as [TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)<T>>::Error
+[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html#associatedtype.Error)
+[TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)
+[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error)
+[Source](https://doc.rust-lang.org/nightly/src/core/convert/mod.rs.html#818)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#method.try_into)
+
+#### fn [try_into](https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html#tymethod.try_into)(self) -> [Result](https://doc.rust-lang.org/nightly/core/result/enum.Result.html)<U, <U as [TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)<T>>::[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error)>
+[try_into](https://doc.rust-lang.org/nightly/core/convert/trait.TryInto.html#tymethod.try_into)
+[Result](https://doc.rust-lang.org/nightly/core/result/enum.Result.html)
+[TryFrom](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html)
+[Error](https://doc.rust-lang.org/nightly/core/convert/trait.TryFrom.html#associatedtype.Error)
+[Source](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/src/dasp_sample/conv.rs.html#699)
+[§](https://docs.rs/cpal/0.17.3/cpal/struct.SupportedStreamConfig.html#impl-Duplex%3CS%3E-for-T)
+
+### impl<S, T> [Duplex](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.Duplex.html)<S> for Twhere T: [FromSample](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html)<S> + [ToSample](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.ToSample.html)<S>,
+
+[Duplex](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.Duplex.html)
+[FromSample](https://docs.rs/cpal/0.17.3/cpal/trait.FromSample.html)
+[ToSample](https://docs.rs/dasp_sample/0.11.0/x86_64-unknown-linux-gnu/dasp_sample/conv/trait.ToSample.html)
