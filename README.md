@@ -1,7 +1,58 @@
-# Tauri + React + Typescript
+# 💎 Aideo Music Player
+**A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics.**
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Aideo is a professional-grade music player built with **Tauri**, **Rust**, and **React**. It is designed for listeners who demand signal purity, bit-perfect playback, and a modern, immersive visual experience.
 
-## Recommended IDE Setup
+---
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## ✨ Key Features
+
+### 🎧 Audiophile Core
+- **Bit-Perfect Playback**: Built on `cpal` and `symphonia` for high-fidelity audio decoding.
+- **WASAPI Exclusive Mode**: Bypasses the Windows audio engine for direct-to-hardware signal purity.
+- **Studio-Grade EQ**: 10-band parametric equalizer with soft-limiting to prevent clipping.
+
+### 🎨 Dynamic Visuals
+- **Adaptive Theming**: The entire UI (accents, gradients, and buttons) automatically shifts its color palette to match the dominant colors of your current album art.
+- **Glassmorphic Design**: A sleek, modern "Deep-Space" aesthetic with frosted glass effects and smooth transitions.
+- **Animated Focus**: Lyrics and UI elements respond with micro-animations for a "living" interface.
+
+### 📜 Smart Lyrics Engine
+- **Lyric Finder**: Search and download lyrics from NetEase and QQMusic directly within the app.
+- **Intelligent Auto-Focus**: Lyrics sync perfectly with the music, featuring a "Smart Scroll" that lets you browse manually without losing your place.
+- **Transliteration & Translation**: One-click **Romaji** for Japanese/Korean/Chinese tracks and Google Translate integration for international music.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) (Latest LTS)
+- [Rust](https://www.rust-lang.org/) (via rustup)
+
+### Installation
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/YourUsername/Aideo_Music_Player.git
+   ```
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+3. **Run in development mode:**
+   ```bash
+   npm run tauri dev
+   ```
+
+---
+
+## 🛠 Tech Stack
+- **Frontend**: React, TypeScript, Framer Motion, Zustand
+- **Backend**: Rust, Tauri
+- **Audio**: cpal (Audio I/O), symphonia (Codecs), rubato (Resampling)
+- **Database**: SQLite (via rusqlite)
+
+---
+
+## 📜 License
+Personal Project - Built with ❤️ for music lovers.
