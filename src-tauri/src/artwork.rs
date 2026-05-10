@@ -1,0 +1,49 @@
+use symphonia::core::probe::Hint;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::formats::FormatOptions;
+use symphonia::default::get_probe;
+use base64::Engine;
+
+/// Extracts embedded cover art from an audio file and returns it as a data URL.
+pub fn get_cover_art(audio_path: &str) -> Option<String> {
+    let path = audio_path.to_string();
+    std::panic::catch_unwind(move || extract_art(&path))
+        .ok()
+        .flatten()
+}
+
+fn extract_art(audio_path: &str) -> Option<String> {
+    let file = std::fs::File::open(audio_path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = std::path::Path::new(audio_path).extension() {
+        hint.with_extension(&ext.to_string_lossy());
+    }
+
+    let mut probed = get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .ok()?;
+
+    // Try inline metadata first (MP3, AAC)
+    if let Some(meta) = probed.format.metadata().current() {
+        if let Some(v) = meta.visuals().first() {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&*v.data);
+            let mime = if v.media_type.is_empty() { "image/jpeg" } else { &v.media_type };
+            return Some(format!("data:{mime};base64,{encoded}"));
+        }
+    }
+
+    // Fallback: metadata log (FLAC, OGG)
+    if let Some(rev) = probed.metadata.get() {
+        if let Some(meta) = rev.current() {
+            if let Some(v) = meta.visuals().first() {
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&*v.data);
+                let mime = if v.media_type.is_empty() { "image/jpeg" } else { &v.media_type };
+                return Some(format!("data:{mime};base64,{encoded}"));
+            }
+        }
+    }
+
+    None
+}
