@@ -1,7 +1,8 @@
 # 💎 Aideo Music Player
+{here me the developer from this app .just wanna say that this app is 100% made by ai with Antigravity and for educational purpose only just wanna say that i just build this app for my personal use and learning method .I m currently a student of computer science and i hope that you all will like my app.and if there is any mistake please forgive me .thanks .}
 **A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics.**
 
-Aideo is a professional-grade music player built with **Tauri**, **Rust**, and **React**. It is designed for listeners who demand signal purity, bit-perfect playback, and a modern, immersive visual experience.
+Aideo is a music player built with **Tauri**, **Rust**, and **React**. It is designed for listeners who demand signal purity, bit-perfect playback, and a modern, immersive visual experience.
 
 ---
 
