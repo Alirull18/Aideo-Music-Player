@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { useStore } from './store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import './App.css';
 
@@ -134,9 +135,9 @@ function LibraryView() {
 }
 
 /* ─── Lyrics ─────────────────────────────────────────── */
-interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; }
+interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; cover_url?: string; }
 function LyricsPanel() {
-  const { lyrics, playback, lyricOffset, seek, adjustLyricOffset, saveLyrics, tracks, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji } = useStore();
+  const { lyrics, playback, lyricOffset, seek, adjustLyricOffset, saveLyrics, tracks, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [userScrolling, setUserScrolling] = useState(false);
   const userScrollTimer = useRef<number | null>(null);
@@ -180,18 +181,28 @@ function LyricsPanel() {
     } catch (e) { console.error(e); } finally { setSearching(false); }
   };
 
-  const pickResult = async (r: SearchResult) => {
+  const pickResult = async (r: SearchResult, mode: 'lyrics' | 'art' | 'both') => {
     setSearching(true);
     try {
-      let lrc = r.raw_lrc ?? '';
-      if (!lrc && r.source === 'NetEase' && r.content_id)
-        lrc = await invoke('get_netease_lrc', { id: r.content_id });
-      if (!lrc && r.source === 'QQMusic' && r.content_id)
-        lrc = await invoke('get_qqmusic_lrc', { mid: r.content_id });
-      if (lrc && playback.current_track) {
-        await saveLyrics(playback.current_track, lrc);
-        setShowFinder(false);
+      if (!playback.current_track) return;
+      
+      if (mode === 'lyrics' || mode === 'both') {
+        let lrc = r.raw_lrc ?? '';
+        if (!lrc && r.source === 'NetEase' && r.content_id)
+          lrc = await invoke<string>('get_netease_lrc', { id: r.content_id }).catch(() => '');
+        if (!lrc && r.source === 'QQMusic' && r.content_id)
+          lrc = await invoke<string>('get_qqmusic_lrc', { mid: r.content_id }).catch(() => '');
+        
+        if (lrc) {
+          await saveLyrics(playback.current_track, lrc);
+        }
       }
+
+      if ((mode === 'art' || mode === 'both') && r.cover_url) {
+        await applyOnlineCover(playback.current_track, r.cover_url);
+      }
+      
+      setShowFinder(false);
     } catch (e) { console.error(e); } finally { setSearching(false); }
   };
 
@@ -255,9 +266,30 @@ function LyricsPanel() {
                 {searching && results.length === 0 && <div className="modal-empty">Searching…</div>}
                 {!searching && results.length === 0 && <div className="modal-empty">No results found.</div>}
                 {results.map((r, i) => (
-                  <div key={i} className="modal-item" onClick={() => pickResult(r)}>
-                    <div className="modal-item-title">{r.title}</div>
-                    <div className="modal-item-sub">{r.artist} · {r.source}</div>
+                  <div key={i} className="modal-item" style={{ display: 'flex', alignItems: 'center', cursor: 'default' }}>
+                    {r.cover_url && <img src={r.cover_url} alt="cover" style={{ width: 36, height: 36, borderRadius: 4, marginRight: 12, objectFit: 'cover' }} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="modal-item-title">{r.title}</div>
+                      <div className="modal-item-sub">{r.artist} · {r.source}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 8px' }}
+                        onClick={() => pickResult(r, 'lyrics')}>
+                        🎵 Lyrics
+                      </button>
+                      {r.cover_url && (
+                        <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 8px' }}
+                          onClick={() => pickResult(r, 'art')}>
+                          ✨ Art
+                        </button>
+                      )}
+                      {r.cover_url && (
+                        <button className="btn btn-primary" style={{ fontSize: 10, padding: '4px 8px' }}
+                          onClick={() => pickResult(r, 'both')}>
+                          Both
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -426,7 +458,16 @@ export default function App() {
   useEffect(() => {
     loadLibrary();
     const id = setInterval(pollStatus, 200);
-    return () => clearInterval(id);
+    
+    let unlisten: (() => void) | undefined;
+    listen('track-ended', () => {
+      useStore.getState().playNext();
+    }).then(f => unlisten = f);
+
+    return () => {
+      clearInterval(id);
+      if (unlisten) unlisten();
+    };
   }, []);
 
   return (

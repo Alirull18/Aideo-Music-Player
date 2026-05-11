@@ -78,6 +78,7 @@ interface PlayerState {
   translateLyrics: () => Promise<void>;
   getRomaji: () => Promise<void>;
   setShowRomaji: (val: boolean) => void;
+  applyOnlineCover: (path: string, url: string) => Promise<void>;
 }
 
 /** Pull a dominant colour from a base64 data-URL image using a canvas. */
@@ -228,12 +229,7 @@ export const useStore = create<PlayerState>((set, get) => ({
   pollStatus: async () => {
     try {
       const status: any = await invoke('get_playback_status');
-      const prevStatus = get().playback.status;
       set(s => ({ playback: { ...s.playback, ...status } }));
-      // Auto-next when track naturally ends
-      if (status.status === 'Stopped' && prevStatus === 'Playing' && !get().isTransitioning && get().currentTrackIndex !== -1) {
-        get().playNext();
-      }
     } catch (e) { console.error('pollStatus:', e); }
   },
 
@@ -316,5 +312,23 @@ export const useStore = create<PlayerState>((set, get) => ({
       );
       set({ lyrics: withRomaji });
     } catch (e) { console.error(e); } finally { set({ isTranslating: false }); }
+  },
+
+  applyOnlineCover: async (path, url) => {
+    try {
+      await invoke('apply_online_cover', { path, url });
+      // Reload cover art if this is the currently playing track
+      if (get().playback.current_track === path) {
+        invoke('get_cover_art', { path }).then(async (art: any) => {
+          if (art && typeof art === 'string') {
+            set({ coverArt: art });
+            try {
+              const color = await extractDominantColor(art);
+              set({ accentColor: color });
+            } catch (_) {}
+          }
+        }).catch(() => {});
+      }
+    } catch (e) { console.error(e); }
   },
 }));

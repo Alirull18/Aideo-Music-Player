@@ -24,6 +24,7 @@ pub struct SearchResult {
     pub synced: bool,
     pub content_id: Option<String>,
     pub raw_lrc: Option<String>,
+    pub cover_url: Option<String>,
 }
 
 // ── Translation command ─────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ async fn search_lyrics_online(artist: String, title: String) -> Result<Vec<Searc
                         synced: !item["syncedLyrics"].is_null(),
                         content_id: None,
                         raw_lrc: item["syncedLyrics"].as_str().or(item["plainLyrics"].as_str()).map(|s| s.to_string()),
+                        cover_url: None,
                     });
                 }
             }
@@ -83,6 +85,7 @@ async fn search_lyrics_online(artist: String, title: String) -> Result<Vec<Searc
                         synced: true,
                         content_id: Some(item["id"].to_string()),
                         raw_lrc: None,
+                        cover_url: item["al"]["picUrl"].as_str().or_else(|| item["album"]["picUrl"].as_str()).map(|s| s.to_string()),
                     });
                 }
             }
@@ -102,6 +105,7 @@ async fn search_lyrics_online(artist: String, title: String) -> Result<Vec<Searc
                         synced: true,
                         content_id: Some(item["songmid"].as_str().unwrap_or("").to_string()),
                         raw_lrc: None,
+                        cover_url: item["albummid"].as_str().map(|mid| format!("https://y.gtimg.cn/music/photo_new/T002R300x300M000{}.jpg", mid)),
                     });
                 }
             }
@@ -218,6 +222,21 @@ fn save_lyrics_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(lrc_path, content).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    
+    let audio_path = std::path::Path::new(&path);
+    let stem = audio_path.file_stem().and_then(|s| s.to_str()).unwrap_or("cover");
+    let parent = audio_path.parent().ok_or("Invalid path")?;
+    let cover_path = parent.join(format!("{}.jpg", stem));
+    
+    std::fs::write(&cover_path, bytes).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ── Exclusive Mode commands ──────────────────────────────────────────────────
 #[tauri::command]
 fn toggle_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
@@ -306,7 +325,7 @@ pub fn run() {
             let conn = db::init_db(db_path_str).map_err(|e| e.to_string())?;
 
             app.manage(AppState {
-                player: Arc::new(Mutex::new(player::Player::new())),
+                player: Arc::new(Mutex::new(player::Player::new(app.handle().clone()))),
                 db: Arc::new(Mutex::new(conn)),
             });
             Ok(())
@@ -334,6 +353,7 @@ pub fn run() {
             get_eq_state,
             get_audio_devices,
             set_audio_device,
+            apply_online_cover,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Condvar};
 use std::thread;
+use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
@@ -10,6 +11,7 @@ use symphonia::core::probe::Hint;
 use symphonia::default::{get_codecs, get_probe};
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use biquad::{DirectForm1, Coefficients, Type, Biquad, ToHertz};
+use tauri::Emitter;
 
 #[derive(Debug)]
 pub enum PlayerCommand {
@@ -39,10 +41,11 @@ pub struct Player {
     pub exclusive_mode: Arc<Mutex<bool>>,
     pub eq_state: Arc<Mutex<EQState>>,
     pub target_device: Arc<Mutex<Option<String>>>,
+    pub app_handle: tauri::AppHandle,
 }
 
 impl Player {
-    pub fn new() -> Self {
+    pub fn new(app_handle: tauri::AppHandle) -> Self {
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<PlayerCommand>();
         let status = Arc::new(Mutex::new(PlaybackStatus::Stopped));
         let current_track = Arc::new(Mutex::new(None::<String>));
@@ -63,13 +66,14 @@ impl Player {
         let exc = Arc::clone(&exclusive_mode);
         let eq = Arc::clone(&eq_state);
         let dev = Arc::clone(&target_device);
+        let app = app_handle.clone();
 
         thread::Builder::new()
             .name("player".into())
-            .spawn(move || player_loop(cmd_rx, s, c, p, v, exc, eq, dev))
+            .spawn(move || player_loop(cmd_rx, s, c, p, v, exc, eq, dev, app))
             .expect("Failed to spawn player thread");
 
-        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, eq_state, target_device }
+        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, eq_state, target_device, app_handle }
     }
 }
 
@@ -82,6 +86,7 @@ fn player_loop(
     exclusive_mode: Arc<Mutex<bool>>,
     eq_state: Arc<Mutex<EQState>>,
     target_device: Arc<Mutex<Option<String>>>,
+    app_handle: tauri::AppHandle,
 ) {
     let mut next_track: Option<(String, f64)> = None;
 
@@ -106,7 +111,7 @@ fn player_loop(
                     *pos = start_pos;
                 }
 
-                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&eq_state), Arc::clone(&target_device), &rx);
+                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&eq_state), Arc::clone(&target_device), &rx, &app_handle);
 
                 if next_track.is_none() {
                     let mut s = status.lock().unwrap();
@@ -131,7 +136,7 @@ fn create_filters(dev_ch: usize, dev_rate: usize, freqs: &[f64; 10], gains: &[f3
     all
 }
 
-/// Soft limiter — only used when EQ is active to prevent clipping from boosts
+/// Soft limiter — prevents digital clipping on heavy boosts
 fn soft_limit(sample: f32) -> f32 {
     let abs = sample.abs();
     if abs > 0.95 {
@@ -152,6 +157,7 @@ fn play_file(
     eq_state: Arc<Mutex<EQState>>,
     target_device: Arc<Mutex<Option<String>>>,
     rx: &std::sync::mpsc::Receiver<PlayerCommand>,
+    app_handle: &tauri::AppHandle,
 ) -> Option<(String, f64)> {
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
@@ -223,28 +229,39 @@ fn play_file(
 
     if configs_to_try.is_empty() { return None; }
 
-    let ring: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::with_capacity(file_rate * file_ch)));
+    // Ring buffer using VecDeque for fast O(1) popping + Condvar
+    let ring: Arc<(Mutex<VecDeque<f32>>, Condvar)> = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
     let mut stream_info: Option<(cpal::Stream, cpal::StreamConfig)> = None;
 
     for config in configs_to_try {
         let status_cb = Arc::clone(&status);
         let volume_cb = Arc::clone(&volume);
-        let eq_ptr = Arc::clone(&eq_state);
         let ring_ptr = Arc::clone(&ring);
 
-        // Build one unified stream callback — clean bypass with volume only,
-        // EQ limiting is applied in the decode loop before samples hit the ring.
         let stream_res = device.build_output_stream(
             &config,
             move |out: &mut [f32], _| {
                 let is_paused = *status_cb.lock().unwrap() == PlaybackStatus::Paused;
-                if is_paused { out.fill(0.0); return; }
-                let mut buf = ring_ptr.lock().unwrap();
+                if is_paused { 
+                    out.fill(0.0); 
+                    return; 
+                }
+                
+                let (lock, cvar) = &*ring_ptr;
+                let mut buf = lock.lock().unwrap();
                 let vol = *volume_cb.lock().unwrap();
+                
                 let n = out.len().min(buf.len());
-                for i in 0..n { out[i] = buf[i] * vol; }
-                buf.drain(..n);
-                if n < out.len() { out[n..].fill(0.0); }
+                for i in 0..n { 
+                    out[i] = buf.pop_front().unwrap() * vol; 
+                }
+                
+                if n < out.len() { 
+                    out[n..].fill(0.0); 
+                }
+                
+                // Notify decoder thread that space has freed up
+                cvar.notify_one();
             },
             |e| eprintln!("[player] stream error: {e}"),
             None,
@@ -288,7 +305,7 @@ fn play_file(
         file_ch
     ).unwrap();
 
-    let mut pending: Vec<Vec<f32>> = vec![Vec::new(); file_ch];
+    let mut pending: Vec<VecDeque<f32>> = vec![VecDeque::new(); file_ch];
     let mut running = true;
     let mut next_track_info: Option<(String, f64)> = None;
     let last_exclusive = is_exclusive;
@@ -306,7 +323,7 @@ fn play_file(
                         let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
                     }
                     *position_secs.lock().unwrap() = secs;
-                    ring.lock().unwrap().clear();
+                    ring.0.lock().unwrap().clear();
                     pending.iter_mut().for_each(|ch| ch.clear());
                 }
                 Err(_) => break,
@@ -362,7 +379,7 @@ fn play_file(
                 AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
                 _ => vec![0.0; n_frames],
             };
-            pending[ch].extend_from_slice(&src);
+            pending[ch].extend(src);
         }
 
         let eq_now = eq_state.lock().unwrap().clone();
@@ -396,10 +413,15 @@ fn play_file(
         
         'resample: loop {
             if pending[0].len() < chunk_size { break 'resample; }
-            let chunk: Vec<Vec<f32>> = pending.iter().map(|ch_buf| ch_buf[..chunk_size].to_vec()).collect();
-            for ch_buf in &mut pending { ch_buf.drain(..chunk_size); }
+            
+            let mut chunk_planar = vec![vec![0.0; chunk_size]; file_ch];
+            for ch in 0..file_ch {
+                for i in 0..chunk_size {
+                    chunk_planar[ch][i] = pending[ch].pop_front().unwrap();
+                }
+            }
 
-            let refs: Vec<&[f32]> = chunk.iter().map(|v| v.as_slice()).collect();
+            let refs: Vec<&[f32]> = chunk_planar.iter().map(|v| v.as_slice()).collect();
             let mut out_planar = match resampler.process(&refs, None) {
                 Ok(o) => o,
                 Err(_) => break 'resample,
@@ -415,8 +437,14 @@ fn play_file(
                         for i in 0..out_planar[ch].len() {
                             let mut sample = out_planar[ch][i] * final_gain;
                             for filter in &mut filters[ch] { sample = filter.run(sample); }
-                            out_planar[ch][i] = sample;
+                            out_planar[ch][i] = soft_limit(sample);
                         }
+                    }
+                }
+            } else {
+                for ch in 0..use_ch {
+                    for i in 0..out_planar[ch].len() {
+                        out_planar[ch][i] = out_planar[ch][i] * final_gain;
                     }
                 }
             }
@@ -430,18 +458,56 @@ fn play_file(
                 }
             }
 
-            let max_ring = dev_rate * dev_ch / 10;
-            loop {
-                let mut buf = ring.lock().unwrap();
-                if buf.len() < max_ring {
-                    buf.extend_from_slice(&interleaved);
-                    break;
+            let max_ring = dev_rate * dev_ch; // 1 second buffer
+            let (lock, cvar) = &*ring;
+            
+            let mut buf = lock.lock().unwrap();
+            while buf.len() + interleaved.len() > max_ring && running {
+                let (new_buf, _res) = cvar.wait_timeout(buf, std::time::Duration::from_millis(20)).unwrap();
+                buf = new_buf;
+                
+                match rx.try_recv() {
+                    Ok(PlayerCommand::Stop) => { running = false; break; }
+                    Ok(PlayerCommand::Pause) => { *status.lock().unwrap() = PlaybackStatus::Paused; }
+                    Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
+                    Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
+                    Ok(PlayerCommand::Seek(secs)) => {
+                        if let Some(tb) = time_base {
+                            let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
+                            let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+                        }
+                        *position_secs.lock().unwrap() = secs;
+                        buf.clear();
+                        pending.iter_mut().for_each(|ch| ch.clear());
+                        break;
+                    }
+                    Err(_) => {}
                 }
-                drop(buf);
-                thread::sleep(std::time::Duration::from_millis(5));
-                if !running { break; }
             }
-            if !running { break; }
+            if running && interleaved.len() > 0 {
+                buf.extend(interleaved);
+            }
+        }
+    }
+
+    // Wait for the buffer to drain entirely before emitting track-ended
+    if running && next_track_info.is_none() {
+        let (lock, cvar) = &*ring;
+        let mut buf = lock.lock().unwrap();
+        while !buf.is_empty() && running {
+            let (new_buf, _res) = cvar.wait_timeout(buf, std::time::Duration::from_millis(20)).unwrap();
+            buf = new_buf;
+            match rx.try_recv() {
+                Ok(PlayerCommand::Stop) => { running = false; break; }
+                Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
+                Ok(PlayerCommand::Pause) => { *status.lock().unwrap() = PlaybackStatus::Paused; }
+                Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
+                _ => {}
+            }
+        }
+        
+        if running && next_track_info.is_none() {
+            let _ = app_handle.emit("track-ended", ());
         }
     }
 

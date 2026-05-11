@@ -1,24 +1,18 @@
 # 💎 Aideo Music Player
-
-[![CI/CD Pipeline](https://github.com/Alirull18/Aideo-Music-Player/workflows/CI%2FCD%20Pipeline/badge.svg)](https://github.com/Alirull18/Aideo-Music-Player/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub Stars](https://img.shields.io/github/stars/Alirull18/Aideo-Music-Player?style=social)](https://github.com/Alirull18/Aideo-Music-Player)
-[![GitHub Forks](https://img.shields.io/github/forks/Alirull18/Aideo-Music-Player?style=social)](https://github.com/Alirull18/Aideo-Music-Player)
+{here me the developer from this app .just wanna say that this app is 100% made by ai with Antigravity and for educational purpose only just wanna say that i just build this app for my personal use and learning method .I m currently a student of computer science and i hope that you all will like my app.and if there is any mistake please forgive me .thanks .}
 
 **A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics.**
 
-Aideo is a premium music player built with **Tauri**, **Rust**, and **React**. Engineered for audiophiles and music enthusiasts who demand bit-perfect playback, advanced audio processing, and a visually stunning interface that adapts to your music.
+Aideo is a music player built with **Tauri**, **Rust**, and **React**. It is designed for listeners who demand signal purity, bit-perfect playback, and a modern, immersive visual experience.
 
 ---
 
 ## ✨ Key Features
 
 ### 🎧 Audiophile Core
-- **Bit-Perfect Playback**: Built on `cpal` and `symphonia` for lossless, transparent audio decoding
-- **WASAPI Exclusive Mode**: Bypasses the Windows audio engine for direct-to-hardware signal purity
-- **Studio-Grade EQ**: 10-band parametric equalizer with soft-limiting to prevent clipping and distortion
-- **Multi-Format Support**: MP3, FLAC, WAV, OGG, AAC, and more via Symphonia
-- **High-Resolution Ready**: Supports 24-bit and 32-bit audio (DSD/SACD coming soon)
+- **Bit-Perfect Playback**: Built on `cpal` and `symphonia` for high-fidelity audio decoding.
+- **WASAPI Exclusive Mode**: Bypasses the Windows audio engine for direct-to-hardware signal purity.
+- **Studio-Grade EQ**: 10-band parametric equalizer with soft-limiting to prevent clipping.
 
 ### 🎨 Dynamic Visuals
 - **Adaptive Theming**: The entire UI automatically shifts its color palette to match the dominant colors of your current album art
@@ -27,18 +21,37 @@ Aideo is a premium music player built with **Tauri**, **Rust**, and **React**. E
 - **Real-Time Visualizer**: Spectrum analyzers and oscilloscope visualizations (planned)
 
 ### 📜 Smart Lyrics Engine
-- **Lyric Finder**: Search and download lyrics from NetEase and QQMusic directly within the app
-- **Intelligent Auto-Focus**: Lyrics sync perfectly with the music, featuring smart scrolling
-- **Transliteration & Translation**: 
-  - One-click **Romaji** for Japanese/Korean/Chinese tracks
-  - Google Translate integration for international music
-- **Lyric Cache**: Offline access to previously loaded lyrics
+- **Lyric Finder**: Search and download lyrics from NetEase and QQMusic directly within the app.
+- **Intelligent Auto-Focus**: Lyrics sync perfectly with the music, featuring a "Smart Scroll" that lets you browse manually without losing your place.
+- **Transliteration & Translation**: One-click **Romaji** for Japanese/Korean/Chinese tracks and Google Translate integration for international music.
 
-### 📚 Library Management
-- **Fast Library Scanning**: SQLite-optimized indexing for 10k+ tracks
-- **Advanced Metadata**: Browse by artist, album, genre, year, or folder structure
-- **Playlist Support**: Create, manage, and organize custom playlists
-- **Recent Plays Tracking**: Keep track of your favorite listening history
+---
+
+## 🗺️ Roadmap & Future Updates
+
+### 🚀 Short-Term (V1.1 - V1.2)
+- [ ] **Gapless Playback**: Implement smooth transitions between tracks for an uninterrupted listening experience.
+- [ ] **ASIO Support**: Add ASIO driver support for professional-grade low-latency output.
+- [ ] **Tray Integration**: Add a system tray icon with media controls and "Now Playing" notifications.
+- [ ] **Global Hotkeys**: Customizable keyboard shortcuts (Play/Pause, Next/Prev) that work even when the app is minimized.
+
+### 🎨 Visuals & UI
+- [ ] **Visualizer Engine**: Add real-time spectrum analyzers and oscilloscope visualizations.
+- [ ] **Folder Explorer**: A dedicated view to browse music by folder structure.
+- [ ] **Mini-Player Mode**: A compact, "always-on-top" view for minimal distraction.
+- [ ] **Custom Themes**: Save and share custom UI presets and EQ profiles.
+
+### ⚙️ Technical & Performance
+- [ ] **SQLite Optimization**: Improve library scanning speed for large collections (10k+ tracks).
+- [ ] **DSD/SACD Support**: Native decoding for high-resolution DSD files.
+- [ ] **Memory Management**: Profile and optimize memory usage during long playback sessions.
+- [ ] **Cross-Platform**: Extend support to Linux (PipeWire/ALSA) and macOS (CoreAudio).
+
+### 🐛 Known Issues & Bug Fixes
+- [ ] **WASAPI Stability**: Investigating occasional "Device Busy" errors when switching sample rates.
+- [ ] **Lyric Sync Drift**: Fixing minor timing offsets in long tracks (>10 mins).
+- [ ] **Album Art Cache**: Improving the reliability of cached artwork retrieval after app restart.
+- [ ] **Exclusive Mode Hijack**: Preventing system sounds from interrupting bit-perfect playback.
 
 ---
 
@@ -131,162 +144,10 @@ The compiled executable will be in `src-tauri/target/release/`.
 ---
 
 ## 🛠 Tech Stack
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **Desktop Framework** | Tauri | Lightweight native app wrapper |
-| **Frontend** | React + TypeScript | Reactive UI with type safety |
-| **UI Animation** | Framer Motion | Smooth, performant animations |
-| **State Management** | Zustand | Lightweight global state |
-| **Backend** | Rust | High-performance audio processing |
-| **Audio I/O** | cpal | Cross-platform audio device access |
-| **Audio Codecs** | symphonia | Multi-format decoding (FLAC, MP3, WAV, OGG, AAC) |
-| **Resampling** | rubato | High-quality audio resampling |
-| **Database** | SQLite | Fast local music library storage |
-| **Styling** | Tailwind CSS | Utility-first CSS framework |
-
----
-
-## 🏗️ Architecture
-
-For a detailed overview of the system architecture, see [**ARCHITECTURE.md**](docs/ARCHITECTURE.md), which covers:
-
-- System design and data flow
-- Audio pipeline explanation
-- Library management & database schema
-- Theming system implementation
-- Tauri IPC commands
-- Performance optimizations
-
-### Quick Overview
-
-```
-User Interface (React/TypeScript)
-         ↓
-    Tauri IPC Bridge
-         ↓
-  Rust Backend
-    ├── Audio Pipeline (WASAPI/cpal)
-    ├── Codec Decoder (symphonia)
-    ├── Lyrics Engine (NetEase/QQMusic)
-    └── Database (SQLite)
-         ↓
-Audio Device & External APIs
-```
-
----
-
-## 📋 Roadmap
-
-### 🚀 Short-Term (V1.1 - V1.2)
-- [ ] **Gapless Playback**: Seamless transitions between tracks
-- [ ] **ASIO Support**: Professional low-latency output (Windows)
-- [ ] **Tray Integration**: System tray icon with media controls
-- [ ] **Global Hotkeys**: Customizable keyboard shortcuts (works when minimized)
-- [ ] **Playlist Management**: Enhanced playlist organization and sharing
-
-### 🎨 Visuals & UI
-- [ ] **Visualizer Engine**: Real-time spectrum analyzers and oscilloscope displays
-- [ ] **Folder Explorer**: Browse music by directory structure
-- [ ] **Mini-Player Mode**: Compact, always-on-top window
-- [ ] **Custom Themes**: Save and share custom UI presets and EQ profiles
-- [ ] **Dark/Light Mode**: Automatic theme switching based on system preferences
-
-### ⚙️ Technical & Performance
-- [ ] **DSD/SACD Support**: Native decoding for high-resolution files
-- [ ] **Memory Optimization**: Profile and optimize for long listening sessions
-- [ ] **Cross-Platform**: Linux (PipeWire/ALSA) and macOS (CoreAudio) support
-- [ ] **Metadata Editing**: Edit ID3 tags and FLAC metadata
-- [ ] **Scrobbling**: Last.fm integration
-
-### 🐛 Known Issues & Bug Fixes
-- [ ] **WASAPI Stability**: Occasional "Device Busy" errors with sample rate switching
-- [ ] **Lyric Sync Drift**: Minor timing offsets in long tracks (>10 minutes)
-- [ ] **Album Art Cache**: Improving reliability after app restart
-- [ ] **Exclusive Mode Hijack**: System sounds interrupting bit-perfect playback
-
----
-
-## 📦 Building & Deployment
-
-### Development Build
-
-```bash
-# Start development server with hot reload
-npm run tauri dev
-```
-
-### Production Build
-
-```bash
-# Build optimized release executable
-npm run tauri build
-```
-
-Output location:
-- **Windows**: `src-tauri/target/release/bundle/msi/`
-- **macOS**: `src-tauri/target/release/bundle/macos/`
-- **Linux**: `src-tauri/target/release/bundle/deb/` (or AppImage)
-
-### Code Quality
-
-```bash
-# Format Rust code
-cargo fmt
-
-# Lint Rust code
-cargo clippy
-
-# Format TypeScript/React
-npm run format
-
-# Lint TypeScript/React
-npm run lint
-
-# Run all tests
-cargo test && npm run test
-```
-
----
-
-## 🤝 Contributing
-
-We welcome contributions from the community! Whether it's bug fixes, new features, documentation, or translations, your help is greatly appreciated.
-
-### Getting Started with Contributing
-
-1. **Fork the repository** and clone your fork
-2. **Create a feature branch**: `git checkout -b feature/your-feature`
-3. **Make your changes** following our [CONTRIBUTING.md](CONTRIBUTING.md) guidelines
-4. **Test thoroughly** on multiple audio formats and devices
-5. **Submit a Pull Request** with a clear description
-
-### Contribution Guidelines
-
-For detailed guidelines on:
-- Code style and conventions
-- Testing requirements
-- Commit message formats
-- Pull request process
-
-See [**CONTRIBUTING.md**](CONTRIBUTING.md).
-
-### Areas We Need Help With
-
-- 🐛 **Bug Fixes**: Help squash existing issues
-- ✨ **New Features**: Implement features from the roadmap
-- 📚 **Documentation**: Improve guides and API docs
-- 🌍 **Translations**: Add support for new languages
-- 🧪 **Testing**: Test on different OS and audio devices
-
----
-
-## 🙋 Support & Community
-
-- **Report Bugs**: [Open an Issue](https://github.com/Alirull18/Aideo-Music-Player/issues/new?template=bug_report.yml)
-- **Request Features**: [Create a Feature Request](https://github.com/Alirull18/Aideo-Music-Player/issues/new?template=feature_request.yml)
-- **Ask Questions**: [GitHub Discussions](https://github.com/Alirull18/Aideo-Music-Player/discussions)
-- **Contact**: azrul18work@gmail.com
+- **Frontend**: React, TypeScript, Framer Motion, Zustand
+- **Backend**: Rust, Tauri
+- **Audio**: cpal (Audio I/O), symphonia (Codecs), rubato (Resampling)
+- **Database**: SQLite (via rusqlite)
 
 ---
 

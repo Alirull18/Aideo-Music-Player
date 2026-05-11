@@ -45,5 +45,23 @@ fn extract_art(audio_path: &str) -> Option<String> {
         }
     }
 
+    // Fallback 2: Look for local cover image in the same directory
+    if let Some(parent) = std::path::Path::new(audio_path).parent() {
+        let stem = std::path::Path::new(audio_path).file_stem().and_then(|s| s.to_str()).unwrap_or("cover");
+        let specific_jpg = format!("{}.jpg", stem);
+        let specific_png = format!("{}.png", stem);
+        let names = [specific_jpg.as_str(), specific_png.as_str(), "cover.jpg", "cover.png", "folder.jpg", "album.jpg"];
+        for name in names {
+            let img_path = parent.join(name);
+            if img_path.exists() {
+                if let Ok(bytes) = std::fs::read(&img_path) {
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    let mime = if name.ends_with(".png") { "image/png" } else { "image/jpeg" };
+                    return Some(format!("data:{mime};base64,{encoded}"));
+                }
+            }
+        }
+    }
+
     None
 }
