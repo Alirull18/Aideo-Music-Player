@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "1.0.0"
+version = "0.2.0"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
