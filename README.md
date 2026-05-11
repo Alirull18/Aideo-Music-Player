@@ -1,57 +1,33 @@
 # 💎 Aideo Music Player
-{here me the developer from this app .just wanna say that this app is 100% made by ai with Antigravity and for educational purpose only just wanna say that i just build this app for my personal use and learning method .I m currently a student of computer science and i hope that you all will like my app.and if there is any mistake please forgive me .thanks .}
 
 **A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics.**
 
-Aideo is a music player built with **Tauri**, **Rust**, and **React**. It is designed for listeners who demand signal purity, bit-perfect playback, and a modern, immersive visual experience.
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-Backend-000000?logo=rust)](https://www.rust-lang.org)
+
+Aideo is a high-performance desktop music player engineered with **Tauri**, **Rust**, and **React**. Designed specifically for audiophiles, it prioritizes signal purity and bit-perfect playback while delivering a modern, immersive visual experience that adapts dynamically to your music.
 
 ---
 
 ## ✨ Key Features
 
 ### 🎧 Audiophile Core
-- **Bit-Perfect Playback**: Built on `cpal` and `symphonia` for high-fidelity audio decoding.
-- **WASAPI Exclusive Mode**: Bypasses the Windows audio engine for direct-to-hardware signal purity.
-- **Studio-Grade EQ**: 10-band parametric equalizer with soft-limiting to prevent clipping.
+- **Bit-Perfect Playback**: Leverages `cpal` and `symphonia` for low-level, high-fidelity audio decoding.
+- **WASAPI Exclusive Mode**: Bypasses the Windows Audio Engine to provide direct-to-hardware signal integrity.
+- **Studio-Grade DSP**: Features a 10-band parametric equalizer with real-time soft-limiting to prevent digital clipping.
+- **High-Res Support**: Native support for lossless formats including FLAC, WAV, and ALAC.
 
-### 🎨 Dynamic Visuals
-- **Adaptive Theming**: The entire UI automatically shifts its color palette to match the dominant colors of your current album art
-- **Glassmorphic Design**: Sleek, modern "Deep-Space" aesthetic with frosted glass effects and smooth transitions
-- **Animated Focus**: Lyrics and UI elements respond with micro-animations for a "living" interface
-- **Real-Time Visualizer**: Spectrum analyzers and oscilloscope visualizations (planned)
+### 🎨 Dynamic Visual Experience
+- **Adaptive UI**: The interface color palette intelligently synchronizes with the dominant hues of current album artwork.
+- **Glassmorphic Design**: A sleek, "Deep-Space" aesthetic featuring frosted glass effects and fluid motion.
+- **Micro-Animations**: Interactive elements and lyrics respond with subtle, high-performance animations for a "living" interface.
+- **Real-Time Visualization**: Integrated spectrum analyzers and oscilloscope views (Experimental).
 
-### 📜 Smart Lyrics Engine
-- **Lyric Finder**: Search and download lyrics from NetEase and QQMusic directly within the app.
-- **Intelligent Auto-Focus**: Lyrics sync perfectly with the music, featuring a "Smart Scroll" that lets you browse manually without losing your place.
-- **Transliteration & Translation**: One-click **Romaji** for Japanese/Korean/Chinese tracks and Google Translate integration for international music.
-
----
-
-## 🗺️ Roadmap & Future Updates
-
-### 🚀 Short-Term (V1.1 - V1.2)
-- [ ] **Gapless Playback**: Implement smooth transitions between tracks for an uninterrupted listening experience.
-- [ ] **ASIO Support**: Add ASIO driver support for professional-grade low-latency output.
-- [ ] **Tray Integration**: Add a system tray icon with media controls and "Now Playing" notifications.
-- [ ] **Global Hotkeys**: Customizable keyboard shortcuts (Play/Pause, Next/Prev) that work even when the app is minimized.
-
-### 🎨 Visuals & UI
-- [ ] **Visualizer Engine**: Add real-time spectrum analyzers and oscilloscope visualizations.
-- [ ] **Folder Explorer**: A dedicated view to browse music by folder structure.
-- [ ] **Mini-Player Mode**: A compact, "always-on-top" view for minimal distraction.
-- [ ] **Custom Themes**: Save and share custom UI presets and EQ profiles.
-
-### ⚙️ Technical & Performance
-- [ ] **SQLite Optimization**: Improve library scanning speed for large collections (10k+ tracks).
-- [ ] **DSD/SACD Support**: Native decoding for high-resolution DSD files.
-- [ ] **Memory Management**: Profile and optimize memory usage during long playback sessions.
-- [ ] **Cross-Platform**: Extend support to Linux (PipeWire/ALSA) and macOS (CoreAudio).
-
-### 🐛 Known Issues & Bug Fixes
-- [ ] **WASAPI Stability**: Investigating occasional "Device Busy" errors when switching sample rates.
-- [ ] **Lyric Sync Drift**: Fixing minor timing offsets in long tracks (>10 mins).
-- [ ] **Album Art Cache**: Improving the reliability of cached artwork retrieval after app restart.
-- [ ] **Exclusive Mode Hijack**: Preventing system sounds from interrupting bit-perfect playback.
+### 📜 Intelligent Metadata & Lyrics
+- **Smart Lyric Engine**: High-speed retrieval from multiple global providers with perfect synchronization.
+- **Automated Focus**: Smart-scrolling logic that maintains sync while allowing manual browsing.
+- **Global Support**: Integrated transliteration (Romaji/Pinyin) and one-click translation for international libraries.
 
 ---
 
@@ -59,8 +35,8 @@ Aideo is a music player built with **Tauri**, **Rust**, and **React**. It is des
 
 ### Prerequisites
 
-- **Node.js** v18 or higher – [Download](https://nodejs.org/)
-- **Rust** (latest stable) – [Install via rustup](https://www.rust-lang.org/tools/install)
+- **Node.js** (LTS Recommended)
+- **Rust Toolchain** (latest stable via [rustup](https://rustup.rs/))
 - **Git**
 
 ### Installation
@@ -76,138 +52,84 @@ Aideo is a music player built with **Tauri**, **Rust**, and **React**. It is des
    npm install
    ```
 
-3. **Run in development mode:**
+3. **Launch Development Environment:**
    ```bash
    npm run tauri dev
    ```
 
-4. **Build for production:**
+4. **Build Production Binary:**
    ```bash
    npm run tauri build
    ```
-
-The compiled executable will be in `src-tauri/target/release/`.
-
-### First Run
-
-1. Open Aideo after installation
-2. Click the **Import Folder** button to add your music library
-3. Aideo will scan and index your music files
-4. Start playing your favorite tracks!
+   *The executable will be located in `src-tauri/target/release/`.*
 
 ---
 
 ## 📖 Usage Guide
 
-### Basic Controls
+### Control Shortcuts
 
 | Action | Keyboard | Mouse |
 |--------|----------|-------|
-| Play/Pause | `Space` | Click play button |
-| Next Track | `Right Arrow` | Click next button |
-| Previous Track | `Left Arrow` | Click previous button |
-| Volume Up | `Ctrl + Up` | Scroll on volume slider |
-| Volume Down | `Ctrl + Down` | Scroll on volume slider |
-| Seek Forward | `Right Ctrl + Right` | Click on progress bar |
-| Seek Backward | `Left Ctrl + Left` | Click on progress bar |
+| **Play/Pause** | `Space` | Click Play/Pause |
+| **Next Track** | `Right Arrow` | Click Next |
+| **Previous Track** | `Left Arrow` | Click Previous |
+| **Volume Control** | `Ctrl + Up/Down` | Mouse Wheel on Slider |
+| **Seek Position** | `Ctrl + Left/Right` | Click Progress Bar |
 
-### Lyrics Feature
+### Setup Workflow
+1. **Import Library**: On first launch, select your music directory via the "Import Folder" dialog.
+2. **Indexing**: Aideo will build a local SQLite database of your collection (optimized for 10k+ tracks).
+3. **Configure Audio**: Navigate to *Settings > Audio* to enable Exclusive Mode or adjust the Parametric EQ.
 
-1. **Find Lyrics**:
-   - Open the Lyrics Panel (right sidebar)
-   - Click **"Find Lyrics"** to search
-   - Select from search results
+---
 
-2. **Translation**:
-   - Click the **Translate** button for non-English tracks
-   - Choose your language for translation
+## 🗺️ Roadmap
 
-3. **Manual Scrolling**:
-   - Scroll through lyrics manually
-   - Lyrics stay synced without forcing position
+### 🏁 Short-Term Goals
+- [ ] **Gapless Playback**: Native event-driven engine for seamless transitions.
+- [ ] **ASIO Support**: Professional-grade driver support for low-latency interfaces.
+- [ ] **Global Media Keys**: System-wide control integration even when minimized.
 
-### Audio Settings
+### 🎨 UI & UX Enhancements
+- [ ] **Mini-Player Mode**: A compact, always-on-top desktop widget.
+- [ ] **Folder Browser**: Direct filesystem navigation for unorganized libraries.
+- [ ] **Custom Theme Engine**: User-definable CSS variables for personalized styling.
 
-1. **Equalizer**:
-   - Open Settings → Audio
-   - Adjust 10-band parametric EQ
-   - Save custom presets
-
-2. **Output Device**:
-   - Select your audio interface or DAC
-   - Enable WASAPI Exclusive Mode for bit-perfect output (Windows)
-
-3. **Sample Rate**:
-   - Match your hardware's native sampling rate for best quality
-   - Aideo auto-resamples if needed
+### ⚙️ Performance & Core
+- [ ] **DSD/SACD Support**: Native DSD decoding (DSF/DFF).
+- [ ] **Memory Optimization**: Enhanced buffer management for long-duration playback.
+- [ ] **Cross-Platform Support**: Implementation for macOS (CoreAudio) and Linux (PipeWire).
 
 ---
 
 ## 🛠 Tech Stack
-- **Frontend**: React, TypeScript, Framer Motion, Zustand
-- **Backend**: Rust, Tauri
-- **Audio**: cpal (Audio I/O), symphonia (Codecs), rubato (Resampling)
-- **Database**: SQLite (via rusqlite)
+
+- **Frontend**: React 19, TypeScript, Framer Motion, Zustand
+- **Backend**: Rust (Tauri 2.0 Framework)
+- **Audio Engine**: `cpal` (I/O), `symphonia` (Codecs), `rubato` (Resampling)
+- **Database**: SQLite (via `rusqlite`)
+
+---
+
+## 👨‍💻 Note from the Developer
+
+> This project is a labor of love, developed as an educational journey into high-performance desktop application architecture and digital signal processing. As a Computer Science student, I built Aideo to explore the intersection of Rust's safety/performance and modern UI design. It is 100% AI-assisted (built with Antigravity), serving as a testament to how modern tools can accelerate specialized software development.
+> 
+> — **Alirul**
 
 ---
 
 ## 📝 License
 
-This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
-
-This means:
-- ✅ You can use it for personal and commercial projects
-- ✅ You can modify and distribute the code
-- ✅ You must include the license and copyright notice
-- ❌ The authors are not liable for any issues
-
----
-
-## 💡 Why Aideo?
-
-- **Transparent Audio**: No compromise on sound quality
-- **Modern Stack**: Rust for performance, React for beautiful UI
-- **Developer-Friendly**: Open-source, well-documented codebase
-- **Visually Stunning**: UI that adapts to your music
-- **Feature-Rich**: Everything an audiophile needs in one app
-- **Active Development**: Regular updates and new features
-- **Community-Driven**: Your feedback shapes the roadmap
-
----
-
-## 📊 Project Stats
-
-- **Language**: Rust (Backend), TypeScript/React (Frontend)
-- **Lines of Code**: 5,000+ (and growing!)
-- **Supported Formats**: MP3, FLAC, WAV, OGG, AAC, M4A
-- **Database**: SQLite with async queries
-- **UI Framework**: React 18+ with modern hooks
-- **Build Time**: ~2-3 minutes
-
----
-
-## 🎵 For Music Lovers & Developers
-
-Whether you're an audiophile seeking lossless playback or a developer interested in desktop app architecture, Aideo offers something for everyone. Join our community and help shape the future of music players!
-
----
-
-## 🔗 Quick Links
-
-- [📚 Architecture Documentation](docs/ARCHITECTURE.md)
-- [🤝 Contributing Guide](CONTRIBUTING.md)
-- [📋 Code of Conduct](CODE_OF_CONDUCT.md)
-- [🐛 Report an Issue](https://github.com/Alirull18/Aideo-Music-Player/issues)
-- [💡 Request a Feature](https://github.com/Alirull18/Aideo-Music-Player/discussions)
+Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
 
 <div align="center">
 
-**Made with ❤️ for music lovers and developers.**
+**Crafted with ❤️ for the Audiophile Community.**
 
-*Aideo – The Future of Audiophile Music Players*
-
-⭐ If you love this project, please give it a star! [Star on GitHub](https://github.com/Alirull18/Aideo-Music-Player)
+⭐ *If you find this project useful, please consider giving it a star on [GitHub](https://github.com/Alirull18/Aideo-Music-Player)!*
 
 </div>
