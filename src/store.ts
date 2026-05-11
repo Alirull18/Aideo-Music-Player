@@ -8,6 +8,7 @@ export interface Track {
   artist: string | null;
   duration: number | null;
   format: string | null;
+  lyric_offset: number;
 }
 
 export interface LyricLine {
@@ -17,10 +18,9 @@ export interface LyricLine {
   translation?: string;
 }
 
-export interface EQState {
-  bands: [number, number, number, number, number, number, number, number, number, number];
+export interface DSPState {
+  width: number;
   enabled: boolean;
-  speed: number;
 }
 
 interface PlayerState {
@@ -39,14 +39,17 @@ interface PlayerState {
 
   lyrics: LyricLine[];
   lyricOffset: number;
+  lyricStatus: 'idle' | 'loading' | 'found' | 'not_found';
   coverArt: string | null;
-  accentColor: string;       // dynamic colour extracted from art
+  accentColor: string;
   showProMode: boolean;
-  eq: EQState;
+  showControlCenter: boolean;
+  showSettings: boolean;
+  dsp: DSPState;
 
   devices: string[];
   currentDevice: string | null;
-  scanDir: string;
+  scanDirs: string[];
   scanStatus: string;
   isTranslating: boolean;
   showRomaji: boolean;
@@ -54,10 +57,14 @@ interface PlayerState {
 
   // actions
   setView: (view: 'library' | 'nowplaying') => void;
-  setScanDir: (dir: string) => void;
+  addScanDir: (dir: string) => void;
+  removeScanDir: (dir: string) => void;
+  toggleSettings: () => void;
+  setShowRomaji: (val: boolean) => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
   playTrack: (track: Track) => Promise<void>;
+  handleTrackTransition: (path: string) => Promise<void>;
   playNext: () => Promise<void>;
   playPrev: () => Promise<void>;
   toggleShuffle: () => void;
@@ -68,8 +75,9 @@ interface PlayerState {
   seek: (secs: number) => Promise<void>;
   pollStatus: () => Promise<void>;
   toggleProMode: () => void;
+  toggleControlCenter: () => void;
   resetProMode: () => void;
-  setEQ: (eq: Partial<EQState>) => Promise<void>;
+  setDSP: (dsp: Partial<DSPState>) => Promise<void>;
   toggleExclusive: () => Promise<void>;
   fetchDevices: () => Promise<void>;
   setAudioDevice: (name: string) => Promise<void>;
@@ -77,11 +85,9 @@ interface PlayerState {
   saveLyrics: (path: string, lrc: string) => Promise<void>;
   translateLyrics: () => Promise<void>;
   getRomaji: () => Promise<void>;
-  setShowRomaji: (val: boolean) => void;
   applyOnlineCover: (path: string, url: string) => Promise<void>;
 }
 
-/** Pull a dominant colour from a base64 data-URL image using a canvas. */
 function extractDominantColor(dataUrl: string): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -97,7 +103,6 @@ function extractDominantColor(dataUrl: string): Promise<string> {
         r += data[i]; g += data[i + 1]; b += data[i + 2]; count++;
       }
       r = Math.round(r / count); g = Math.round(g / count); b = Math.round(b / count);
-      // Boost saturation so it looks vivid, not muddy
       const max = Math.max(r, g, b), min = Math.min(r, g, b);
       const lightness = (max + min) / 510;
       if (lightness > 0.85 || lightness < 0.1) { resolve('#8b5cf6'); return; }
@@ -116,29 +121,41 @@ export const useStore = create<PlayerState>((set, get) => ({
   playback: { status: 'Stopped', current_track: null, position_secs: 0, volume: 1.0, exclusive: false },
   lyrics: [],
   lyricOffset: 0,
+  lyricStatus: 'idle',
   coverArt: null,
   accentColor: '#8b5cf6',
   showProMode: false,
-  eq: { bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], enabled: false, speed: 1.0 },
+  showControlCenter: false,
+  showSettings: false,
+  dsp: { width: 1.0, enabled: false },
   devices: [],
   currentDevice: null,
-  scanDir: '',
+  scanDirs: JSON.parse(localStorage.getItem('aideo_scan_dirs') || '[]'),
   scanStatus: '',
   isTranslating: false,
   showRomaji: true,
   isTransitioning: false,
 
   setView: (view) => set({ view }),
-  setScanDir: (dir) => set({ scanDir: dir }),
+  addScanDir: (dir) => {
+    const newDirs = Array.from(new Set([...get().scanDirs, dir]));
+    localStorage.setItem('aideo_scan_dirs', JSON.stringify(newDirs));
+    set({ scanDirs: newDirs });
+  },
+  removeScanDir: (dir) => {
+    const newDirs = get().scanDirs.filter(d => d !== dir);
+    localStorage.setItem('aideo_scan_dirs', JSON.stringify(newDirs));
+    set({ scanDirs: newDirs });
+  },
+  toggleSettings: () => set(s => ({ showSettings: !s.showSettings })),
   setShowRomaji: (val) => set({ showRomaji: val }),
 
   scanLibrary: async () => {
-    const dir = get().scanDir;
-    if (!dir) { set({ scanStatus: 'Pick a folder first' }); return; }
+    const dirs = get().scanDirs;
+    if (dirs.length === 0) { set({ scanStatus: 'Add a folder first' }); return; }
     set({ scanStatus: 'Scanning...' });
     try {
-      // Backend command is scan_and_save, args: dir
-      const count: number = await invoke('scan_and_save', { dir });
+      const count: number = await invoke('scan_and_save', { dirs });
       await get().loadLibrary();
       set({ scanStatus: `Found ${count} tracks` });
     } catch (e: any) { set({ scanStatus: 'Scan failed: ' + e }); }
@@ -152,42 +169,120 @@ export const useStore = create<PlayerState>((set, get) => ({
   },
 
   playTrack: async (track) => {
+    if (!track) return;
     try {
       const index = get().tracks.findIndex(t => t.path === track.path);
       set({
         currentTrackIndex: index,
-        lyricOffset: 0,
+        lyricOffset: track.lyric_offset || 0, // LOAD SAVED OFFSET
         lyrics: [],
+        lyricStatus: 'loading',
         coverArt: null,
         accentColor: '#8b5cf6',
         playback: { ...get().playback, current_track: track.path, status: 'Playing', position_secs: 0 },
       });
 
-      // Send play command to backend
       await invoke('play_track', { path: track.path });
+      
+      invoke('update_media_metadata', {
+        title: track.title || track.path.split(/[\\/]/).pop(),
+        artist: track.artist || 'Unknown Artist',
+        coverUrl: null,
+        duration: track.duration || 0,
+      }).catch(() => {});
 
-      // Fetch cover art asynchronously – backend returns full data-URL string
       invoke('get_cover_art', { path: track.path }).then(async (art: any) => {
+        if (get().playback.current_track !== track.path) return;
         if (art && typeof art === 'string') {
           set({ coverArt: art });
-          // Extract accent colour from the art
           try {
             const color = await extractDominantColor(art);
             set({ accentColor: color });
-          } catch (_) {}
+          } catch (_) { }
+          invoke('update_media_metadata', {
+            title: track.title || track.path.split(/[\\/]/).pop(),
+            artist: track.artist || 'Unknown Artist',
+            coverUrl: art,
+            duration: track.duration || 0,
+          }).catch(() => {});
         }
-      }).catch(() => {});
+      }).catch(() => { });
 
-      // Fetch lyrics asynchronously
       invoke('get_lyrics', { path: track.path }).then((lrc: any) => {
-        if (Array.isArray(lrc) && lrc.length > 0) set({ lyrics: lrc });
-      }).catch(() => {});
+        if (get().playback.current_track !== track.path) return;
+        if (Array.isArray(lrc) && lrc.length > 0) {
+          set({ lyrics: lrc, lyricStatus: 'found' });
+        } else {
+          set({ lyrics: [], lyricStatus: 'not_found' });
+        }
+      }).catch(() => {
+        if (get().playback.current_track === track.path) set({ lyricStatus: 'not_found' });
+      });
 
     } catch (e) {
-      console.error('playTrack:', e);
+      console.error('playTrack error:', e);
     } finally {
       set({ isTransitioning: false });
     }
+
+    const state = get();
+    if (state.tracks.length > 0 && state.currentTrackIndex >= 0) {
+      let nextIndex = state.shuffle
+        ? Math.floor(Math.random() * state.tracks.length)
+        : (state.currentTrackIndex + 1) % state.tracks.length;
+      try { await invoke('queue_next', { path: state.tracks[nextIndex].path }); } catch (e) { }
+    }
+  },
+
+  handleTrackTransition: async (path: string) => {
+    const state = get();
+    const index = state.tracks.findIndex(t => t.path === path);
+    if (index === -1) return;
+    const track = state.tracks[index];
+
+    set({
+      currentTrackIndex: index,
+      lyricOffset: track.lyric_offset || 0, // LOAD SAVED OFFSET
+      lyrics: [],
+      lyricStatus: 'loading',
+      coverArt: null,
+      accentColor: '#8b5cf6',
+      playback: { ...state.playback, current_track: path, status: 'Playing', position_secs: 0 },
+    });
+
+    invoke('get_cover_art', { path }).then(async (art: any) => {
+      if (get().playback.current_track !== path) return;
+      if (art && typeof art === 'string') {
+        set({ coverArt: art });
+        try {
+          const color = await extractDominantColor(art);
+          set({ accentColor: color });
+        } catch (_) { }
+        invoke('update_media_metadata', {
+          title: track.title || path.split(/[\\/]/).pop(),
+          artist: track.artist || 'Unknown Artist',
+          coverUrl: art,
+          duration: track.duration || 0,
+        }).catch(() => {});
+      }
+    }).catch(() => { });
+
+    invoke('get_lyrics', { path }).then((lrc: any) => {
+      if (get().playback.current_track !== path) return;
+      if (Array.isArray(lrc) && lrc.length > 0) {
+        set({ lyrics: lrc, lyricStatus: 'found' });
+      } else {
+        set({ lyrics: [], lyricStatus: 'not_found' });
+      }
+    }).catch(() => {
+      if (get().playback.current_track === path) set({ lyricStatus: 'not_found' });
+    });
+
+    const newState = get();
+    let nextIndex = newState.shuffle
+      ? Math.floor(Math.random() * newState.tracks.length)
+      : (newState.currentTrackIndex + 1) % newState.tracks.length;
+    try { await invoke('queue_next', { path: newState.tracks[nextIndex].path }); } catch (e) { }
   },
 
   playNext: async () => {
@@ -209,17 +304,32 @@ export const useStore = create<PlayerState>((set, get) => ({
 
   toggleShuffle: () => set(s => ({ shuffle: !s.shuffle })),
 
-  pauseTrack: async () => { try { await invoke('pause_track'); } catch (e) { console.error(e); } },
-  resumeTrack: async () => { try { await invoke('resume_track'); } catch (e) { console.error(e); } },
+  pauseTrack: async () => { 
+    try { 
+      await invoke('pause_track'); 
+      await invoke('update_media_playback', { playing: false });
+      set(s => ({ playback: { ...s.playback, status: 'Paused' } }));
+    } catch (e) { console.error(e); } 
+  },
+  resumeTrack: async () => { 
+    try { 
+      await invoke('resume_track'); 
+      await invoke('update_media_playback', { playing: true });
+      set(s => ({ playback: { ...s.playback, status: 'Playing' } }));
+    } catch (e) { console.error(e); } 
+  },
   stopTrack: async () => {
-    try { await invoke('stop_track'); } catch (e) { console.error(e); }
-    set({ isTransitioning: false, playback: { ...get().playback, status: 'Stopped' } });
+    try { 
+      await invoke('stop_track'); 
+      set({ isTransitioning: false, playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 } });
+    } catch (e) { console.error(e); }
   },
 
-  // Backend command name is set_volume, param name is volume (NOT vol)
   setVolume: async (vol) => {
-    try { await invoke('set_volume', { volume: vol }); } catch (e) { console.error(e); }
-    set(s => ({ playback: { ...s.playback, volume: vol } }));
+    try { 
+      await invoke('set_volume', { volume: vol }); 
+      set(s => ({ playback: { ...s.playback, volume: vol } }));
+    } catch (e) { console.error(e); }
   },
 
   seek: async (secs) => {
@@ -229,31 +339,33 @@ export const useStore = create<PlayerState>((set, get) => ({
   pollStatus: async () => {
     try {
       const status: any = await invoke('get_playback_status');
-      set(s => ({ playback: { ...s.playback, ...status } }));
-    } catch (e) { console.error('pollStatus:', e); }
+      if (status) {
+        set(s => ({ playback: { ...s.playback, ...status } }));
+      }
+    } catch (e) { }
   },
 
   toggleProMode: () => set(s => ({ showProMode: !s.showProMode })),
+  toggleControlCenter: () => set(s => ({ showControlCenter: !s.showControlCenter })),
   resetProMode: async () => {
-    const def: EQState = { bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], enabled: false, speed: 1.0 };
-    set({ eq: def });
-    try { await invoke('set_eq_state', { state: def }); } catch (e) { console.error(e); }
+    const def: DSPState = { width: 1.0, enabled: false };
+    set({ dsp: def });
+    try { await invoke('set_dsp_state', { dsp: def }); } catch (e) { console.error(e); }
   },
-  setEQ: async (newEQ) => {
-    const full = { ...get().eq, ...newEQ } as EQState;
-    set({ eq: full });
-    try { await invoke('set_eq_state', { state: full }); } catch (e) { console.error(e); }
+  setDSP: async (newDSP) => {
+    const full = { ...get().dsp, ...newDSP } as DSPState;
+    set({ dsp: full });
+    try { await invoke('set_dsp_state', { dsp: full }); } catch (e) { console.error(e); }
   },
 
   toggleExclusive: async () => {
     try {
       const res: boolean = await invoke('toggle_exclusive_mode');
-      if (res) await get().setEQ({ enabled: false });
+      if (res) await get().setDSP({ enabled: false });
       set(s => ({ playback: { ...s.playback, exclusive: res } }));
     } catch (e) { console.error(e); }
   },
 
-  // No get_current_device command exists – just list devices, default to null
   fetchDevices: async () => {
     try {
       const ds: string[] = await invoke('get_audio_devices');
@@ -265,18 +377,28 @@ export const useStore = create<PlayerState>((set, get) => ({
     try { await invoke('set_audio_device', { name }); set({ currentDevice: name }); } catch (e) { console.error(e); }
   },
 
-  adjustLyricOffset: (ms) => set(s => ({ lyricOffset: s.lyricOffset + ms })),
+  adjustLyricOffset: (ms) => {
+    const newOffset = get().lyricOffset + ms;
+    set({ lyricOffset: newOffset });
+    // PERSIST TO DATABASE
+    const path = get().playback.current_track;
+    if (path) {
+      invoke('update_track_offset', { path, offset: newOffset }).catch(() => {});
+      // Update local tracks state too so it's remembered during this session without reload
+      set(s => ({
+        tracks: s.tracks.map(t => t.path === path ? { ...t, lyric_offset: newOffset } : t)
+      }));
+    }
+  },
 
-  // Backend command: save_lyrics_file(path, content)
   saveLyrics: async (path, lrc) => {
     try {
       await invoke('save_lyrics_file', { path, content: lrc });
       const lines: any = await invoke('get_lyrics', { path });
-      if (Array.isArray(lines)) set({ lyrics: lines });
+      if (Array.isArray(lines)) set({ lyrics: lines, lyricStatus: 'found' });
     } catch (e) { console.error(e); }
   },
 
-  // Backend has translate_lyric_line(text) per-line; we do a best-effort full translation
   translateLyrics: async () => {
     const { lyrics, playback } = get();
     if (!playback.current_track || lyrics.length === 0) return;
@@ -295,7 +417,6 @@ export const useStore = create<PlayerState>((set, get) => ({
     } catch (e) { console.error(e); } finally { set({ isTranslating: false }); }
   },
 
-  // Fetch only romaji/transliteration without translation
   getRomaji: async () => {
     const { lyrics } = get();
     if (lyrics.length === 0) return;
@@ -303,7 +424,7 @@ export const useStore = create<PlayerState>((set, get) => ({
     try {
       const withRomaji = await Promise.all(
         lyrics.map(async (l) => {
-          if (!l.text || l.romaji) return l; // skip if already has romaji
+          if (!l.text || l.romaji) return l;
           try {
             const [, romaji]: [string, string] = await invoke('translate_lyric_line', { text: l.text });
             return { ...l, romaji: romaji || undefined };
@@ -317,7 +438,6 @@ export const useStore = create<PlayerState>((set, get) => ({
   applyOnlineCover: async (path, url) => {
     try {
       await invoke('apply_online_cover', { path, url });
-      // Reload cover art if this is the currently playing track
       if (get().playback.current_track === path) {
         invoke('get_cover_art', { path }).then(async (art: any) => {
           if (art && typeof art === 'string') {
@@ -325,9 +445,9 @@ export const useStore = create<PlayerState>((set, get) => ({
             try {
               const color = await extractDominantColor(art);
               set({ accentColor: color });
-            } catch (_) {}
+            } catch (_) { }
           }
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } catch (e) { console.error(e); }
   },

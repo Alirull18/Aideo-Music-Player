@@ -4,7 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, Disc3, FolderSearch, Search, Languages, Volume2, X, Activity, RefreshCw } from 'lucide-react';
 import './App.css';
+import defaultCover from './assets/default_cover.png';
 
 /* ─── helpers ───────────────────────────────────────── */
 function fmt(s: number | null) {
@@ -17,19 +19,7 @@ function baseName(p: string | null) {
 
 /* ─── Sidebar ────────────────────────────────────────── */
 function Sidebar() {
-  const {
-    view, setView, scanDir, setScanDir, scanStatus, scanLibrary,
-    devices, currentDevice, fetchDevices, setAudioDevice,
-    playback, toggleExclusive, showProMode, toggleProMode,
-  } = useStore();
-  const [devOpen, setDevOpen] = useState(false);
-
-  useEffect(() => { fetchDevices(); }, []);
-
-  const browse = async () => {
-    const sel = await open({ directory: true, multiple: false }).catch(() => null);
-    if (sel && typeof sel === 'string') setScanDir(sel);
-  };
+  const { view, setView, toggleSettings } = useStore();
 
   return (
     <aside className="app-sidebar">
@@ -39,59 +29,37 @@ function Sidebar() {
 
       {/* Navigation */}
       <div className={`nav-item ${view === 'library' ? 'active' : ''}`} onClick={() => setView('library')}>
-        <span>📚</span> Library
+        <Library size={18} /> Library
       </div>
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
-        <span>🎧</span> Now Playing
-      </div>
-      <div className={`nav-item ${showProMode ? 'active' : ''}`} onClick={toggleProMode}>
-        <span>🎚️</span> Studio EQ
+        <Headphones size={18} /> Now Playing
       </div>
 
-      {/* Hardware section */}
-      <div className="sidebar-section-label">Hardware</div>
-
-      <div className={`exclusive-toggle ${playback.exclusive ? 'active' : ''}`} onClick={toggleExclusive}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: 12, fontWeight: 700 }}>Exclusive Mode</span>
-          <span style={{ fontSize: 9, color: playback.exclusive ? 'var(--accent)' : 'var(--text-dim)' }}>
-            {playback.exclusive ? 'ON' : 'OFF'}
-          </span>
-        </div>
-        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>Bit-perfect output</div>
-      </div>
-
-      <div className="device-selector">
-        <div className="current-device" onClick={() => setDevOpen(o => !o)}>
-          {currentDevice || 'System Default'} ▾
-        </div>
-        <AnimatePresence>
-          {devOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-              style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1200,
-                background: '#13131d', border: '1px solid var(--glass-border)', borderRadius: 12, marginTop: 4, overflow: 'hidden' }}>
-              {devices.length === 0 && <div style={{ padding: 12, fontSize: 11, color: 'var(--text-dim)' }}>No devices found</div>}
-              {devices.map(d => (
-                <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
-                  style={{ padding: '10px 14px', fontSize: 11, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
-                    color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.06)' : '' }}>
-                  {d}
-                </div>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Scan section */}
-      <div className="scan-box">
-        <button className="btn btn-secondary" onClick={browse}>📁 Select Folder</button>
-        {scanDir && <div style={{ fontSize: 10, color: 'var(--text-dim)', margin: '6px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{scanDir}</div>}
-        <button className="btn btn-primary" onClick={scanLibrary}>Scan Library</button>
-        <div className="scan-status">{scanStatus}</div>
+      {/* Settings */}
+      <div style={{ marginTop: 'auto' }} className={`nav-item`} onClick={toggleSettings}>
+        <Settings size={18} /> Settings
       </div>
     </aside>
+  );
+}
+
+/* ─── Smart Thumbnail ────────────────────────────────── */
+function TrackThumbnail({ path }: { path: string }) {
+  const [art, setArt] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Only fetch if not already loaded
+    if (!art) {
+      invoke('get_cover_art', { path }).then((res: any) => {
+        if (res && typeof res === 'string') setArt(res);
+      }).catch(() => {});
+    }
+  }, [path]);
+
+  return (
+    <div className="lib-thumb-mini">
+      <img src={art || defaultCover} alt="" />
+    </div>
   );
 }
 
@@ -108,22 +76,44 @@ function LibraryView() {
         <table className="track-table">
           <thead>
             <tr>
-              <th style={{ width: 52 }}>#</th>
+              <th style={{ width: 48, textAlign: 'center' }}>#</th>
+              <th style={{ width: 48 }}></th>
               <th>Title</th>
               <th>Artist</th>
-              <th style={{ width: 72 }}>Time</th>
+              <th style={{ width: 80 }}>Quality</th>
+              <th style={{ width: 72, textAlign: 'right' }}>Time</th>
             </tr>
           </thead>
           <tbody>
             {tracks.map((t, i) => {
               const active = playback.current_track === t.path;
+              const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
+              
               return (
                 <tr key={t.id} className={`track-row${active ? ' playing' : ''}`}
                   onClick={() => { playTrack(t); setView('nowplaying'); }}>
-                  <td style={{ color: active ? 'var(--accent)' : 'var(--text-dim)' }}>{active ? '▶' : i + 1}</td>
-                  <td><div className="track-name">{t.title || baseName(t.path)}</div></td>
-                  <td><div className="track-sub">{t.artist || 'Unknown'}</div></td>
-                  <td><div className="track-sub">{fmt(t.duration)}</div></td>
+                  <td style={{ textAlign: 'center', color: active ? 'var(--accent)' : 'var(--text-dim)', fontSize: 12 }}>
+                    {active ? '▶' : i + 1}
+                  </td>
+                  <td>
+                    <TrackThumbnail path={t.path} />
+                  </td>
+                  <td>
+                    <div className="track-name">{t.title || baseName(t.path)}</div>
+                  </td>
+                  <td>
+                    <div className="track-sub">{t.artist || '—'}</div>
+                  </td>
+                  <td>
+                    {t.format && (
+                      <span className={`quality-tag ${isHighRes ? 'high-res' : ''}`}>
+                        {t.format.toUpperCase()}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div className="track-sub">{fmt(t.duration)}</div>
+                  </td>
                 </tr>
               );
             })}
@@ -137,13 +127,15 @@ function LibraryView() {
 /* ─── Lyrics ─────────────────────────────────────────── */
 interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; cover_url?: string; }
 function LyricsPanel() {
-  const { lyrics, playback, lyricOffset, seek, adjustLyricOffset, saveLyrics, tracks, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover } = useStore();
+  const { lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, tracks, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [userScrolling, setUserScrolling] = useState(false);
   const userScrollTimer = useRef<number | null>(null);
   const [showFinder, setShowFinder] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [editContent, setEditContent] = useState('');
 
   const currentTrack = tracks.find(t => t.path === playback.current_track);
 
@@ -210,9 +202,37 @@ function LyricsPanel() {
     <div className="np-right">
       {/* Toolbar */}
       <div className="lyrics-toolbar">
-        <button className="lyric-btn" onClick={() => adjustLyricOffset(-100)}>−100ms</button>
-        <button className="lyric-btn" onClick={() => adjustLyricOffset(100)}>+100ms</button>
+        <div className="sync-controls">
+          <button className="lyric-btn" title="Make lyrics appear earlier" onClick={() => adjustLyricOffset(-100)}>–</button>
+          <div className="sync-value" onClick={() => adjustLyricOffset(-lyricOffset)} title="Click to reset">
+            {lyricOffset > 0 ? `+${lyricOffset}` : lyricOffset}ms
+          </div>
+          <button className="lyric-btn" title="Make lyrics appear later" onClick={() => adjustLyricOffset(100)}>+</button>
+        </div>
+        
         <button className="lyric-btn" onClick={doSearch}>🔍 Finder</button>
+        <button className="lyric-btn" onClick={() => {
+          // Join existing lyrics back into LRC format for editing
+          const raw = lyrics.map(l => `[${fmt(l.time_secs).padStart(5, '0')}.00]${l.text}`).join('\n');
+          setEditContent(raw);
+          setShowEditor(true);
+        }}>✍️ Studio</button>
+        
+        {/* Status Indicator */}
+        <div style={{ 
+          marginLeft: 'auto', marginRight: 12, fontSize: 10, fontWeight: 700, 
+          letterSpacing: 1, textTransform: 'uppercase', 
+          color: lyricStatus === 'loading' ? 'var(--accent)' : lyricStatus === 'not_found' ? '#ef4444' : 'var(--text-dim)',
+          display: 'flex', alignItems: 'center', gap: 6
+        }}>
+          <div style={{ 
+            width: 6, height: 6, borderRadius: '50%', 
+            background: lyricStatus === 'loading' ? 'var(--accent)' : lyricStatus === 'not_found' ? '#ef4444' : lyricStatus === 'found' ? '#10b981' : 'transparent',
+            boxShadow: lyricStatus === 'found' ? '0 0 8px #10b981' : 'none',
+            animation: lyricStatus === 'loading' ? 'pulse 1.5s infinite' : 'none'
+          }} />
+          {lyricStatus === 'loading' ? 'Searching...' : lyricStatus === 'found' ? 'Synced' : lyricStatus === 'not_found' ? 'No Lyrics' : ''}
+        </div>
         <button className={`lyric-btn ${isTranslating ? 'active' : ''}`} onClick={translateLyrics} disabled={isTranslating}>
           {isTranslating ? 'Working…' : '🌐 Translate'}
         </button>
@@ -235,8 +255,24 @@ function LyricsPanel() {
         <div className="lyrics-scroll" ref={scrollRef} onScroll={onScroll}>
           <div className="lyric-spacer-top" />
           {lyrics.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 16, padding: '24px 0' }}>
-              No lyrics. Click <strong>Finder</strong> to search online.
+            <div style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 16, padding: '48px 24px' }}>
+              {lyricStatus === 'loading' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                  <RefreshCw size={32} className="spin" style={{ color: 'var(--accent)' }} />
+                  <div style={{ fontSize: 14 }}>Fetching lyrics...</div>
+                </div>
+              ) : lyricStatus === 'not_found' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                  <X size={32} style={{ color: '#ef4444' }} />
+                  <div style={{ fontSize: 14 }}>No lyrics found in file.</div>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={doSearch}>Try Online Finder</button>
+                    <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => { setEditContent(''); setShowEditor(true); }}>Open Studio</button>
+                  </div>
+                </div>
+              ) : (
+                <>No lyrics. Click <strong>Finder</strong> to search online.</>
+              )}
             </div>
           ) : (
             lyrics.map((l, i) => (
@@ -297,37 +333,180 @@ function LyricsPanel() {
           </div>
         )}
       </AnimatePresence>
+      
+      {/* Lyric Editor Modal (Studio) */}
+      <AnimatePresence>
+        {showEditor && (
+          <div className="modal-overlay" onClick={() => setShowEditor(false)}>
+            <motion.div className="modal-box" onClick={e => e.stopPropagation()}
+              style={{ width: 600, height: 700 }}
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
+              <div className="modal-header">
+                <div>
+                  <h3 style={{ margin: 0 }}>Lyric Studio</h3>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Paste your LRC text or AI-generated lyrics below.</div>
+                </div>
+                <button className="modal-close" onClick={() => setShowEditor(false)}>✕</button>
+              </div>
+              <div className="modal-body" style={{ padding: 0 }}>
+                <textarea 
+                  className="studio-editor"
+                  placeholder="Paste lyrics here... 
+Example:
+[00:12.50]Hello world
+[00:15.00]This is Aideo"
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                />
+              </div>
+              <div className="modal-footer" style={{ padding: '0 24px 24px', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                <button className="btn btn-secondary" style={{ width: 'auto', padding: '10px 24px' }} onClick={() => setShowEditor(false)}>Cancel</button>
+                <button className="btn btn-primary" style={{ width: 'auto', padding: '10px 32px' }} onClick={async () => {
+                  if (playback.current_track) {
+                    await saveLyrics(playback.current_track, editContent);
+                    setShowEditor(false);
+                  }
+                }}>Save to File</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-/* ─── EQ ─────────────────────────────────────────────── */
-function EQPanel() {
-  const { eq, setEQ, resetProMode } = useStore();
-  const BANDS = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+/* ─── Audio Control Center ─────────────────────────────── */
+function AudioControlCenter() {
+  const { dsp, setDSP, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices } = useStore();
+  const [devOpen, setDevOpen] = useState(false);
+
+  useEffect(() => {
+    if (showControlCenter) fetchDevices();
+  }, [showControlCenter]);
+
+  if (!showControlCenter) return null;
+
   return (
-    <motion.div className="eq-panel"
-      initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700 }}>Studio Equalizer</h3>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="lyric-btn" onClick={resetProMode}>Reset</button>
-          <button className={`lyric-btn ${eq.enabled ? 'active' : ''}`} onClick={() => setEQ({ enabled: !eq.enabled })}>
-            {eq.enabled ? 'ON' : 'OFF'}
-          </button>
-        </div>
-      </div>
-      <div className="eq-bands">
-        {eq.bands.map((v, i) => (
-          <div key={i} className="eq-band">
-            <input type="range" min={-12} max={12} step={0.5} value={v}
-              style={{ writingMode: 'vertical-lr', direction: 'rtl', height: 120, width: 4, accentColor: 'var(--accent)' } as any}
-              onChange={e => { const b = [...eq.bands] as typeof eq.bands; b[i] = +e.target.value; setEQ({ bands: b }); }} />
-            <span>{BANDS[i]}</span>
+    <div className="modal-overlay" onClick={toggleControlCenter} style={{ backdropFilter: 'blur(16px)', background: 'rgba(0,0,0,0.6)' }}>
+      <motion.div className="modal-box" onClick={e => e.stopPropagation()}
+        style={{ width: 800, maxWidth: '90vw', height: 600, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}>
+        
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 32px', borderBottom: '1px solid var(--glass-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Activity size={24} color="var(--accent)" />
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Audio Engine</h2>
           </div>
-        ))}
-      </div>
-    </motion.div>
+          <button className="modal-close" onClick={toggleControlCenter}><X size={20} /></button>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Left Column: DSP / Soundstage */}
+          <div style={{ flex: 2, padding: 32, borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 48 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Activity size={18} /> Soundstage Engine
+              </h3>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary" onClick={resetProMode}>Reset</button>
+                <button className={`btn ${dsp.enabled ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setDSP({ enabled: !dsp.enabled })}>
+                  {dsp.enabled ? 'Engine: ON' : 'Engine: OFF'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 32 }}>
+              <div style={{ width: '100%', maxWidth: 500 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: dsp.width < 1.0 ? 'var(--accent)' : 'var(--text-dim)', transition: 'color 0.2s' }}>
+                    HEADPHONE CROSSFEED
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: dsp.width > 1.0 ? 'var(--accent)' : 'var(--text-dim)', transition: 'color 0.2s' }}>
+                    SPATIAL WIDENER
+                  </span>
+                </div>
+                
+                <input type="range" min={0} max={3} step={0.01} value={dsp.width}
+                  style={{ width: '100%', height: 6, accentColor: 'var(--accent)', cursor: 'pointer' }}
+                  onChange={e => setDSP({ width: +e.target.value })} />
+                
+                <div style={{ marginTop: 24, textAlign: 'center' }}>
+                  <div style={{ fontSize: 48, fontWeight: 800, color: 'var(--accent)', fontFamily: 'monospace' }}>
+                    {Math.round(dsp.width * 100)}%
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, textTransform: 'uppercase', letterSpacing: 2 }}>
+                    {dsp.width === 1.0 ? 'Natural Stereo' : dsp.width < 1.0 ? 'Focused Center' : 'Immersive Width'}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: 24, borderRadius: 16, maxWidth: 400, fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                <p style={{ margin: 0 }}>
+                  {dsp.width < 1.0 
+                    ? "Crossfeed blends stereo channels to reduce ear fatigue when using headphones, simulating the natural sound of speakers."
+                    : dsp.width > 1.0 
+                    ? "Spatial widening uses mid/side processing to expand the soundstage, making instruments feel more distinct and immersive."
+                    : "Music is playing in its original stereo master format with zero processing."}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Hardware & Output */}
+          <div style={{ flex: 1, padding: 32, background: 'rgba(255,255,255,0.02)' }}>
+            <h3 style={{ margin: 0, marginBottom: 24, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Settings2 size={18} /> Output Hardware
+            </h3>
+
+            {/* Device Selector */}
+            <div style={{ marginBottom: 32 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Playback Device</div>
+              <div className="device-selector" style={{ position: 'relative' }}>
+                <div className="current-device" onClick={() => setDevOpen(o => !o)} style={{ padding: '12px 16px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{currentDevice || 'System Default'}</span>
+                  <span style={{ color: 'var(--text-dim)' }}>▾</span>
+                </div>
+                <AnimatePresence>
+                  {devOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                      style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1200, background: '#1a1a24', border: '1px solid var(--glass-border)', borderRadius: 8, marginTop: 4, overflow: 'hidden', maxHeight: 200, overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                      {devices.length === 0 && <div style={{ padding: 12, fontSize: 11, color: 'var(--text-dim)' }}>No devices found</div>}
+                      {devices.map(d => (
+                        <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
+                          style={{ padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
+                            color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.1)' : '' }}>
+                          {d}
+                        </div>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+
+            {/* Exclusive Mode */}
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Audio API</div>
+              <div className={`exclusive-toggle ${playback.exclusive ? 'active' : ''}`} onClick={toggleExclusive} style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.exclusive ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>Exclusive Mode</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.exclusive ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: playback.exclusive ? '#fff' : 'var(--text-dim)' }}>
+                    {playback.exclusive ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.4 }}>
+                  Bypass the OS mixer for bit-perfect output. Takes exclusive control of the DAC.
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
@@ -368,10 +547,7 @@ function NowPlayingView() {
       {/* Art + Meta — fixed left column */}
       <div className="np-left">
         <div className={`np-art-wrap${coverArt ? ' has-art' : ''}`}>
-          {coverArt
-            ? <img src={coverArt} alt="cover" className="np-art" />
-            : <div className="np-art-placeholder">🎵</div>
-          }
+          <img src={coverArt || defaultCover} alt="cover" className="np-art" />
         </div>
         <div className="np-meta">
           <div className="np-title">{current?.title || baseName(playback.current_track)}</div>
@@ -381,9 +557,6 @@ function NowPlayingView() {
 
       {/* Lyrics — right column */}
       <LyricsPanel />
-
-      {/* EQ overlay */}
-      <AnimatePresence>{showProMode && <EQPanel />}</AnimatePresence>
     </div>
   );
 }
@@ -391,10 +564,20 @@ function NowPlayingView() {
 /* ─── Player Bar ─────────────────────────────────────── */
 function PlayerBar() {
   const {
-    tracks, playback, coverArt,
+    view, tracks, playback, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle,
   } = useStore();
+
+  const activeLyric = useMemo(() => {
+    if (!lyrics.length) return null;
+    const now = playback.position_secs + lyricOffset / 1000;
+    let current = null;
+    for (let i = 0; i < lyrics.length; i++) {
+      if (lyrics[i].time_secs <= now) current = lyrics[i]; else break;
+    }
+    return current;
+  }, [lyrics, playback.position_secs, lyricOffset]);
 
   const current  = tracks.find(t => t.path === playback.current_track);
   const duration = current?.duration ?? 0;
@@ -410,10 +593,7 @@ function PlayerBar() {
       {/* LEFT */}
       <div className="pb-left">
         <div className="pb-thumb" onClick={() => setView('nowplaying')}>
-          {coverArt
-            ? <img src={coverArt} alt="" />
-            : <div className="no-art">🎵</div>
-          }
+          <img src={coverArt || defaultCover} alt="" />
         </div>
         <div className="pb-info" onClick={() => setView('nowplaying')}>
           <div className="pb-title">{current?.title || baseName(playback.current_track)}</div>
@@ -423,14 +603,27 @@ function PlayerBar() {
 
       {/* CENTER */}
       <div className="pb-center">
+        {activeLyric && view !== 'nowplaying' && (
+          <div className="pb-lyric" onClick={() => setView('nowplaying')}>
+            {activeLyric.text}
+          </div>
+        )}
         <div className="pb-buttons">
-          <button className={`pb-btn ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">🔀</button>
-          <button className="pb-btn" onClick={playPrev} title="Previous">⏮</button>
-          <button className="pb-btn play" onClick={playback.status === 'Playing' ? pauseTrack : resumeTrack}>
-            {playback.status === 'Playing' ? '⏸' : '▶'}
+          <button className={`pb-btn ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
+            <Shuffle size={16} />
           </button>
-          <button className="pb-btn" onClick={playNext} title="Next">⏭</button>
-          <button className="pb-btn" onClick={stopTrack} style={{ fontSize: 14 }} title="Stop">⏹</button>
+          <button className="pb-btn" onClick={playPrev} title="Previous">
+            <SkipBack size={20} fill="currentColor" />
+          </button>
+          <button className="pb-btn play" onClick={playback.status === 'Playing' ? pauseTrack : resumeTrack}>
+            {playback.status === 'Playing' ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 3 }} />}
+          </button>
+          <button className="pb-btn" onClick={playNext} title="Next">
+            <SkipForward size={20} fill="currentColor" />
+          </button>
+          <button className="pb-btn" onClick={stopTrack} title="Stop">
+            <Square size={14} fill="currentColor" />
+          </button>
         </div>
         <div className="progress-row">
           <span className="prog-time">{fmt(playback.position_secs)}</span>
@@ -442,11 +635,89 @@ function PlayerBar() {
       </div>
 
       {/* RIGHT */}
-      <div className="pb-right">
-        {playback.exclusive && <span className="bit-badge">BIT-PERFECT</span>}
-        <input className="vol-slider" type="range" min={0} max={1} step={0.01}
-          value={playback.volume} onChange={e => setVolume(+e.target.value)} />
+      <div className="pb-right" style={{ gap: 16 }}>
+        {playback.exclusive && <span className="bit-badge" style={{ transform: 'none' }}>BIT-PERFECT</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Volume2 size={16} color="var(--text-dim)" />
+          <input className="vol-slider" type="range" min={0} max={1} step={0.01} style={{ width: 80 }}
+            value={playback.volume} onChange={e => setVolume(+e.target.value)} />
+        </div>
+        <button className="pb-btn" onClick={() => useStore.getState().toggleControlCenter()} title="Audio Engine Settings">
+          <SlidersHorizontal size={18} />
+        </button>
       </div>
+    </div>
+  );
+}
+
+/* ─── Settings Modal ────────────────────────────────────── */
+function SettingsModal() {
+  const { showSettings, toggleSettings, scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus } = useStore();
+  const [activeTab, setActiveTab] = useState('library');
+
+  if (!showSettings) return null;
+
+  const browse = async () => {
+    const sel = await open({ directory: true, multiple: false }).catch(() => null);
+    if (sel && typeof sel === 'string') addScanDir(sel);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={toggleSettings} style={{ backdropFilter: 'blur(16px)', background: 'rgba(0,0,0,0.6)' }}>
+      <motion.div className="modal-box" onClick={e => e.stopPropagation()}
+        style={{ width: 800, maxWidth: '90vw', height: 600, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}>
+        
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 32px', borderBottom: '1px solid var(--glass-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Settings size={24} color="var(--accent)" />
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Settings</h2>
+          </div>
+          <button className="modal-close" onClick={toggleSettings}><X size={20} /></button>
+        </div>
+
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Tabs Sidebar */}
+          <div style={{ width: 200, padding: 24, borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className={`nav-item ${activeTab === 'library' ? 'active' : ''}`} onClick={() => setActiveTab('library')}>
+              <Library size={18} /> Library
+            </div>
+          </div>
+
+          {/* Tab Content */}
+          <div style={{ flex: 1, padding: 32, overflowY: 'auto' }}>
+            {activeTab === 'library' && (
+              <div>
+                <h3 style={{ margin: 0, marginBottom: 24, fontSize: 18, fontWeight: 500 }}>Library Folders</h3>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 24 }}>
+                  Add multiple folders to your library. Aideo will scan all of them and aggregate your music.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+                  {scanDirs.map(dir => (
+                    <div key={dir} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
+                      <span style={{ fontSize: 13, wordBreak: 'break-all' }}>{dir}</span>
+                      <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => removeScanDir(dir)}>Remove</button>
+                    </div>
+                  ))}
+                  {scanDirs.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-dim)', padding: 16, textAlign: 'center', background: 'rgba(0,0,0,0.1)', borderRadius: 8 }}>No folders tracked.</div>}
+                </div>
+
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <button className="btn btn-secondary" onClick={browse}>
+                    <FolderSearch size={16} style={{ marginRight: 8 }} /> Add Folder
+                  </button>
+                  <button className="btn btn-primary" onClick={scanLibrary} disabled={scanDirs.length === 0}>
+                    <RefreshCw size={16} style={{ marginRight: 8 }} /> Sync Library
+                  </button>
+                  <span style={{ fontSize: 13, color: 'var(--text-dim)', marginLeft: 8 }}>{scanStatus}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -459,14 +730,62 @@ export default function App() {
     loadLibrary();
     const id = setInterval(pollStatus, 200);
     
-    let unlisten: (() => void) | undefined;
+    let unlistenEnded: (() => void) | undefined;
     listen('track-ended', () => {
       useStore.getState().playNext();
-    }).then(f => unlisten = f);
+    }).then(f => unlistenEnded = f);
+
+    let unlistenChanged: (() => void) | undefined;
+    listen<string>('track-changed', (event) => {
+      useStore.getState().handleTrackTransition(event.payload);
+    }).then(f => unlistenChanged = f);
+
+    // OS Media Controls (souvlaki)
+    let unlistenPlay: (() => void) | undefined;
+    listen('media-play', () => useStore.getState().resumeTrack()).then(f => unlistenPlay = f);
+    let unlistenPause: (() => void) | undefined;
+    listen('media-pause', () => useStore.getState().pauseTrack()).then(f => unlistenPause = f);
+    let unlistenToggle: (() => void) | undefined;
+    listen('media-toggle', () => {
+      const state = useStore.getState();
+      if (state.playback.status === 'Playing') state.pauseTrack();
+      else state.resumeTrack();
+    }).then(f => unlistenToggle = f);
+    let unlistenNext: (() => void) | undefined;
+    listen('media-next', () => useStore.getState().playNext()).then(f => unlistenNext = f);
+    let unlistenPrev: (() => void) | undefined;
+    listen('media-prev', () => useStore.getState().playPrev()).then(f => unlistenPrev = f);
+    
+    // Global Keyboard Shortcuts
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input or textarea
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      const key = e.keyCode || e.which;
+      if (key === 32) { // Space
+        e.preventDefault();
+        const state = useStore.getState();
+        if (state.playback.status === 'Playing') state.pauseTrack();
+        else state.resumeTrack();
+      } else if (key === 39) { // Right
+        useStore.getState().playNext();
+      } else if (key === 37) { // Left
+        useStore.getState().playPrev();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       clearInterval(id);
-      if (unlisten) unlisten();
+      window.removeEventListener('keydown', handleKeyDown);
+      if (unlistenEnded) unlistenEnded();
+      if (unlistenChanged) unlistenChanged();
+      if (unlistenPlay) unlistenPlay();
+      if (unlistenPause) unlistenPause();
+      if (unlistenToggle) unlistenToggle();
+      if (unlistenNext) unlistenNext();
+      if (unlistenPrev) unlistenPrev();
     };
   }, []);
 
@@ -490,6 +809,10 @@ export default function App() {
         </AnimatePresence>
       </main>
       <PlayerBar />
+      <AnimatePresence>
+        <AudioControlCenter key="audio-cc" />
+        <SettingsModal key="settings" />
+      </AnimatePresence>
     </div>
   );
 }

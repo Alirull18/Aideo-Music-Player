@@ -100,5 +100,6 @@ fn extract_metadata(path: &Path) -> Option<Track> {
         album,
         duration,
         format: extension,
+        lyric_offset: 0,
     })
 }
