@@ -10,9 +10,22 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
+## 📸 Screenshots
+
+<div align="center">
+  <p><b>Main Interface & Dynamic Themes</b></p>
+  <img src="https://via.placeholder.com/800x450.png?text=Main+Library+View" alt="Aideo Library" width="80%"/>
+  <br/><br/>
+  <p><b>High-Fidelity Lyrics & Audio Engine</b></p>
+  <img src="https://via.placeholder.com/800x450.png?text=Now+Playing+with+Lyrics" alt="Aideo Lyrics View" width="48%"/>
+  <img src="https://via.placeholder.com/800x450.png?text=Audio+Settings+%26+EQ" alt="Aideo Audio Settings" width="48%"/>
+</div>
+
+---
+
 ## ✨ Key Features
 
-### 🎧 Audiophile Core
+### 🎧 Audio Core
 - **Bit-Perfect Playback**: Leverages `cpal` and `symphonia` for low-level, high-fidelity audio decoding.
 - **WASAPI Exclusive Mode**: Bypasses the Windows Audio Engine to provide direct-to-hardware signal integrity.
 - **Studio-Grade DSP**: Features a 10-band parametric equalizer with real-time soft-limiting to prevent digital clipping.
