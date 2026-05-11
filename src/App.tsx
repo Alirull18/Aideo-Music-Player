@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, Disc3, FolderSearch, Search, Languages, Volume2, X, Activity, RefreshCw } from 'lucide-react';
+import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, FolderSearch, Volume2, X, Activity, RefreshCw } from 'lucide-react';
 import './App.css';
 import defaultCover from './assets/default_cover.png';
 
@@ -512,7 +512,7 @@ function AudioControlCenter() {
 
 /* ─── Now Playing ────────────────────────────────────── */
 function NowPlayingView() {
-  const { tracks, playback, coverArt, accentColor, showProMode } = useStore();
+  const { tracks, playback, coverArt, accentColor } = useStore();
   const current = tracks.find(t => t.path === playback.current_track);
 
   // Apply dynamic accent colour as CSS variable on root
