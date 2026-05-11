@@ -46,30 +46,35 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### ⚡ Quick Start (For Users)
+If you just want to use Aideo without setting up a development environment:
+1. **Download**: Get the latest version from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the installer (`.msi` or `.exe` for Windows).
+3. **Launch**: Open Aideo and start importing your music library!
 
+---
+
+### 🛠 Build from Source (For Developers)
+
+#### Prerequisites
 - **Node.js** (LTS Recommended)
 - **Rust Toolchain** (latest stable via [rustup](https://rustup.rs/))
 - **Git**
 
-### Installation
-
+#### Installation
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/Alirull18/Aideo-Music-Player.git
    cd Aideo-Music-Player
    ```
-
 2. **Install dependencies:**
    ```bash
    npm install
    ```
-
 3. **Launch Development Environment:**
    ```bash
    npm run tauri dev
    ```
-
 4. **Build Production Binary:**
    ```bash
    npm run tauri build
