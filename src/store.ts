@@ -54,12 +54,21 @@ interface PlayerState {
   isTranslating: boolean;
   showRomaji: boolean;
   isTransitioning: boolean;
+  scrobbleEnabled: boolean;
+  lastfmSessionKey: string | null;
+  lastfmToken: string | null;
+  scrobbledCurrent: boolean;
+  lastScrobble: { artist: string; track: string } | null;
+  scrobbleThreshold: number;
 
   // actions
   setView: (view: 'library' | 'nowplaying') => void;
   addScanDir: (dir: string) => void;
   removeScanDir: (dir: string) => void;
+  setScrobbleThreshold: (val: number) => void;
   toggleSettings: () => void;
+  toggleScrobble: () => void;
+  setLastFmSession: (key: string | null) => void;
   setShowRomaji: (val: boolean) => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
@@ -135,6 +144,12 @@ export const useStore = create<PlayerState>((set, get) => ({
   isTranslating: false,
   showRomaji: true,
   isTransitioning: false,
+  scrobbleEnabled: localStorage.getItem('lastfm_session') ? true : false,
+  lastfmSessionKey: localStorage.getItem('lastfm_session') || null,
+  lastfmToken: null,
+  scrobbledCurrent: false,
+  lastScrobble: null as { artist: string, track: string } | null,
+  scrobbleThreshold: parseInt(localStorage.getItem('lastfm_threshold') || '50'),
 
   setView: (view) => set({ view }),
   addScanDir: (dir) => {
@@ -147,7 +162,23 @@ export const useStore = create<PlayerState>((set, get) => ({
     localStorage.setItem('aideo_scan_dirs', JSON.stringify(newDirs));
     set({ scanDirs: newDirs });
   },
+  setScrobbleThreshold: (val: number) => {
+    localStorage.setItem('lastfm_threshold', val.toString());
+    set({ scrobbleThreshold: val });
+  },
   toggleSettings: () => set(s => ({ showSettings: !s.showSettings })),
+  toggleScrobble: () => set(s => {
+    if (s.scrobbleEnabled) {
+      localStorage.removeItem('lastfm_session');
+      return { scrobbleEnabled: false, lastfmSessionKey: null };
+    }
+    return { scrobbleEnabled: true };
+  }),
+  setLastFmSession: (key) => {
+    if (key) localStorage.setItem('lastfm_session', key);
+    else localStorage.removeItem('lastfm_session');
+    set({ lastfmSessionKey: key, scrobbleEnabled: !!key });
+  },
   setShowRomaji: (val) => set({ showRomaji: val }),
 
   scanLibrary: async () => {
@@ -174,11 +205,12 @@ export const useStore = create<PlayerState>((set, get) => ({
       const index = get().tracks.findIndex(t => t.path === track.path);
       set({
         currentTrackIndex: index,
-        lyricOffset: track.lyric_offset || 0, // LOAD SAVED OFFSET
+        lyricOffset: track.lyric_offset || 0,
         lyrics: [],
         lyricStatus: 'loading',
         coverArt: null,
         accentColor: '#8b5cf6',
+        scrobbledCurrent: false,
         playback: { ...get().playback, current_track: track.path, status: 'Playing', position_secs: 0 },
       });
 
@@ -247,8 +279,17 @@ export const useStore = create<PlayerState>((set, get) => ({
       lyricStatus: 'loading',
       coverArt: null,
       accentColor: '#8b5cf6',
+      scrobbledCurrent: false,
+      isTransitioning: false,
       playback: { ...state.playback, current_track: path, status: 'Playing', position_secs: 0 },
     });
+
+    invoke('update_media_metadata', {
+      title: track.title || path.split(/[\\/]/).pop(),
+      artist: track.artist || 'Unknown Artist',
+      coverUrl: null,
+      duration: track.duration || 0,
+    }).catch(() => {});
 
     invoke('get_cover_art', { path }).then(async (art: any) => {
       if (get().playback.current_track !== path) return;
@@ -339,9 +380,46 @@ export const useStore = create<PlayerState>((set, get) => ({
   pollStatus: async () => {
     try {
       const status: any = await invoke('get_playback_status');
-      if (status) {
-        set(s => ({ playback: { ...s.playback, ...status } }));
+      if (!status) return;
+
+      const prevTrack = get().playback.current_track;
+      const newTrack = status.current_track;
+
+      // Detect if the backend switched tracks (gapless transition)
+      if (newTrack && newTrack !== prevTrack) {
+        // The backend changed tracks — trigger a full metadata reload
+        get().handleTrackTransition(newTrack);
+        return; // Don't overwrite state; handleTrackTransition will set it
       }
+
+      set(s => ({ playback: { ...s.playback, ...status } }));
+
+      // Auto Scrobble at threshold% or 4 minutes
+      const { current_track, position_secs } = status;
+      const { scrobbleEnabled, lastfmSessionKey, scrobbledCurrent, tracks, scrobbleThreshold } = get();
+      if (scrobbleEnabled && lastfmSessionKey && !scrobbledCurrent && current_track && status.status === 'Playing') {
+        const tr = tracks.find(t => t.path === current_track);
+        if (tr && tr.artist && tr.title) {
+          const dur = tr.duration || 200;
+          const thresholdSecs = (scrobbleThreshold / 100) * dur;
+          if (position_secs > thresholdSecs || position_secs > 240) {
+            set({ scrobbledCurrent: true });
+            const ts = Math.floor(Date.now() / 1000) - Math.floor(position_secs);
+            invoke('lastfm_scrobble', { artist: tr.artist, track: tr.title, timestamp: ts, sessionKey: lastfmSessionKey })
+              .then(() => {
+                set({ lastScrobble: { artist: tr.artist ?? 'Unknown', track: tr.title ?? 'Unknown' } });
+                setTimeout(() => set({ lastScrobble: null }), 5000);
+              })
+              .catch((e: any) => {
+                const msg = String(e);
+                console.error('Scrobble error:', msg);
+                set({ lastScrobble: { artist: '⚠️ Scrobble Failed', track: msg } });
+                setTimeout(() => set({ lastScrobble: null }), 8000);
+              });
+          }
+        }
+      }
+
     } catch (e) { }
   },
 

@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, FolderSearch, Volume2, X, Activity, RefreshCw } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, FolderSearch, Volume2, X, Activity, RefreshCw, Radio } from 'lucide-react';
 import './App.css';
 import defaultCover from './assets/default_cover.png';
 
@@ -654,8 +655,14 @@ function PlayerBar() {
 
 /* ─── Settings Modal ────────────────────────────────────── */
 function SettingsModal() {
-  const { showSettings, toggleSettings, scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus } = useStore();
+  const { 
+    showSettings, toggleSettings, scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus, 
+    toggleScrobble, setLastFmSession, lastfmSessionKey, lastfmToken,
+    scrobbleThreshold, setScrobbleThreshold
+  } = useStore();
   const [activeTab, setActiveTab] = useState('library');
+  const [lfmLoading, setLfmLoading] = useState(false);
+  const [lfmError, setLfmError] = useState('');
 
   if (!showSettings) return null;
 
@@ -684,6 +691,9 @@ function SettingsModal() {
           <div style={{ width: 200, padding: 24, borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div className={`nav-item ${activeTab === 'library' ? 'active' : ''}`} onClick={() => setActiveTab('library')}>
               <Library size={18} /> Library
+            </div>
+            <div className={`nav-item ${activeTab === 'services' ? 'active' : ''}`} onClick={() => setActiveTab('services')}>
+              <Radio size={18} /> Services
             </div>
           </div>
 
@@ -717,6 +727,113 @@ function SettingsModal() {
                 </div>
               </div>
             )}
+
+            {activeTab === 'services' && (
+              <div>
+                <h3 style={{ margin: 0, marginBottom: 24, fontSize: 18, fontWeight: 500 }}>Connected Services</h3>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 24 }}>
+                  Connect Aideo to external services like Last.fm to scrobble your listening history.
+                </p>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, background: '#ba0000', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 18 }}>
+                      as
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>Last.fm Scrobbling</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>Automatically log songs you play to your Last.fm profile.</div>
+                    </div>
+                  </div>
+                  {lastfmSessionKey ? (
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <div style={{ fontSize: 13, color: '#22c55e', fontWeight: 600 }}>Active Connection</div>
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ padding: '8px 20px' }}
+                        onClick={toggleScrobble}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {!lastfmToken ? (
+                        <button 
+                          className="btn btn-primary" 
+                          style={{ padding: '8px 24px' }}
+                          disabled={lfmLoading}
+                          onClick={async () => {
+                            setLfmLoading(true); setLfmError('');
+                            try {
+                              const token = await invoke<string>('lastfm_get_token');
+                              useStore.setState({ lastfmToken: token });
+                              // Open browser for authorization
+                              // Replace YOUR_API_KEY below with your actual API key for this to work
+                              const apiKey = "f4cbad896003f0f61f05b844ee3c5b0b"; 
+                              await openUrl(`https://www.last.fm/api/auth/?api_key=${apiKey}&token=${token}`);
+                            } catch (e: any) {
+                              setLfmError(String(e));
+                            } finally {
+                              setLfmLoading(false);
+                            }
+                          }}
+                        >
+                          {lfmLoading ? 'Connecting...' : 'Connect to Last.fm'}
+                        </button>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                          <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>Waiting for Browser...</span>
+                          <button 
+                            className="btn btn-primary" 
+                            style={{ padding: '8px 24px' }}
+                            disabled={lfmLoading}
+                            onClick={async () => {
+                              setLfmLoading(true); setLfmError('');
+                              try {
+                                const session = await invoke<string>('lastfm_get_session', { token: lastfmToken });
+                                setLastFmSession(session);
+                                useStore.setState({ lastfmToken: null });
+                              } catch (e: any) {
+                                setLfmError("Could not find authorization. Did you click 'Allow' in your browser?");
+                              } finally {
+                                setLfmLoading(false);
+                              }
+                            }}
+                          >
+                            {lfmLoading ? 'Checking...' : 'I have Authorized'}
+                          </button>
+                          <button className="btn btn-secondary" style={{ padding: '8px 12px' }} onClick={() => useStore.setState({ lastfmToken: null })}>Cancel</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {lastfmSessionKey && (
+                  <div style={{ marginTop: 20, padding: '16px', background: 'var(--glass)', borderRadius: 12, border: '1px solid var(--glass-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500 }}>Scrobble Threshold</span>
+                      <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 700 }}>{scrobbleThreshold}%</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="10" max="100" step="5"
+                      value={scrobbleThreshold}
+                      onChange={(e) => setScrobbleThreshold(parseInt(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--accent)' }}
+                    />
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>
+                      Song will be scrobbled after playing {scrobbleThreshold}% of its duration.
+                    </div>
+                  </div>
+                )}
+                {lfmError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 12, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 6 }}>{lfmError}</div>}
+                <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                  Aideo uses official Web Auth. We never see or store your Last.fm password.
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </motion.div>
@@ -726,7 +843,7 @@ function SettingsModal() {
 
 /* ─── Root ───────────────────────────────────────────── */
 export default function App() {
-  const { view, pollStatus, loadLibrary } = useStore();
+  const { view, pollStatus, loadLibrary, lastScrobble } = useStore();
 
   useEffect(() => {
     loadLibrary();
@@ -814,6 +931,18 @@ export default function App() {
       <AnimatePresence>
         <AudioControlCenter key="audio-cc" />
         <SettingsModal key="settings" />
+        {lastScrobble && (
+          <motion.div 
+            key="scrobble-toast"
+            initial={{ opacity: 0, y: 50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: 50, x: '-50%' }}
+            className="scrobble-toast"
+          >
+            <Radio size={14} className="pulse" />
+            <span>Scrobbled: <strong>{lastScrobble.track}</strong></span>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );

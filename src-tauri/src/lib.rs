@@ -9,6 +9,7 @@ mod db;
 mod lyrics;
 mod player;
 mod scanner;
+mod lastfm;
 
 // ── Shared application state ──────────────────────────────────────────────────
 pub struct AppState {
@@ -190,6 +191,27 @@ async fn get_qqmusic_lrc(mid: String) -> Result<String, String> {
     }
 
     Ok(lrc)
+}
+
+// ── Last.fm Commands ───────────────────────────────────────────────────────
+#[tauri::command]
+async fn lastfm_get_token() -> Result<String, String> {
+    lastfm::get_auth_token().await
+}
+
+#[tauri::command]
+async fn lastfm_get_session(token: String) -> Result<String, String> {
+    lastfm::get_session(&token).await
+}
+
+
+
+ 
+
+
+#[tauri::command]
+async fn lastfm_scrobble(artist: String, track: String, timestamp: i64, session_key: String) -> Result<(), String> {
+    lastfm::scrobble(&artist, &track, timestamp, &session_key).await
 }
 
 // ── FX Commands ────────────────────────────────────────────────────────────
@@ -578,6 +600,9 @@ pub fn run() {
             set_audio_device,
             apply_online_cover,
             update_track_offset,
+            lastfm_get_token,
+            lastfm_get_session,
+            lastfm_scrobble,
         ])
         .plugin(tauri_plugin_updater::Builder::new().build())
         .run(tauri::generate_context!())

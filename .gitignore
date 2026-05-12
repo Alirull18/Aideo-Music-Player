@@ -30,3 +30,7 @@ src-tauri/*.db-journal
 
 # Scratch
 scratch/
+
+# Sensitive data
+.env
+*.env

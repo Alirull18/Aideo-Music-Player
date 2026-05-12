@@ -1013,6 +1013,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
 name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2396,6 +2402,12 @@ dependencies = [
  "tendril",
  "web_atoms",
 ]
+
+[[package]]
+name = "md5"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
 
 [[package]]
 name = "memchr"
@@ -4535,11 +4547,13 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "biquad",
  "cpal",
+ "dotenvy",
+ "md5",
  "reqwest",
  "ringbuf",
  "rubato",

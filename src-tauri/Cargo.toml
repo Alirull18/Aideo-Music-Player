@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.2.0"
+version = "0.2.2"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+dotenvy = "0.15"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -36,4 +37,5 @@ biquad = "0.6.0"
 ringbuf = "0.2.8"
 tauri-plugin-updater = "2.10.1"
 souvlaki = "0.8.3"
+md5 = "0.8.0"
 
