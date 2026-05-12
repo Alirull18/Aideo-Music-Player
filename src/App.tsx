@@ -52,7 +52,7 @@ function TrackThumbnail({ path }: { path: string }) {
     if (!art) {
       invoke('get_cover_art', { path }).then((res: any) => {
         if (res && typeof res === 'string') setArt(res);
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, [path]);
 
@@ -88,7 +88,7 @@ function LibraryView() {
             {tracks.map((t, i) => {
               const active = playback.current_track === t.path;
               const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
-              
+
               return (
                 <tr key={t.id} className={`track-row${active ? ' playing' : ''}`}
                   onClick={() => { playTrack(t); setView('nowplaying'); }}>
@@ -177,14 +177,14 @@ function LyricsPanel() {
     setSearching(true);
     try {
       if (!playback.current_track) return;
-      
+
       if (mode === 'lyrics' || mode === 'both') {
         let lrc = r.raw_lrc ?? '';
         if (!lrc && r.source === 'NetEase' && r.content_id)
           lrc = await invoke<string>('get_netease_lrc', { id: r.content_id }).catch(() => '');
         if (!lrc && r.source === 'QQMusic' && r.content_id)
           lrc = await invoke<string>('get_qqmusic_lrc', { mid: r.content_id }).catch(() => '');
-        
+
         if (lrc) {
           await saveLyrics(playback.current_track, lrc);
         }
@@ -193,7 +193,7 @@ function LyricsPanel() {
       if ((mode === 'art' || mode === 'both') && r.cover_url) {
         await applyOnlineCover(playback.current_track, r.cover_url);
       }
-      
+
       setShowFinder(false);
     } catch (e) { console.error(e); } finally { setSearching(false); }
   };
@@ -209,7 +209,7 @@ function LyricsPanel() {
           </div>
           <button className="lyric-btn" title="Make lyrics appear later" onClick={() => adjustLyricOffset(100)}>+</button>
         </div>
-        
+
         <button className="lyric-btn" onClick={doSearch}>🔍 Finder</button>
         <button className="lyric-btn" onClick={() => {
           // Join existing lyrics back into LRC format for editing
@@ -217,16 +217,16 @@ function LyricsPanel() {
           setEditContent(raw);
           setShowEditor(true);
         }}>✍️ Studio</button>
-        
+
         {/* Status Indicator */}
-        <div style={{ 
-          marginLeft: 'auto', marginRight: 12, fontSize: 10, fontWeight: 700, 
-          letterSpacing: 1, textTransform: 'uppercase', 
+        <div style={{
+          marginLeft: 'auto', marginRight: 12, fontSize: 10, fontWeight: 700,
+          letterSpacing: 1, textTransform: 'uppercase',
           color: lyricStatus === 'loading' ? 'var(--accent)' : lyricStatus === 'not_found' ? '#ef4444' : 'var(--text-dim)',
           display: 'flex', alignItems: 'center', gap: 6
         }}>
-          <div style={{ 
-            width: 6, height: 6, borderRadius: '50%', 
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%',
             background: lyricStatus === 'loading' ? 'var(--accent)' : lyricStatus === 'not_found' ? '#ef4444' : lyricStatus === 'found' ? '#10b981' : 'transparent',
             boxShadow: lyricStatus === 'found' ? '0 0 8px #10b981' : 'none',
             animation: lyricStatus === 'loading' ? 'pulse 1.5s infinite' : 'none'
@@ -333,7 +333,7 @@ function LyricsPanel() {
           </div>
         )}
       </AnimatePresence>
-      
+
       {/* Lyric Editor Modal (Studio) */}
       <AnimatePresence>
         {showEditor && (
@@ -349,7 +349,7 @@ function LyricsPanel() {
                 <button className="modal-close" onClick={() => setShowEditor(false)}>✕</button>
               </div>
               <div className="modal-body" style={{ padding: 0 }}>
-                <textarea 
+                <textarea
                   className="studio-editor"
                   placeholder="Paste lyrics here... 
 Example:
@@ -392,7 +392,7 @@ function AudioControlCenter() {
       <motion.div className="modal-box" onClick={e => e.stopPropagation()}
         style={{ width: 800, maxWidth: '90vw', height: 600, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}>
-        
+
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 32px', borderBottom: '1px solid var(--glass-border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -427,11 +427,11 @@ function AudioControlCenter() {
                     SPATIAL WIDENER
                   </span>
                 </div>
-                
+
                 <input type="range" min={0} max={3} step={0.01} value={dsp.width}
                   style={{ width: '100%', height: 6, accentColor: 'var(--accent)', cursor: 'pointer' }}
                   onChange={e => setDSP({ width: +e.target.value })} />
-                
+
                 <div style={{ marginTop: 24, textAlign: 'center' }}>
                   <div style={{ fontSize: 48, fontWeight: 800, color: 'var(--accent)', fontFamily: 'monospace' }}>
                     {Math.round(dsp.width * 100)}%
@@ -444,11 +444,11 @@ function AudioControlCenter() {
 
               <div style={{ background: 'rgba(255,255,255,0.03)', padding: 24, borderRadius: 16, maxWidth: 400, fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
                 <p style={{ margin: 0 }}>
-                  {dsp.width < 1.0 
+                  {dsp.width < 1.0
                     ? "Crossfeed blends stereo channels to reduce ear fatigue when using headphones, simulating the natural sound of speakers."
-                    : dsp.width > 1.0 
-                    ? "Spatial widening uses mid/side processing to expand the soundstage, making instruments feel more distinct and immersive."
-                    : "Music is playing in its original stereo master format with zero processing."}
+                    : dsp.width > 1.0
+                      ? "Spatial widening uses mid/side processing to expand the soundstage, making instruments feel more distinct and immersive."
+                      : "Music is playing in its original stereo master format with zero processing."}
                 </p>
               </div>
             </div>
@@ -476,8 +476,10 @@ function AudioControlCenter() {
                       {devices.length === 0 && <div style={{ padding: 12, fontSize: 11, color: 'var(--text-dim)' }}>No devices found</div>}
                       {devices.map(d => (
                         <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
-                          style={{ padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
-                            color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.1)' : '' }}>
+                          style={{
+                            padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
+                            color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.1)' : ''
+                          }}>
                           {d}
                         </div>
                       ))}
@@ -579,9 +581,9 @@ function PlayerBar() {
     return current;
   }, [lyrics, playback.position_secs, lyricOffset]);
 
-  const current  = tracks.find(t => t.path === playback.current_track);
+  const current = tracks.find(t => t.path === playback.current_track);
   const duration = current?.duration ?? 0;
-  const pct      = duration > 0 ? (playback.position_secs / duration) * 100 : 0;
+  const pct = duration > 0 ? (playback.position_secs / duration) * 100 : 0;
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -667,7 +669,7 @@ function SettingsModal() {
       <motion.div className="modal-box" onClick={e => e.stopPropagation()}
         style={{ width: 800, maxWidth: '90vw', height: 600, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}>
-        
+
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 32px', borderBottom: '1px solid var(--glass-border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -729,7 +731,7 @@ export default function App() {
   useEffect(() => {
     loadLibrary();
     const id = setInterval(pollStatus, 200);
-    
+
     let unlistenEnded: (() => void) | undefined;
     listen('track-ended', () => {
       useStore.getState().playNext();
@@ -755,7 +757,7 @@ export default function App() {
     listen('media-next', () => useStore.getState().playNext()).then(f => unlistenNext = f);
     let unlistenPrev: (() => void) | undefined;
     listen('media-prev', () => useStore.getState().playPrev()).then(f => unlistenPrev = f);
-    
+
     // Global Keyboard Shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if user is typing in an input or textarea
