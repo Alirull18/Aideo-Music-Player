@@ -15,15 +15,14 @@
     <div class="glow-sphere" style="bottom: -10%; right: -10%; background: radial-gradient(circle, rgba(147, 51, 234, 0.3) 0%, transparent 70%);"></div>
 
     <nav>
-        <div class="logo">💿 <span>AIDEO</span></div>
+        <div class="logo"><span>AIDEO</span></div>
         <div class="nav-links">
             <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn btn-secondary"><i class="fab fa-github"></i> GitHub</a>
         </div>
     </nav>
 
     <header class="hero">
-        <img src="banner.png" alt="Aideo v0.3.0" class="hero-banner">
-        <h1>Experience Music in 4K</h1>
+        <h1 style="margin-top: -5rem;">Pristine Sound. Dynamic Soul.</h1>
         <p class="tagline">The Interactive Era has arrived. High-fidelity audio meets cinematic design in the most advanced local music player ever built.</p>
         
         <div class="cta-group">
@@ -36,17 +35,53 @@
         <div class="feature-card">
             <i class="fas fa-wave-square"></i>
             <h3>Bit-Perfect Audio</h3>
-            <p>Studio-grade signal purity with WASAPI Exclusive Mode and 10-band Parametric EQ. Hear your music exactly as the artist intended.</p>
+            <p>Studio-grade signal purity with WASAPI Exclusive Mode. Hear your music exactly as the artist intended.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-sliders"></i>
+            <h3>Studio-Grade DSP</h3>
+            <p>Take control with a 10-band parametric equalizer and real-time soft-limiting for the perfect soundstage.</p>
         </div>
         <div class="feature-card">
             <i class="fas fa-magic"></i>
             <h3>Dynamic Theming</h3>
-            <p>The interface breathes with your music. Colors intelligently adapt to your album artwork for a fully immersive visual journey.</p>
+            <p>The interface breathes with your music. Colors intelligently adapt to your album artwork in real-time.</p>
         </div>
         <div class="feature-card">
             <i class="fas fa-keyboard"></i>
             <h3>Interactive Lyrics</h3>
-            <p>Never settle for missing lyrics. Use the new Manual Finder to sync perfect .lrc files from global providers instantly.</p>
+            <p>Manual Finder to sync perfect .lrc files from global providers (NetEase, QQ Music, LRCLIB).</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-database"></i>
+            <h3>Persistent Sync</h3>
+            <p>Aideo remembers your lyric offsets for every track. Sync once, enjoy forever with local SQLite memory.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-certificate"></i>
+            <h3>High-Res Badges</h3>
+            <p>Automatic identification of lossless formats (FLAC/WAV). Visual confirmation of your audio quality.</p>
+        </div>
+    </section>
+
+    <section id="roadmap" style="padding: 10rem 10%; background: rgba(255,255,255,0.01);">
+        <h2 style="font-size: 3rem; margin-bottom: 4rem; text-align: center;">The Roadmap</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px;">
+            <div class="feature-card" style="border-left: 4px solid var(--primary);">
+                <span style="font-size: 0.8rem; color: var(--primary); font-weight: 700;">COMING SOON</span>
+                <h4 style="margin-top: 10px;">ASIO Driver Support</h4>
+                <p style="font-size: 0.9rem;">Professional-grade low-latency driver integration for high-end audio interfaces.</p>
+            </div>
+            <div class="feature-card" style="border-left: 4px solid var(--primary);">
+                <span style="font-size: 0.8rem; color: var(--primary); font-weight: 700;">COMING SOON</span>
+                <h4 style="margin-top: 10px;">Mini-Player Widget</h4>
+                <p style="font-size: 0.9rem;">A compact, glassmorphic always-on-top controller for your desktop.</p>
+            </div>
+            <div class="feature-card" style="border-left: 4px solid var(--primary);">
+                <span style="font-size: 0.8rem; color: var(--primary); font-weight: 700;">COMING SOON</span>
+                <h4 style="margin-top: 10px;">Spectrum Engine</h4>
+                <p style="font-size: 0.9rem;">Real-time FFT audio visualization in the Now Playing view.</p>
+            </div>
         </div>
     </section>
 
@@ -54,15 +89,5 @@
         <p>&copy; 2026 Aideo Music Player. Crafted with ❤️ by Alirul.</p>
         <p style="margin-top: 10px; font-size: 0.8rem; opacity: 0.5;">Optimized for High-Performance Audiophiles.</p>
     </footer>
-
-    <script>
-        // Subtle Parallax Effect on Banner
-        document.addEventListener('mousemove', (e) => {
-            const banner = document.querySelector('.hero-banner');
-            const xAxis = (window.innerWidth / 2 - e.pageX) / 50;
-            const yAxis = (window.innerHeight / 2 - e.pageY) / 50;
-            banner.style.transform = `rotateY(${xAxis}deg) rotateX(${yAxis}deg) translateY(-10px)`;
-        });
-    </script>
 </body>
 </html>
