@@ -1,10 +1,10 @@
 {
   "version": "0.3.0",
   "notes": "🚀 AIDEO v0.3.0: The Interactive Era. Featuring Manual Lyric Search, Hardened Audio Engine (FFmpeg Caching), and Full UI State Flushing. NetEase and QQ Music lyric retrieval has been fully optimized.",
-  "pub_date": "2026-05-12T15:12:00Z",
+  "pub_date": "2026-05-12T15:32:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNUJOK2RtUSthbDVxTDNuaU1WS1ZxOGxFNjMxdDJkUXR6cWpEL0dKUHNmWGRSQ2s0ZXM2R0c3bXJRdkFGT0dnV0l6OHJRMysxWUdFRFdhTU5waENKM1BaQzI2UEVTcnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NTk4NjEwCWZpbGU6QWlkZW9fMC4zLjBfeDY0X2VuLVVTLm1zaQoyRWRsd2JNMTNUQ212cWE3T2NtcUFXV09JZDA0UVgrMEhkN1Y5NlZPQzhVamFzTTVTczdOdUtkUEJwclpoRGZFQ1hSaGVHQUNCMWM2MEY5OFZocW1DQT09Cg==",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSmJlSjQvZFJub1pyd01jTXl2aWJIWFJ6ekgzMFNxUENvMTUvdHdIMlZONmI4V3JIeDdYMGxDOWpnVjV0Q1hUcUNJM0U4U2JjelVPR3UxalhQc0ZOaEIxOUVnMVVjVkFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NTk5OTQ3CWZpbGU6QWlkZW9fMC4zLjBfeDY0X2VuLVVTLm1zaQoyRDYram10THVGekxqK1FkUFRFNGgrMXFuS2pvRzZIalJ6akx4dHlVOWt1U0JmK3JWTm02ZkdPSTlXdEhpdllXMUVzczV3Q09JdlhpV3dhYXZ4ME5BZz09Cg==",
       "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.3.0/Aideo_0.3.0_x64_en-US.msi"
     }
   }

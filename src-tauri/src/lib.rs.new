@@ -1,0 +1,194 @@
+use cpal::traits::{DeviceTrait, HostTrait};
+use serde::{Deserialize, Serialize};
+use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager, State};
+
+mod artwork;
+mod db;
+mod lyrics;
+mod player;
+mod scanner;
+mod lastfm;
+mod downloader;
+
+// ── Shared application state ──────────────────────────────────────────────────
+pub struct AppState {
+    pub player: Arc<Mutex<player::Player>>,
+    pub db: Arc<Mutex<rusqlite::Connection>>,
+    pub media_controls: Arc<Mutex<Option<MediaControls>>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub source: String,
+    pub synced: bool,
+    pub content_id: Option<String>,
+    pub raw_lrc: Option<String>,
+    pub cover_url: Option<String>,
+}
+
+// ── Translation command ─────────────────────────────────────────────────────
+#[tauri::command]
+async fn translate_lyric_line(text: String) -> Result<(String, String), String> {
+    let url = format!(
+        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&dt=rm&q={}",
+        urlencoding::encode(&text)
+    );
+    let client = reqwest::Client::new();
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let data = res
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let translation = data[0][0][0].as_str().unwrap_or("").to_string();
+    let transliteration = data[0][1][3].as_str().unwrap_or("").to_string();
+
+    Ok((translation, transliteration))
+}
+
+// ── Online Search commands ──────────────────────────────────────────────────
+#[tauri::command]
+async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String> {
+    let mut results = Vec::new();
+    let client = reqwest::Client::new();
+    let encoded_query = urlencoding::encode(&query);
+
+    let lrc_url = format!("https://lrclib.net/api/search?q={}", encoded_query);
+    if let Ok(res) = client.get(&lrc_url).send().await {
+        if let Ok(data) = res.json::<serde_json::Value>().await {
+            if let Some(list) = data.as_array() {
+                for item in list.iter().take(5) {
+                    results.push(SearchResult {
+                        id: item["id"].to_string(),
+                        title: item["trackName"].as_str().unwrap_or("").to_string(),
+                        artist: item["artistName"].as_str().unwrap_or("").to_string(),
+                        source: "LRCLIB".to_string(),
+                        synced: !item["syncedLyrics"].is_null(),
+                        content_id: None,
+                        raw_lrc: item["syncedLyrics"]
+                            .as_str()
+                            .or(item["plainLyrics"].as_str())
+                            .map(|s| s.to_string()),
+                        cover_url: None,
+                    });
+                }
+            }
+        }
+    }
+
+    let ne_url = format!(
+        "https://music.163.com/api/search/get?s={}&type=1&limit=5",
+        encoded_query
+    );
+    if let Ok(res) = client.get(&ne_url).send().await {
+        if let Ok(data) = res.json::<serde_json::Value>().await {
+            if let Some(songs) = data["result"]["songs"].as_array() {
+                for item in songs {
+                    results.push(SearchResult {
+                        id: item["id"].to_string(),
+                        title: item["name"].as_str().unwrap_or("").to_string(),
+                        artist: item["artists"][0]["name"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_string(),
+                        source: "NetEase".to_string(),
+                        synced: true,
+                        content_id: Some(item["id"].to_string()),
+                        raw_lrc: None,
+                        cover_url: item["al"]["picUrl"]
+                            .as_str()
+                            .or_else(|| item["album"]["picUrl"].as_str())
+                            .map(|s| s.to_string()),
+                    });
+                }
+            }
+        }
+    }
+
+    let qq_url = format!(
+        "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w={}&format=json",
+        encoded_query
+    );
+    if let Ok(res) = client.get(&qq_url).send().await {
+        if let Ok(data) = res.json::<serde_json::Value>().await {
+            if let Some(songs) = data["data"]["song"]["list"].as_array() {
+                for item in songs {
+                    results.push(SearchResult {
+                        id: item["songmid"].as_str().unwrap_or("").to_string(),
+                        title: item["songname"].as_str().unwrap_or("").to_string(),
+                        artist: item["singer"][0]["name"].as_str().unwrap_or("").to_string(),
+                        source: "QQMusic".to_string(),
+                        synced: true,
+                        content_id: Some(item["songmid"].as_str().unwrap_or("").to_string()),
+                        raw_lrc: None,
+                        cover_url: item["albummid"].as_str().map(|mid| {
+                            format!(
+                                "https://y.gtimg.cn/music/photo_new/T002R300x300M000{}.jpg",
+                                mid
+                            )
+                        }),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+#[tauri::command]
+async fn get_netease_lrc(id: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=1",
+        id
+    );
+    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let data = res
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())?;
+    let lrc = data["lrc"]["lyric"]
+        .as_str()
+        .ok_or("No lyric found")?
+        .to_string();
+    Ok(lrc)
+}
+
+#[tauri::command]
+async fn get_qqmusic_lrc(mid: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let url = format!("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={}&format=json&nobase64=1", mid);
+    let res = client
+        .get(&url)
+        .header("Referer", "https://y.qq.com/portal/player.html")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let text = res.text().await.map_err(|e| e.to_string())?;
+    let clean_json = if text.contains("MusicJsonCallback(") {
+        text.replace("MusicJsonCallback(", "").replace(")", "")
+    } else {
+        text
+    };
+
+    let data: serde_json::Value = serde_json::from_str(&clean_json).map_err(|e| e.to_string())?;
+    let lrc = data["lyric"].as_str().ok_or("No lyric found")?.to_string();
+
+    if !lrc.contains("[") && lrc.len() > 10 {
+        use base64::{engine::general_purpose, Engine as _};
+        if let Ok(decoded) = general_purpose::STANDARD.decode(lrc.trim()) {
+            if let Ok(s) = String::from_utf8(decoded) {
+                return Ok(s);
+            }
+        }
+    }
+
+    Ok(lrc)
+}

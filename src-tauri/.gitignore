@@ -12,3 +12,6 @@
 tauri.key*
 *.key*
 tauri.key.password
+
+# Handover
+handler.md

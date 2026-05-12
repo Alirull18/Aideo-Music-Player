@@ -39,8 +39,10 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - **Smart Thumbnails**: Asynchronous background loading for high-resolution library artwork.
 
 ### 📜 Intelligent Metadata & Lyrics
+- **Manual Lyric Finder**: (NEW v0.3.0) Take control of your library with an interactive search prompt. Override automatic metadata to find the perfect `.lrc` sync.
 - **Lyric Studio**: A dedicated workspace to paste AI-generated lyrics and save them as synced `.lrc` files instantly.
 - **Smart Lyric Engine**: High-speed retrieval from global providers (NetEase, QQMusic, LRCLIB).
+- **Stealth Integration**: Optimized headers (User-Agent/Referer) for 100% reliable online retrieval.
 - **Mini-Lyrics Bar**: A reactive scrolling lyric display integrated directly into the playback control bar.
 - **Global Support**: Integrated Romaji generation and one-click translation for international libraries.
 
@@ -49,8 +51,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 ## 🚀 Getting Started
 
 ### ⚡ Quick Start (For Users)
-1. **Download**: Get the latest version from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the installer (`.msi` or `.exe` for Windows).
+1. **Download**: Get the latest version (v0.3.0) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the installer (`Aideo_0.3.0_x64_en-US.msi`).
 3. **Launch**: Open Aideo and start importing your music library!
 
 ---
