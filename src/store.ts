@@ -11,6 +11,11 @@ export interface Track {
   lyric_offset: number;
 }
 
+export interface Playlist {
+  id: number;
+  name: string;
+}
+
 export interface LyricLine {
   time_secs: number;
   text: string;
@@ -61,7 +66,25 @@ interface PlayerState {
   lastScrobble: { artist: string; track: string } | null;
   scrobbleThreshold: number;
 
+  playlists: Playlist[];
+  currentPlaylist: Playlist | null;
+
+  playbackError: string | null;
+  playbackSuccess: string | null;
+
+  customPrompt: {
+    open: boolean;
+    title: string;
+    placeholder: string;
+    initialValue?: string;
+    actionLabel: string;
+    onSubmit: (val: string) => void;
+  };
+
   // actions
+  setCustomPrompt: (prompt: Partial<PlayerState['customPrompt']>) => void;
+  setPlaybackError: (err: string | null) => void;
+  setPlaybackSuccess: (msg: string | null) => void;
   setView: (view: 'library' | 'nowplaying') => void;
   addScanDir: (dir: string) => void;
   removeScanDir: (dir: string) => void;
@@ -95,6 +118,13 @@ interface PlayerState {
   translateLyrics: () => Promise<void>;
   getRomaji: () => Promise<void>;
   applyOnlineCover: (path: string, url: string) => Promise<void>;
+
+  fetchPlaylists: () => Promise<void>;
+  createPlaylist: (name: string) => Promise<void>;
+  deletePlaylist: (id: number) => Promise<void>;
+  addToPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
+  removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
+  loadPlaylistTracks: (playlistId: number) => Promise<void>;
 }
 
 function extractDominantColor(dataUrl: string): Promise<string> {
@@ -150,6 +180,33 @@ export const useStore = create<PlayerState>((set, get) => ({
   scrobbledCurrent: false,
   lastScrobble: null as { artist: string, track: string } | null,
   scrobbleThreshold: parseInt(localStorage.getItem('lastfm_threshold') || '50'),
+  playlists: [],
+  currentPlaylist: null,
+
+  playbackError: null,
+  playbackSuccess: null,
+
+  customPrompt: {
+    open: false,
+    title: '',
+    placeholder: '',
+    initialValue: '',
+    actionLabel: '',
+    onSubmit: () => {}
+  },
+
+  setCustomPrompt: (prompt) => set(s => ({
+    customPrompt: { ...s.customPrompt, ...prompt }
+  })),
+
+  setPlaybackError: (err) => {
+    set({ playbackError: err });
+    if (err) setTimeout(() => get().setPlaybackError(null), 5000);
+  },
+  setPlaybackSuccess: (msg) => {
+    set({ playbackSuccess: msg });
+    if (msg) setTimeout(() => get().setPlaybackSuccess(null), 4000);
+  },
 
   setView: (view) => set({ view }),
   addScanDir: (dir) => {
@@ -237,8 +294,14 @@ export const useStore = create<PlayerState>((set, get) => ({
             coverUrl: art,
             duration: track.duration || 0,
           }).catch(() => {});
+        } else {
+          set({ coverArt: null, accentColor: '#8b5cf6' });
         }
-      }).catch(() => { });
+      }).catch(() => { 
+        if (get().playback.current_track === track.path) {
+          set({ coverArt: null, accentColor: '#8b5cf6' });
+        }
+      });
 
       invoke('get_lyrics', { path: track.path }).then((lrc: any) => {
         if (get().playback.current_track !== track.path) return;
@@ -305,8 +368,14 @@ export const useStore = create<PlayerState>((set, get) => ({
           coverUrl: art,
           duration: track.duration || 0,
         }).catch(() => {});
+      } else {
+        set({ coverArt: null, accentColor: '#8b5cf6' });
       }
-    }).catch(() => { });
+    }).catch(() => { 
+      if (get().playback.current_track === path) {
+        set({ coverArt: null, accentColor: '#8b5cf6' });
+      }
+    });
 
     invoke('get_lyrics', { path }).then((lrc: any) => {
       if (get().playback.current_track !== path) return;
@@ -362,7 +431,14 @@ export const useStore = create<PlayerState>((set, get) => ({
   stopTrack: async () => {
     try { 
       await invoke('stop_track'); 
-      set({ isTransitioning: false, playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 } });
+      set({ 
+        isTransitioning: false, 
+        playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 },
+        coverArt: null,
+        accentColor: '#8b5cf6',
+        lyrics: [],
+        lyricStatus: 'idle'
+      });
     } catch (e) { console.error(e); }
   },
 
@@ -393,6 +469,11 @@ export const useStore = create<PlayerState>((set, get) => ({
       }
 
       set(s => ({ playback: { ...s.playback, ...status } }));
+
+      // If playback stopped and we still have art, clear it
+      if (!status.current_track && get().coverArt) {
+        set({ coverArt: null, accentColor: '#8b5cf6', lyrics: [], lyricStatus: 'idle' });
+      }
 
       // Auto Scrobble at threshold% or 4 minutes
       const { current_track, position_secs } = status;
@@ -527,6 +608,53 @@ export const useStore = create<PlayerState>((set, get) => ({
           }
         }).catch(() => { });
       }
+    } catch (e) { console.error(e); }
+  },
+
+  fetchPlaylists: async () => {
+    try {
+      const playlists: Playlist[] = await invoke('get_playlists');
+      set({ playlists });
+    } catch (e) { console.error(e); }
+  },
+  createPlaylist: async (name) => {
+    try {
+      await invoke('create_playlist', { name });
+      await get().fetchPlaylists();
+    } catch (e) { console.error(e); }
+  },
+  deletePlaylist: async (id) => {
+    try {
+      await invoke('delete_playlist', { id });
+      await get().fetchPlaylists();
+      if (get().currentPlaylist?.id === id) {
+        set({ currentPlaylist: null });
+        await get().loadLibrary();
+      }
+    } catch (e) { console.error(e); }
+  },
+  addToPlaylist: async (playlistId, trackPath) => {
+    try {
+      await invoke('add_to_playlist', { playlistId, path: trackPath });
+      // If we are currently viewing this playlist, refresh the tracks
+      if (get().currentPlaylist?.id === playlistId) {
+        await get().loadPlaylistTracks(playlistId);
+      }
+    } catch (e) { console.error(e); }
+  },
+  removeFromPlaylist: async (playlistId, trackPath) => {
+    try {
+      await invoke('remove_from_playlist', { playlistId, path: trackPath });
+      if (get().currentPlaylist?.id === playlistId) {
+        await get().loadPlaylistTracks(playlistId);
+      }
+    } catch (e) { console.error(e); }
+  },
+  loadPlaylistTracks: async (playlistId) => {
+    try {
+      const tracks: Track[] = await invoke('get_playlist_tracks', { playlistId });
+      const playlist = get().playlists.find(p => p.id === playlistId) || null;
+      set({ tracks, currentPlaylist: playlist });
     } catch (e) { console.error(e); }
   },
 }));

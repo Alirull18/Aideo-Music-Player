@@ -1,4 +1,4 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
 
 /* â”€â”€ Design tokens â”€â”€ */
 :root {
@@ -328,6 +328,7 @@ input[type=range] {
   gap: 36px;
   padding: 56px 48px;
   border-right: 1px solid rgba(255, 255, 255, 0.04);
+  min-width: 0;
 }
 
 .np-art-wrap {
@@ -391,6 +392,7 @@ input[type=range] {
   padding: 40px 48px;
   height: 100%;
   overflow: hidden;
+  min-width: 0;
 }
 
 .lyrics-toolbar {
@@ -963,4 +965,22 @@ input[type=range] {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.2); opacity: 0.7; }
   100% { transform: scale(1); opacity: 1; }
+}
+
+.live-badge {
+  background: #ef4444;
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 1px;
+  animation: live-pulse 2s infinite;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+
+@keyframes live-pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
 }

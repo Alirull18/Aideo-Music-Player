@@ -4,8 +4,8 @@ use serde_json::Value;
 
 // IMPORTANT: You MUST replace these with your actual Last.fm API Key and Secret
 // Get them here: https://www.last.fm/api/account/create
-const API_KEY: &str = env!("LASTFM_API_KEY");
-const API_SECRET: &str = env!("LASTFM_API_SECRET");
+const API_KEY: &str = match option_env!("LASTFM_API_KEY") { Some(v) => v, None => "YOUR_LASTFM_API_KEY" };
+const API_SECRET: &str = match option_env!("LASTFM_API_SECRET") { Some(v) => v, None => "YOUR_LASTFM_API_SECRET" };
 const API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 
 fn sign_request(params: &mut BTreeMap<String, String>) {

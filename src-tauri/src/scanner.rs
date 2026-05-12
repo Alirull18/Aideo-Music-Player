@@ -38,7 +38,7 @@ pub fn scan_directory(dir: &str) -> Vec<Track> {
     tracks
 }
 
-fn extract_metadata(path: &Path) -> Option<Track> {
+pub fn extract_metadata(path: &Path) -> Option<Track> {
     let file = File::open(path).ok()?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();

@@ -116,7 +116,6 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - [ ] **Visualizer Engine**: Real-time FFT spectrum visualization.
 
 ### ⚙️ Performance & Core
-- [ ] **Local AI Transcription**: Built-in Whisper support for auto-lyric generation.
 - [ ] **Cross-Platform Support**: Implementation for macOS (CoreAudio).
 - [ ] **DSD/SACD Support**: Native DSD decoding (DSF/DFF).
 

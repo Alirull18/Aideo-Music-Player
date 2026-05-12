@@ -5,7 +5,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, FolderSearch, Volume2, X, Activity, RefreshCw, Radio } from 'lucide-react';
+import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, FolderSearch, Volume2, X, Activity, RefreshCw, Radio, ListMusic, Plus, Trash2, MoreVertical, Download, Check } from 'lucide-react';
+import { save } from '@tauri-apps/plugin-dialog';
 import './App.css';
 import defaultCover from './assets/default_cover.png';
 
@@ -17,10 +18,51 @@ function fmt(s: number | null) {
 function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
 }
+function getStreamName(url: string | null) {
+  if (!url) return 'Unknown Stream';
+  try {
+    const u = new URL(url);
+    const domain = u.hostname.replace('www.', '');
+    const path = u.pathname.split('/').pop();
+    
+    // If we have a meaningful path (station name like 'groovesalad'), use it
+    if (path && path.length > 2 && !path.includes('.')) {
+      const station = path.charAt(0).toUpperCase() + path.slice(1);
+      return `${station} (${domain})`;
+    }
+    
+    // If it's a direct IP or very short domain, return full URL
+    if (domain.length < 4 || /^\d/.test(domain)) return url;
+    
+    return domain.charAt(0).toUpperCase() + domain.slice(1);
+  } catch {
+    return url;
+  }
+}
 
 /* ─── Sidebar ────────────────────────────────────────── */
 function Sidebar() {
-  const { view, setView, toggleSettings } = useStore();
+  const { view, setView, toggleSettings, playlists, currentPlaylist, loadPlaylistTracks, loadLibrary, createPlaylist, deletePlaylist, setCustomPrompt, setPlaybackError } = useStore();
+  const [creating, setCreating] = useState(false);
+  const [newPName, setNewPName] = useState('');
+
+  const goLibrary = () => {
+    useStore.setState({ currentPlaylist: null });
+    loadLibrary();
+    setView('library');
+  };
+
+  const goPlaylist = (id: number) => {
+    loadPlaylistTracks(id);
+    setView('library');
+  };
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPName.trim()) createPlaylist(newPName.trim());
+    setCreating(false);
+    setNewPName('');
+  };
 
   return (
     <aside className="app-sidebar">
@@ -29,11 +71,119 @@ function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <div className={`nav-item ${view === 'library' ? 'active' : ''}`} onClick={() => setView('library')}>
+      <div className={`nav-item ${view === 'library' && !currentPlaylist ? 'active' : ''}`} onClick={goLibrary}>
         <Library size={18} /> Library
       </div>
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
         <Headphones size={18} /> Now Playing
+      </div>
+
+      {/* Playlists */}
+      <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1 }}>Playlists</span>
+          <button className="icon-btn" onClick={() => setCreating(!creating)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}>
+            <Plus size={14} />
+          </button>
+        </div>
+        
+        {creating && (
+          <form onSubmit={handleCreate} style={{ marginBottom: 12 }}>
+            <input 
+              autoFocus
+              type="text" 
+              placeholder="Playlist Name..." 
+              value={newPName}
+              onChange={e => setNewPName(e.target.value)}
+              onBlur={() => setCreating(false)}
+              style={{ width: '100%', padding: '6px 12px', fontSize: 12, borderRadius: 6, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white', outline: 'none' }}
+            />
+          </form>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {playlists.map(p => (
+            <div 
+              key={p.id} 
+              className={`nav-item ${currentPlaylist?.id === p.id && view === 'library' ? 'active' : ''}`} 
+              style={{ padding: '6px 12px', fontSize: 13 }}
+              onClick={() => goPlaylist(p.id)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: 12, overflow: 'hidden' }}>
+                <ListMusic size={16} />
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+              </div>
+              {currentPlaylist?.id === p.id && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); deletePlaylist(p.id); }} 
+                  style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                  title="Delete Playlist"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+          ))}
+          {playlists.length === 0 && !creating && (
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '8px 0', fontStyle: 'italic' }}>
+              No playlists yet.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Online Tools */}
+      <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 8 }}>Online Tools</span>
+        <div className="nav-item" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => {
+          setCustomPrompt({
+            open: true,
+            title: 'Stream Radio / URL',
+            placeholder: 'Enter http:// or https:// stream URL...',
+            actionLabel: 'Play Stream',
+            onSubmit: async (url) => {
+              if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                try {
+                  await invoke('play_track', { path: url });
+                } catch (e) { setPlaybackError('Failed to play stream: ' + e); }
+              } else {
+                setPlaybackError('Invalid stream URL. Must start with http:// or https://');
+              }
+            }
+          });
+        }}>
+          <Radio size={16} /> Play Stream URL
+        </div>
+        <div className="nav-item" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => {
+          setCustomPrompt({
+            open: true,
+            title: 'YouTube Importer',
+            placeholder: 'Paste YouTube Video URL...',
+            actionLabel: 'Fetch & Download',
+            onSubmit: async (url) => {
+              if (!url) return;
+              try {
+                // 1. Fetch video title first
+                const title = await invoke<string>('get_video_title', { url });
+                
+                // 2. Open save dialog with the title as filename
+                const savePath = await save({
+                  title: 'Save Audio As...',
+                  defaultPath: `${title}.m4a`,
+                  filters: [{ name: 'Audio', extensions: ['m4a', 'webm', 'mp3'] }]
+                });
+                
+                if (savePath) {
+                  await invoke('download_youtube', { url, savePath });
+                }
+              } catch (e: any) {
+                setPlaybackError('Import Failed: ' + e);
+              }
+            }
+          });
+        }}>
+          <Download size={16} /> Download YouTube
+        </div>
       </div>
 
       {/* Settings */}
@@ -66,12 +216,16 @@ function TrackThumbnail({ path }: { path: string }) {
 
 /* ─── Library ────────────────────────────────────────── */
 function LibraryView() {
-  const { tracks, playback, playTrack, setView } = useStore();
+  const { tracks, playback, playTrack, setView, currentPlaylist, playlists, addToPlaylist, removeFromPlaylist } = useStore();
+  const [menuOpenFor, setMenuOpenFor] = useState<number | null>(null);
+
   return (
-    <div className="library-wrap">
-      <h1 className="library-title">Music Library</h1>
+    <div className="library-wrap" onClick={() => setMenuOpenFor(null)}>
+      <h1 className="library-title">{currentPlaylist ? currentPlaylist.name : 'Music Library'}</h1>
       {tracks.length === 0 && (
-        <p style={{ color: 'var(--text-dim)' }}>No tracks yet. Select a folder and press "Scan Library".</p>
+        <p style={{ color: 'var(--text-dim)' }}>
+          {currentPlaylist ? "This playlist is empty." : "No tracks yet. Select a folder and press \"Scan Library\"."}
+        </p>
       )}
       {tracks.length > 0 && (
         <table className="track-table">
@@ -113,7 +267,54 @@ function LibraryView() {
                     )}
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    <div className="track-sub">{fmt(t.duration)}</div>
+                    <div className="track-sub" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
+                      {fmt(t.duration)}
+                      <div style={{ position: 'relative' }}>
+                        <button 
+                          className="icon-btn" 
+                          onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === t.id ? null : t.id); }}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4 }}
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                        <AnimatePresence>
+                          {menuOpenFor === t.id && (
+                            <motion.div 
+                              initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                              style={{ position: 'absolute', right: 0, top: '100%', zIndex: 100, background: '#1a1a24', border: '1px solid var(--glass-border)', borderRadius: 8, padding: 8, minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {currentPlaylist ? (
+                                <div 
+                                  onClick={() => { removeFromPlaylist(currentPlaylist.id, t.path); setMenuOpenFor(null); }}
+                                  style={{ padding: '8px 12px', fontSize: 12, color: '#ef4444', cursor: 'pointer', borderRadius: 4 }}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                  Remove from Playlist
+                                </div>
+                              ) : (
+                                <>
+                                  <div style={{ padding: '4px 12px', fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Add to Playlist</div>
+                                  {playlists.map(p => (
+                                    <div 
+                                      key={p.id}
+                                      onClick={() => { addToPlaylist(p.id, t.path); setMenuOpenFor(null); }}
+                                      style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 4 }}
+                                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                    >
+                                      {p.name}
+                                    </div>
+                                  ))}
+                                  {playlists.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-dim)' }}>No playlists</div>}
+                                </>
+                              )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               );
@@ -128,7 +329,7 @@ function LibraryView() {
 /* ─── Lyrics ─────────────────────────────────────────── */
 interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; cover_url?: string; }
 function LyricsPanel() {
-  const { lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, tracks, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover } = useStore();
+  const { lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, tracks, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover, setCustomPrompt } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [userScrolling, setUserScrolling] = useState(false);
   const userScrollTimer = useRef<number | null>(null);
@@ -162,14 +363,12 @@ function LyricsPanel() {
     userScrollTimer.current = window.setTimeout(() => setUserScrolling(false), 3500);
   };
 
-  const doSearch = async () => {
-    if (!currentTrack) return;
+  const doSearch = async (manualQuery?: string) => {
+    if (!currentTrack && !manualQuery) return;
     setSearching(true); setShowFinder(true); setResults([]);
     try {
-      const r: SearchResult[] = await invoke('search_lyrics_online', {
-        artist: currentTrack.artist ?? '',
-        title: currentTrack.title ?? baseName(currentTrack.path),
-      });
+      const query = manualQuery || `${currentTrack?.artist ?? ''} ${currentTrack?.title ?? baseName(currentTrack?.path ?? '')}`;
+      const r: SearchResult[] = await invoke('search_lyrics_online', { query });
       setResults(r);
     } catch (e) { console.error(e); } finally { setSearching(false); }
   };
@@ -211,7 +410,18 @@ function LyricsPanel() {
           <button className="lyric-btn" title="Make lyrics appear later" onClick={() => adjustLyricOffset(100)}>+</button>
         </div>
 
-        <button className="lyric-btn" onClick={doSearch}>🔍 Finder</button>
+        <button className="lyric-btn" onClick={() => doSearch()}>🔍 Auto</button>
+        <button className="lyric-btn" onClick={() => {
+          setCustomPrompt({
+            open: true,
+            title: 'Manual Lyric Search',
+            placeholder: 'Enter Artist and Track Name...',
+            initialValue: `${currentTrack?.artist ?? ''} ${currentTrack?.title ?? ''}`.trim(),
+            actionLabel: 'Search Online',
+            onSubmit: (val) => doSearch(val)
+          });
+        }}>🔍 Manual</button>
+
         <button className="lyric-btn" onClick={() => {
           // Join existing lyrics back into LRC format for editing
           const raw = lyrics.map(l => `[${fmt(l.time_secs).padStart(5, '0')}.00]${l.text}`).join('\n');
@@ -267,7 +477,7 @@ function LyricsPanel() {
                   <X size={32} style={{ color: '#ef4444' }} />
                   <div style={{ fontSize: 14 }}>No lyrics found in file.</div>
                   <div style={{ display: 'flex', gap: 12 }}>
-                    <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={doSearch}>Try Online Finder</button>
+                    <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => doSearch()}>Try Online Finder</button>
                     <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => { setEditContent(''); setShowEditor(true); }}>Open Studio</button>
                   </div>
                 </div>
@@ -513,6 +723,85 @@ function AudioControlCenter() {
   );
 }
 
+/* ─── Visualizer ─────────────────────────────────────── */
+function Visualizer() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dataRef = useRef<number[]>(new Array(64).fill(0));
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<number[]>('audio-spectrum', (event) => {
+      dataRef.current = event.payload;
+    }).then(f => unlisten = f);
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    let animId: number;
+    let smoothData = new Array(64).fill(0);
+
+    const draw = () => {
+      animId = requestAnimationFrame(draw);
+      
+      const rect = canvas.getBoundingClientRect();
+      if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+      }
+
+      const width = rect.width;
+      const height = rect.height;
+      
+      ctx.clearRect(0, 0, width, height);
+
+      const isPlaying = useStore.getState().playback.status === 'Playing';
+      const targetData = isPlaying ? dataRef.current : new Array(64).fill(0);
+
+      const barWidth = Math.max(1, (width / 64) - 2);
+      
+      for (let i = 0; i < 64; i++) {
+        // Boost amplitude significantly (5x multiplier)
+        const rawValue = (targetData[i] || 0) * 5.0;
+        
+        // Faster attack, slightly slower release for punchy but smooth spikes
+        if (rawValue > smoothData[i]) {
+          smoothData[i] += (rawValue - smoothData[i]) * 0.4; // Fast spike up
+        } else {
+          smoothData[i] += (rawValue - smoothData[i]) * 0.15; // Smooth fall down
+        }
+        
+        let value = Math.min(1.0, Math.max(0.0, smoothData[i]));
+        if (value < 0.02) value = 0.02;
+
+        const barHeight = value * height;
+        const x = i * (width / 64);
+        const y = height - barHeight;
+        
+        ctx.fillStyle = `rgba(var(--accent-rgb), ${0.3 + (value * 0.7)})`;
+        ctx.beginPath();
+        ctx.roundRect(x, y, barWidth, barHeight, [4, 4, 0, 0]);
+        ctx.fill();
+      }
+    };
+    
+    draw();
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'flex-end' }}>
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%' }} />
+    </div>
+  );
+}
+
 /* ─── Now Playing ────────────────────────────────────── */
 function NowPlayingView() {
   const { tracks, playback, coverArt, accentColor } = useStore();
@@ -552,9 +841,44 @@ function NowPlayingView() {
         <div className={`np-art-wrap${coverArt ? ' has-art' : ''}`}>
           <img src={coverArt || defaultCover} alt="cover" className="np-art" />
         </div>
-        <div className="np-meta">
-          <div className="np-title">{current?.title || baseName(playback.current_track)}</div>
-          <div className="np-artist">{current?.artist || 'Unknown Artist'}</div>
+        <div className="np-meta" style={{ minWidth: 0 }}>
+          <div className="np-title" style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 12, 
+            justifyContent: 'center',
+            width: '100%',
+            overflow: 'hidden',
+          }}>
+            <span style={{ 
+              overflow: 'hidden', 
+              textOverflow: 'ellipsis', 
+              whiteSpace: 'nowrap',
+              maxWidth: '100%' 
+            }}>
+              {playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : (current?.title || baseName(playback.current_track))}
+            </span>
+            {playback.current_track?.startsWith('http') && (
+              <span className="live-badge" style={{ flexShrink: 0 }}>LIVE</span>
+            )}
+          </div>
+          <div className="np-artist" style={{ 
+            opacity: 0.7, 
+            fontSize: 13, 
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            cursor: 'pointer', 
+            textDecoration: 'underline' 
+          }}
+            onClick={() => playback.current_track && openUrl(playback.current_track)}>
+            {playback.current_track?.startsWith('http') 
+              ? (getStreamName(playback.current_track) === playback.current_track ? 'Live Stream' : playback.current_track) 
+              : (current?.artist || 'Unknown Artist')}
+          </div>
+        </div>
+        <div style={{ height: 80, width: '100%', marginTop: 'auto' }}>
+          <Visualizer />
         </div>
       </div>
 
@@ -599,8 +923,17 @@ function PlayerBar() {
           <img src={coverArt || defaultCover} alt="" />
         </div>
         <div className="pb-info" onClick={() => setView('nowplaying')}>
-          <div className="pb-title">{current?.title || baseName(playback.current_track)}</div>
-          <div className="pb-artist">{current?.artist || '—'}</div>
+          <div className="pb-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : (current?.title || baseName(playback.current_track))}
+            {playback.current_track?.startsWith('http') && (
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 8px #ef4444' }} />
+            )}
+          </div>
+          <div className="pb-artist" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.6 }}>
+            {playback.current_track?.startsWith('http') 
+              ? (getStreamName(playback.current_track) === playback.current_track ? 'Live Stream' : playback.current_track) 
+              : (current?.artist || '—')}
+          </div>
         </div>
       </div>
 
@@ -843,10 +1176,12 @@ function SettingsModal() {
 
 /* ─── Root ───────────────────────────────────────────── */
 export default function App() {
-  const { view, pollStatus, loadLibrary, lastScrobble } = useStore();
+  const { view, pollStatus, loadLibrary, lastScrobble, fetchPlaylists, playbackError, playbackSuccess, customPrompt, setCustomPrompt, setPlaybackError, setPlaybackSuccess } = useStore();
+  const [dlStatus, setDlStatus] = useState<{ percentage: number; status: string } | null>(null);
 
   useEffect(() => {
     loadLibrary();
+    fetchPlaylists();
     const id = setInterval(pollStatus, 200);
 
     let unlistenEnded: (() => void) | undefined;
@@ -908,6 +1243,33 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let unlisten: any;
+    listen<{ percentage: number; status: string }>('download-progress', (event) => {
+      setDlStatus(event.payload);
+      if (event.payload.status === 'Complete') {
+        setTimeout(() => setDlStatus(null), 3000);
+      }
+    }).then(u => unlisten = u);
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: any;
+    listen<string>('playback-error', (event) => {
+      setPlaybackError(event.payload);
+    }).then(u => unlisten = u);
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: any;
+    listen<string>('playback-success', (event) => {
+      setPlaybackSuccess(event.payload);
+    }).then(u => unlisten = u);
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
   return (
     <div className="app">
       <Sidebar />
@@ -943,7 +1305,181 @@ export default function App() {
             <span>Scrobbled: <strong>{lastScrobble.track}</strong></span>
           </motion.div>
         )}
+
+        {dlStatus && (
+          <motion.div
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 50 }}
+            style={{
+              position: 'fixed',
+              bottom: 100,
+              right: 24,
+              width: 280,
+              background: 'rgba(23, 23, 23, 0.95)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: 12,
+              padding: 16,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              zIndex: 9999,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{dlStatus.status}</span>
+              <span style={{ fontSize: 12, color: 'var(--accent)' }}>{Math.round(dlStatus.percentage)}%</span>
+            </div>
+            <div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+              <motion.div 
+                animate={{ width: `${dlStatus.percentage}%` }}
+                style={{ height: '100%', background: 'var(--accent)' }} 
+              />
+            </div>
+          </motion.div>
+        )}
+
+        {playbackError && (
+          <motion.div
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 50 }}
+            style={{
+              position: 'fixed',
+              bottom: 100,
+              right: 24,
+              width: 320,
+              background: 'rgba(127, 29, 29, 0.95)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: 12,
+              padding: 16,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              zIndex: 9999,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ background: '#ef4444', borderRadius: '50%', padding: 4, display: 'flex' }}>
+                <X size={14} color="white" />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 2 }}>Playback Error</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', lineHeight: 1.4 }}>{playbackError}</div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {playbackSuccess && (
+          <motion.div
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 50 }}
+            style={{
+              position: 'fixed',
+              bottom: 100,
+              right: 24,
+              width: 320,
+              background: 'rgba(21, 128, 61, 0.95)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              borderRadius: 12,
+              padding: 16,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              zIndex: 9999,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ background: '#22c55e', borderRadius: '50%', padding: 4, display: 'flex' }}>
+                <Check size={14} color="white" />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 2 }}>Streaming Success</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)', fontWeight: 600, marginBottom: 2 }}>STATION CONNECTED</div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', lineHeight: 1.4, opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{playbackSuccess}</div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        <AnimatePresence>
+          {customPrompt.open && (
+            <AideoPrompt 
+              title={customPrompt.title}
+              placeholder={customPrompt.placeholder}
+              initialValue={customPrompt.initialValue}
+              actionLabel={customPrompt.actionLabel}
+              onClose={() => setCustomPrompt({ open: false })}
+              onSubmit={customPrompt.onSubmit}
+            />
+          )}
+        </AnimatePresence>
       </AnimatePresence>
     </div>
+  );
+}
+
+function AideoPrompt({ title, placeholder, initialValue = '', actionLabel, onClose, onSubmit }: { 
+  title: string, 
+  placeholder: string, 
+  initialValue?: string,
+  actionLabel: string, 
+  onClose: () => void, 
+  onSubmit: (v: string) => void 
+}) {
+  const [val, setVal] = useState(initialValue);
+  
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="modal-overlay"
+      style={{ zIndex: 3000 }}
+      onClick={onClose}
+    >
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        className="modal-content"
+        style={{ maxWidth: 450, padding: 32 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Activity size={20} color="var(--accent)" />
+            {title}
+          </h2>
+          <button className="modal-close" onClick={onClose}><X size={20} /></button>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <input 
+            autoFocus
+            type="text" 
+            placeholder={placeholder}
+            value={val}
+            onChange={e => setVal(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { onSubmit(val); onClose(); } }}
+            style={{ 
+              width: '100%', 
+              padding: '14px 18px', 
+              fontSize: 14, 
+              borderRadius: 12, 
+              border: '1px solid var(--glass-border)', 
+              background: 'rgba(0,0,0,0.3)', 
+              color: 'white', 
+              outline: 'none',
+              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)'
+            }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => { onSubmit(val); onClose(); }}>
+            {actionLabel}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

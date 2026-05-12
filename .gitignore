@@ -34,3 +34,6 @@ scratch/
 # Sensitive data
 .env
 *.env
+tauri.key*
+*.key*
+tauri.key.password

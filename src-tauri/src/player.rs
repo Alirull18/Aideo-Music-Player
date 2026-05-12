@@ -1,8 +1,11 @@
 use std::sync::{Arc, Mutex};
+use std::io::BufRead;
 use std::thread;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use ringbuf::RingBuffer;
+use crossbeam_channel::{Receiver, Sender};
+use rustfft::{FftPlanner, num_complex::Complex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
@@ -33,6 +36,28 @@ pub struct DSPState {
     pub enabled: bool,
 }
 
+fn find_ffmpeg_path() -> String {
+    if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") {
+        let base_path = std::path::PathBuf::from(local_appdata).join("Microsoft").join("WinGet").join("Packages");
+        if let Ok(entries) = std::fs::read_dir(&base_path) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if name.contains("ffmpeg") {
+                    if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
+                        for sub in sub_entries.filter_map(|e| e.ok()) {
+                            let bin_path = sub.path().join("bin").join("ffmpeg.exe");
+                            if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
+                            let direct_path = sub.path().join("ffmpeg.exe");
+                            if direct_path.exists() { return direct_path.to_string_lossy().to_string(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    "ffmpeg".to_string()
+}
+
 pub struct Player {
     pub cmd_tx: std::sync::mpsc::Sender<PlayerCommand>,
     pub status: Arc<Mutex<PlaybackStatus>>,
@@ -44,6 +69,76 @@ pub struct Player {
     pub target_device: Arc<Mutex<Option<String>>>,
     pub queued_track: Arc<Mutex<Option<String>>>,
     pub app_handle: tauri::AppHandle,
+    pub current_process: Arc<Mutex<Option<std::process::Child>>>,
+    pub ffmpeg_path: String,
+}
+
+fn analyzer_loop(rx: Receiver<Vec<f32>>, app_handle: tauri::AppHandle) {
+    let mut planner = FftPlanner::new();
+    let fft = planner.plan_fft_forward(2048);
+    let mut buffer = vec![Complex { re: 0.0, im: 0.0 }; 2048];
+
+    // Hann window
+    let mut window = vec![0.0; 2048];
+    for i in 0..2048 {
+        window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 2047.0).cos());
+    }
+
+    while let Ok(samples) = rx.recv() {
+        if samples.len() != 2048 { continue; }
+        
+        for i in 0..2048 {
+            buffer[i] = Complex {
+                re: samples[i] * window[i],
+                im: 0.0,
+            };
+        }
+        
+        fft.process(&mut buffer);
+        
+        let mut magnitudes = vec![0.0; 1024];
+        for i in 0..1024 {
+            let mag = (buffer[i].re.powi(2) + buffer[i].im.powi(2)).sqrt() / 2048.0;
+            // Boost higher frequencies so it looks more balanced (pink noise compensation)
+            magnitudes[i] = mag * (1.0 + (i as f32 * 0.02)); 
+        }
+
+        let num_bands = 64;
+        let mut bands = vec![0.0; num_bands];
+        
+        let min_freq = 20.0f32;
+        let max_freq = 20000.0f32;
+        let sample_rate = 44100.0f32; // Approximation for binning
+        
+        for band in 0..num_bands {
+            let start_freq = min_freq * (max_freq / min_freq).powf(band as f32 / num_bands as f32);
+            let end_freq = min_freq * (max_freq / min_freq).powf((band + 1) as f32 / num_bands as f32);
+            
+            let mut start_bin = (start_freq * 2048.0 / sample_rate) as usize;
+            let mut end_bin = (end_freq * 2048.0 / sample_rate) as usize;
+            
+            start_bin = start_bin.clamp(1, 1023);
+            end_bin = end_bin.clamp(start_bin, 1023);
+            
+            let mut sum = 0.0;
+            let mut count = 0;
+            for bin in start_bin..=end_bin {
+                sum += magnitudes[bin];
+                count += 1;
+            }
+            if count > 0 {
+                bands[band] = sum / count as f32;
+            }
+        }
+        
+        let _ = app_handle.emit("audio-spectrum", bands);
+    }
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        kill_current_process(&self.current_process);
+    }
 }
 
 impl Player {
@@ -60,7 +155,10 @@ impl Player {
         }));
         let target_device = Arc::new(Mutex::new(None::<String>));
         let queued_track = Arc::new(Mutex::new(None::<String>));
-
+        let current_process = Arc::new(Mutex::new(None::<std::process::Child>));
+        let ffmpeg_path = find_ffmpeg_path();
+        
+        let cp = Arc::clone(&current_process);
         let s = Arc::clone(&status);
         let c = Arc::clone(&current_track);
         let p = Arc::clone(&position_secs);
@@ -70,13 +168,22 @@ impl Player {
         let dev = Arc::clone(&target_device);
         let qt = Arc::clone(&queued_track);
         let app = app_handle.clone();
+        let ff = ffmpeg_path.clone();
 
+        let (fft_tx, fft_rx) = crossbeam_channel::bounded::<Vec<f32>>(2);
+        
+        let analyzer_app = app_handle.clone();
+        thread::Builder::new()
+            .name("analyzer".into())
+            .spawn(move || analyzer_loop(fft_rx, analyzer_app))
+            .expect("Failed to spawn analyzer thread");
+        
         thread::Builder::new()
             .name("player".into())
-            .spawn(move || player_loop(cmd_rx, s, c, p, v, exc, dsp, dev, qt, app))
+            .spawn(move || player_loop(cmd_rx, s, c, p, v, exc, dsp, dev, qt, cp, app, fft_tx, ff))
             .expect("Failed to spawn player thread");
 
-        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queued_track, app_handle }
+        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queued_track, app_handle, current_process, ffmpeg_path }
     }
 }
 
@@ -90,7 +197,10 @@ fn player_loop(
     dsp_state: Arc<Mutex<DSPState>>,
     target_device: Arc<Mutex<Option<String>>>,
     queued_track: Arc<Mutex<Option<String>>>,
+    current_process: Arc<Mutex<Option<std::process::Child>>>,
     app_handle: tauri::AppHandle,
+    fft_tx: Sender<Vec<f32>>,
+    ffmpeg_path: String,
 ) {
     let mut next_track: Option<(String, f64)> = None;
 
@@ -115,7 +225,7 @@ fn player_loop(
                     *pos = start_pos;
                 }
 
-                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queued_track), &rx, &app_handle);
+                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queued_track), Arc::clone(&current_process), &rx, &app_handle, &fft_tx, &ffmpeg_path);
 
                 if next_track.is_none() {
                     let mut s = status.lock().unwrap();
@@ -131,6 +241,12 @@ fn player_loop(
 
 
 /// Soft limiter — prevents digital clipping on heavy boosts
+fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>>) {
+    if let Some(mut child) = current_process.lock().unwrap().take() {
+        let _ = child.kill();
+    }
+}
+
 fn soft_limit(sample: f32) -> f32 {
     let abs = sample.abs();
     if abs > 0.95 {
@@ -152,26 +268,153 @@ fn play_file(
     dsp_state: Arc<Mutex<DSPState>>,
     target_device: Arc<Mutex<Option<String>>>,
     queued_track: Arc<Mutex<Option<String>>>,
+    current_process: Arc<Mutex<Option<std::process::Child>>>,
     rx: &std::sync::mpsc::Receiver<PlayerCommand>,
     app_handle: &tauri::AppHandle,
+    fft_tx: &Sender<Vec<f32>>,
+    ffmpeg_path: &str,
 ) -> Option<(String, f64)> {
-    let file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return None,
+    let mut stream_content_type: Option<String> = None;
+    println!("[player] Using FFmpeg path: {}", ffmpeg_path);
+
+    let mss = if path.starts_with("http://") || path.starts_with("https://") {
+        println!("[player] Detected HTTP stream, attempting FFmpeg proxy...");
+        
+        let mut cmd = std::process::Command::new(&ffmpeg_path);
+        cmd.args([
+            "-headers", "Referer: https://www.hotfm.audio/\r\nOrigin: https://www.hotfm.audio/\r\n",
+            "-user_agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            "-reconnect", "1",
+            "-reconnect_at_eof", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "2",
+            "-i", path,
+            "-f", "wav",
+            "-acodec", "pcm_s16le",
+            "-ar", "44100",
+            "-ac", "2",
+            "-"
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+        // Kill existing process if any
+        if let Some(mut old_child) = current_process.lock().unwrap().take() {
+            let _ = old_child.kill();
+        }
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                println!("[player] FFmpeg proxy spawned successfully.");
+                
+                // Monitor stderr in a thread
+                let stderr = child.stderr.take().unwrap();
+                std::thread::spawn(move || {
+                    let reader = std::io::BufReader::new(stderr);
+                    for line in reader.lines().filter_map(|l| l.ok()) {
+                        println!("[ffmpeg] {}", line);
+                    }
+                });
+
+                let stdout = child.stdout.take().unwrap();
+                
+                // Store child for future termination
+                *current_process.lock().unwrap() = Some(child);
+
+                let source = symphonia::core::io::ReadOnlySource::new(stdout);
+                stream_content_type = Some("audio/wav".to_string());
+                MediaSourceStream::new(Box::new(source), Default::default())
+            },
+            Err(_) => {
+                let client = reqwest::blocking::Client::builder()
+                    .user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+                    .timeout(std::time::Duration::from_secs(15))
+                    .build()
+                    .ok()?;
+                let resp = client.get(path).send().ok()?;
+                let source = symphonia::core::io::ReadOnlySource::new(resp);
+                MediaSourceStream::new(Box::new(source), Default::default())
+            }
+        }
+    } else {
+        let file = match std::fs::File::open(path) {
+            Ok(f) => f,
+            Err(e) => { 
+                let msg = format!("File open error: {}", e);
+                let _ = app_handle.emit("playback-error", msg);
+                return None; 
+            }
+        };
+        MediaSourceStream::new(Box::new(file), Default::default())
     };
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(path).extension() {
+    let mut hint_set = false;
+    if path.starts_with("http://") || path.starts_with("https://") {
+        // Fallback to extension from URL
+        let url_path = path.split('?').next().unwrap_or(path);
+        if let Some(ext) = std::path::Path::new(url_path).extension() {
+            hint.with_extension(&ext.to_string_lossy());
+            hint_set = true;
+        }
+    } else if let Some(ext) = std::path::Path::new(path).extension() {
         hint.with_extension(&ext.to_string_lossy());
+        hint_set = true;
     }
-    let probed = match get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default()) {
-        Ok(p) => p,
-        Err(_) => return None,
+    
+    // If we have a response from a stream, try to use Content-Type header as a better hint
+    if let Some(ct) = stream_content_type {
+        if ct.contains("mpeg") || ct.contains("mp3") {
+            hint.with_extension("mp3");
+            hint_set = true;
+        } else if ct.contains("aac") || ct.contains("audio/x-aac") {
+            hint.with_extension("aac");
+            hint_set = true;
+        } else if ct.contains("ogg") || ct.contains("opus") {
+            hint.with_extension("ogg");
+            hint_set = true;
+        } else if ct.contains("flac") {
+            hint.with_extension("flac");
+            hint_set = true;
+        } else if ct.contains("wav") {
+            hint.with_extension("wav");
+            hint_set = true;
+        }
+    } 
+    
+    if (path.starts_with("http") || path.starts_with("https")) && !hint_set {
+        // Absolute fallback for streams without extensions or headers
+        hint.with_extension("mp3");
+    }
+    
+    println!("[player] Probing media format...");
+    let probed = match get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions { 
+        limit_metadata_bytes: symphonia::core::meta::Limit::Maximum(1024 * 16),
+        limit_visual_bytes: symphonia::core::meta::Limit::Maximum(1) 
+    }) {
+        Ok(p) => {
+            println!("[player] Format probed successfully.");
+            if path.starts_with("http://") || path.starts_with("https://") {
+                // We don't have the response here easily, but we can assume success if we got here
+                // However, if it was a 403, it would have failed probe anyway.
+                let _ = app_handle.emit("playback-success", path.to_string());
+            }
+            p
+        },
+        Err(e) => { 
+            let msg = format!("Codec probe error: {}", e);
+            eprintln!("[player] {}", msg);
+            let _ = app_handle.emit("playback-error", msg);
+            return None; 
+        }
     };
     let mut format = probed.format;
     let track = match format.default_track() {
         Some(t) => t.clone(),
-        None => return None,
+        None => { 
+            let msg = "No default track found in media".to_string();
+            let _ = app_handle.emit("playback-error", msg);
+            return None; 
+        }
     };
 
     let mut track_id = track.id;
@@ -293,6 +536,7 @@ fn play_file(
     let chunk_size = 512usize;
 
     let mut current_dsp = dsp_state.lock().unwrap().clone();
+    let mut fft_buffer = Vec::with_capacity(2048);
 
     let mut resampler: SincFixedIn<f32> = SincFixedIn::<f32>::new(
         dev_rate as f64 / file_rate as f64,
@@ -312,6 +556,7 @@ fn play_file(
     let mut running = true;
     let mut next_track_info: Option<(String, f64)> = None;
     let last_exclusive = is_exclusive;
+    let is_stream = path.starts_with("http://") || path.starts_with("https://");
 
     while running {
         loop {
@@ -321,14 +566,16 @@ fn play_file(
                 Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
                 Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
                 Ok(PlayerCommand::Seek(secs)) => {
-                    if let Some(tb) = time_base {
-                        let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
-                        let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+                    if !is_stream {
+                        if let Some(tb) = time_base {
+                            let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
+                            let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+                        }
+                        *position_secs.lock().unwrap() = secs;
+                        // Signal the consumer to flush its buffer
+                        flush_signal.store(true, Ordering::SeqCst);
+                        pending.iter_mut().for_each(|ch| ch.clear());
                     }
-                    *position_secs.lock().unwrap() = secs;
-                    // Signal the consumer to flush its buffer
-                    flush_signal.store(true, Ordering::SeqCst);
-                    pending.iter_mut().for_each(|ch| ch.clear());
                 }
                 Ok(PlayerCommand::QueueNext(path)) => {
                     *queued_track.lock().unwrap() = Some(path);
@@ -360,8 +607,13 @@ fn play_file(
 
         let packet = match format.next_packet() {
             Ok(p) => p,
-            Err(_) => {
-                // EOF Reached! Check for queued track for gapless transition
+            Err(symphonia::core::errors::Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // For live streams this is normal between chunks — retry
+                if is_stream {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+                // For files this is real EOF — check queued track
                 let next_queued = queued_track.lock().unwrap().take();
                 if let Some(next_path) = next_queued {
                     if let Ok(file) = std::fs::File::open(&next_path) {
@@ -386,24 +638,28 @@ fn play_file(
                             } else { None };
 
                             if let Some((new_decoder, new_tid, new_tb)) = track_info {
-                                // Gapless transition successful!
                                 format = new_format;
                                 decoder = new_decoder;
                                 track_id = new_tid;
                                 time_base = new_tb;
-                                
                                 *position_secs.lock().unwrap() = 0.0;
                                 *current_track.lock().unwrap() = Some(next_path.clone());
                                 let _ = app_handle.emit("track-changed", next_path);
                                 continue;
                             } else {
-                                // Non-gapless transition required
                                 next_track_info = Some((next_path, 0.0));
                             }
                         }
                     }
                 }
-                break; 
+                break;
+            }
+            Err(_) => {
+                if is_stream {
+                    // For live streams, non-IO errors (e.g. decode glitches) — skip
+                    continue;
+                }
+                break;
             }
         };
         if packet.track_id() != track_id { continue; }
@@ -512,9 +768,22 @@ fn play_file(
             let n_out = out_planar[0].len();
             let mut interleaved = Vec::with_capacity(n_out * dev_ch);
             for i in 0..n_out {
+                let mut mono_sample = 0.0;
                 for ch in 0..dev_ch {
                     let src_ch = if ch < use_ch { ch } else { 0 };
-                    interleaved.push(out_planar[src_ch][i]);
+                    let sample = out_planar[src_ch][i];
+                    interleaved.push(sample);
+                    if ch < use_ch {
+                        mono_sample += sample;
+                    }
+                }
+                
+                // FFT Extraction
+                mono_sample /= use_ch as f32;
+                fft_buffer.push(mono_sample);
+                if fft_buffer.len() >= 2048 {
+                    let _ = fft_tx.try_send(fft_buffer.clone());
+                    fft_buffer.clear();
                 }
             }
 
@@ -523,10 +792,19 @@ fn play_file(
                 std::thread::sleep(std::time::Duration::from_millis(5));
                 
                 match rx.try_recv() {
-                    Ok(PlayerCommand::Stop) => { running = false; break; }
+                    Ok(PlayerCommand::Stop) => { 
+                        kill_current_process(&current_process);
+                        running = false; 
+                        break; 
+                    }
                     Ok(PlayerCommand::Pause) => { *status.lock().unwrap() = PlaybackStatus::Paused; }
                     Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
-                    Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
+                    Ok(PlayerCommand::Play(p, pos)) => { 
+                        kill_current_process(&current_process);
+                        running = false; 
+                        next_track_info = Some((p, pos)); 
+                        break; 
+                    }
                     Ok(PlayerCommand::Seek(secs)) => {
                         if let Some(tb) = time_base {
                             let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
@@ -556,8 +834,17 @@ fn play_file(
         while prod.len() > 0 && running {
             std::thread::sleep(std::time::Duration::from_millis(10));
             match rx.try_recv() {
-                Ok(PlayerCommand::Stop) => { running = false; break; }
-                Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
+                Ok(PlayerCommand::Stop) => { 
+                    kill_current_process(&current_process);
+                    running = false; 
+                    break; 
+                }
+                Ok(PlayerCommand::Play(p, pos)) => { 
+                    kill_current_process(&current_process);
+                    running = false; 
+                    next_track_info = Some((p, pos)); 
+                    break; 
+                }
                 Ok(PlayerCommand::Pause) => { *status.lock().unwrap() = PlaybackStatus::Paused; }
                 Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
                 Ok(PlayerCommand::QueueNext(path)) => { *queued_track.lock().unwrap() = Some(path); }

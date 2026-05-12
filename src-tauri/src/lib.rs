@@ -10,6 +10,7 @@ mod lyrics;
 mod player;
 mod scanner;
 mod lastfm;
+mod downloader;
 
 // ── Shared application state ──────────────────────────────────────────────────
 pub struct AppState {
@@ -52,10 +53,9 @@ async fn translate_lyric_line(text: String) -> Result<(String, String), String> 
 
 // ── Online Search commands ──────────────────────────────────────────────────
 #[tauri::command]
-async fn search_lyrics_online(artist: String, title: String) -> Result<Vec<SearchResult>, String> {
+async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String> {
     let mut results = Vec::new();
     let client = reqwest::Client::new();
-    let query = format!("{} {}", artist, title);
     let encoded_query = urlencoding::encode(&query);
 
     let lrc_url = format!("https://lrclib.net/api/search?q={}", encoded_query);
@@ -85,12 +85,19 @@ async fn search_lyrics_online(artist: String, title: String) -> Result<Vec<Searc
         "https://music.163.com/api/search/get?s={}&type=1&limit=5",
         encoded_query
     );
-    if let Ok(res) = client.get(&ne_url).send().await {
+    if let Ok(res) = client.get(&ne_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Referer", "https://music.163.com")
+        .send().await {
         if let Ok(data) = res.json::<serde_json::Value>().await {
             if let Some(songs) = data["result"]["songs"].as_array() {
                 for item in songs {
+                    let ne_id = item["id"].as_i64().map(|i| i.to_string())
+                        .or_else(|| item["id"].as_str().map(|s| s.to_string()))
+                        .unwrap_or_else(|| item["id"].to_string());
+                        
                     results.push(SearchResult {
-                        id: item["id"].to_string(),
+                        id: ne_id.clone(),
                         title: item["name"].as_str().unwrap_or("").to_string(),
                         artist: item["artists"][0]["name"]
                             .as_str()
@@ -98,7 +105,7 @@ async fn search_lyrics_online(artist: String, title: String) -> Result<Vec<Searc
                             .to_string(),
                         source: "NetEase".to_string(),
                         synced: true,
-                        content_id: Some(item["id"].to_string()),
+                        content_id: Some(ne_id),
                         raw_lrc: None,
                         cover_url: item["al"]["picUrl"]
                             .as_str()
@@ -145,10 +152,13 @@ async fn search_lyrics_online(artist: String, title: String) -> Result<Vec<Searc
 async fn get_netease_lrc(id: String) -> Result<String, String> {
     let client = reqwest::Client::new();
     let url = format!(
-        "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=1",
+        "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1&os=pc",
         id
     );
-    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let res = client.get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Referer", "https://music.163.com")
+        .send().await.map_err(|e| e.to_string())?;
     let data = res
         .json::<serde_json::Value>()
         .await
@@ -167,6 +177,7 @@ async fn get_qqmusic_lrc(mid: String) -> Result<String, String> {
     let res = client
         .get(&url)
         .header("Referer", "https://y.qq.com/portal/player.html")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -203,11 +214,6 @@ async fn lastfm_get_token() -> Result<String, String> {
 async fn lastfm_get_session(token: String) -> Result<String, String> {
     lastfm::get_session(&token).await
 }
-
-
-
- 
-
 
 #[tauri::command]
 async fn lastfm_scrobble(artist: String, track: String, timestamp: i64, session_key: String) -> Result<(), String> {
@@ -257,8 +263,8 @@ fn set_audio_device(state: State<'_, AppState>, name: String) -> Result<(), Stri
         .lock()
         .or_else(|e| Ok(e.into_inner()))
         .map_err(|e: String| e)?;
-    let mut target = player.target_device.lock().unwrap();
-    *target = Some(name);
+    let mut target_device = player.target_device.lock().unwrap();
+    *target_device = Some(name);
     Ok(())
 }
 
@@ -282,6 +288,52 @@ async fn scan_and_save(dirs: Vec<String>, state: State<'_, AppState>) -> Result<
     let _ = conn.execute("DELETE FROM tracks", []);
     db::save_tracks(&conn, &mut all_tracks_to_save).map_err(|e| e.to_string())?;
     Ok(total_tracks)
+}
+
+#[tauri::command]
+fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let track = scanner::extract_metadata(std::path::Path::new(&path))
+        .ok_or_else(|| "Failed to extract metadata from file".to_string())?;
+    
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::save_tracks(&conn, &mut [track]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::Playlist>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_playlists(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_playlist(name: String, state: State<'_, AppState>) -> Result<i32, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::create_playlist(&conn, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_playlist(id: i32, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::delete_playlist(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_to_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::add_to_playlist(&conn, playlist_id, &path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_from_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::remove_from_playlist(&conn, playlist_id, &path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_playlist_tracks(&conn, playlist_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -603,6 +655,15 @@ pub fn run() {
             lastfm_get_token,
             lastfm_get_session,
             lastfm_scrobble,
+            get_playlists,
+            create_playlist,
+            delete_playlist,
+            add_to_playlist,
+            remove_from_playlist,
+            get_playlist_tracks,
+            add_track_to_library,
+            downloader::download_youtube,
+            downloader::get_video_title,
         ])
         .plugin(tauri_plugin_updater::Builder::new().build())
         .run(tauri::generate_context!())

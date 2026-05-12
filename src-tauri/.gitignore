@@ -7,3 +7,8 @@
 /gen/schemas
 .env
 *.env
+
+# Sensitive data
+tauri.key*
+*.key*
+tauri.key.password
