@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aideo | The Future of Local Music</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="glow-sphere" style="top: -10%; left: -10%;"></div>
+    <div class="glow-sphere" style="bottom: -10%; right: -10%; background: radial-gradient(circle, rgba(147, 51, 234, 0.3) 0%, transparent 70%);"></div>
+
+    <nav>
+        <div class="logo">💿 <span>AIDEO</span></div>
+        <div class="nav-links">
+            <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn btn-secondary"><i class="fab fa-github"></i> GitHub</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <img src="banner.png" alt="Aideo v0.3.0" class="hero-banner">
+        <h1>Experience Music in 4K</h1>
+        <p class="tagline">The Interactive Era has arrived. High-fidelity audio meets cinematic design in the most advanced local music player ever built.</p>
+        
+        <div class="cta-group">
+            <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary"><i class="fas fa-download"></i> Download v0.3.0</a>
+            <a href="#features" class="btn btn-secondary">Explore Features</a>
+        </div>
+    </header>
+
+    <section id="features" class="features">
+        <div class="feature-card">
+            <i class="fas fa-wave-square"></i>
+            <h3>Bit-Perfect Audio</h3>
+            <p>Studio-grade signal purity with WASAPI Exclusive Mode and 10-band Parametric EQ. Hear your music exactly as the artist intended.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-magic"></i>
+            <h3>Dynamic Theming</h3>
+            <p>The interface breathes with your music. Colors intelligently adapt to your album artwork for a fully immersive visual journey.</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-keyboard"></i>
+            <h3>Interactive Lyrics</h3>
+            <p>Never settle for missing lyrics. Use the new Manual Finder to sync perfect .lrc files from global providers instantly.</p>
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy; 2026 Aideo Music Player. Crafted with ❤️ by Alirul.</p>
+        <p style="margin-top: 10px; font-size: 0.8rem; opacity: 0.5;">Optimized for High-Performance Audiophiles.</p>
+    </footer>
+
+    <script>
+        // Subtle Parallax Effect on Banner
+        document.addEventListener('mousemove', (e) => {
+            const banner = document.querySelector('.hero-banner');
+            const xAxis = (window.innerWidth / 2 - e.pageX) / 50;
+            const yAxis = (window.innerHeight / 2 - e.pageY) / 50;
+            banner.style.transform = `rotateY(${xAxis}deg) rotateX(${yAxis}deg) translateY(-10px)`;
+        });
+    </script>
+</body>
+</html>
