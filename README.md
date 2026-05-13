@@ -28,8 +28,13 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 ### 🎧 Audio Core
 - **Bit-Perfect Playback**: Leverages `cpal` and `symphonia` for low-level, high-fidelity audio decoding.
 - **WASAPI Exclusive Mode**: Bypasses the Windows Audio Engine to provide direct-to-hardware signal integrity.
-- **Studio-Grade DSP**: Features a 10-band parametric equalizer with real-time soft-limiting.
-- **High-Res Identification**: Automatic visual badges for lossless formats (FLAC, WAV) vs lossy (MP3, AAC).
+- **High-Fidelity Audio Engine**: (NEW v0.4.0)
+  - **Lazy RAM Buffering**: Asynchronous background decoding for instantaneous playback startup.
+  - **Hi-Res Upsampling**: Professional Sinc-interpolation upsampling (up to 384kHz) with hardware rate switching.
+  - **TPDF Dithering**: High-precision triangular dithering to optimize noise floor on 24-bit/32-bit DACs.
+  - **Buffer-Aware Sync**: Sub-millisecond lyric synchronization that accounts for hardware processing delays.
+- **Studio-Grade DSP**: Features a 10-band parametric equalizer, spatial widening, and headphone crossfeed.
+- **High-Res Identification**: Automatic visual badges for lossless formats (FLAC, WAV) and Hi-Res status.
 - **Persistent Sync Memory**: Intelligent database that remembers your lyric synchronization offsets for every song.
 
 ### 🎨 Dynamic Visual Experience
@@ -51,8 +56,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 ## 🚀 Getting Started
 
 ### ⚡ Quick Start (For Users)
-1. **Download**: Get the latest version (v0.3.0) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the installer (`Aideo_0.3.0_x64_en-US.msi`).
+1. **Download**: Get the latest version (v0.4.0) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the installer (`Aideo_0.4.0_x64_en-US.msi`).
 3. **Launch**: Open Aideo and start importing your music library!
 
 ---
@@ -118,8 +123,13 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - [ ] **Visualizer Engine**: Real-time FFT spectrum visualization.
 
 ### ⚙️ Performance & Core
-- [ ] **Cross-Platform Support**: Implementation for macOS (CoreAudio).
+- [x] **Bit-Perfect Bypass**: Skip all software processing when rates match.
+- [x] **Lazy RAM Buffer**: Asynchronous pre-loading to eliminate I/O jitter and latency.
+- [x] **High-Quality Upsampling**: Sinc-based upsampling with hardware rate negotiation.
+- [x] **TPDF Dithering**: Signal decorrelation for high-bitrate DACs.
+- [ ] **Event-Driven WASAPI**: Pull-based clocking for ultra-stability.
 - [ ] **DSD/SACD Support**: Native DSD decoding (DSF/DFF).
+- [ ] **Cross-Platform Support**: Implementation for macOS (CoreAudio).
 
 ---
 

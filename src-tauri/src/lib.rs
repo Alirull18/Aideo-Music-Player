@@ -406,6 +406,30 @@ fn get_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(mode)
 }
 
+#[tauri::command]
+fn toggle_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    let player = state
+        .player
+        .lock()
+        .or_else(|e| Ok(e.into_inner()))
+        .map_err(|e: String| e)?;
+    let mut mode = player.bit_perfect.lock().unwrap();
+    *mode = !*mode;
+    let current_mode = *mode;
+    Ok(current_mode)
+}
+
+#[tauri::command]
+fn get_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    let player = state
+        .player
+        .lock()
+        .or_else(|e| Ok(e.into_inner()))
+        .map_err(|e: String| e)?;
+    let mode = *player.bit_perfect.lock().unwrap();
+    Ok(mode)
+}
+
 // ── Playback commands ─────────────────────────────────────────────────────────
 #[tauri::command]
 fn update_media_metadata(
@@ -551,6 +575,9 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "position_secs": *player.position_secs.lock().unwrap(),
         "volume": *player.volume.lock().unwrap(),
         "exclusive": *player.exclusive_mode.lock().unwrap(),
+        "bit_perfect": *player.bit_perfect.lock().unwrap(),
+        "dev_rate": *player.current_dev_rate.lock().unwrap(),
+        "dsp": *player.dsp_state.lock().unwrap(),
     }))
 }
 
@@ -642,6 +669,8 @@ pub fn run() {
             seek_track,
             toggle_exclusive_mode,
             get_exclusive_mode,
+            toggle_bit_perfect_mode,
+            get_bit_perfect_mode,
             search_lyrics_online,
             get_netease_lrc,
             translate_lyric_line,

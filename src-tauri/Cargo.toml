@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.2.2"
+version = "0.4.0"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
@@ -40,4 +40,5 @@ souvlaki = "0.8.3"
 md5 = "0.8.0"
 rustfft = "6.4.1"
 crossbeam-channel = "0.5.15"
+rand = "0.9.0"
 

@@ -4622,7 +4622,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "0.2.2"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "biquad",
@@ -4630,6 +4630,7 @@ dependencies = [
  "crossbeam-channel",
  "dotenvy",
  "md5",
+ "rand",
  "reqwest",
  "ringbuf",
  "rubato",

@@ -26,6 +26,8 @@ export interface LyricLine {
 export interface DSPState {
   width: number;
   enabled: boolean;
+  upsample_rate: number;
+  dither: boolean;
 }
 
 interface PlayerState {
@@ -40,6 +42,8 @@ interface PlayerState {
     position_secs: number;
     volume: number;
     exclusive: boolean;
+    bit_perfect: boolean;
+    dev_rate: number;
   };
 
   lyrics: LyricLine[];
@@ -111,6 +115,7 @@ interface PlayerState {
   resetProMode: () => void;
   setDSP: (dsp: Partial<DSPState>) => Promise<void>;
   toggleExclusive: () => Promise<void>;
+  toggleBitPerfect: () => Promise<void>;
   fetchDevices: () => Promise<void>;
   setAudioDevice: (name: string) => Promise<void>;
   adjustLyricOffset: (ms: number) => void;
@@ -157,7 +162,7 @@ export const useStore = create<PlayerState>((set, get) => ({
   tracks: [],
   currentTrackIndex: -1,
   shuffle: false,
-  playback: { status: 'Stopped', current_track: null, position_secs: 0, volume: 1.0, exclusive: false },
+  playback: { status: 'Stopped', current_track: null, position_secs: 0, volume: 1.0, exclusive: false, bit_perfect: false, dev_rate: 0 },
   lyrics: [],
   lyricOffset: 0,
   lyricStatus: 'idle',
@@ -166,7 +171,7 @@ export const useStore = create<PlayerState>((set, get) => ({
   showProMode: false,
   showControlCenter: false,
   showSettings: false,
-  dsp: { width: 1.0, enabled: false },
+  dsp: { width: 1.0, enabled: false, upsample_rate: 0, dither: false },
   devices: [],
   currentDevice: null,
   scanDirs: JSON.parse(localStorage.getItem('aideo_scan_dirs') || '[]'),
@@ -507,7 +512,7 @@ export const useStore = create<PlayerState>((set, get) => ({
   toggleProMode: () => set(s => ({ showProMode: !s.showProMode })),
   toggleControlCenter: () => set(s => ({ showControlCenter: !s.showControlCenter })),
   resetProMode: async () => {
-    const def: DSPState = { width: 1.0, enabled: false };
+    const def: DSPState = { width: 1.0, enabled: false, upsample_rate: 0, dither: false };
     set({ dsp: def });
     try { await invoke('set_dsp_state', { dsp: def }); } catch (e) { console.error(e); }
   },
@@ -522,6 +527,16 @@ export const useStore = create<PlayerState>((set, get) => ({
       const res: boolean = await invoke('toggle_exclusive_mode');
       if (res) await get().setDSP({ enabled: false });
       set(s => ({ playback: { ...s.playback, exclusive: res } }));
+    } catch (e) { console.error(e); }
+  },
+  toggleBitPerfect: async () => {
+    try {
+      const res: boolean = await invoke('toggle_bit_perfect_mode');
+      if (res) {
+        await get().setDSP({ enabled: false, upsample_rate: 0 });
+        await get().setVolume(1.0);
+      }
+      set(s => ({ playback: { ...s.playback, bit_perfect: res } }));
     } catch (e) { console.error(e); }
   },
 

@@ -610,12 +610,20 @@ function AudioControlCenter() {
             <Activity size={24} color="var(--accent)" />
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Audio Engine</h2>
           </div>
-          <button className="modal-close" onClick={toggleControlCenter}><X size={20} /></button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {playback.bit_perfect && (
+              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+                style={{ background: 'rgba(6, 182, 212, 0.1)', border: '1px solid rgba(6, 182, 212, 0.3)', color: '#06b6d4', padding: '6px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>
+                BYPASS ACTIVE
+              </motion.div>
+            )}
+            <button className="modal-close" onClick={toggleControlCenter}><X size={20} /></button>
+          </div>
         </div>
 
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
           {/* Left Column: DSP / Soundstage */}
-          <div style={{ flex: 2, padding: 32, borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 2, padding: 32, borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 48 }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Activity size={18} /> Soundstage Engine
@@ -666,7 +674,7 @@ function AudioControlCenter() {
           </div>
 
           {/* Right Column: Hardware & Output */}
-          <div style={{ flex: 1, padding: 32, background: 'rgba(255,255,255,0.02)' }}>
+          <div style={{ flex: 1, padding: 32, background: 'rgba(255,255,255,0.02)', overflowY: 'auto' }}>
             <h3 style={{ margin: 0, marginBottom: 24, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Settings2 size={18} /> Output Hardware
             </h3>
@@ -700,18 +708,90 @@ function AudioControlCenter() {
               </div>
             </div>
 
-            {/* Exclusive Mode */}
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Audio API</div>
-              <div className={`exclusive-toggle ${playback.exclusive ? 'active' : ''}`} onClick={toggleExclusive} style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.exclusive ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>Exclusive Mode</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.exclusive ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: playback.exclusive ? '#fff' : 'var(--text-dim)' }}>
-                    {playback.exclusive ? 'ON' : 'OFF'}
-                  </span>
+            {/* Exclusive Mode & Bit Perfect */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Hardware Mode</div>
+                <div className={`exclusive-toggle ${playback.exclusive ? 'active' : ''}`} onClick={toggleExclusive} style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.exclusive ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>Exclusive Mode</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.exclusive ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: playback.exclusive ? '#fff' : 'var(--text-dim)' }}>
+                      {playback.exclusive ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.4 }}>
+                    Bypass the OS mixer for direct signal integrity.
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.4 }}>
-                  Bypass the OS mixer for bit-perfect output. Takes exclusive control of the DAC.
+              </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Signal Path</div>
+                <div className={`exclusive-toggle ${playback.bit_perfect ? 'active' : ''}`} 
+                  onClick={() => useStore.getState().toggleBitPerfect()} 
+                  style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.bit_perfect ? 'rgba(6, 182, 212, 0.1)' : 'rgba(0,0,0,0.2)', borderColor: playback.bit_perfect ? '#06b6d4' : '' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>Bit-Perfect Bypass</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.bit_perfect ? '#06b6d4' : 'rgba(255,255,255,0.1)', color: playback.bit_perfect ? '#fff' : 'var(--text-dim)' }}>
+                      {playback.bit_perfect ? 'ACTIVE' : 'OFF'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.4 }}>
+                    Skips resampler, volume, and DSP. Only works if file rate matches hardware.
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Hi-Res Upsampling</div>
+                <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {[0, 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000].map(rate => (
+                      <button 
+                        key={rate}
+                        className={`rate-chip ${dsp.upsample_rate === rate ? 'active' : ''}`}
+                        style={{ 
+                          fontSize: 9, 
+                          padding: '3px 6px', 
+                          borderRadius: 4,
+                          border: '1px solid var(--glass-border)',
+                          background: dsp.upsample_rate === rate ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                          color: dsp.upsample_rate === rate ? 'white' : 'var(--text-dim)',
+                          cursor: 'pointer',
+                          fontWeight: dsp.upsample_rate === rate ? 700 : 400,
+                          transition: 'all 0.2s'
+                        }}
+                        onClick={() => {
+                          setDSP({ upsample_rate: rate });
+                          if (rate > 0 && playback.bit_perfect) {
+                             useStore.getState().toggleBitPerfect();
+                          }
+                        }}
+                      >
+                        {rate === 0 ? 'OFF' : `${rate/1000}k`}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 12, lineHeight: 1.4 }}>
+                    Sinc-interpolation upsampling to hardware limits.
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Bit-Depth Optimization</div>
+                <div className={`exclusive-toggle ${dsp.dither ? 'active' : ''}`} 
+                  onClick={() => setDSP({ dither: !dsp.dither })} 
+                  style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: dsp.dither ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>TPDF Dithering</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: dsp.dither ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: dsp.dither ? '#fff' : 'var(--text-dim)' }}>
+                      {dsp.dither ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.4 }}>
+                    Reduces quantization distortion by adding 24-bit TPDF noise. Recommended for high-end DACs.
+                  </div>
                 </div>
               </div>
             </div>
@@ -804,7 +884,7 @@ function Visualizer() {
 
 /* ─── Now Playing ────────────────────────────────────── */
 function NowPlayingView() {
-  const { tracks, playback, coverArt, accentColor } = useStore();
+  const { tracks, playback, coverArt, accentColor, dsp } = useStore();
   const current = tracks.find(t => t.path === playback.current_track);
 
   // Apply dynamic accent colour as CSS variable on root
@@ -861,6 +941,16 @@ function NowPlayingView() {
             {playback.current_track?.startsWith('http') && (
               <span className="live-badge" style={{ flexShrink: 0 }}>LIVE</span>
             )}
+            {playback.bit_perfect && (
+              <span className="bit-badge" style={{ flexShrink: 0, background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', boxShadow: '0 0 12px rgba(6, 182, 212, 0.4)' }}>
+                BIT-PERFECT {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
+              </span>
+            )}
+            {dsp.upsample_rate > 0 && !playback.bit_perfect && (
+              <span className="bit-badge" style={{ flexShrink: 0, background: 'linear-gradient(135deg, #a855f7, #6366f1)', boxShadow: '0 0 12px rgba(168, 85, 247, 0.4)' }}>
+                HI-RES · {dsp.upsample_rate / 1000}kHz
+              </span>
+            )}
           </div>
           <div className="np-artist" style={{ 
             opacity: 0.7, 
@@ -893,7 +983,7 @@ function PlayerBar() {
   const {
     view, tracks, playback, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
-    playNext, playPrev, shuffle, toggleShuffle,
+    playNext, playPrev, shuffle, toggleShuffle, dsp,
   } = useStore();
 
   const activeLyric = useMemo(() => {
@@ -972,7 +1062,17 @@ function PlayerBar() {
 
       {/* RIGHT */}
       <div className="pb-right" style={{ gap: 16 }}>
-        {playback.exclusive && <span className="bit-badge" style={{ transform: 'none' }}>BIT-PERFECT</span>}
+        {playback.bit_perfect && (
+          <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)' }}>
+            BIT-PERFECT {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
+          </span>
+        )}
+        {playback.exclusive && !playback.bit_perfect && !dsp.upsample_rate && <span className="bit-badge" style={{ transform: 'none' }}>EXCLUSIVE</span>}
+        {dsp.upsample_rate > 0 && !playback.bit_perfect && (
+          <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #a855f7, #6366f1)' }}>
+            HI-RES · {dsp.upsample_rate / 1000}kHz
+          </span>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Volume2 size={16} color="var(--text-dim)" />
           <input className="vol-slider" type="range" min={0} max={1} step={0.01} style={{ width: 80 }}
