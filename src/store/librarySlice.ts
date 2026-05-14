@@ -12,13 +12,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   playlists: [],
   currentPlaylist: null,
 
-  addScanDir: (dir) => {
+  addScanDir: (dir: string) => {
     const newDirs = Array.from(new Set([...get().scanDirs, dir]));
     localStorage.setItem('aideo_scan_dirs', JSON.stringify(newDirs));
     set({ scanDirs: newDirs });
   },
 
-  removeScanDir: (dir) => {
+  removeScanDir: (dir: string) => {
     const newDirs = get().scanDirs.filter(d => d !== dir);
     localStorage.setItem('aideo_scan_dirs', JSON.stringify(newDirs));
     set({ scanDirs: newDirs });
@@ -42,7 +42,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error('loadLibrary:', e); }
   },
 
-  playTrack: async (track) => {
+  playTrack: async (track: Track) => {
     if (!track) return;
     try {
       const index = get().tracks.findIndex(t => t.path === track.path);
@@ -209,14 +209,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error(e); }
   },
 
-  createPlaylist: async (name) => {
+  createPlaylist: async (name: string) => {
     try {
       await invoke('create_playlist', { name });
       await get().fetchPlaylists();
     } catch (e) { console.error(e); }
   },
 
-  deletePlaylist: async (id) => {
+  deletePlaylist: async (id: number) => {
     try {
       await invoke('delete_playlist', { id });
       await get().fetchPlaylists();
@@ -227,7 +227,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error(e); }
   },
 
-  addToPlaylist: async (playlistId, trackPath) => {
+  addToPlaylist: async (playlistId: number, trackPath: string) => {
     try {
       await invoke('add_to_playlist', { playlistId, path: trackPath });
       if (get().currentPlaylist?.id === playlistId) {
@@ -236,7 +236,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error(e); }
   },
 
-  removeFromPlaylist: async (playlistId, trackPath) => {
+  removeFromPlaylist: async (playlistId: number, trackPath: string) => {
     try {
       await invoke('remove_from_playlist', { playlistId, path: trackPath });
       if (get().currentPlaylist?.id === playlistId) {
@@ -245,14 +245,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error(e); }
   },
 
-  loadPlaylistTracks: async (id) => {
+  loadPlaylistTracks: async (id: number) => {
     try {
       const tracks = await invoke<Track[]>('get_playlist_tracks', { playlistId: id });
       set({ tracks, currentPlaylist: get().playlists.find(p => p.id === id) || null });
     } catch (e) { console.error(e); }
   },
 
-  matchMetadata: async (track) => {
+  matchMetadata: async (track: Track) => {
     try {
       set({ scanStatus: `Matching ${track.title || 'track'}...` });
       const res: any = await invoke('mbz_search_recording', { title: track.title || '', artist: track.artist || '' });

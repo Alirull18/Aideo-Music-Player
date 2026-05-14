@@ -85,7 +85,8 @@ export interface PlayerState {
   setCustomPrompt: (prompt: Partial<CustomPromptState>) => void;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'nowplaying') => void;
+  setView: (view: 'library' | 'nowplaying' | 'lastfm') => void;
+  updateDiscordPresence: () => void;
   addScanDir: (dir: string) => void;
   removeScanDir: (dir: string) => void;
   setScrobbleThreshold: (val: number) => void;

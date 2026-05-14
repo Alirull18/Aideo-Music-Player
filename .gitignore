@@ -37,7 +37,13 @@ scratch/
 tauri.key*
 *.key*
 tauri.key.password
-ffmpeg.exe
-ytdlp.exe
 # Handover
 handler.md
+final_aideo.key
+
+# Binaries
+ffmpeg.exe
+ytdlp.exe
+*.exe
+*.msi
+*.sig

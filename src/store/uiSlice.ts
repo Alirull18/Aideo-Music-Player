@@ -18,21 +18,21 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     onSubmit: () => { }
   },
 
-  setCustomPrompt: (prompt) => set(s => ({
+  setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }
   })),
 
-  setPlaybackError: (err) => {
+  setPlaybackError: (err: string | null) => {
     set({ playbackError: err });
     if (err) setTimeout(() => get().setPlaybackError(null), 5000);
   },
 
-  setPlaybackSuccess: (msg) => {
+  setPlaybackSuccess: (msg: string | null) => {
     set({ playbackSuccess: msg });
     if (msg) setTimeout(() => get().setPlaybackSuccess(null), 4000);
   },
 
-  setView: (view) => set({ view }),
+  setView: (view: 'library' | 'nowplaying' | 'lastfm') => set({ view }),
 
   toggleSettings: () => set(s => ({ showSettings: !s.showSettings })),
 

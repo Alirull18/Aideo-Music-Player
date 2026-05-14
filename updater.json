@@ -1,11 +1,11 @@
 {
-  "version": "0.4.1",
-  "notes": "💎 AIDEO v0.4.1: The 'Ultra-Resilient' Update. Featuring hardened YouTube integration with Browser Cookie Sync (Edge/Chrome/Firefox) to bypass 429/403 blocks. Includes native yt-dlp pipe streaming and audiophile DSP improvements.",
-  "pub_date": "2026-05-13T21:00:00Z",
+  "version": "0.4.5",
+  "notes": "💎 AIDEO v0.4.5: The 'Presence' Update. \n- New Discord Rich Presence (Social Listening)\n- MusicBrainz 'Magic Match' Metadata Fixer\n- Sleek 'Pure List' Last.fm Dashboard\n- Stabilized Audio Visualizer & Performance Fixes.",
+  "pub_date": "2026-05-14T10:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSmJlSjQvZFJub2RWN0tEWEtubFgvZjlXVnNDSVEyTDFVR2FKZWNMVEtBL1hZNlBkN1ZOdlJ5MVpLWG9DcXJpaGxpeTUwOUlRZkJpQVREMkhyMjBMamM4UVJtRXdnTVFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NjQ5NzY1CWZpbGU6QWlkZW9fMC40LjBfeDY0X2VuLVVTLm1zaQpmWkN4SWRGeHZPU1BNbUhDT3AwWlJrVUFta2Vwb1p4YVhqcXZhNG1IZjJJZlBIRXZ4TTVJLzJmZnFrSjEzQ0dKL21VQUQwdU5UclhWbEZvdE4vWUVEdz09Cg==",
-      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v.0.4.1/Aideo_0.4.1_x64_en-US.msi"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSZTBxZVRmR0M0LzhWUUQxREhQVjFJOTNjdklSSEMzZjdvTUVWR09rOGFEVm9VNW0zQ3FqRFl2aWJGVkI0MEUvQ0JURitsaVZEZzBYRWRRVXdablBpZEVPalk5OHE5bWdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NzU0NzIyCWZpbGU6QWlkZW9fMC40LjVfeDY0X2VuLVVTLm1zaQpSVmtvaUJjY2thT2x1Tnk4UC9XVEN1anVHRXA0SmtCZ0pHaDZwcmJjOXlPZHFZM3VLK1ArSVlwZEdEY0J1WVpaMWR3YVN6T0J4dVduR2x5c3hNK0ZEdz09Cg==",
+      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.4.5/Aideo_0.4.5_x64_en-US.msi"
     }
   }
 }

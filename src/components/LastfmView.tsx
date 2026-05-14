@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
-import { Radio, Users, Activity, ExternalLink, RefreshCw } from 'lucide-react';
+import { Radio, Users, Activity, RefreshCw } from 'lucide-react';
 
 export function LastfmView() {
   const { 
-    lastfmSessionKey, lastfmUser, lastfmRecent, lastfmTopArtists, fetchLastfmDashboard,
-    scrobbleEnabled, toggleScrobble
+    lastfmSessionKey, lastfmUser, lastfmRecent, lastfmTopArtists, fetchLastfmDashboard
   } = useStore();
   const [loading, setLoading] = useState(false);
 

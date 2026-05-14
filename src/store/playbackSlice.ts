@@ -58,14 +58,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     } catch (e) { console.error(e); }
   },
 
-  setVolume: async (vol) => {
+  setVolume: async (vol: number) => {
     try {
       await invoke('set_volume', { volume: vol });
       set(s => ({ playback: { ...s.playback, volume: vol } }));
     } catch (e) { console.error(e); }
   },
 
-  seek: async (secs) => {
+  seek: async (secs: number) => {
     set(s => ({ playback: { ...s.playback, position_secs: secs } }));
     try { await invoke('seek_track', { secs }); } catch (e) { console.error(e); }
   },
@@ -117,7 +117,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     } catch (e) { }
   },
 
-  setDSP: async (newDSP) => {
+  setDSP: async (newDSP: Partial<DSPState>) => {
     const full = { ...get().dsp, ...newDSP } as DSPState;
     set({ dsp: full });
     try { await invoke('set_dsp_state', { dsp: full }); } catch (e) { console.error(e); }
@@ -149,14 +149,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     } catch (e) { console.error(e); }
   },
 
-  setAudioDevice: async (name) => {
+  setAudioDevice: async (name: string) => {
     try { 
       await invoke('set_audio_device', { name }); 
       set({ currentDevice: name }); 
     } catch (e) { console.error(e); }
   },
 
-  setDriverType: (type) => {
+  setDriverType: (type: 'WASAPI' | 'ASIO') => {
     set(s => ({ playback: { ...s.playback, driver_type: type } }));
   },
 

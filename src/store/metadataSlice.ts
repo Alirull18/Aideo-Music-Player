@@ -10,9 +10,9 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
   isTranslating: false,
   showRomaji: true,
 
-  setShowRomaji: (val) => set({ showRomaji: val }),
+  setShowRomaji: (val: boolean) => set({ showRomaji: val }),
 
-  adjustLyricOffset: (ms) => {
+  adjustLyricOffset: (ms: number) => {
     const newOffset = get().lyricOffset + ms;
     set({ lyricOffset: newOffset });
     const path = get().playback.current_track;
@@ -24,7 +24,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
   },
 
-  saveLyrics: async (path, lrc) => {
+  saveLyrics: async (path: string, lrc: string) => {
     try {
       await invoke('save_lyrics_file', { path, content: lrc });
       const lines: any = await invoke('get_lyrics', { path });
@@ -68,7 +68,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     } catch (e) { console.error(e); } finally { set({ isTranslating: false }); }
   },
 
-  applyOnlineCover: async (path, url) => {
+  applyOnlineCover: async (path: string, url: string) => {
     try {
       await invoke('apply_online_cover', { path, url });
       if (get().playback.current_track === path) {

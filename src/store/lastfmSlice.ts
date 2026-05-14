@@ -23,7 +23,7 @@ export const createLastfmSlice: StateCreator<PlayerState, [], [], any> = (set, g
     return { scrobbleEnabled: true };
   }),
 
-  setLastFmSession: (key) => {
+  setLastFmSession: (key: string | null) => {
     if (key) localStorage.setItem('lastfm_session', key);
     else localStorage.removeItem('lastfm_session');
     set({ lastfmSessionKey: key, scrobbleEnabled: !!key });
