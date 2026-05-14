@@ -18,6 +18,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "aideo"
+version = "0.4.5"
+dependencies = [
+ "base64 0.22.1",
+ "biquad",
+ "cpal",
+ "crossbeam-channel",
+ "dirs",
+ "discord-rich-presence",
+ "dotenvy",
+ "futures",
+ "lazy_static",
+ "md5",
+ "rand",
+ "reqwest 0.12.28",
+ "ringbuf",
+ "rubato",
+ "rusqlite",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "souvlaki",
+ "symphonia",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-deep-link",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tokio",
+ "url",
+ "urlencoding",
+ "walkdir",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4743,43 +4780,6 @@ dependencies = [
  "webview2-com",
  "window-vibrancy",
  "windows 0.61.3",
-]
-
-[[package]]
-name = "tauri-app"
-version = "0.4.1"
-dependencies = [
- "base64 0.22.1",
- "biquad",
- "cpal",
- "crossbeam-channel",
- "dirs",
- "discord-rich-presence",
- "dotenvy",
- "futures",
- "lazy_static",
- "md5",
- "rand",
- "reqwest 0.12.28",
- "ringbuf",
- "rubato",
- "rusqlite",
- "rustfft",
- "serde",
- "serde_json",
- "souvlaki",
- "symphonia",
- "tauri",
- "tauri-build",
- "tauri-plugin-deep-link",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tokio",
- "url",
- "urlencoding",
- "walkdir",
 ]
 
 [[package]]

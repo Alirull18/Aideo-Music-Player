@@ -1,6 +1,6 @@
 [package]
-name = "tauri-app"
-version = "0.4.1"
+name = "aideo"
+version = "0.4.5"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
