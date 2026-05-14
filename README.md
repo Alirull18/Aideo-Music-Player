@@ -1,6 +1,6 @@
-# 💎 Aideo Music Player
+# 💎 Aideo Music Player v0.4.5
 
-**A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics.**
+**A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics & Social Presence.**
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app)
@@ -43,21 +43,28 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - **Micro-Animations**: Interactive elements respond with high-performance animations for a "living" interface.
 - **Smart Thumbnails**: Asynchronous background loading for high-resolution library artwork.
 
+- **Global Support**: Integrated Romaji generation and one-click translation for international libraries.
 ### 📜 Intelligent Metadata & Lyrics
+
 - **Manual Lyric Finder**: (NEW v0.3.0) Take control of your library with an interactive search prompt. Override automatic metadata to find the perfect `.lrc` sync.
 - **Lyric Studio**: A dedicated workspace to paste AI-generated lyrics and save them as synced `.lrc` files instantly.
 - **Smart Lyric Engine**: High-speed retrieval from global providers (NetEase, QQMusic, LRCLIB).
 - **Stealth Integration**: Optimized headers (User-Agent/Referer) for 100% reliable online retrieval.
 - **Mini-Lyrics Bar**: A reactive scrolling lyric display integrated directly into the playback control bar.
-- **Global Support**: Integrated Romaji generation and one-click translation for international libraries.
+
+### 🌐 Social & Intelligent Metadata
+- **Discord Rich Presence**: (NEW v0.4.5) Show your listening status on Discord with high-quality metadata and direct "Download App" buttons.
+- **MusicBrainz Magic Match**: (NEW v0.4.5) One-click library cleaning. Instantly match your tracks with official MusicBrainz metadata to fix titles, artists, and albums.
+- **Last.fm Pure Dashboard**: Real-time listening stats and recent activity delivered in a sleek, minimalist "Pure List" design.
+- **Dynamic Visualizer**: (STABILIZED v0.4.5) High-performance, crash-resistant audio spectrum visualization optimized for Windows WebView2.
 
 ---
 
 ## 🚀 Getting Started
 
 ### ⚡ Quick Start (For Users)
-1. **Download**: Get the latest version (v0.4.0) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the installer (`Aideo_0.4.0_x64_en-US.msi`).
+1. **Download**: Get the latest version (v0.4.5) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the installer (`Aideo_0.4.5_x64_en-US.msi`).
 3. **Launch**: Open Aideo and start importing your music library!
 
 ---
@@ -116,11 +123,13 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - [x] **High-Res Badges**: Visual audio quality identification (FLAC/MP3).
 - [ ] **ASIO Support**: Professional-grade driver support.
 - [x] **Auto-Updater**: One-click application updates via GitHub.
+- [x] **Discord Rich Presence**: Integrated social listening status.
+- [x] **MusicBrainz Integration**: Smart "Magic Match" metadata fixing.
 
 ### 🎨 UI & UX Enhancements
 - [ ] **Mini-Player Mode**: A compact, always-on-top desktop widget.
 - [ ] **Folder Browser**: Direct filesystem navigation.
-- [ ] **Visualizer Engine**: Real-time FFT spectrum visualization.
+- [x] **Visualizer Engine**: Real-time FFT spectrum visualization (Optimized v0.4.5).
 
 ### ⚙️ Performance & Core
 - [x] **Bit-Perfect Bypass**: Skip all software processing when rates match.
