@@ -87,6 +87,14 @@ pub fn save_tracks(conn: &Connection, tracks: &mut [Track]) -> Result<()> {
     Ok(())
 }
 
+pub fn update_track_metadata(conn: &Connection, path: &str, title: &str, artist: &str, album: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE tracks SET title = ?1, artist = ?2, album = ?3 WHERE path = ?4",
+        rusqlite::params![title, artist, album, path],
+    )?;
+    Ok(())
+}
+
 pub fn update_track_offset(conn: &Connection, path: &str, offset: i32) -> Result<()> {
     conn.execute(
         "UPDATE tracks SET lyric_offset = ?1 WHERE path = ?2",

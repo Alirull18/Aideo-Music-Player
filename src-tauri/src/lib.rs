@@ -2,21 +2,35 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig};
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, Listener};
 
 mod artwork;
 mod db;
 mod lyrics;
 mod player;
-mod scanner;
+use crate::player::PlayerCommand;
 mod lastfm;
-mod downloader;
+mod scanner;
+mod musicbrainz;
+mod discord;
 
 // ── Shared application state ──────────────────────────────────────────────────
+// ── Safe Lock Utility ────────────────────────────────────────────────────────
+fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("[system] Mutex poisoned! Recovering...");
+            poisoned.into_inner()
+        }
+    }
+}
+
 pub struct AppState {
     pub player: Arc<Mutex<player::Player>>,
     pub db: Arc<Mutex<rusqlite::Connection>>,
     pub media_controls: Arc<Mutex<Option<MediaControls>>>,
+    pub cached_devices: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -148,6 +162,7 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
     Ok(results)
 }
 
+
 #[tauri::command]
 async fn get_netease_lrc(id: String) -> Result<String, String> {
     let client = reqwest::Client::new();
@@ -220,71 +235,123 @@ async fn lastfm_scrobble(artist: String, track: String, timestamp: i64, session_
     lastfm::scrobble(&artist, &track, timestamp, &session_key).await
 }
 
+#[tauri::command]
+async fn lastfm_get_user_info(session_key: String) -> Result<serde_json::Value, String> {
+    lastfm::get_user_info(&session_key).await
+}
+
+#[tauri::command]
+async fn lastfm_get_recent_tracks(username: String) -> Result<serde_json::Value, String> {
+    lastfm::get_recent_tracks(&username).await
+}
+
+#[tauri::command]
+async fn lastfm_get_top_artists(username: String) -> Result<serde_json::Value, String> {
+    lastfm::get_top_artists(&username).await
+}
+
+// ── MusicBrainz Commands ──────────────────────────────────────────────────
+#[tauri::command]
+async fn mbz_search_recording(title: String, artist: String) -> Result<serde_json::Value, String> {
+    musicbrainz::search_recording(&title, &artist).await
+}
+
+#[tauri::command]
+async fn mbz_get_cover_art(release_id: String) -> Result<String, String> {
+    musicbrainz::get_cover_art_url(&release_id).await
+}
+
+#[tauri::command]
+fn update_discord_presence(details: String, state_str: String, is_playing: bool) {
+    discord::update_presence(&details, &state_str, is_playing);
+}
+
 // ── FX Commands ────────────────────────────────────────────────────────────
 #[tauri::command]
 fn set_dsp_state(state: State<'_, AppState>, dsp: player::DSPState) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    let mut current = player.dsp_state.lock().unwrap();
+    let player = safe_lock(&state.player);
+    let mut current = safe_lock(&player.dsp_state);
     *current = dsp;
     Ok(())
 }
 
 #[tauri::command]
 fn get_dsp_state(state: State<'_, AppState>) -> Result<player::DSPState, String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    let current = player.dsp_state.lock().unwrap();
+    let player = safe_lock(&state.player);
+    let current = safe_lock(&player.dsp_state);
     Ok(current.clone())
 }
 
 // ── Device Commands ────────────────────────────────────────────────────────
 #[tauri::command]
-fn get_audio_devices() -> Result<Vec<String>, String> {
+fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let is_playing = {
+        let player = safe_lock(&state.player);
+        let status = safe_lock(&player.status);
+        *status != player::PlaybackStatus::Stopped
+    };
+
+    let mut cache = safe_lock(&state.cached_devices);
+
+    let mut all_names = Vec::new();
     let host = cpal::default_host();
-    let devices = host.output_devices().map_err(|e| e.to_string())?;
-    #[allow(deprecated)]
-    let names: Vec<String> = devices
-        .map(|d| d.name().unwrap_or("Unknown".to_string()))
-        .collect();
-    Ok(names)
+    if let Ok(devices) = host.output_devices() {
+        for d in devices {
+            #[allow(deprecated)]
+            if let Ok(name) = d.name() {
+                all_names.push(format!("[WASAPI] {}", name));
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if !is_playing || cache.is_empty() {
+            if let Ok(asio_host) = cpal::host_from_id(cpal::HostId::Asio) {
+                if let Ok(devices) = asio_host.output_devices() {
+                    for d in devices {
+                        #[allow(deprecated)]
+                        if let Ok(name) = d.name() {
+                            all_names.push(format!("[ASIO] {}", name));
+                        }
+                    }
+                }
+            }
+        } else {
+            for name in cache.iter() {
+                if name.starts_with("[ASIO]") && !all_names.contains(name) {
+                    all_names.push(name.clone());
+                }
+            }
+        }
+    }
+
+    *cache = all_names.clone();
+    Ok(all_names)
 }
 
 #[tauri::command]
 fn set_audio_device(state: State<'_, AppState>, name: String) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    let mut target_device = player.target_device.lock().unwrap();
+    let player = safe_lock(&state.player);
+    let mut target_device = safe_lock(&player.target_device);
     *target_device = Some(name);
+    let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
     Ok(())
 }
 
 // ── Scanner commands ──────────────────────────────────────────────────────────
 #[tauri::command]
-async fn scan_and_save(dirs: Vec<String>, state: State<'_, AppState>) -> Result<usize, String> {
+async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
     let mut all_tracks_to_save = Vec::new();
     let mut total_tracks = 0;
 
     for dir in dirs {
-        let tracks = scanner::scan_directory(&dir);
+        let tracks = scanner::scan_directory(&dir, &app_handle);
         total_tracks += tracks.len();
         all_tracks_to_save.extend(tracks);
     }
 
-    let conn = state
-        .db
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let conn = safe_lock(&state.db);
     let _ = conn.execute("DELETE FROM tracks", []);
     db::save_tracks(&conn, &mut all_tracks_to_save).map_err(|e| e.to_string())?;
     Ok(total_tracks)
@@ -295,54 +362,50 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
     let track = scanner::extract_metadata(std::path::Path::new(&path))
         .ok_or_else(|| "Failed to extract metadata from file".to_string())?;
     
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
     db::save_tracks(&conn, &mut [track]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::Playlist>, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
     db::get_playlists(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn create_playlist(name: String, state: State<'_, AppState>) -> Result<i32, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
     db::create_playlist(&conn, &name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn delete_playlist(id: i32, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
     db::delete_playlist(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn add_to_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
     db::add_to_playlist(&conn, playlist_id, &path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn remove_from_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
     db::remove_from_playlist(&conn, playlist_id, &path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
     db::get_playlist_tracks(&conn, playlist_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    let conn = state
-        .db
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let conn = safe_lock(&state.db);
     db::get_all_tracks(&conn).map_err(|e| e.to_string())
 }
 
@@ -384,50 +447,36 @@ async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
 // ── Exclusive Mode commands ──────────────────────────────────────────────────
 #[tauri::command]
 fn toggle_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    let mut mode = player.exclusive_mode.lock().unwrap();
+    let player = safe_lock(&state.player);
+    let mut mode = safe_lock(&player.exclusive_mode);
     *mode = !*mode;
-    let current_mode = *mode;
-    Ok(current_mode)
+    let val = *mode;
+    let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
+    Ok(val)
 }
 
 #[tauri::command]
 fn get_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    let mode = *player.exclusive_mode.lock().unwrap();
-    Ok(mode)
+    let player = safe_lock(&state.player);
+    let val = *safe_lock(&player.exclusive_mode);
+    Ok(val)
 }
 
 #[tauri::command]
 fn toggle_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    let mut mode = player.bit_perfect.lock().unwrap();
+    let player = safe_lock(&state.player);
+    let mut mode = safe_lock(&player.bit_perfect);
     *mode = !*mode;
-    let current_mode = *mode;
-    Ok(current_mode)
+    let val = *mode;
+    let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
+    Ok(val)
 }
 
 #[tauri::command]
 fn get_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    let mode = *player.bit_perfect.lock().unwrap();
-    Ok(mode)
+    let player = safe_lock(&state.player);
+    let val = *safe_lock(&player.bit_perfect);
+    Ok(val)
 }
 
 // ── Playback commands ─────────────────────────────────────────────────────────
@@ -439,7 +488,7 @@ fn update_media_metadata(
     duration: f64,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if let Some(controls) = state.media_controls.lock().unwrap().as_mut() {
+    if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
         controls
             .set_metadata(MediaMetadata {
                 title: Some(&title),
@@ -455,7 +504,7 @@ fn update_media_metadata(
 
 #[tauri::command]
 fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(controls) = state.media_controls.lock().unwrap().as_mut() {
+    if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
         controls
             .set_playback(if playing {
                 MediaPlayback::Playing { progress: None }
@@ -469,11 +518,7 @@ fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<()
 
 #[tauri::command]
 fn play_track(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let player = safe_lock(&state.player);
     player
         .cmd_tx
         .send(player::PlayerCommand::Play(path, 0.0))
@@ -483,18 +528,14 @@ fn play_track(path: String, state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn queue_next(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let player = state.player.lock().or_else(|e| Ok(e.into_inner())).map_err(|e: String| e)?;
+    let player = safe_lock(&state.player);
     player.cmd_tx.send(player::PlayerCommand::QueueNext(path)).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn pause_track(state: State<'_, AppState>) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let player = safe_lock(&state.player);
     player
         .cmd_tx
         .send(player::PlayerCommand::Pause)
@@ -504,11 +545,7 @@ fn pause_track(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn resume_track(state: State<'_, AppState>) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let player = safe_lock(&state.player);
     player
         .cmd_tx
         .send(player::PlayerCommand::Resume)
@@ -518,11 +555,7 @@ fn resume_track(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn stop_track(state: State<'_, AppState>) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let player = safe_lock(&state.player);
     player
         .cmd_tx
         .send(player::PlayerCommand::Stop)
@@ -532,26 +565,25 @@ fn stop_track(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_volume(volume: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
-    *player.volume.lock().unwrap() = volume;
+    let player = safe_lock(&state.player);
+    *safe_lock(&player.volume) = volume;
     Ok(())
 }
 
 #[tauri::command]
 fn seek_track(secs: f64, state: State<'_, AppState>) -> Result<(), String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let player = safe_lock(&state.player);
     player
         .cmd_tx
         .send(player::PlayerCommand::Seek(secs))
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_track_metadata(path: String, title: String, artist: String, album: String, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = safe_lock(&state.db);
+    db::update_track_metadata(&conn, &path, &title, &artist, &album).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -564,94 +596,37 @@ fn update_track_offset(path: String, offset: i32, state: State<'_, AppState>) ->
 
 #[tauri::command]
 fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let player = state
-        .player
-        .lock()
-        .or_else(|e| Ok(e.into_inner()))
-        .map_err(|e: String| e)?;
+    let player = safe_lock(&state.player);
     Ok(serde_json::json!({
-        "status": *player.status.lock().unwrap(),
-        "current_track": *player.current_track.lock().unwrap(),
-        "position_secs": *player.position_secs.lock().unwrap(),
-        "volume": *player.volume.lock().unwrap(),
-        "exclusive": *player.exclusive_mode.lock().unwrap(),
-        "bit_perfect": *player.bit_perfect.lock().unwrap(),
-        "dev_rate": *player.current_dev_rate.lock().unwrap(),
-        "dsp": *player.dsp_state.lock().unwrap(),
+        "status": *safe_lock(&player.status),
+        "current_track": *safe_lock(&player.current_track),
+        "position_secs": *safe_lock(&player.position_secs),
+        "volume": *safe_lock(&player.volume),
+        "exclusive": *safe_lock(&player.exclusive_mode),
+        "bit_perfect": *safe_lock(&player.bit_perfect),
+        "dev_rate": *safe_lock(&player.current_dev_rate),
+        "dsp": *safe_lock(&player.dsp_state),
     }))
+}
+
+#[tauri::command]
+fn log_error(msg: String) {
+    println!("[frontend-error] {}", msg);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    dotenvy::dotenv().ok();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            let db_path = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                .join("library.db");
-            if let Some(parent) = db_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let db_path_str = db_path.to_str().unwrap();
-            let conn = db::init_db(db_path_str).map_err(|e| e.to_string())?;
-
-            let mut controls_opt = None;
-
-            // Get the real HWND from the Tauri window — required by souvlaki on Windows
-            let hwnd = {
-                let main_window = app.get_webview_window("main").expect("main window not found");
-                #[cfg(target_os = "windows")]
-                {
-                    // Tauri 2 WebviewWindow has .hwnd() on Windows
-                    let raw = main_window.hwnd().expect("Failed to get HWND");
-                    Some(raw.0 as *mut std::ffi::c_void)
-                }
-                #[cfg(not(target_os = "windows"))]
-                { None }
-            };
-
-            let config = PlatformConfig {
-                dbus_name: "aideo",
-                display_name: "Aideo Music Player",
-                hwnd,
-            };
-
-            if let Ok(mut controls) = MediaControls::new(config) {
-                let app_handle = app.handle().clone();
-                controls
-                    .attach(move |event| match event {
-                        MediaControlEvent::Play => {
-                            let _ = app_handle.emit("media-play", ());
-                        }
-                        MediaControlEvent::Pause => {
-                            let _ = app_handle.emit("media-pause", ());
-                        }
-                        MediaControlEvent::Toggle => {
-                            let _ = app_handle.emit("media-toggle", ());
-                        }
-                        MediaControlEvent::Next => {
-                            let _ = app_handle.emit("media-next", ());
-                        }
-                        MediaControlEvent::Previous => {
-                            let _ = app_handle.emit("media-prev", ());
-                        }
-                        _ => {}
-                    })
-                    .ok();
-                controls_opt = Some(controls);
-            }
-
-            app.manage(AppState {
-                player: Arc::new(Mutex::new(player::Player::new(app.handle().clone()))),
-                db: Arc::new(Mutex::new(conn)),
-                media_controls: Arc::new(Mutex::new(controls_opt)),
-            });
-            Ok(())
-        })
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let _ = app.emit("deep-link", argv);
+        }))
         .invoke_handler(tauri::generate_handler![
+            log_error,
             scan_and_save,
             get_library,
             play_track,
@@ -680,10 +655,17 @@ pub fn run() {
             get_audio_devices,
             set_audio_device,
             apply_online_cover,
+            update_track_metadata,
             update_track_offset,
             lastfm_get_token,
             lastfm_get_session,
             lastfm_scrobble,
+            lastfm_get_user_info,
+            lastfm_get_recent_tracks,
+            lastfm_get_top_artists,
+            mbz_search_recording,
+            mbz_get_cover_art,
+            update_discord_presence,
             get_playlists,
             create_playlist,
             delete_playlist,
@@ -691,10 +673,81 @@ pub fn run() {
             remove_from_playlist,
             get_playlist_tracks,
             add_track_to_library,
-            downloader::download_youtube,
-            downloader::get_video_title,
         ])
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            discord::init_discord();
+            let _handle = app.handle().clone();
+            let app_data = app.path().app_data_dir().unwrap();
+            let db_path = app_data.join("aideo.db");
+            if let Some(parent) = db_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let db_path_str = db_path.to_str().unwrap();
+            let conn = db::init_db(db_path_str).map_err(|e| e.to_string())?;
+
+            #[cfg(target_os = "windows")]
+            {
+                match cpal::host_from_id(cpal::HostId::Asio) {
+                    Ok(asio_host) => {
+                        let devices = asio_host.output_devices().map(|ds| ds.count()).unwrap_or(0);
+                        if devices > 0 {
+                            println!("[system] ASIO host initialized successfully. Found {} devices.", devices);
+                        } else {
+                            println!("[system] ASIO host initialized but NO devices found.");
+                        }
+                    },
+                    Err(e) => {
+                        println!("[system] ASIO host FAILED: {}", e);
+                    }
+                }
+            }
+
+            let mut controls_opt = None;
+            let hwnd = {
+                let main_window = app.get_webview_window("main").expect("main window not found");
+                #[cfg(target_os = "windows")]
+                {
+                    let raw = main_window.hwnd().expect("Failed to get HWND");
+                    Some(raw.0 as *mut std::ffi::c_void)
+                }
+                #[cfg(not(target_os = "windows"))]
+                { None }
+            };
+
+            let config = PlatformConfig {
+                dbus_name: "aideo",
+                display_name: "Aideo Music Player",
+                hwnd,
+            };
+
+            if let Ok(mut controls) = MediaControls::new(config) {
+                let app_handle = app.handle().clone();
+                controls
+                    .attach(move |event| match event {
+                        MediaControlEvent::Play => { let _ = app_handle.emit("media-play", ()); }
+                        MediaControlEvent::Pause => { let _ = app_handle.emit("media-pause", ()); }
+                        MediaControlEvent::Toggle => { let _ = app_handle.emit("media-toggle", ()); }
+                        MediaControlEvent::Next => { let _ = app_handle.emit("media-next", ()); }
+                        MediaControlEvent::Previous => { let _ = app_handle.emit("media-prev", ()); }
+                        _ => {}
+                    })
+                    .ok();
+                controls_opt = Some(controls);
+            }
+
+            app.manage(AppState {
+                player: Arc::new(Mutex::new(player::Player::new(app.handle().clone()))),
+                db: Arc::new(Mutex::new(conn)),
+                media_controls: Arc::new(Mutex::new(controls_opt)),
+                cached_devices: Arc::new(Mutex::new(Vec::new())),
+            });
+
+            app.listen_any("deep-link", move |event| {
+                println!("Got deep link: {:?}", event.payload());
+            });
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

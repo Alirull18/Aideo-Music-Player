@@ -122,3 +122,55 @@ pub async fn scrobble(artist: &str, track: &str, timestamp: i64, session_key: &s
         Err(format!("Unexpected Last.fm response: {}", json))
     }
 }
+
+pub async fn get_user_info(session_key: &str) -> Result<Value, String> {
+    let mut params = BTreeMap::new();
+    params.insert("method".to_string(), "user.getInfo".to_string());
+    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("sk".to_string(), session_key.to_string());
+    
+    sign_request(&mut params);
+    params.insert("format".to_string(), "json".to_string());
+
+    let client = Client::new();
+    let res = client.get(format!("{}?{}", API_URL, encode_params(&params)))
+        .send().await.map_err(|e| e.to_string())?;
+    
+    let json: Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(json)
+}
+
+pub async fn get_recent_tracks(username: &str) -> Result<Value, String> {
+    let mut params = BTreeMap::new();
+    params.insert("method".to_string(), "user.getRecentTracks".to_string());
+    params.insert("user".to_string(), username.to_string());
+    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("limit".to_string(), "10".to_string());
+    
+    params.insert("format".to_string(), "json".to_string());
+
+    let client = Client::new();
+    let res = client.get(format!("{}?{}", API_URL, encode_params(&params)))
+        .send().await.map_err(|e| e.to_string())?;
+    
+    let json: Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(json)
+}
+
+pub async fn get_top_artists(username: &str) -> Result<Value, String> {
+    let mut params = BTreeMap::new();
+    params.insert("method".to_string(), "user.getTopArtists".to_string());
+    params.insert("user".to_string(), username.to_string());
+    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("limit".to_string(), "10".to_string());
+    params.insert("period".to_string(), "7day".to_string());
+    
+    params.insert("format".to_string(), "json".to_string());
+
+    let client = Client::new();
+    let res = client.get(format!("{}?{}", API_URL, encode_params(&params)))
+        .send().await.map_err(|e| e.to_string())?;
+    
+    let json: Value = res.json().await.map_err(|e| e.to_string())?;
+    Ok(json)
+}

@@ -18,6 +18,205 @@ use symphonia::default::{get_codecs, get_probe};
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use tauri::Emitter;
 
+/// 🛡️ Safe Lock Pattern: Handles mutex poisoning by recovering the inner data instead of panicking.
+fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("[player] CRITICAL: Mutex poisoned! Attempting recovery...");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// 📦 Grouped decoder state to simplify passing multiple arguments
+struct DecoderInfo {
+    pub format: Box<dyn symphonia::core::formats::FormatReader>,
+    pub decoder: Box<dyn symphonia::core::codecs::Decoder>,
+    pub track_id: u32,
+    pub time_base: Option<TimeBase>,
+    pub file_rate: usize,
+    pub file_ch: usize,
+}
+
+/// 🎚️ Hardware Rate Switching & Config Selection
+fn select_output_config(
+    device: &cpal::Device,
+    file_rate: usize,
+    file_ch: usize,
+    is_exclusive: bool,
+    is_stream: bool,
+    upsample_target: u32,
+    device_display_name: &str,
+) -> Vec<(cpal::StreamConfig, cpal::SampleFormat)> {
+    let mut configs = Vec::new();
+
+    // Priority 1: Upsampling Target (if enabled)
+    if upsample_target > 0 && !is_stream {
+        if let Ok(supported) = device.supported_output_configs() {
+            for c in supported {
+                if c.channels() as usize == file_ch {
+                    let min = c.min_sample_rate();
+                    let max = c.max_sample_rate();
+                    if min <= upsample_target && max >= upsample_target {
+                        let cfg = c.with_sample_rate(upsample_target).config();
+                        let host_name = if device_display_name.starts_with("[ASIO]") { "ASIO" } else { "WASAPI" };
+                        println!("AUDIOPHILE: {} -> Upsampling to {}Hz ({:?})", host_name, upsample_target, c.sample_format());
+                        configs.push((cfg, c.sample_format()));
+                        break; // Found our best upsample match
+                    }
+                }
+            }
+        }
+    }
+
+    // Priority 2: Native Bit-Perfect Match
+    if configs.is_empty() && is_exclusive && !is_stream {
+        if let Ok(supported) = device.supported_output_configs() {
+            let supported_configs: Vec<_> = supported.collect();
+            
+            // Priority 2a: High-Res Integer (I32/I24)
+            for c in &supported_configs {
+                if c.channels() as usize == file_ch && (c.sample_format() == cpal::SampleFormat::I32 || c.sample_format() == cpal::SampleFormat::I24) {
+                    if c.min_sample_rate() <= file_rate as u32 && c.max_sample_rate() >= file_rate as u32 {
+                        let cfg = c.with_sample_rate(file_rate as u32).config();
+                        println!("AUDIOPHILE: Native Integer Match ({:?}): {}Hz", c.sample_format(), file_rate);
+                        configs.push((cfg, c.sample_format()));
+                    }
+                }
+            }
+            
+            // Priority 2b: I16
+            if configs.is_empty() {
+                for c in &supported_configs {
+                    if c.channels() as usize == file_ch && c.sample_format() == cpal::SampleFormat::I16 {
+                        if c.min_sample_rate() <= file_rate as u32 && c.max_sample_rate() >= file_rate as u32 {
+                            let cfg = c.with_sample_rate(file_rate as u32).config();
+                            println!("AUDIOPHILE: Native I16 Match: {}Hz", file_rate);
+                            configs.push((cfg, c.sample_format()));
+                        }
+                    }
+                }
+            }
+
+            // Priority 2c: F32
+            if configs.is_empty() {
+                for c in &supported_configs {
+                    if c.channels() as usize == file_ch && c.sample_format() == cpal::SampleFormat::F32 {
+                        if c.min_sample_rate() <= file_rate as u32 && c.max_sample_rate() >= file_rate as u32 {
+                            let cfg = c.with_sample_rate(file_rate as u32).config();
+                            println!("AUDIOPHILE: Native Float Match: {}Hz", file_rate);
+                            configs.push((cfg, c.sample_format()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Final Fallback: Default (Shared Mode)
+    if configs.is_empty() {
+        if let Ok(def) = device.default_output_config() {
+            println!("AUDIOPHILE: Falling back to Default Shared Config: {}Hz", def.sample_rate());
+            configs.push((def.config(), def.sample_format()));
+        }
+    }
+
+    if configs.is_empty() {
+        eprintln!("[player] ERROR: No valid audio configurations found for this device.");
+    }
+
+    configs
+}
+
+/// 🎵 Prepare the media source and decoder
+fn prepare_decoder(
+    path: &str,
+    _app_handle: &tauri::AppHandle,
+    ffmpeg_path: &str,
+    current_process: &Arc<Mutex<Option<std::process::Child>>>,
+) -> Result<DecoderInfo, String> {
+    let is_stream = path.starts_with("http://") || path.starts_with("https://");
+
+    let mss = if is_stream {
+        println!("[player] Preparing URL stream proxy...");
+        let final_ff_path = ffmpeg_path.to_string();
+        let mut ps_command = format!("& '{}' '-headers' 'Referer: https://www.google.com/`r`nOrigin: https://www.google.com/`r`n' ", final_ff_path);
+        ps_command.push_str("'-user_agent' 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36' ");
+        ps_command.push_str("'-reconnect' '1' '-reconnect_at_eof' '1' '-reconnect_streamed' '1' '-reconnect_delay_max' '4' ");
+        ps_command.push_str(&format!("'-i' '{}' '-f' 'wav' '-acodec' 'pcm_s16le' '-ar' '44100' '-ac' '2' '-'", path.replace("'", "''")));
+
+        let mut cmd = if std::path::Path::new(r"C:\Windows\Sysnative").exists() {
+            std::process::Command::new(r"C:\Windows\Sysnative\WindowsPowerShell\v1.0\powershell.exe")
+        } else {
+            std::process::Command::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+        };
+        
+        cmd.args(["-ExecutionPolicy", "Bypass", "-Command", &ps_command])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        // Kill existing process safely
+        if let Some(mut old_child) = safe_lock(current_process).take() {
+            let _ = old_child.kill();
+        }
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let stderr = child.stderr.take().unwrap();
+                thread::spawn(move || {
+                    let reader = std::io::BufReader::new(stderr);
+                    for line in reader.lines().filter_map(|l| l.ok()) {
+                        if line.contains("Error") { eprintln!("[ffmpeg-err] {}", line); }
+                    }
+                });
+                let stdout = child.stdout.take().unwrap();
+                *safe_lock(current_process) = Some(child);
+                let source = symphonia::core::io::ReadOnlySource::new(stdout);
+                MediaSourceStream::new(Box::new(source), Default::default())
+            },
+            Err(e) => return Err(format!("FFmpeg failed: {}", e)),
+        }
+    } else {
+        let file = std::fs::File::open(path).map_err(|e| format!("File error: {}", e))?;
+        MediaSourceStream::new(Box::new(file), Default::default())
+    };
+
+    let mut hint = Hint::new();
+    if let Some(ext) = std::path::Path::new(path).extension() {
+        hint.with_extension(&ext.to_string_lossy());
+    } else if is_stream {
+        hint.with_extension("mp3"); // Default for streams
+    }
+
+    let probed = get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions { 
+        limit_metadata_bytes: symphonia::core::meta::Limit::Maximum(1024 * 8),
+        limit_visual_bytes: symphonia::core::meta::Limit::Maximum(1) 
+    }).map_err(|e| format!("Probe error: {}", e))?;
+
+    let format = probed.format;
+    let track = format.default_track().ok_or("No default track")?.clone();
+    let track_id = track.id;
+    let decoder = get_codecs().make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| format!("Codec error: {}", e))?;
+
+    let rate = track.codec_params.sample_rate.unwrap_or(44100) as usize;
+    let ch = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
+
+    if is_stream {
+        let _ = _app_handle.emit("playback-success", path.to_string());
+    }
+
+    Ok(DecoderInfo {
+        format,
+        decoder,
+        track_id,
+        time_base: track.codec_params.time_base,
+        file_rate: rate,
+        file_ch: ch,
+    })
+}
+
 #[derive(Debug)]
 pub enum PlayerCommand {
     Play(String, f64),
@@ -26,6 +225,7 @@ pub enum PlayerCommand {
     Stop,
     Seek(f64),
     QueueNext(String),
+    RestartStream,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -40,26 +240,11 @@ pub struct DSPState {
 }
 
 fn find_ffmpeg_path() -> String {
-    if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") {
-        let base_path = std::path::PathBuf::from(local_appdata).join("Microsoft").join("WinGet").join("Packages");
-        if let Ok(entries) = std::fs::read_dir(&base_path) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let name = entry.file_name().to_string_lossy().to_lowercase();
-                if name.contains("ffmpeg") {
-                    if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
-                        for sub in sub_entries.filter_map(|e| e.ok()) {
-                            let bin_path = sub.path().join("bin").join("ffmpeg.exe");
-                            if bin_path.exists() { return bin_path.to_string_lossy().to_string(); }
-                            let direct_path = sub.path().join("ffmpeg.exe");
-                            if direct_path.exists() { return direct_path.to_string_lossy().to_string(); }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    "ffmpeg".to_string()
+    let local_path = r"C:\Users\Alirul\Downloads\Aideo_Music_Player\ffmpeg.exe";
+    if std::path::Path::new(local_path).exists() { return local_path.to_string(); }
+    "ffmpeg.exe".to_string()
 }
+
 
 #[derive(Clone)]
 pub struct CachedTrack {
@@ -245,22 +430,30 @@ fn player_loop(
         match cmd {
             PlayerCommand::Play(path, start_pos) => {
                 {
-                    let mut s = status.lock().unwrap();
+                    let mut s = safe_lock(&status);
                     *s = PlaybackStatus::Playing;
-                    let mut ct = current_track.lock().unwrap();
+                    let mut ct = safe_lock(&current_track);
                     *ct = Some(path.clone());
-                    let mut pos = position_secs.lock().unwrap();
+                    let mut pos = safe_lock(&position_secs);
                     *pos = start_pos;
                 }
 
                 next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queued_track), Arc::clone(&current_process), &rx, &app_handle, &fft_tx, &ffmpeg_path);
 
                 if next_track.is_none() {
-                    let mut s = status.lock().unwrap();
+                    let mut s = safe_lock(&status);
                     *s = PlaybackStatus::Stopped;
-                    let mut ct = current_track.lock().unwrap();
+                    let mut ct = safe_lock(&current_track);
                     *ct = None;
                 }
+            }
+            PlayerCommand::RestartStream => {
+                let (path, pos) = {
+                    let ct = safe_lock(&current_track);
+                    let ps = safe_lock(&position_secs);
+                    if let Some(p) = ct.clone() { (p, *ps) } else { continue; }
+                };
+                next_track = Some((path, pos));
             }
             _ => {} 
         }
@@ -270,7 +463,7 @@ fn player_loop(
 
 /// Soft limiter — prevents digital clipping on heavy boosts
 fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>>) {
-    if let Some(mut child) = current_process.lock().unwrap().take() {
+    if let Some(mut child) = safe_lock(&current_process).take() {
         let _ = child.kill();
     }
 }
@@ -327,7 +520,7 @@ fn background_decode(
 
         if let Ok(decoded) = decoder.decode(&packet) {
             let n_frames = decoded_frames(&decoded);
-            let mut lock = samples.lock().unwrap();
+            let mut lock = safe_lock(&samples);
             let file_ch = lock.len();
             for ch in 0..file_ch {
                 let src: Vec<f32> = match &decoded {
@@ -346,24 +539,6 @@ fn background_decode(
     complete.store(true, Ordering::SeqCst);
 }
 
-fn get_track_metadata(path: &str) -> Result<(usize, usize, Option<TimeBase>), String> {
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    let mut hint = Hint::new();
-    if let Some(ext) = std::path::Path::new(path).extension() {
-        hint.with_extension(&ext.to_string_lossy());
-    }
-
-    let probed = get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default()).map_err(|e| e.to_string())?;
-    let track = probed.format.default_track().ok_or("No default track")?.clone();
-    let time_base = track.codec_params.time_base.or_else(|| {
-        Some(symphonia::core::units::TimeBase { numer: 1, denom: track.codec_params.sample_rate.unwrap_or(44100) })
-    });
-    let file_rate = track.codec_params.sample_rate.unwrap_or(44100) as usize;
-    let file_ch   = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
-
-    Ok((file_rate, file_ch, time_base))
-}
 
 fn play_file(
     path: &str,
@@ -385,266 +560,138 @@ fn play_file(
     fft_tx: &Sender<Vec<f32>>,
     ffmpeg_path: &str,
 ) -> Option<(String, f64)> {
-    *current_track.lock().unwrap() = Some(path.to_string());
-    let mut stream_content_type: Option<String> = None;
-    println!("[player] Using FFmpeg path: {}", ffmpeg_path);
-
-    let mss = if path.starts_with("http://") || path.starts_with("https://") {
-        println!("[player] Detected HTTP stream, attempting FFmpeg proxy...");
-        
-        let mut cmd = std::process::Command::new(&ffmpeg_path);
-        cmd.args([
-            "-headers", "Referer: https://www.hotfm.audio/\r\nOrigin: https://www.hotfm.audio/\r\n",
-            "-user_agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-            "-reconnect", "1",
-            "-reconnect_at_eof", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_delay_max", "2",
-            "-i", path,
-            "-f", "wav",
-            "-acodec", "pcm_s16le",
-            "-ar", "44100",
-            "-ac", "2",
-            "-"
-        ])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-        // Kill existing process if any
-        if let Some(mut old_child) = current_process.lock().unwrap().take() {
-            let _ = old_child.kill();
-        }
-
-        match cmd.spawn() {
-            Ok(mut child) => {
-                println!("[player] FFmpeg proxy spawned successfully.");
-                
-                // Monitor stderr in a thread
-                let stderr = child.stderr.take().unwrap();
-                std::thread::spawn(move || {
-                    let reader = std::io::BufReader::new(stderr);
-                    for line in reader.lines().filter_map(|l| l.ok()) {
-                        println!("[ffmpeg] {}", line);
-                    }
-                });
-
-                let stdout = child.stdout.take().unwrap();
-                
-                // Store child for future termination
-                *current_process.lock().unwrap() = Some(child);
-
-                let source = symphonia::core::io::ReadOnlySource::new(stdout);
-                stream_content_type = Some("audio/wav".to_string());
-                MediaSourceStream::new(Box::new(source), Default::default())
-            },
-            Err(_) => {
-                let client = reqwest::blocking::Client::builder()
-                    .user_agent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-                    .timeout(std::time::Duration::from_secs(15))
-                    .build()
-                    .ok()?;
-                let resp = client.get(path).send().ok()?;
-                let source = symphonia::core::io::ReadOnlySource::new(resp);
-                MediaSourceStream::new(Box::new(source), Default::default())
-            }
-        }
-    } else {
-        let file = match std::fs::File::open(path) {
-            Ok(f) => f,
-            Err(e) => { 
-                let msg = format!("File open error: {}", e);
-                let _ = app_handle.emit("playback-error", msg);
-                return None; 
-            }
-        };
-        MediaSourceStream::new(Box::new(file), Default::default())
-    };
-    let mut hint = Hint::new();
-    let mut hint_set = false;
-    if path.starts_with("http://") || path.starts_with("https://") {
-        // Fallback to extension from URL
-        let url_path = path.split('?').next().unwrap_or(path);
-        if let Some(ext) = std::path::Path::new(url_path).extension() {
-            hint.with_extension(&ext.to_string_lossy());
-            hint_set = true;
-        }
-    } else if let Some(ext) = std::path::Path::new(path).extension() {
-        hint.with_extension(&ext.to_string_lossy());
-        hint_set = true;
-    }
+    *safe_lock(&current_track) = Some(path.to_string());
     
-    // If we have a response from a stream, try to use Content-Type header as a better hint
-    if let Some(ct) = stream_content_type {
-        if ct.contains("mpeg") || ct.contains("mp3") {
-            hint.with_extension("mp3");
-            hint_set = true;
-        } else if ct.contains("aac") || ct.contains("audio/x-aac") {
-            hint.with_extension("aac");
-            hint_set = true;
-        } else if ct.contains("ogg") || ct.contains("opus") {
-            hint.with_extension("ogg");
-            hint_set = true;
-        } else if ct.contains("flac") {
-            hint.with_extension("flac");
-            hint_set = true;
-        } else if ct.contains("wav") {
-            hint.with_extension("wav");
-            hint_set = true;
-        }
-    } 
-    
-    if (path.starts_with("http") || path.starts_with("https")) && !hint_set {
-        // Absolute fallback for streams without extensions or headers
-        hint.with_extension("mp3");
-    }
-    
-    println!("[player] Probing media format...");
-    let probed = match get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions { 
-        limit_metadata_bytes: symphonia::core::meta::Limit::Maximum(1024 * 16),
-        limit_visual_bytes: symphonia::core::meta::Limit::Maximum(1) 
-    }) {
-        Ok(p) => {
-            println!("[player] Format probed successfully.");
-            if path.starts_with("http://") || path.starts_with("https://") {
-                // We don't have the response here easily, but we can assume success if we got here
-                // However, if it was a 403, it would have failed probe anyway.
-                let _ = app_handle.emit("playback-success", path.to_string());
-            }
-            p
-        },
-        Err(e) => { 
-            let msg = format!("Codec probe error: {}", e);
-            eprintln!("[player] {}", msg);
-            let _ = app_handle.emit("playback-error", msg);
-            return None; 
-        }
-    };
-    let mut format = probed.format;
-    let track = match format.default_track() {
-        Some(t) => t.clone(),
-        None => { 
-            let msg = "No default track found in media".to_string();
-            let _ = app_handle.emit("playback-error", msg);
-            return None; 
+    // 1. Initialize Decoder
+    let info = match prepare_decoder(path, app_handle, ffmpeg_path, &current_process) {
+        Ok(i) => i,
+        Err(e) => {
+            let _ = app_handle.emit("playback-error", e);
+            return None;
         }
     };
 
-    let track_id = track.id;
-    let mut decoder = match get_codecs().make(&track.codec_params, &DecoderOptions::default()) {
-        Ok(d) => d,
-        Err(_) => return None,
-    };
+    let file_rate = info.file_rate;
+    let file_ch = info.file_ch;
+    let track_id = info.track_id;
+    let mut format = info.format;
+    let mut decoder = info.decoder;
+    let time_base = info.time_base;
 
-    let is_exclusive = *exclusive_mode.lock().unwrap();
-
-    // 1. PRE-DECODE INTO RAM (if not a stream)
+    let is_exclusive = *safe_lock(&exclusive_mode);
     let is_stream = path.starts_with("http://") || path.starts_with("https://");
-    
+
+    // 2. PRE-DECODE INTO RAM (if not a stream)
     let decode_shutdown = Arc::new(AtomicBool::new(false));
-    let (decoded_samples, file_rate, file_ch, time_base, is_complete) = if !is_stream {
-        let mut cache_lock = cache.lock().unwrap();
+    let (decoded_samples, is_complete) = if !is_stream {
+        let mut cache_lock = safe_lock(&cache);
         let use_cached = if let Some(cached) = &*cache_lock {
             if cached.path == path { Some(cached.clone()) } else { None }
         } else { None };
 
         if let Some(cached) = use_cached {
-            (Some(cached.samples), cached.file_rate, cached.file_ch, cached.time_base, Some(cached.complete))
+            (Some(cached.samples), Some(cached.complete))
         } else {
-            match get_track_metadata(path) {
-                Ok((rate, ch, tb)) => {
-                    let samples = Arc::new(Mutex::new(vec![Vec::new(); ch]));
-                    let complete = Arc::new(AtomicBool::new(false));
-                    let cached = CachedTrack {
-                        path: path.to_string(),
-                        samples: Arc::clone(&samples),
-                        complete: Arc::clone(&complete),
-                        file_rate: rate,
-                        file_ch: ch,
-                        time_base: tb,
-                    };
-                    *cache_lock = Some(cached);
-                    
-                    let path_str = path.to_string();
-                    let s_clone = Arc::clone(&samples);
-                    let c_clone = Arc::clone(&complete);
-                    let sd_clone = Arc::clone(&decode_shutdown);
-                    thread::spawn(move || {
-                        background_decode(path_str, s_clone, c_clone, sd_clone);
-                    });
-                    
-                    (Some(samples), rate, ch, tb, Some(complete))
-                }
-                Err(e) => {
-                    let _ = app_handle.emit("playback-error", format!("Metadata failed: {}", e));
-                    return None;
-                }
-            }
+            let samples = Arc::new(Mutex::new(vec![Vec::new(); file_ch]));
+            let complete = Arc::new(AtomicBool::new(false));
+            let cached = CachedTrack {
+                path: path.to_string(),
+                samples: Arc::clone(&samples),
+                complete: Arc::clone(&complete),
+                file_rate,
+                file_ch,
+                time_base,
+            };
+            *cache_lock = Some(cached);
+            
+            let path_str = path.to_string();
+            let s_clone = Arc::clone(&samples);
+            let c_clone = Arc::clone(&complete);
+            let sd_clone = Arc::clone(&decode_shutdown);
+            thread::spawn(move || {
+                background_decode(path_str, s_clone, c_clone, sd_clone);
+            });
+            
+            (Some(samples), Some(complete))
         }
     } else {
-        (None, 44100, 2, None, None)
+        (None, None)
     };
 
-    let host = cpal::default_host();
+    let target = safe_lock(&target_device).clone();
+
+    let host = if let Some(ref name) = target {
+        if name.starts_with("[ASIO]") {
+            #[cfg(target_os = "windows")]
+            { cpal::host_from_id(cpal::HostId::Asio).unwrap_or(cpal::default_host()) }
+            #[cfg(not(target_os = "windows"))]
+            { cpal::default_host() }
+        } else {
+            cpal::default_host()
+        }
+    } else {
+        cpal::default_host()
+    };
+
     let device = {
-        let target = target_device.lock().unwrap().clone();
-        let dev = if let Some(name) = target {
+        let dev = if let Some(ref full_name) = target {
+            let actual_name = if full_name.starts_with("[ASIO] ") {
+                full_name.trim_start_matches("[ASIO] ").to_string()
+            } else if full_name.starts_with("[WASAPI] ") {
+                full_name.trim_start_matches("[WASAPI] ").to_string()
+            } else {
+                full_name.clone()
+            };
+
+            println!("[player] Attempting to open device: \"{}\" on host: \"{:?}\"", actual_name, host.id());
+            
             #[allow(deprecated)]
-            host.output_devices().ok().and_then(|mut ds| ds.find(|d| d.name().unwrap_or_default() == name))
+            match host.output_devices() {
+                Ok(mut ds) => ds.find(|d| d.name().unwrap_or_default() == actual_name),
+                Err(e) => {
+                    eprintln!("[player] Could not list host devices: {}", e);
+                    None
+                }
+            }
         } else {
             None
         };
-        dev.or_else(|| host.default_output_device()).expect("No output device found")
+        
+        match dev.or_else(|| host.default_output_device()) {
+            Some(d) => d,
+            None => {
+                println!("[player] Target device not found or host error. Falling back to system default.");
+                cpal::default_host().default_output_device().expect("No audio device available at all")
+            }
+        }
     };
 
-    let upsample_target = dsp_state.lock().unwrap().upsample_rate;
-
-    // 2. HARDWARE RATE SWITCHING
-    let mut configs_to_try = Vec::new();
-
-    // Priority 1: Upsampling Target (if enabled)
-    if upsample_target > 0 && !is_stream {
-        if let Ok(supported) = device.supported_output_configs() {
-            for c in supported {
-                if c.channels() as usize == file_ch {
-                    let min = c.min_sample_rate();
-                    let max = c.max_sample_rate();
-                    if min <= upsample_target && max >= upsample_target {
-                        let cfg = c.with_sample_rate(upsample_target).config();
-                        println!("AUDIOPHILE: Upsampling target rate found: {}Hz", upsample_target);
-                        configs_to_try.push(cfg);
-                    }
-                }
-            }
-        }
-    }
-
-    // Priority 2: Native Bit-Perfect Match
-    if configs_to_try.is_empty() && is_exclusive && !is_stream {
-        if let Ok(supported) = device.supported_output_configs() {
-            for c in supported {
-                if c.channels() as usize == file_ch {
-                    let min = c.min_sample_rate();
-                    let max = c.max_sample_rate();
-                    if min <= file_rate as u32 && max >= file_rate as u32 {
-                        let cfg = c.with_sample_rate(file_rate as u32).config();
-                        println!("AUDIOPHILE: Matching hardware rate found: {}Hz", file_rate);
-                        configs_to_try.push(cfg);
-                    }
-                }
-            }
-        }
-    }
-    if let Ok(def) = device.default_output_config() {
-        configs_to_try.push(def.config());
-    }
-
-    if configs_to_try.is_empty() { return None; }
+    let device_display_name = target.clone().unwrap_or_else(|| "Default Device".to_string());
+    
+    let upsample_target = safe_lock(&dsp_state).upsample_rate;
+    let configs_to_try = select_output_config(
+        &device,
+        file_rate,
+        file_ch,
+        is_exclusive,
+        is_stream,
+        upsample_target,
+        &device_display_name,
+    );
 
     let mut stream_info: Option<(cpal::Stream, cpal::StreamConfig)> = None;
     let mut prod_opt = None;
     let flush_signal = Arc::new(AtomicBool::new(false));
 
-    for config in configs_to_try {
+    // Determine if we should attempt EXCLUSIVE mode
+    // (Only for local files and when Bit-Perfect/Upsampling is requested)
+    let request_exclusive = is_exclusive && !is_stream;
+
+    if request_exclusive {
+        println!("[player] AUDIOPHILE: Requesting EXCLUSIVE hardware access for bit-perfect output...");
+    }
+
+    for (config, sample_format) in configs_to_try {
         let status_cb = Arc::clone(&status);
         let volume_cb = Arc::clone(&volume);
         let flush_cb = Arc::clone(&flush_signal);
@@ -652,51 +699,147 @@ fn play_file(
         // Compute max ring size (2 seconds of audio at target rate)
         let rate = config.sample_rate as usize;
         let channels = config.channels as usize;
-        let max_ring = rate * channels * 2;
+        let max_ring = rate * channels;
         
         let rb = RingBuffer::<f32>::new(max_ring);
         let (prod, mut cons) = rb.split();
 
-        let stream_res = device.build_output_stream(
-            &config,
-            move |out: &mut [f32], _| {
-                let is_paused = *status_cb.lock().unwrap() == PlaybackStatus::Paused;
-                if is_paused { 
-                    out.fill(0.0); 
-                    return; 
-                }
-                
-                // Handle seek/flush signal lock-free
-                if flush_cb.swap(false, Ordering::SeqCst) {
-                    let len = cons.len();
-                    cons.discard(len);
-                }
-                
-                let vol = *volume_cb.lock().unwrap();
-                let n = cons.pop_slice(out);
-                
-                for i in 0..n { 
-                    out[i] *= vol; 
-                }
-                if n < out.len() { 
-                    out[n..].fill(0.0); 
-                }
-            },
-            |e| eprintln!("[player] stream error: {e}"),
-            None,
-        );
+        let config_inner = config.clone();
+
+        // 🛡️ TRUTH: For strict ASIO drivers, we must match the hardware's expected format exactly.
+        let stream_res = match sample_format {
+            cpal::SampleFormat::F32 => device.build_output_stream(
+                &config_inner,
+                move |data: &mut [f32], _| {
+                    if *safe_lock(&status_cb) == PlaybackStatus::Paused { data.fill(0.0); return; }
+                    if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
+                    let vol = *safe_lock(&volume_cb);
+                    let n = cons.pop_slice(data);
+                    for i in 0..n { data[i] *= vol; }
+                    if n < data.len() { data[n..].fill(0.0); }
+                },
+                |e| eprintln!("[player] stream error: {e}"),
+                None,
+            ),
+            cpal::SampleFormat::I16 => device.build_output_stream(
+                &config_inner,
+                move |data: &mut [i16], _| {
+                    if *safe_lock(&status_cb) == PlaybackStatus::Paused { data.fill(0); return; }
+                    if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
+                    let vol = *safe_lock(&volume_cb);
+                    let mut buf = vec![0.0; data.len()];
+                    let n = cons.pop_slice(&mut buf);
+                    for i in 0..n { 
+                        data[i] = (buf[i] * vol * i16::MAX as f32) as i16; 
+                    }
+                    if n < data.len() { data[n..].fill(0); }
+                },
+                |e| eprintln!("[player] stream error: {e}"),
+                None,
+            ),
+            _ => device.build_output_stream(
+                &config_inner,
+                move |data: &mut [i32], _| {
+                    if *safe_lock(&status_cb) == PlaybackStatus::Paused { data.fill(0); return; }
+                    if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
+                    let vol = *safe_lock(&volume_cb);
+                    let mut buf = vec![0.0; data.len()];
+                    let n = cons.pop_slice(&mut buf);
+                    
+                    // Handle I32/I24 (padded)
+                    for i in 0..n { 
+                        data[i] = (buf[i] * vol * i32::MAX as f32) as i32; 
+                    }
+                    if n < data.len() { data[n..].fill(0); }
+                },
+                |e| eprintln!("[player] stream error: {e}"),
+                None,
+            ),
+        };
 
         if let Ok(s) = stream_res {
+            // 🕒 PRE-FILL PROTOCOL: Wait for buffer to have enough data before playing
+            // We want at least 200ms of audio ready to prevent "crisp" startup noise.
+            let ms_200_samples = (config.sample_rate as usize * config.channels as usize) / 5;
+            
+            println!("[player] Pre-filling buffer (200ms)...");
+            let mut attempts = 0;
+            while prod.len() < ms_200_samples && attempts < 100 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                attempts += 1;
+            }
+
             let _ = s.play();
+            println!("[player] AUDIOPHILE: Exclusive hardware stream established!");
+            println!("         -> Host: {:?}", host.id());
+            println!("         -> Rate: {}Hz", config.sample_rate);
             stream_info = Some((s, config));
             prod_opt = Some(prod);
             break;
+        } else if let Err(e) = stream_res {
+            eprintln!("[player] Could not establish exclusive stream: {}.", e);
+            if let Ok(supported) = device.supported_output_configs() {
+                println!("[player] Probing device capabilities for \"{}\":", device_display_name);
+                for (idx, c) in supported.enumerate() {
+                    println!("         -> Config {}: {:?} ({}Hz - {}Hz)", idx, c.sample_format(), c.min_sample_rate(), c.max_sample_rate());
+                }
+            }
+            println!("[player] Trying next config...");
+        }
+    }
+
+    if stream_info.is_none() {
+        let msg = format!("Device \"{}\" failed. Falling back to System Default.", device_display_name);
+        println!("[player] CRITICAL: {}", msg);
+        let _ = app_handle.emit("playback-error", msg);
+
+        // EMERGENCY FALLBACK: Try Default Host and Default Device
+        let host = cpal::default_host();
+        if let Some(dev) = host.default_output_device() {
+            if let Ok(def_cfg) = dev.default_output_config() {
+                let cfg = def_cfg.config();
+                let fmt = def_cfg.sample_format();
+                let status_cb = Arc::clone(&status);
+                let volume_cb = Arc::clone(&volume);
+                let flush_cb = Arc::clone(&flush_signal);
+                let rb = RingBuffer::<f32>::new(cfg.sample_rate as usize * cfg.channels as usize);
+                let (prod, mut cons) = rb.split();
+                
+                let stream_res = match fmt {
+                    cpal::SampleFormat::F32 => dev.build_output_stream(&cfg, move |d: &mut [f32], _| {
+                        if *safe_lock(&status_cb) == PlaybackStatus::Paused { d.fill(0.0); return; }
+                        if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
+                        let vol = *safe_lock(&volume_cb);
+                        let n = cons.pop_slice(d);
+                        for i in 0..n { d[i] *= vol; }
+                        if n < d.len() { d[n..].fill(0.0); }
+                    }, |_| {}, None),
+                    _ => dev.build_output_stream(&cfg, move |d: &mut [i16], _| {
+                        if *safe_lock(&status_cb) == PlaybackStatus::Paused { d.fill(0); return; }
+                        if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
+                        let vol = *safe_lock(&volume_cb);
+                        let mut buf = vec![0.0; d.len()];
+                        let n = cons.pop_slice(&mut buf);
+                        for i in 0..n { d[i] = (buf[i] * vol * i16::MAX as f32) as i16; }
+                        if n < d.len() { d[n..].fill(0); }
+                    }, |_| {}, None),
+                };
+
+                if let Ok(s) = stream_res {
+                    let _ = s.play();
+                    stream_info = Some((s, cfg));
+                    prod_opt = Some(prod);
+                }
+            }
         }
     }
 
     let (stream, config) = match stream_info {
         Some(i) => i,
-        None => return None,
+        None => {
+            let _ = app_handle.emit("playback-error", "Total audio system failure. Please restart app.");
+            return None;
+        }
     };
     
     let mut prod = prod_opt.unwrap();
@@ -706,14 +849,14 @@ fn play_file(
     let use_ch   = file_ch.min(dev_ch);
     
     // REPORT ACTUAL HARDWARE RATE
-    *current_dev_rate.lock().unwrap() = dev_rate as u32;
+    *safe_lock(&current_dev_rate) = dev_rate as u32;
 
     let chunk_size = 512usize;
 
-    let mut current_dsp = dsp_state.lock().unwrap().clone();
+    let mut current_dsp = safe_lock(&dsp_state).clone();
     let mut fft_buffer = Vec::with_capacity(2048);
 
-    let mut resampler: SincFixedIn<f32> = SincFixedIn::<f32>::new(
+    let mut resampler = match SincFixedIn::<f32>::new(
         dev_rate as f64 / file_rate as f64,
         2.0,
         SincInterpolationParameters {
@@ -725,12 +868,22 @@ fn play_file(
         },
         chunk_size,
         file_ch
-    ).unwrap();
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = format!("Resampler error: {}. Hardware rate {}Hz might be incompatible.", e, dev_rate);
+            eprintln!("[player] {}", msg);
+            let _ = app_handle.emit("playback-error", msg);
+            return None;
+        }
+    };
 
     let mut pending: Vec<VecDeque<f32>> = vec![VecDeque::new(); file_ch];
     let mut running = true;
     let mut next_track_info: Option<(String, f64)> = None;
     let last_exclusive = is_exclusive;
+    let bp_now = *safe_lock(&bit_perfect);
+    let last_bit_perfect = bp_now;
     let last_upsample_rate = upsample_target;
     let is_stream = path.starts_with("http://") || path.starts_with("https://");
 
@@ -741,12 +894,12 @@ fn play_file(
         loop {
             match rx.try_recv() {
                 Ok(PlayerCommand::Stop) => { running = false; break; }
-                Ok(PlayerCommand::Pause) => { *status.lock().unwrap() = PlaybackStatus::Paused; }
-                Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
+                Ok(PlayerCommand::Pause) => { *safe_lock(&status) = PlaybackStatus::Paused; }
+                Ok(PlayerCommand::Resume) => { *safe_lock(&status) = PlaybackStatus::Playing; }
                 Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
                 Ok(PlayerCommand::Seek(secs)) => {
                     if let Some(samples_arc) = &decoded_samples {
-                        let lock = samples_arc.lock().unwrap();
+                        let lock = safe_lock(&samples_arc);
                         ram_cursor = (secs * file_rate as f64) as usize;
                         if ram_cursor >= lock[0].len() { 
                             if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
@@ -759,35 +912,42 @@ fn play_file(
                             let _ = format.seek(SeekMode::Accurate, SeekTo::TimeStamp { ts: seek_ts, track_id });
                         }
                     }
-                    *position_secs.lock().unwrap() = secs;
+                    *safe_lock(&position_secs) = secs;
                     flush_signal.store(true, Ordering::SeqCst);
                     pending.iter_mut().for_each(|ch| ch.clear());
                 }
                 Ok(PlayerCommand::QueueNext(path)) => {
-                    *queued_track.lock().unwrap() = Some(path);
+                    *safe_lock(&queued_track) = Some(path);
+                }
+                Ok(PlayerCommand::RestartStream) => {
+                    let current_pos = *safe_lock(&position_secs);
+                    running = false;
+                    next_track_info = Some((path.to_string(), current_pos));
+                    break;
                 }
                 Err(_) => break,
             }
         }
         if !running { break; }
-        let exc_now = *exclusive_mode.lock().unwrap();
-        let dsp_now = dsp_state.lock().unwrap().clone();
+        let exc_now = *safe_lock(&exclusive_mode);
+        let bp_now = *safe_lock(&bit_perfect);
+        let dsp_now = safe_lock(&dsp_state).clone();
         
-        if exc_now != last_exclusive || dsp_now.upsample_rate != last_upsample_rate {
-            stream.pause().ok();
-            let current_pos = *position_secs.lock().unwrap();
+        // ONLY restart if values actually changed from what we started with
+        if exc_now != last_exclusive || bp_now != last_bit_perfect || dsp_now.upsample_rate != last_upsample_rate {
+            println!("[player] Hardware/DSP change detected (Bit-Perfect: {}). Restarting stream...", bp_now);
+            let _ = stream.pause();
+            let current_pos = *safe_lock(&position_secs);
             next_track_info = Some((path.to_string(), current_pos));
             break;
         }
-
-        let bp_now = *bit_perfect.lock().unwrap();
         // BIT-PERFECT toggle is now handled inside the loop without stream restart
 
         // FILL PENDING BUFFER
         if pending[0].len() < chunk_size * 4 {
             if let Some(samples_arc) = &decoded_samples {
                 // READ FROM RAM (Possibly still loading)
-                let lock = samples_arc.lock().unwrap();
+                let lock = safe_lock(&samples_arc);
                 if ram_cursor < lock[0].len() {
                     let to_read = (lock[0].len() - ram_cursor).min(chunk_size * 8);
                     for ch in 0..file_ch {
@@ -797,7 +957,7 @@ fn play_file(
                     // Position update moved to end of loop for better accuracy
                 } else if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
                     // RAM EOF - Check queue
-                    let next_queued = queued_track.lock().unwrap().take();
+                    let next_queued = safe_lock(&queued_track).take();
                     if let Some(npath) = next_queued {
                         next_track_info = Some((npath, 0.0));
                     }
@@ -831,7 +991,7 @@ fn play_file(
             }
         }
 
-        let dsp_now = dsp_state.lock().unwrap().clone();
+        let dsp_now = safe_lock(&dsp_state).clone();
         if dsp_now.enabled != current_dsp.enabled || dsp_now.width != current_dsp.width {
             current_dsp = dsp_now.clone();
         }
@@ -842,7 +1002,9 @@ fn play_file(
             let mut chunk_planar = vec![vec![0.0; chunk_size]; file_ch];
             for ch in 0..file_ch {
                 for i in 0..chunk_size {
-                    chunk_planar[ch][i] = pending[ch].pop_front().unwrap();
+                    if let Some(s) = pending[ch].pop_front() {
+                        chunk_planar[ch][i] = s;
+                    }
                 }
             }
 
@@ -949,8 +1111,8 @@ fn play_file(
                         running = false; 
                         break; 
                     }
-                    Ok(PlayerCommand::Pause) => { *status.lock().unwrap() = PlaybackStatus::Paused; }
-                    Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
+                    Ok(PlayerCommand::Pause) => { *safe_lock(&status) = PlaybackStatus::Paused; }
+                    Ok(PlayerCommand::Resume) => { *safe_lock(&status) = PlaybackStatus::Playing; }
                     Ok(PlayerCommand::Play(p, pos)) => { 
                         decode_shutdown.store(true, Ordering::SeqCst);
                         kill_current_process(&current_process);
@@ -959,21 +1121,41 @@ fn play_file(
                         break; 
                     }
                     Ok(PlayerCommand::Seek(secs)) => {
-                        if let Some(tb) = time_base {
-                            let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
-                            let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+                        if let Some(samples_arc) = &decoded_samples {
+                            let lock = safe_lock(&samples_arc);
+                            ram_cursor = (secs * file_rate as f64) as usize;
+                            if ram_cursor >= lock[0].len() { 
+                                if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
+                                    ram_cursor = lock[0].len().saturating_sub(1); 
+                                }
+                            }
+                        } else if !is_stream {
+                            if let Some(tb) = time_base {
+                                let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
+                                let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+                            }
                         }
-                        *position_secs.lock().unwrap() = secs;
-                        
-                        // Signal the consumer to flush its buffer
+                        *safe_lock(&position_secs) = secs;
                         flush_signal.store(true, Ordering::SeqCst);
                         pending.iter_mut().for_each(|ch| ch.clear());
+                        interleaved.clear(); // ⚡ Clear stale data immediately
+                        break; // ⚡ Break wait loop to process new position
+                    }
+                    Ok(PlayerCommand::RestartStream) => {
+                        let current_p = { safe_lock(&current_track).clone() };
+                        let current_pos = *safe_lock(&position_secs);
+                        if let Some(p) = current_p {
+                            decode_shutdown.store(true, Ordering::SeqCst);
+                            kill_current_process(&current_process);
+                            running = false;
+                            next_track_info = Some((p, current_pos));
+                        }
                         break;
                     }
-                Ok(PlayerCommand::QueueNext(path)) => {
-                    *queued_track.lock().unwrap() = Some(path);
-                }
-                Err(_) => {}
+                    Ok(PlayerCommand::QueueNext(path)) => {
+                        *safe_lock(&queued_track) = Some(path);
+                    }
+                    Err(_) => {}
                 }
             }
             if running && interleaved.len() > 0 {
@@ -987,42 +1169,43 @@ fn play_file(
             let r_len = prod.len() as f64 / (dev_ch as f64);
             let delay_secs = (p_len / file_rate as f64) + (r_len / dev_rate as f64);
             let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
-            *position_secs.lock().unwrap() = true_pos.max(0.0);
+            *safe_lock(&position_secs) = true_pos.max(0.0);
         }
 
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
-    // Wait for the buffer to drain entirely before emitting track-ended
-    if running && next_track_info.is_none() {
-        while prod.len() > 0 && running {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            match rx.try_recv() {
-                Ok(PlayerCommand::Stop) => { 
-                    kill_current_process(&current_process);
-                    running = false; 
-                    break; 
-                }
-                Ok(PlayerCommand::Play(p, pos)) => { 
-                    kill_current_process(&current_process);
+    // 5. WAIT FOR BUFFER TO DRAIN ENTIRELY
+    // This prevents cutting off the last second of audio when the ringbuffer is full at EOF.
+    while running && prod.len() > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        while let Ok(cmd) = rx.try_recv() {
+            match cmd {
+                PlayerCommand::Stop => { running = false; break; }
+                PlayerCommand::Pause => { *safe_lock(&status) = PlaybackStatus::Paused; }
+                PlayerCommand::Resume => { *safe_lock(&status) = PlaybackStatus::Playing; }
+                PlayerCommand::Play(p, pos) => { 
                     running = false; 
                     next_track_info = Some((p, pos)); 
                     break; 
                 }
-                Ok(PlayerCommand::Pause) => { *status.lock().unwrap() = PlaybackStatus::Paused; }
-                Ok(PlayerCommand::Resume) => { *status.lock().unwrap() = PlaybackStatus::Playing; }
-                Ok(PlayerCommand::QueueNext(path)) => { *queued_track.lock().unwrap() = Some(path); }
                 _ => {}
             }
         }
-        
-        if running && next_track_info.is_none() {
-            let _ = app_handle.emit("track-ended", ());
-        }
+    }
+
+    if running && next_track_info.is_none() {
+        let _ = app_handle.emit("track-ended", ());
     }
 
     stream.pause().ok(); // Prevent audio pop at end of track
     drop(stream);
+    
+    // Give drivers a moment to fully release the hardware before the next stream starts
+    if next_track_info.is_some() {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    
     next_track_info
 }
 

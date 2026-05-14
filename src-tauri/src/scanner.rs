@@ -9,7 +9,9 @@ use std::fs::File;
 
 use crate::db::Track;
 
-pub fn scan_directory(dir: &str) -> Vec<Track> {
+use tauri::{AppHandle, Emitter};
+
+pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
     let mut tracks = Vec::new();
 
     if !std::path::Path::new(dir).exists() {
@@ -29,7 +31,11 @@ pub fn scan_directory(dir: &str) -> Vec<Track> {
                     match result {
                         Ok(Some(track)) => tracks.push(track),
                         Ok(None) => {}
-                        Err(_) => {}
+                        Err(e) => {
+                            let msg = format!("Failed to read file: {:?}. Error: {:?}", path, e);
+                            eprintln!("[scanner] {}", msg);
+                            let _ = app_handle.emit("playback-error", msg);
+                        }
                     }
                 }
             }

@@ -1,11 +1,11 @@
 {
-  "version": "0.4.0",
-  "notes": "💎 AIDEO v0.4.0: The Audiophile Evolution. Featuring High-Res Sinc Upsampling (up to 384kHz), TPDF Dithering, and Lazy RAM Buffering for instantaneous playback. Sub-millisecond lyric synchronization is now fully calibrated for high-end DACs.Bug Fixed.",
-  "pub_date": "2026-05-13T12:00:00Z",
+  "version": "0.4.1",
+  "notes": "💎 AIDEO v0.4.1: The 'Ultra-Resilient' Update. Featuring hardened YouTube integration with Browser Cookie Sync (Edge/Chrome/Firefox) to bypass 429/403 blocks. Includes native yt-dlp pipe streaming and audiophile DSP improvements.",
+  "pub_date": "2026-05-13T21:00:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSmJlSjQvZFJub2RWN0tEWEtubFgvZjlXVnNDSVEyTDFVR2FKZWNMVEtBL1hZNlBkN1ZOdlJ5MVpLWG9DcXJpaGxpeTUwOUlRZkJpQVREMkhyMjBMamM4UVJtRXdnTVFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NjQ5NzY1CWZpbGU6QWlkZW9fMC40LjBfeDY0X2VuLVVTLm1zaQpmWkN4SWRGeHZPU1BNbUhDT3AwWlJrVUFta2Vwb1p4YVhqcXZhNG1IZjJJZlBIRXZ4TTVJLzJmZnFrSjEzQ0dKL21VQUQwdU5UclhWbEZvdE4vWUVEdz09Cg==",
-      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v.0.4.0/Aideo_0.4.0_x64_en-US.msi"
+      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v.0.4.1/Aideo_0.4.1_x64_en-US.msi"
     }
   }
 }

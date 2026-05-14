@@ -5,10 +5,21 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, FolderSearch, Volume2, X, Activity, RefreshCw, Radio, ListMusic, Plus, Trash2, MoreVertical, Download, Check } from 'lucide-react';
-import { save } from '@tauri-apps/plugin-dialog';
+import { Library, Headphones, SlidersHorizontal, Settings2, Settings, Play, Pause, SkipBack, SkipForward, Shuffle, Square, FolderSearch, Volume2, X, Activity, RefreshCw, Radio, ListMusic, Plus, Trash2, MoreVertical, Check } from 'lucide-react';
 import './App.css';
 import defaultCover from './assets/default_cover.png';
+import { LastfmView } from './components/LastfmView';
+
+// Global Error Logging to Backend Terminal
+if (typeof window !== 'undefined') {
+  window.onerror = (msg, _url, line, col, error) => {
+    invoke('log_error', { msg: `[JS Error] ${msg} at line ${line}:${col} - ${error?.stack || 'No stack'}` });
+    return false;
+  };
+  window.onunhandledrejection = (event) => {
+    invoke('log_error', { msg: `[Unhandled Rejection] ${event.reason}` });
+  };
+}
 
 /* ─── helpers ───────────────────────────────────────── */
 function fmt(s: number | null) {
@@ -24,16 +35,16 @@ function getStreamName(url: string | null) {
     const u = new URL(url);
     const domain = u.hostname.replace('www.', '');
     const path = u.pathname.split('/').pop();
-    
+
     // If we have a meaningful path (station name like 'groovesalad'), use it
     if (path && path.length > 2 && !path.includes('.')) {
       const station = path.charAt(0).toUpperCase() + path.slice(1);
       return `${station} (${domain})`;
     }
-    
+
     // If it's a direct IP or very short domain, return full URL
     if (domain.length < 4 || /^\d/.test(domain)) return url;
-    
+
     return domain.charAt(0).toUpperCase() + domain.slice(1);
   } catch {
     return url;
@@ -77,6 +88,10 @@ function Sidebar() {
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
         <Headphones size={18} /> Now Playing
       </div>
+      <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')}>
+        <Radio size={18} /> Last.fm Stats
+      </div>
+
 
       {/* Playlists */}
       <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
@@ -86,13 +101,13 @@ function Sidebar() {
             <Plus size={14} />
           </button>
         </div>
-        
+
         {creating && (
           <form onSubmit={handleCreate} style={{ marginBottom: 12 }}>
-            <input 
+            <input
               autoFocus
-              type="text" 
-              placeholder="Playlist Name..." 
+              type="text"
+              placeholder="Playlist Name..."
               value={newPName}
               onChange={e => setNewPName(e.target.value)}
               onBlur={() => setCreating(false)}
@@ -103,9 +118,9 @@ function Sidebar() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {playlists.map(p => (
-            <div 
-              key={p.id} 
-              className={`nav-item ${currentPlaylist?.id === p.id && view === 'library' ? 'active' : ''}`} 
+            <div
+              key={p.id}
+              className={`nav-item ${currentPlaylist?.id === p.id && view === 'library' ? 'active' : ''}`}
               style={{ padding: '6px 12px', fontSize: 13 }}
               onClick={() => goPlaylist(p.id)}
             >
@@ -114,8 +129,8 @@ function Sidebar() {
                 <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
               </div>
               {currentPlaylist?.id === p.id && (
-                <button 
-                  onClick={(e) => { e.stopPropagation(); deletePlaylist(p.id); }} 
+                <button
+                  onClick={(e) => { e.stopPropagation(); deletePlaylist(p.id); }}
                   style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   title="Delete Playlist"
                 >
@@ -143,9 +158,7 @@ function Sidebar() {
             actionLabel: 'Play Stream',
             onSubmit: async (url) => {
               if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-                try {
-                  await invoke('play_track', { path: url });
-                } catch (e) { setPlaybackError('Failed to play stream: ' + e); }
+                useStore.getState().playStream(url);
               } else {
                 setPlaybackError('Invalid stream URL. Must start with http:// or https://');
               }
@@ -153,36 +166,6 @@ function Sidebar() {
           });
         }}>
           <Radio size={16} /> Play Stream URL
-        </div>
-        <div className="nav-item" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => {
-          setCustomPrompt({
-            open: true,
-            title: 'YouTube Importer',
-            placeholder: 'Paste YouTube Video URL...',
-            actionLabel: 'Fetch & Download',
-            onSubmit: async (url) => {
-              if (!url) return;
-              try {
-                // 1. Fetch video title first
-                const title = await invoke<string>('get_video_title', { url });
-                
-                // 2. Open save dialog with the title as filename
-                const savePath = await save({
-                  title: 'Save Audio As...',
-                  defaultPath: `${title}.m4a`,
-                  filters: [{ name: 'Audio', extensions: ['m4a', 'webm', 'mp3'] }]
-                });
-                
-                if (savePath) {
-                  await invoke('download_youtube', { url, savePath });
-                }
-              } catch (e: any) {
-                setPlaybackError('Import Failed: ' + e);
-              }
-            }
-          });
-        }}>
-          <Download size={16} /> Download YouTube
         </div>
       </div>
 
@@ -216,8 +199,26 @@ function TrackThumbnail({ path }: { path: string }) {
 
 /* ─── Library ────────────────────────────────────────── */
 function LibraryView() {
-  const { tracks, playback, playTrack, setView, currentPlaylist, playlists, addToPlaylist, removeFromPlaylist } = useStore();
+  const { 
+    tracks, playback, loadLibrary, playTrack, setView, playlists, addToPlaylist, currentPlaylist, removeFromPlaylist, 
+    matchMetadata 
+  } = useStore();
   const [menuOpenFor, setMenuOpenFor] = useState<number | null>(null);
+  const [matchData, setMatchData] = useState<{ track: any, match: any } | null>(null);
+  const [isMatching, setIsMatching] = useState<number | null>(null);
+
+  const applyMatch = async () => {
+    if (!matchData) return;
+    const { track, match } = matchData;
+    await invoke('update_track_metadata', { 
+      path: track.path, 
+      title: match.title, 
+      artist: match.artist, 
+      album: match.album 
+    });
+    setMatchData(null);
+    loadLibrary();
+  };
 
   return (
     <div className="library-wrap" onClick={() => setMenuOpenFor(null)}>
@@ -270,8 +271,8 @@ function LibraryView() {
                     <div className="track-sub" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
                       {fmt(t.duration)}
                       <div style={{ position: 'relative' }}>
-                        <button 
-                          className="icon-btn" 
+                        <button
+                          className="icon-btn"
                           onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === t.id ? null : t.id); }}
                           style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4 }}
                         >
@@ -279,13 +280,46 @@ function LibraryView() {
                         </button>
                         <AnimatePresence>
                           {menuOpenFor === t.id && (
-                            <motion.div 
+                            <motion.div
                               initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
                               style={{ position: 'absolute', right: 0, top: '100%', zIndex: 100, background: '#1a1a24', border: '1px solid var(--glass-border)', borderRadius: 8, padding: 8, minWidth: 150, boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
                               onClick={(e) => e.stopPropagation()}
                             >
+                              <div
+                                onClick={async () => { 
+                                  setMenuOpenFor(null);
+                                  setIsMatching(t.id);
+                                  invoke('log_error', { msg: `[MagicMatch] Starting search for: ${t.title || t.path}` });
+                                  try {
+                                    const match = await matchMetadata(t);
+                                    if (match) {
+                                      invoke('log_error', { msg: '[MagicMatch] Match found: ' + match.title });
+                                      setMatchData({ track: t, match });
+                                    } else {
+                                      invoke('log_error', { msg: '[MagicMatch] No match found on MusicBrainz.' });
+                                      alert('No match found on MusicBrainz for this track.');
+                                    }
+                                  } catch (e) {
+                                    invoke('log_error', { msg: '[MagicMatch] Error: ' + e });
+                                  } finally {
+                                    setIsMatching(null);
+                                  }
+                                }}
+                                style={{ padding: '8px 12px', fontSize: 12, color: 'var(--accent)', cursor: 'pointer', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 8 }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.1)'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                                {isMatching === t.id ? (
+                                    <RefreshCw size={14} className="spin" />
+                                  ) : (
+                                    <Activity size={14} />
+                                  )}
+                                  {isMatching === t.id ? 'Searching...' : 'Magic Match'}
+                              </div>
+                              <div style={{ height: 1, background: 'rgba(255,255,255,0.05)', margin: '4px 0' }} />
+
                               {currentPlaylist ? (
-                                <div 
+                                <div
                                   onClick={() => { removeFromPlaylist(currentPlaylist.id, t.path); setMenuOpenFor(null); }}
                                   style={{ padding: '8px 12px', fontSize: 12, color: '#ef4444', cursor: 'pointer', borderRadius: 4 }}
                                   onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
@@ -297,7 +331,7 @@ function LibraryView() {
                                 <>
                                   <div style={{ padding: '4px 12px', fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>Add to Playlist</div>
                                   {playlists.map(p => (
-                                    <div 
+                                    <div
                                       key={p.id}
                                       onClick={() => { addToPlaylist(p.id, t.path); setMenuOpenFor(null); }}
                                       style={{ padding: '8px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 4 }}
@@ -322,6 +356,52 @@ function LibraryView() {
           </tbody>
         </table>
       )}
+
+      {/* Custom Magic Match Modal */}
+      <AnimatePresence>
+        {matchData && (
+          <motion.div 
+            className="modal-overlay"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setMatchData(null)}
+          >
+            <motion.div 
+              className="modal-content"
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 450 }}
+            >
+              <div style={{ textAlign: 'center', marginBottom: 24 }}>
+                <div className="pulse-container" style={{ width: 64, height: 64, background: 'rgba(var(--accent-rgb), 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                  <Activity size={32} color="var(--accent)" />
+                </div>
+                <h2 style={{ margin: 0 }}>Magic Match Found</h2>
+                <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>We found the official metadata for this track.</p>
+              </div>
+
+              <div className="match-comparison" style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: 20, marginBottom: 24 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 10, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Title</label>
+                  <div style={{ fontSize: 16, fontWeight: 600 }}>{matchData.match.title}</div>
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 10, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Artist</label>
+                  <div style={{ fontSize: 14 }}>{matchData.match.artist}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 4 }}>Album</label>
+                  <div style={{ fontSize: 14, color: 'var(--text-dim)' }}>{matchData.match.album || '—'}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setMatchData(null)}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={applyMatch}>Apply Changes</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -354,7 +434,11 @@ function LyricsPanel() {
   useEffect(() => {
     if (userScrolling || !scrollRef.current || activeIdx === -1) return;
     const el = scrollRef.current.querySelector(`[data-idx="${activeIdx}"]`) as HTMLElement | null;
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (el) {
+      const container = scrollRef.current;
+      const targetTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
+      container.scrollTo({ top: targetTop, behavior: 'smooth' });
+    }
   }, [activeIdx, userScrolling]);
 
   const onScroll = () => {
@@ -431,7 +515,7 @@ function LyricsPanel() {
 
         {/* Status Indicator */}
         <div style={{
-          marginLeft: 'auto', marginRight: 12, fontSize: 10, fontWeight: 700,
+          fontSize: 10, fontWeight: 700,
           letterSpacing: 1, textTransform: 'uppercase',
           color: lyricStatus === 'loading' ? 'var(--accent)' : lyricStatus === 'not_found' ? '#ef4444' : 'var(--text-dim)',
           display: 'flex', alignItems: 'center', gap: 6
@@ -593,8 +677,10 @@ function AudioControlCenter() {
   const [devOpen, setDevOpen] = useState(false);
 
   useEffect(() => {
-    if (showControlCenter) fetchDevices();
-  }, [showControlCenter]);
+    if (showControlCenter && devices.length === 0) {
+      fetchDevices();
+    }
+  }, [showControlCenter, devices.length]);
 
   if (!showControlCenter) return null;
 
@@ -681,7 +767,12 @@ function AudioControlCenter() {
 
             {/* Device Selector */}
             <div style={{ marginBottom: 32 }}>
-              <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Playback Device</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1 }}>Playback Device</div>
+                <button onClick={() => fetchDevices()} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700, textTransform: 'uppercase' }}>
+                  <RefreshCw size={10} /> Refresh
+                </button>
+              </div>
               <div className="device-selector" style={{ position: 'relative' }}>
                 <div className="current-device" onClick={() => setDevOpen(o => !o)} style={{ padding: '12px 16px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}>
                   <span>{currentDevice || 'System Default'}</span>
@@ -697,9 +788,14 @@ function AudioControlCenter() {
                         <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
                           style={{
                             padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
-                            color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.1)' : ''
+                            color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.1)' : '',
+                            display: 'flex', alignItems: 'center', gap: 8
                           }}>
-                          {d}
+                          {d.startsWith('[ASIO]') && <span style={{ fontSize: 8, background: '#ef4444', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>ASIO</span>}
+                          {d.startsWith('[WASAPI]') && <span style={{ fontSize: 8, background: '#3b82f6', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>WASAPI</span>}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
+                          </span>
                         </div>
                       ))}
                     </motion.div>
@@ -727,8 +823,8 @@ function AudioControlCenter() {
 
               <div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Signal Path</div>
-                <div className={`exclusive-toggle ${playback.bit_perfect ? 'active' : ''}`} 
-                  onClick={() => useStore.getState().toggleBitPerfect()} 
+                <div className={`exclusive-toggle ${playback.bit_perfect ? 'active' : ''}`}
+                  onClick={() => useStore.getState().toggleBitPerfect()}
                   style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.bit_perfect ? 'rgba(6, 182, 212, 0.1)' : 'rgba(0,0,0,0.2)', borderColor: playback.bit_perfect ? '#06b6d4' : '' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 14, fontWeight: 600 }}>Bit-Perfect Bypass</span>
@@ -747,12 +843,12 @@ function AudioControlCenter() {
                 <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)' }}>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {[0, 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000].map(rate => (
-                      <button 
+                      <button
                         key={rate}
                         className={`rate-chip ${dsp.upsample_rate === rate ? 'active' : ''}`}
-                        style={{ 
-                          fontSize: 9, 
-                          padding: '3px 6px', 
+                        style={{
+                          fontSize: 9,
+                          padding: '3px 6px',
                           borderRadius: 4,
                           border: '1px solid var(--glass-border)',
                           background: dsp.upsample_rate === rate ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
@@ -764,11 +860,11 @@ function AudioControlCenter() {
                         onClick={() => {
                           setDSP({ upsample_rate: rate });
                           if (rate > 0 && playback.bit_perfect) {
-                             useStore.getState().toggleBitPerfect();
+                            useStore.getState().toggleBitPerfect();
                           }
                         }}
                       >
-                        {rate === 0 ? 'OFF' : `${rate/1000}k`}
+                        {rate === 0 ? 'OFF' : `${rate / 1000}k`}
                       </button>
                     ))}
                   </div>
@@ -780,8 +876,8 @@ function AudioControlCenter() {
 
               <div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Bit-Depth Optimization</div>
-                <div className={`exclusive-toggle ${dsp.dither ? 'active' : ''}`} 
-                  onClick={() => setDSP({ dither: !dsp.dither })} 
+                <div className={`exclusive-toggle ${dsp.dither ? 'active' : ''}`}
+                  onClick={() => setDSP({ dither: !dsp.dither })}
                   style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: dsp.dither ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 14, fontWeight: 600 }}>TPDF Dithering</span>
@@ -827,50 +923,85 @@ function Visualizer() {
     let smoothData = new Array(64).fill(0);
 
     const draw = () => {
-      animId = requestAnimationFrame(draw);
-      
-      const rect = canvas.getBoundingClientRect();
-      if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        ctx.scale(dpr, dpr);
-      }
+      try {
+        animId = requestAnimationFrame(draw);
 
-      const width = rect.width;
-      const height = rect.height;
-      
-      ctx.clearRect(0, 0, width, height);
-
-      const isPlaying = useStore.getState().playback.status === 'Playing';
-      const targetData = isPlaying ? dataRef.current : new Array(64).fill(0);
-
-      const barWidth = Math.max(1, (width / 64) - 2);
-      
-      for (let i = 0; i < 64; i++) {
-        // Boost amplitude significantly (5x multiplier)
-        const rawValue = (targetData[i] || 0) * 5.0;
-        
-        // Faster attack, slightly slower release for punchy but smooth spikes
-        if (rawValue > smoothData[i]) {
-          smoothData[i] += (rawValue - smoothData[i]) * 0.4; // Fast spike up
-        } else {
-          smoothData[i] += (rawValue - smoothData[i]) * 0.15; // Smooth fall down
+        const rect = canvas.getBoundingClientRect();
+        if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
+          canvas.width = rect.width * dpr;
+          canvas.height = rect.height * dpr;
+          ctx.scale(dpr, dpr);
         }
-        
-        let value = Math.min(1.0, Math.max(0.0, smoothData[i]));
-        if (value < 0.02) value = 0.02;
 
-        const barHeight = value * height;
-        const x = i * (width / 64);
-        const y = height - barHeight;
-        
-        ctx.fillStyle = `rgba(var(--accent-rgb), ${0.3 + (value * 0.7)})`;
-        ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, barHeight, [4, 4, 0, 0]);
-        ctx.fill();
+        const width = rect.width;
+        const height = rect.height;
+
+        ctx.clearRect(0, 0, width, height);
+
+        const isPlaying = useStore.getState().playback.status === 'Playing';
+        const targetData = isPlaying ? dataRef.current : new Array(64).fill(0);
+
+        const accentColor = useStore.getState().accentColor;
+        let r = 139, g = 92, b = 246;
+        if (accentColor.startsWith('rgb')) {
+          const m = accentColor.match(/\d+/g);
+          if (m && m.length >= 3) {
+            r = parseInt(m[0]); g = parseInt(m[1]); b = parseInt(m[2]);
+          }
+        } else if (accentColor.startsWith('#')) {
+          const hex = accentColor.replace('#', '');
+          r = parseInt(hex.substring(0, 2), 16);
+          g = parseInt(hex.substring(2, 4), 16);
+          b = parseInt(hex.substring(4, 6), 16);
+        }
+
+        const barWidth = Math.max(2, (width / 64) - 4);
+        const gap = (width / 64);
+
+        for (let i = 0; i < 64; i++) {
+          const rawValue = (targetData[i] || 0) * 4.5;
+
+          if (rawValue > smoothData[i]) {
+            smoothData[i] += (rawValue - smoothData[i]) * 0.45;
+          } else {
+            smoothData[i] += (rawValue - smoothData[i]) * 0.12;
+          }
+
+          let value = Math.min(1.0, Math.max(0.0, smoothData[i]));
+          if (value < 0.015) value = 0.015;
+
+          const barHeight = value * (height * 0.85);
+          const x = i * gap + 2;
+          const y = (height * 0.9) - barHeight;
+
+          // Glow
+          ctx.shadowBlur = 15 * value;
+          ctx.shadowColor = `rgba(${r}, ${g}, ${b}, ${0.4 + value * 0.6})`;
+
+          // Gradient
+          const grad = ctx.createLinearGradient(0, y, 0, height * 0.9);
+          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.6 + value * 0.4})`);
+          grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.1)`);
+
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.rect(x, y, barWidth, barHeight);
+          ctx.fill();
+
+          // Subtle Reflection
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.05 + value * 0.1})`;
+          ctx.beginPath();
+          ctx.rect(x, height * 0.9 + 4, barWidth, barHeight * 0.3);
+          ctx.fill();
+        }
+      } catch (e) {
+        console.error('Visualizer crash:', e);
+        invoke('log_error', { msg: 'Visualizer Draw Crash: ' + e });
+        cancelAnimationFrame(animId);
       }
     };
-    
+
     draw();
     return () => cancelAnimationFrame(animId);
   }, []);
@@ -884,17 +1015,30 @@ function Visualizer() {
 
 /* ─── Now Playing ────────────────────────────────────── */
 function NowPlayingView() {
-  const { tracks, playback, coverArt, accentColor, dsp } = useStore();
+  const { tracks, playback, currentDevice, coverArt, accentColor, dsp } = useStore();
   const current = tracks.find(t => t.path === playback.current_track);
 
   // Apply dynamic accent colour as CSS variable on root
   useEffect(() => {
     document.documentElement.style.setProperty('--dynamic-accent', accentColor);
-    // Derive an rgb version so rgba() works
-    const m = accentColor.match(/\d+/g);
-    if (m && m.length >= 3) {
-      document.documentElement.style.setProperty('--accent-rgb', `${m[0]},${m[1]},${m[2]}`);
+    
+    // Derived RGB version for transparency support
+    let r = 139, g = 92, b = 246; // Default purple
+    
+    if (accentColor.startsWith('rgb')) {
+      const m = accentColor.match(/\d+/g);
+      if (m && m.length >= 3) {
+        r = parseInt(m[0]); g = parseInt(m[1]); b = parseInt(m[2]);
+      }
+    } else if (accentColor.startsWith('#')) {
+      // Hex to RGB conversion
+      const hex = accentColor.replace('#', '');
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
     }
+    
+    document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`);
   }, [accentColor]);
 
   if (!playback.current_track) {
@@ -922,19 +1066,19 @@ function NowPlayingView() {
           <img src={coverArt || defaultCover} alt="cover" className="np-art" />
         </div>
         <div className="np-meta" style={{ minWidth: 0 }}>
-          <div className="np-title" style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 12, 
+          <div className="np-title" style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
             justifyContent: 'center',
             width: '100%',
             overflow: 'hidden',
           }}>
-            <span style={{ 
-              overflow: 'hidden', 
-              textOverflow: 'ellipsis', 
+            <span style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              maxWidth: '100%' 
+              maxWidth: '100%'
             }}>
               {playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : (current?.title || baseName(playback.current_track))}
             </span>
@@ -943,7 +1087,7 @@ function NowPlayingView() {
             )}
             {playback.bit_perfect && (
               <span className="bit-badge" style={{ flexShrink: 0, background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', boxShadow: '0 0 12px rgba(6, 182, 212, 0.4)' }}>
-                BIT-PERFECT {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
+                {currentDevice?.startsWith('[ASIO]') ? 'ASIO BIT-PERFECT' : 'BIT-PERFECT'} {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
               </span>
             )}
             {dsp.upsample_rate > 0 && !playback.bit_perfect && (
@@ -952,18 +1096,18 @@ function NowPlayingView() {
               </span>
             )}
           </div>
-          <div className="np-artist" style={{ 
-            opacity: 0.7, 
-            fontSize: 13, 
+          <div className="np-artist" style={{
+            opacity: 0.7,
+            fontSize: 13,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            cursor: 'pointer', 
-            textDecoration: 'underline' 
+            cursor: 'pointer',
+            textDecoration: 'underline'
           }}
             onClick={() => playback.current_track && openUrl(playback.current_track)}>
-            {playback.current_track?.startsWith('http') 
-              ? (getStreamName(playback.current_track) === playback.current_track ? 'Live Stream' : playback.current_track) 
+            {playback.current_track?.startsWith('http')
+              ? (getStreamName(playback.current_track) === playback.current_track ? 'Live Stream' : playback.current_track)
               : (current?.artist || 'Unknown Artist')}
           </div>
         </div>
@@ -981,7 +1125,7 @@ function NowPlayingView() {
 /* ─── Player Bar ─────────────────────────────────────── */
 function PlayerBar() {
   const {
-    view, tracks, playback, coverArt, lyrics, lyricOffset,
+    view, tracks, playback, currentDevice, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, dsp,
   } = useStore();
@@ -1011,18 +1155,37 @@ function PlayerBar() {
       <div className="pb-left">
         <div className="pb-thumb" onClick={() => setView('nowplaying')}>
           <img src={coverArt || defaultCover} alt="" />
+          {playback.current_track?.startsWith('http') && (
+            <div className="stream-badge-mini">LIVE</div>
+          )}
         </div>
         <div className="pb-info" onClick={() => setView('nowplaying')}>
           <div className="pb-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : (current?.title || baseName(playback.current_track))}
             {playback.current_track?.startsWith('http') && (
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 8px #ef4444' }} />
+              <motion.div 
+                animate={{ opacity: [1, 0.4, 1] }} 
+                transition={{ duration: 1.5, repeat: Infinity }}
+                style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 8px #ef4444' }} 
+              />
             )}
           </div>
-          <div className="pb-artist" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.6 }}>
-            {playback.current_track?.startsWith('http') 
-              ? (getStreamName(playback.current_track) === playback.current_track ? 'Live Stream' : playback.current_track) 
-              : (current?.artist || '—')}
+          <div className="pb-artist" style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: 0.6 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {playback.current_track?.startsWith('http')
+                ? (getStreamName(playback.current_track) === playback.current_track ? 'Direct URL Stream' : playback.current_track)
+                : (current?.artist || '—')}
+            </span>
+            {playback.current_track?.startsWith('http') && (
+              <button 
+                className="icon-btn-danger" 
+                title="Stop and Close Stream"
+                onClick={(e) => { e.stopPropagation(); stopTrack(); }}
+                style={{ padding: 2, borderRadius: 4, background: 'rgba(239, 68, 68, 0.1)', border: 'none', color: '#ef4444', cursor: 'pointer' }}
+              >
+                <X size={12} strokeWidth={3} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1053,10 +1216,23 @@ function PlayerBar() {
         </div>
         <div className="progress-row">
           <span className="prog-time">{fmt(playback.position_secs)}</span>
-          <div className="prog-track" onClick={handleSeek}>
-            <div className="prog-fill" style={{ width: `${pct}%` }} />
-          </div>
-          <span className="prog-time">{fmt(duration)}</span>
+          {playback.current_track?.startsWith('http') ? (
+            <div className="prog-track stream-active">
+              <motion.div 
+                className="stream-progress-fill"
+                animate={{ x: ['-100%', '100%'] }}
+                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+              />
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, letterSpacing: 2, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>
+                Streaming Live
+              </div>
+            </div>
+          ) : (
+            <div className="prog-track" onClick={handleSeek}>
+              <div className="prog-fill" style={{ width: `${pct}%` }} />
+            </div>
+          )}
+          <span className="prog-time">{playback.current_track?.startsWith('http') ? 'LIVE' : fmt(duration)}</span>
         </div>
       </div>
 
@@ -1064,7 +1240,7 @@ function PlayerBar() {
       <div className="pb-right" style={{ gap: 16 }}>
         {playback.bit_perfect && (
           <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)' }}>
-            BIT-PERFECT {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
+            {currentDevice?.startsWith('[ASIO]') ? 'ASIO' : 'BIT-PERFECT'} {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
           </span>
         )}
         {playback.exclusive && !playback.bit_perfect && !dsp.upsample_rate && <span className="bit-badge" style={{ transform: 'none' }}>EXCLUSIVE</span>}
@@ -1088,14 +1264,15 @@ function PlayerBar() {
 
 /* ─── Settings Modal ────────────────────────────────────── */
 function SettingsModal() {
-  const { 
-    showSettings, toggleSettings, scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus, 
+  const {
+    showSettings, toggleSettings, scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus,
     toggleScrobble, setLastFmSession, lastfmSessionKey, lastfmToken,
-    scrobbleThreshold, setScrobbleThreshold
+    scrobbleThreshold, setScrobbleThreshold,
   } = useStore();
   const [activeTab, setActiveTab] = useState('library');
   const [lfmLoading, setLfmLoading] = useState(false);
   const [lfmError, setLfmError] = useState('');
+
 
   if (!showSettings) return null;
 
@@ -1165,8 +1342,9 @@ function SettingsModal() {
               <div>
                 <h3 style={{ margin: 0, marginBottom: 24, fontSize: 18, fontWeight: 500 }}>Connected Services</h3>
                 <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 24 }}>
-                  Connect Aideo to external services like Last.fm to scrobble your listening history.
+                  Connect Aideo to external services to improve playback stability and scrobble your listening history.
                 </p>
+
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -1181,8 +1359,8 @@ function SettingsModal() {
                   {lastfmSessionKey ? (
                     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                       <div style={{ fontSize: 13, color: '#22c55e', fontWeight: 600 }}>Active Connection</div>
-                      <button 
-                        className="btn btn-secondary" 
+                      <button
+                        className="btn btn-secondary"
                         style={{ padding: '8px 20px' }}
                         onClick={toggleScrobble}
                       >
@@ -1192,8 +1370,8 @@ function SettingsModal() {
                   ) : (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       {!lastfmToken ? (
-                        <button 
-                          className="btn btn-primary" 
+                        <button
+                          className="btn btn-primary"
                           style={{ padding: '8px 24px' }}
                           disabled={lfmLoading}
                           onClick={async () => {
@@ -1203,7 +1381,7 @@ function SettingsModal() {
                               useStore.setState({ lastfmToken: token });
                               // Open browser for authorization
                               // Replace YOUR_API_KEY below with your actual API key for this to work
-                              const apiKey = "f4cbad896003f0f61f05b844ee3c5b0b"; 
+                              const apiKey = "f4cbad896003f0f61f05b844ee3c5b0b";
                               await openUrl(`https://www.last.fm/api/auth/?api_key=${apiKey}&token=${token}`);
                             } catch (e: any) {
                               setLfmError(String(e));
@@ -1217,8 +1395,8 @@ function SettingsModal() {
                       ) : (
                         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                           <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>Waiting for Browser...</span>
-                          <button 
-                            className="btn btn-primary" 
+                          <button
+                            className="btn btn-primary"
                             style={{ padding: '8px 24px' }}
                             disabled={lfmLoading}
                             onClick={async () => {
@@ -1249,8 +1427,8 @@ function SettingsModal() {
                       <span style={{ fontSize: 13, fontWeight: 500 }}>Scrobble Threshold</span>
                       <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 700 }}>{scrobbleThreshold}%</span>
                     </div>
-                    <input 
-                      type="range" 
+                    <input
+                      type="range"
                       min="10" max="100" step="5"
                       value={scrobbleThreshold}
                       onChange={(e) => setScrobbleThreshold(parseInt(e.target.value))}
@@ -1274,14 +1452,31 @@ function SettingsModal() {
   );
 }
 
-/* ─── Root ───────────────────────────────────────────── */
+
 export default function App() {
   const { view, pollStatus, loadLibrary, lastScrobble, fetchPlaylists, playbackError, playbackSuccess, customPrompt, setCustomPrompt, setPlaybackError, setPlaybackSuccess } = useStore();
-  const [dlStatus, setDlStatus] = useState<{ percentage: number; status: string } | null>(null);
 
   useEffect(() => {
+    const { fetchDevices } = useStore.getState();
     loadLibrary();
     fetchPlaylists();
+    fetchDevices();
+
+    listen<string>('playback-error', (event) => {
+      setPlaybackError(event.payload);
+    });
+
+    return () => { };
+  }, [loadLibrary, fetchPlaylists, setPlaybackError]);
+
+  useEffect(() => {
+    if (playbackError) {
+      const t = setTimeout(() => setPlaybackError(null), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [playbackError, setPlaybackError]);
+
+  useEffect(() => {
     const id = setInterval(pollStatus, 200);
 
     let unlistenEnded: (() => void) | undefined;
@@ -1343,16 +1538,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    let unlisten: any;
-    listen<{ percentage: number; status: string }>('download-progress', (event) => {
-      setDlStatus(event.payload);
-      if (event.payload.status === 'Complete') {
-        setTimeout(() => setDlStatus(null), 3000);
-      }
-    }).then(u => unlisten = u);
-    return () => { if (unlisten) unlisten(); };
-  }, []);
 
   useEffect(() => {
     let unlisten: any;
@@ -1387,6 +1572,12 @@ export default function App() {
               <NowPlayingView />
             </motion.div>
           )}
+          {view === 'lastfm' && (
+            <motion.div key="lfm" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <LastfmView />
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
       <PlayerBar />
@@ -1394,7 +1585,7 @@ export default function App() {
         <AudioControlCenter key="audio-cc" />
         <SettingsModal key="settings" />
         {lastScrobble && (
-          <motion.div 
+          <motion.div
             key="scrobble-toast"
             initial={{ opacity: 0, y: 50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
@@ -1406,37 +1597,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {dlStatus && (
-          <motion.div
-            initial={{ opacity: 0, x: 50 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 50 }}
-            style={{
-              position: 'fixed',
-              bottom: 100,
-              right: 24,
-              width: 280,
-              background: 'rgba(23, 23, 23, 0.95)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: 12,
-              padding: 16,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-              zIndex: 9999,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{dlStatus.status}</span>
-              <span style={{ fontSize: 12, color: 'var(--accent)' }}>{Math.round(dlStatus.percentage)}%</span>
-            </div>
-            <div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
-              <motion.div 
-                animate={{ width: `${dlStatus.percentage}%` }}
-                style={{ height: '100%', background: 'var(--accent)' }} 
-              />
-            </div>
-          </motion.div>
-        )}
 
         {playbackError && (
           <motion.div
@@ -1503,7 +1663,7 @@ export default function App() {
 
         <AnimatePresence>
           {customPrompt.open && (
-            <AideoPrompt 
+            <AideoPrompt
               title={customPrompt.title}
               placeholder={customPrompt.placeholder}
               initialValue={customPrompt.initialValue}
@@ -1518,24 +1678,24 @@ export default function App() {
   );
 }
 
-function AideoPrompt({ title, placeholder, initialValue = '', actionLabel, onClose, onSubmit }: { 
-  title: string, 
-  placeholder: string, 
+function AideoPrompt({ title, placeholder, initialValue = '', actionLabel, onClose, onSubmit }: {
+  title: string,
+  placeholder: string,
   initialValue?: string,
-  actionLabel: string, 
-  onClose: () => void, 
-  onSubmit: (v: string) => void 
+  actionLabel: string,
+  onClose: () => void,
+  onSubmit: (v: string) => void
 }) {
   const [val, setVal] = useState(initialValue);
-  
+
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="modal-overlay"
       style={{ zIndex: 3000 }}
       onClick={onClose}
     >
-      <motion.div 
+      <motion.div
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -1552,21 +1712,21 @@ function AideoPrompt({ title, placeholder, initialValue = '', actionLabel, onClo
         </div>
 
         <div style={{ marginBottom: 24 }}>
-          <input 
+          <input
             autoFocus
-            type="text" 
+            type="text"
             placeholder={placeholder}
             value={val}
             onChange={e => setVal(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { onSubmit(val); onClose(); } }}
-            style={{ 
-              width: '100%', 
-              padding: '14px 18px', 
-              fontSize: 14, 
-              borderRadius: 12, 
-              border: '1px solid var(--glass-border)', 
-              background: 'rgba(0,0,0,0.3)', 
-              color: 'white', 
+            style={{
+              width: '100%',
+              padding: '14px 18px',
+              fontSize: 14,
+              borderRadius: 12,
+              border: '1px solid var(--glass-border)',
+              background: 'rgba(0,0,0,0.3)',
+              color: 'white',
               outline: 'none',
               boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)'
             }}
