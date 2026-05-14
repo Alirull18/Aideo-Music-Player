@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://alirull18.github.io/Aideo-Music-Player/sitemap.xml
