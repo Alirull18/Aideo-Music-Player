@@ -44,13 +44,6 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - **Smart Thumbnails**: Asynchronous background loading for high-resolution library artwork.
 
 - **Global Support**: Integrated Romaji generation and one-click translation for international libraries.
-### 📜 Intelligent Metadata & Lyrics
-
-- **Manual Lyric Finder**: (NEW v0.3.0) Take control of your library with an interactive search prompt. Override automatic metadata to find the perfect `.lrc` sync.
-- **Lyric Studio**: A dedicated workspace to paste AI-generated lyrics and save them as synced `.lrc` files instantly.
-- **Smart Lyric Engine**: High-speed retrieval from global providers (NetEase, QQMusic, LRCLIB).
-- **Stealth Integration**: Optimized headers (User-Agent/Referer) for 100% reliable online retrieval.
-- **Mini-Lyrics Bar**: A reactive scrolling lyric display integrated directly into the playback control bar.
 
 ### 🌐 Social & Intelligent Metadata
 - **Discord Rich Presence**: (NEW v0.4.5) Show your listening status on Discord with high-quality metadata and direct "Download App" buttons.
@@ -121,7 +114,6 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - [x] **Persistent Sync Memory**: Automatic saving of lyric offsets per-track.
 - [x] **Lyric Studio**: Workspace for manual/AI lyric integration.
 - [x] **High-Res Badges**: Visual audio quality identification (FLAC/MP3).
-- [ ] **ASIO Support**: Professional-grade driver support.
 - [x] **Auto-Updater**: One-click application updates via GitHub.
 - [x] **Discord Rich Presence**: Integrated social listening status.
 - [x] **MusicBrainz Integration**: Smart "Magic Match" metadata fixing.
@@ -131,13 +123,15 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - [ ] **Folder Browser**: Direct filesystem navigation.
 - [x] **Visualizer Engine**: Real-time FFT spectrum visualization (Optimized v0.4.5).
 
-### ⚙️ Performance & Core
+### ⚙️ Performance & Core (Next-Gen)
 - [x] **Bit-Perfect Bypass**: Skip all software processing when rates match.
 - [x] **Lazy RAM Buffer**: Asynchronous pre-loading to eliminate I/O jitter and latency.
 - [x] **High-Quality Upsampling**: Sinc-based upsampling with hardware rate negotiation.
 - [x] **TPDF Dithering**: Signal decorrelation for high-bitrate DACs.
-- [ ] **Event-Driven WASAPI**: Pull-based clocking for ultra-stability.
-- [ ] **DSD/SACD Support**: Native DSD decoding (DSF/DFF).
+- [ ] **Event-Driven WASAPI**: Pull-based clocking for ultra-stability (Next-Gen).
+- [ ] **DSD/SACD Support**: Native DSD decoding (DSF/DFF) via DoP (Next-Gen).
+- [ ] **Convolution Engine**: FIR/Impulse Response loader for Headphone Correction (Next-Gen).
+- [ ] **Neural Reconstruction**: AI-based high-frequency restoration for compressed audio (Next-Gen).
 - [ ] **Cross-Platform Support**: Implementation for macOS (CoreAudio).
 
 ---
