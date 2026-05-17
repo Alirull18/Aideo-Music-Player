@@ -36,6 +36,8 @@ export interface PlaybackState {
   bit_perfect: boolean;
   dev_rate: number;
   driver_type: 'WASAPI' | 'ASIO';
+  last_skip_time?: number;
+  last_played_track?: string | null;
 }
 
 export interface CustomPromptState {
@@ -50,8 +52,10 @@ export interface CustomPromptState {
 export interface PlayerState {
   view: 'library' | 'nowplaying' | 'lastfm';
   tracks: Track[];
+  queue: Track[];
   currentTrackIndex: number;
   shuffle: boolean;
+  playHistory: string[];
   playback: PlaybackState;
   lyrics: LyricLine[];
   lyricOffset: number;
@@ -61,6 +65,7 @@ export interface PlayerState {
   showProMode: boolean;
   showControlCenter: boolean;
   showSettings: boolean;
+  showQueue: boolean;
   dsp: DSPState;
   devices: string[];
   currentDevice: string | null;
@@ -68,7 +73,6 @@ export interface PlayerState {
   scanStatus: string;
   isTranslating: boolean;
   showRomaji: boolean;
-  isTransitioning: boolean;
   scrobbleEnabled: boolean;
   lastfmSessionKey: string | null;
   lastfmToken: string | null;
@@ -91,12 +95,21 @@ export interface PlayerState {
   removeScanDir: (dir: string) => void;
   setScrobbleThreshold: (val: number) => void;
   toggleSettings: () => void;
+  toggleQueue: () => void;
   toggleScrobble: () => void;
   setLastFmSession: (key: string | null) => void;
   setShowRomaji: (val: boolean) => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
-  playTrack: (track: Track) => Promise<void>;
+  playTrack: (track: Track, isHistory?: boolean) => Promise<void>;
+  addToQueue: (track: Track) => Promise<void>;
+  playNextInQueue: (track: Track) => Promise<void>;
+  playFromQueue: (index: number) => Promise<void>;
+  removeFromQueue: (index: number) => Promise<void>;
+  clearQueue: () => Promise<void>;
+  reorderQueue: (from: number, to: number) => Promise<void>;
+  initializeQueue: () => Promise<void>;
+  fetchQueue: () => Promise<void>;
   handleTrackTransition: (path: string) => Promise<void>;
   playNext: () => Promise<void>;
   playPrev: () => Promise<void>;

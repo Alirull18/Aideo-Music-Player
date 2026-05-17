@@ -529,7 +529,53 @@ fn play_track(path: String, state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 fn queue_next(path: String, state: State<'_, AppState>) -> Result<(), String> {
     let player = safe_lock(&state.player);
-    player.cmd_tx.send(player::PlayerCommand::QueueNext(path)).map_err(|e| e.to_string())?;
+    player.cmd_tx.send(player::PlayerCommand::PushNext(path)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_to_queue(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let player = safe_lock(&state.player);
+    player.cmd_tx.send(player::PlayerCommand::AppendQueue(path)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_queue(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let player = safe_lock(&state.player);
+    let queue = player.queue.lock().unwrap();
+    let paths: Vec<String> = queue.iter().cloned().collect();
+    Ok(paths)
+}
+
+#[tauri::command]
+fn remove_from_queue(index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    let player = safe_lock(&state.player);
+    let mut q = player.queue.lock().unwrap();
+    if index < q.len() {
+        q.remove(index);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_queue(state: State<'_, AppState>) -> Result<(), String> {
+    let player = safe_lock(&state.player);
+    let mut q = player.queue.lock().unwrap();
+    q.clear();
+    Ok(())
+}
+
+#[tauri::command]
+fn reorder_queue(from: usize, to: usize, state: State<'_, AppState>) -> Result<(), String> {
+    let player = safe_lock(&state.player);
+    let mut q = player.queue.lock().unwrap();
+    if from < q.len() && to <= q.len() {
+        if let Some(item) = q.remove(from) {
+            let insert_idx = if to > from { to - 1 } else { to };
+            q.insert(insert_idx, item);
+        }
+    }
     Ok(())
 }
 
@@ -560,6 +606,12 @@ fn stop_track(state: State<'_, AppState>) -> Result<(), String> {
         .cmd_tx
         .send(player::PlayerCommand::Stop)
         .map_err(|e| e.to_string())?;
+        
+    // Unblock the player_loop instantly if it is stuck connecting to a stream
+    if let Some(mut child) = safe_lock(&player.current_process).take() {
+        let _ = child.kill();
+    }
+        
     Ok(())
 }
 
@@ -657,6 +709,12 @@ pub fn run() {
             apply_online_cover,
             update_track_metadata,
             update_track_offset,
+            queue_next,
+            add_to_queue,
+            remove_from_queue,
+            clear_queue,
+            reorder_queue,
+            get_queue,
             lastfm_get_token,
             lastfm_get_session,
             lastfm_scrobble,

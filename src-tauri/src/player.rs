@@ -129,6 +129,31 @@ fn select_output_config(
     configs
 }
 
+fn resolve_playlist_url(url: &str) -> String {
+    let url_lower = url.to_lowercase();
+    if url_lower.ends_with(".pls") || url_lower.ends_with(".m3u") {
+        if let Ok(res) = reqwest::blocking::get(url) {
+            if let Ok(text) = res.text() {
+                if url_lower.ends_with(".pls") {
+                    for line in text.lines() {
+                        if line.to_lowercase().starts_with("file1=") {
+                            return line[6..].trim().to_string();
+                        }
+                    }
+                } else {
+                    for line in text.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("http") {
+                            return trimmed.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    url.to_string()
+}
+
 /// 🎵 Prepare the media source and decoder
 fn prepare_decoder(
     path: &str,
@@ -140,21 +165,33 @@ fn prepare_decoder(
 
     let mss = if is_stream {
         println!("[player] Preparing URL stream proxy...");
-        let final_ff_path = ffmpeg_path.to_string();
-        let mut ps_command = format!("& '{}' '-headers' 'Referer: https://www.google.com/`r`nOrigin: https://www.google.com/`r`n' ", final_ff_path);
-        ps_command.push_str("'-user_agent' 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36' ");
-        ps_command.push_str("'-reconnect' '1' '-reconnect_at_eof' '1' '-reconnect_streamed' '1' '-reconnect_delay_max' '4' ");
-        ps_command.push_str(&format!("'-i' '{}' '-f' 'wav' '-acodec' 'pcm_s16le' '-ar' '44100' '-ac' '2' '-'", path.replace("'", "''")));
-
-        let mut cmd = if std::path::Path::new(r"C:\Windows\Sysnative").exists() {
-            std::process::Command::new(r"C:\Windows\Sysnative\WindowsPowerShell\v1.0\powershell.exe")
-        } else {
-            std::process::Command::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
-        };
         
-        cmd.args(["-ExecutionPolicy", "Bypass", "-Command", &ps_command])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+        #[cfg(target_os = "windows")]
+        use std::os::windows::process::CommandExt;
+        
+        let mut cmd = std::process::Command::new(ffmpeg_path);
+        
+        let resolved_url = resolve_playlist_url(path);
+        
+        cmd.args([
+            "-headers", "Referer: https://www.google.com/\r\nOrigin: https://www.google.com/\r\n",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "-reconnect", "1",
+            "-reconnect_at_eof", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "4",
+            "-i", &resolved_url,
+            "-f", "wav",
+            "-acodec", "pcm_s16le",
+            "-ar", "44100",
+            "-ac", "2",
+            "-"
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+        
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
         // Kill existing process safely
         if let Some(mut old_child) = safe_lock(current_process).take() {
@@ -224,7 +261,8 @@ pub enum PlayerCommand {
     Resume,
     Stop,
     Seek(f64),
-    QueueNext(String),
+    PushNext(String),
+    AppendQueue(String),
     RestartStream,
 }
 
@@ -265,7 +303,7 @@ pub struct Player {
     pub exclusive_mode: Arc<Mutex<bool>>,
     pub dsp_state: Arc<Mutex<DSPState>>,
     pub target_device: Arc<Mutex<Option<String>>>,
-    pub queued_track: Arc<Mutex<Option<String>>>,
+    pub queue: Arc<Mutex<VecDeque<String>>>,
     pub app_handle: tauri::AppHandle,
     pub current_process: Arc<Mutex<Option<std::process::Child>>>,
     pub ffmpeg_path: String,
@@ -300,8 +338,22 @@ fn analyzer_loop(rx: Receiver<Vec<f32>>, app_handle: tauri::AppHandle) {
         let mut magnitudes = vec![0.0; 1024];
         for i in 0..1024 {
             let mag = (buffer[i].re.powi(2) + buffer[i].im.powi(2)).sqrt() / 2048.0;
-            // Boost higher frequencies so it looks more balanced (pink noise compensation)
-            magnitudes[i] = mag * (1.0 + (i as f32 * 0.02)); 
+            
+            // Convert to Decibels (-80dB floor) for human-accurate hearing perception
+            let db = if mag > 1e-4 { 20.0 * mag.log10() } else { -80.0 };
+            
+            // Normalize dB to a 0.0 -> 1.0 scale
+            let mut normalized = (db + 80.0) / 80.0;
+            normalized = normalized.clamp(0.0, 1.0);
+            
+            // Apply exponential curve for dynamic visual "bounciness"
+            let dynamic = normalized.powf(2.5);
+            
+            // High-frequency tilt (Pink noise compensation): Music naturally rolls off high frequencies.
+            // We boost the upper bins so the right side of the visualizer is as active as the bass.
+            let tilt = 1.0 + (i as f32 / 1024.0) * 2.0; 
+            
+            magnitudes[i] = (dynamic * tilt).clamp(0.0, 1.0);
         }
 
         let num_bands = 64;
@@ -357,7 +409,7 @@ impl Player {
             dither: false,
         }));
         let target_device = Arc::new(Mutex::new(None::<String>));
-        let queued_track = Arc::new(Mutex::new(None::<String>));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
         let current_process = Arc::new(Mutex::new(None::<std::process::Child>));
         let ffmpeg_path = find_ffmpeg_path();
         let bit_perfect = Arc::new(Mutex::new(false));
@@ -373,7 +425,7 @@ impl Player {
         let bp = Arc::clone(&bit_perfect);
         let dsp = Arc::clone(&dsp_state);
         let dev = Arc::clone(&target_device);
-        let qt = Arc::clone(&queued_track);
+        let qt = Arc::clone(&queue);
         let app = app_handle.clone();
         let ff = ffmpeg_path.clone();
 
@@ -393,7 +445,7 @@ impl Player {
             .spawn(move || player_loop(cmd_rx, s, c, p, v, exc, bp, dr, ca, dsp, dev, qt, cp, app, fft_tx, ff))
             .expect("Failed to spawn player thread");
 
-        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queued_track, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache }
+        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache }
     }
 }
 
@@ -409,7 +461,7 @@ fn player_loop(
     cache: Arc<Mutex<Option<CachedTrack>>>,
     dsp_state: Arc<Mutex<DSPState>>,
     target_device: Arc<Mutex<Option<String>>>,
-    queued_track: Arc<Mutex<Option<String>>>,
+    queue: Arc<Mutex<VecDeque<String>>>,
     current_process: Arc<Mutex<Option<std::process::Child>>>,
     app_handle: tauri::AppHandle,
     fft_tx: Sender<Vec<f32>>,
@@ -428,7 +480,33 @@ fn player_loop(
         };
 
         match cmd {
-            PlayerCommand::Play(path, start_pos) => {
+            PlayerCommand::Play(mut path, mut start_pos) => {
+                // 🚀 DRAIN / DEBOUNCE QUEUE: If the user spammed 'Next', grab the absolute latest track
+                // and skip the intermediate ones to save CPU, disk IO, and prevent UI bouncing.
+                let mut abort_play = false;
+                while let Ok(next_cmd) = rx.try_recv() {
+                    match next_cmd {
+                        PlayerCommand::Play(p, pos) => {
+                            println!("[player] Rapid skip detected: Dropping '{}', jumping straight to '{}'", path, p);
+                            path = p;
+                            start_pos = pos;
+                        }
+                        PlayerCommand::Stop => {
+                            abort_play = true;
+                            break;
+                        }
+                        _ => {} // Ignore other commands during rapid skip collapse
+                    }
+                }
+
+                if abort_play {
+                    let mut s = safe_lock(&status);
+                    *s = PlaybackStatus::Stopped;
+                    let mut ct = safe_lock(&current_track);
+                    *ct = None;
+                    continue;
+                }
+
                 {
                     let mut s = safe_lock(&status);
                     *s = PlaybackStatus::Playing;
@@ -438,7 +516,7 @@ fn player_loop(
                     *pos = start_pos;
                 }
 
-                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queued_track), Arc::clone(&current_process), &rx, &app_handle, &fft_tx, &ffmpeg_path);
+                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queue), Arc::clone(&current_process), &rx, &app_handle, &fft_tx, &ffmpeg_path);
 
                 if next_track.is_none() {
                     let mut s = safe_lock(&status);
@@ -553,7 +631,7 @@ fn play_file(
     cache: Arc<Mutex<Option<CachedTrack>>>,
     dsp_state: Arc<Mutex<DSPState>>,
     target_device: Arc<Mutex<Option<String>>>,
-    queued_track: Arc<Mutex<Option<String>>>,
+    queue: Arc<Mutex<VecDeque<String>>>,
     current_process: Arc<Mutex<Option<std::process::Child>>>,
     rx: &std::sync::mpsc::Receiver<PlayerCommand>,
     app_handle: &tauri::AppHandle,
@@ -691,9 +769,12 @@ fn play_file(
         println!("[player] AUDIOPHILE: Requesting EXCLUSIVE hardware access for bit-perfect output...");
     }
 
+    let stream_paused = Arc::new(AtomicBool::new(false));
+    let stream_volume = Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
+
     for (config, sample_format) in configs_to_try {
-        let status_cb = Arc::clone(&status);
-        let volume_cb = Arc::clone(&volume);
+        let paused_cb = Arc::clone(&stream_paused);
+        let volume_cb = Arc::clone(&stream_volume);
         let flush_cb = Arc::clone(&flush_signal);
         
         // Compute max ring size (2 seconds of audio at target rate)
@@ -711,9 +792,9 @@ fn play_file(
             cpal::SampleFormat::F32 => device.build_output_stream(
                 &config_inner,
                 move |data: &mut [f32], _| {
-                    if *safe_lock(&status_cb) == PlaybackStatus::Paused { data.fill(0.0); return; }
+                    if paused_cb.load(Ordering::Relaxed) { data.fill(0.0); return; }
                     if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
-                    let vol = *safe_lock(&volume_cb);
+                    let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                     let n = cons.pop_slice(data);
                     for i in 0..n { data[i] *= vol; }
                     if n < data.len() { data[n..].fill(0.0); }
@@ -724,9 +805,9 @@ fn play_file(
             cpal::SampleFormat::I16 => device.build_output_stream(
                 &config_inner,
                 move |data: &mut [i16], _| {
-                    if *safe_lock(&status_cb) == PlaybackStatus::Paused { data.fill(0); return; }
+                    if paused_cb.load(Ordering::Relaxed) { data.fill(0); return; }
                     if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
-                    let vol = *safe_lock(&volume_cb);
+                    let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                     let mut buf = vec![0.0; data.len()];
                     let n = cons.pop_slice(&mut buf);
                     for i in 0..n { 
@@ -740,9 +821,9 @@ fn play_file(
             _ => device.build_output_stream(
                 &config_inner,
                 move |data: &mut [i32], _| {
-                    if *safe_lock(&status_cb) == PlaybackStatus::Paused { data.fill(0); return; }
+                    if paused_cb.load(Ordering::Relaxed) { data.fill(0); return; }
                     if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
-                    let vol = *safe_lock(&volume_cb);
+                    let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                     let mut buf = vec![0.0; data.len()];
                     let n = cons.pop_slice(&mut buf);
                     
@@ -759,13 +840,13 @@ fn play_file(
 
         if let Ok(s) = stream_res {
             // 🕒 PRE-FILL PROTOCOL: Wait for buffer to have enough data before playing
-            // We want at least 200ms of audio ready to prevent "crisp" startup noise.
-            let ms_200_samples = (config.sample_rate as usize * config.channels as usize) / 5;
+            // We want at least 20ms of audio ready to prevent "crisp" startup noise.
+            let ms_20_samples = (config.sample_rate as usize * config.channels as usize) / 50;
             
-            println!("[player] Pre-filling buffer (200ms)...");
+            println!("[player] Pre-filling buffer (20ms)...");
             let mut attempts = 0;
-            while prod.len() < ms_200_samples && attempts < 100 {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+            while prod.len() < ms_20_samples && attempts < 100 {
+                std::thread::sleep(std::time::Duration::from_millis(5));
                 attempts += 1;
             }
 
@@ -799,25 +880,25 @@ fn play_file(
             if let Ok(def_cfg) = dev.default_output_config() {
                 let cfg = def_cfg.config();
                 let fmt = def_cfg.sample_format();
-                let status_cb = Arc::clone(&status);
-                let volume_cb = Arc::clone(&volume);
+                let paused_cb = Arc::clone(&stream_paused);
+                let volume_cb = Arc::clone(&stream_volume);
                 let flush_cb = Arc::clone(&flush_signal);
                 let rb = RingBuffer::<f32>::new(cfg.sample_rate as usize * cfg.channels as usize);
                 let (prod, mut cons) = rb.split();
                 
                 let stream_res = match fmt {
                     cpal::SampleFormat::F32 => dev.build_output_stream(&cfg, move |d: &mut [f32], _| {
-                        if *safe_lock(&status_cb) == PlaybackStatus::Paused { d.fill(0.0); return; }
+                        if paused_cb.load(Ordering::Relaxed) { d.fill(0.0); return; }
                         if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
-                        let vol = *safe_lock(&volume_cb);
+                        let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let n = cons.pop_slice(d);
                         for i in 0..n { d[i] *= vol; }
                         if n < d.len() { d[n..].fill(0.0); }
                     }, |_| {}, None),
                     _ => dev.build_output_stream(&cfg, move |d: &mut [i16], _| {
-                        if *safe_lock(&status_cb) == PlaybackStatus::Paused { d.fill(0); return; }
+                        if paused_cb.load(Ordering::Relaxed) { d.fill(0); return; }
                         if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
-                        let vol = *safe_lock(&volume_cb);
+                        let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let mut buf = vec![0.0; d.len()];
                         let n = cons.pop_slice(&mut buf);
                         for i in 0..n { d[i] = (buf[i] * vol * i16::MAX as f32) as i16; }
@@ -916,8 +997,11 @@ fn play_file(
                     flush_signal.store(true, Ordering::SeqCst);
                     pending.iter_mut().for_each(|ch| ch.clear());
                 }
-                Ok(PlayerCommand::QueueNext(path)) => {
-                    *safe_lock(&queued_track) = Some(path);
+                Ok(PlayerCommand::PushNext(path)) => {
+                    safe_lock(&queue).push_front(path);
+                }
+                Ok(PlayerCommand::AppendQueue(path)) => {
+                    safe_lock(&queue).push_back(path);
                 }
                 Ok(PlayerCommand::RestartStream) => {
                     let current_pos = *safe_lock(&position_secs);
@@ -936,12 +1020,15 @@ fn play_file(
         // ONLY restart if values actually changed from what we started with
         if exc_now != last_exclusive || bp_now != last_bit_perfect || dsp_now.upsample_rate != last_upsample_rate {
             println!("[player] Hardware/DSP change detected (Bit-Perfect: {}). Restarting stream...", bp_now);
-            let _ = stream.pause();
             let current_pos = *safe_lock(&position_secs);
             next_track_info = Some((path.to_string(), current_pos));
             break;
         }
-        // BIT-PERFECT toggle is now handled inside the loop without stream restart
+        // UPDATE ATOMICS FOR STREAM
+        let is_paused = *safe_lock(&status) == PlaybackStatus::Paused;
+        stream_paused.store(is_paused, Ordering::Relaxed);
+        let current_vol = *safe_lock(&volume);
+        stream_volume.store(current_vol.to_bits(), Ordering::Relaxed);
 
         // FILL PENDING BUFFER
         if pending[0].len() < chunk_size * 4 {
@@ -957,7 +1044,7 @@ fn play_file(
                     // Position update moved to end of loop for better accuracy
                 } else if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
                     // RAM EOF - Check queue
-                    let next_queued = safe_lock(&queued_track).take();
+                    let next_queued = safe_lock(&queue).pop_front();
                     if let Some(npath) = next_queued {
                         next_track_info = Some((npath, 0.0));
                     }
@@ -1108,14 +1195,33 @@ fn play_file(
                     Ok(PlayerCommand::Stop) => { 
                         decode_shutdown.store(true, Ordering::SeqCst);
                         kill_current_process(&current_process);
+                        
+                        // EVADE DEADLOCK: Clear incomplete cache if stopped prematurely
+                        let mut c = safe_lock(&cache);
+                        if let Some(ct) = c.as_ref() {
+                            if !ct.complete.load(Ordering::SeqCst) { *c = None; }
+                        }
+                        
                         running = false; 
                         break; 
                     }
-                    Ok(PlayerCommand::Pause) => { *safe_lock(&status) = PlaybackStatus::Paused; }
-                    Ok(PlayerCommand::Resume) => { *safe_lock(&status) = PlaybackStatus::Playing; }
+                    Ok(PlayerCommand::Pause) => { 
+                        *safe_lock(&status) = PlaybackStatus::Paused; 
+                        stream_paused.store(true, Ordering::Relaxed);
+                    }
+                    Ok(PlayerCommand::Resume) => { 
+                        *safe_lock(&status) = PlaybackStatus::Playing; 
+                        stream_paused.store(false, Ordering::Relaxed);
+                    }
                     Ok(PlayerCommand::Play(p, pos)) => { 
                         decode_shutdown.store(true, Ordering::SeqCst);
                         kill_current_process(&current_process);
+                        
+                        let mut c = safe_lock(&cache);
+                        if let Some(ct) = c.as_ref() {
+                            if !ct.complete.load(Ordering::SeqCst) { *c = None; }
+                        }
+                        
                         running = false; 
                         next_track_info = Some((p, pos)); 
                         break; 
@@ -1147,13 +1253,22 @@ fn play_file(
                         if let Some(p) = current_p {
                             decode_shutdown.store(true, Ordering::SeqCst);
                             kill_current_process(&current_process);
+                            
+                            let mut c = safe_lock(&cache);
+                            if let Some(ct) = c.as_ref() {
+                                if !ct.complete.load(Ordering::SeqCst) { *c = None; }
+                            }
+                            
                             running = false;
                             next_track_info = Some((p, current_pos));
                         }
                         break;
                     }
-                    Ok(PlayerCommand::QueueNext(path)) => {
-                        *safe_lock(&queued_track) = Some(path);
+                    Ok(PlayerCommand::PushNext(path)) => {
+                        safe_lock(&queue).push_front(path);
+                    }
+                    Ok(PlayerCommand::AppendQueue(path)) => {
+                        safe_lock(&queue).push_back(path);
                     }
                     Err(_) => {}
                 }
@@ -1182,8 +1297,14 @@ fn play_file(
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
                 PlayerCommand::Stop => { running = false; break; }
-                PlayerCommand::Pause => { *safe_lock(&status) = PlaybackStatus::Paused; }
-                PlayerCommand::Resume => { *safe_lock(&status) = PlaybackStatus::Playing; }
+                PlayerCommand::Pause => { 
+                    *safe_lock(&status) = PlaybackStatus::Paused; 
+                    stream_paused.store(true, Ordering::Relaxed);
+                }
+                PlayerCommand::Resume => { 
+                    *safe_lock(&status) = PlaybackStatus::Playing; 
+                    stream_paused.store(false, Ordering::Relaxed);
+                }
                 PlayerCommand::Play(p, pos) => { 
                     running = false; 
                     next_track_info = Some((p, pos)); 
@@ -1198,7 +1319,6 @@ fn play_file(
         let _ = app_handle.emit("track-ended", ());
     }
 
-    stream.pause().ok(); // Prevent audio pop at end of track
     drop(stream);
     
     // Give drivers a moment to fully release the hardware before the next stream starts

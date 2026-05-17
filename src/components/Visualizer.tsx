@@ -57,6 +57,16 @@ export function Visualizer() {
         ctx.fill();
       }
 
+      // Draw subtle glowing baseline to anchor the visualizer
+      ctx.beginPath();
+      ctx.moveTo(0, height - 1);
+      ctx.lineTo(width, height - 1);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = accentColor;
+      ctx.globalAlpha = 0.4;
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+
       animationId = requestAnimationFrame(render);
     };
 
@@ -68,8 +78,8 @@ export function Visualizer() {
     <canvas 
       ref={canvasRef} 
       width={600} 
-      height={120} 
-      style={{ width: '100%', height: '120px', marginTop: '24px', opacity: 0.8 }} 
+      height={80} 
+      style={{ width: '100%', height: '100%', opacity: 0.8, display: 'block' }} 
     />
   );
 }
