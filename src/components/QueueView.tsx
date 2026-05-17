@@ -1,6 +1,6 @@
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Play, Trash2, GripVertical } from 'lucide-react';
+import { X, Trash2, GripVertical } from 'lucide-react';
 import { useState } from 'react';
 
 function fmt(s: number | null) {
@@ -18,7 +18,7 @@ export function QueueView() {
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
+  const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
@@ -99,7 +99,7 @@ export function QueueView() {
                       key={`${t.path}-${i}`}
                       draggable
                       onDragStart={(e) => handleDragStart(e, i)}
-                      onDragOver={(e) => handleDragOver(e, i)}
+                      onDragOver={handleDragOver}
                       onDrop={(e) => handleDrop(e, i)}
                       onMouseEnter={() => setHoveredIdx(i)}
                       onMouseLeave={() => setHoveredIdx(null)}

@@ -157,10 +157,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           set({ accentColor: color });
         } catch (_) { }
         invoke('update_media_metadata', {
-          title: track.title || path.split(/[\\/]/).pop(),
-          artist: track.artist || 'Unknown Artist',
+          title: track?.title || path.split(/[\\/]/).pop(),
+          artist: track?.artist || 'Unknown Artist',
           coverUrl: art,
-          duration: track.duration || 0,
+          duration: track?.duration || 0,
         }).catch(() => { });
       } else {
         set({ coverArt: null, accentColor: '#8b5cf6' });
@@ -209,7 +209,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   playPrev: async () => {
-    const { tracks, currentTrackIndex, playHistory, playTrack } = get();
+    const { tracks, currentTrackIndex, playHistory } = get();
     if (tracks.length === 0) return;
     
     // If we have history, pop the last track and play it

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';

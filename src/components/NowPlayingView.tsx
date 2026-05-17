@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useStore } from '../store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import defaultCover from '../assets/default_cover.png';
