@@ -26,7 +26,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGQjg2MDdDOTNBN0QyNUUKUldSZTBxZVRmR0M0LzArTW56ZnJFVVBReG1SRlNUSGZ5WExHWVhFSVpYS0I3QVd2NWxFNEFneFkK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERENzkyNUY2OTA5RTk0RkMKUldUOGxKNlE5aVY1M2NibHVCZGwrTUV4R3F5M09mZjNVSzhVWldSR2xOa21ySUlNVlpQOFpWenEK",
       "endpoints": [
         "https://raw.githubusercontent.com/Alirull18/Aideo-Music-Player/main/updater.json"
       ],
