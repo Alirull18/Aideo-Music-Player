@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.4.5
+# 💎 Aideo Music Player v0.4.6
 
 **A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics & Social Presence.**
 
@@ -46,18 +46,19 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - **Global Support**: Integrated Romaji generation and one-click translation for international libraries.
 
 ### 🌐 Social & Intelligent Metadata
-- **Discord Rich Presence**: (NEW v0.4.5) Show your listening status on Discord with high-quality metadata and direct "Download App" buttons.
-- **MusicBrainz Magic Match**: (NEW v0.4.5) One-click library cleaning. Instantly match your tracks with official MusicBrainz metadata to fix titles, artists, and albums.
+- **Discord Rich Presence**: Show your listening status on Discord with high-quality metadata and direct "Download App" buttons.
+- **MusicBrainz Magic Match**: One-click library cleaning. Instantly match your tracks with official MusicBrainz metadata to fix titles, artists, and albums.
 - **Last.fm Pure Dashboard**: Real-time listening stats and recent activity delivered in a sleek, minimalist "Pure List" design.
-- **Dynamic Visualizer**: (STABILIZED v0.4.5) High-performance, crash-resistant audio spectrum visualization optimized for Windows WebView2.
+- **Dynamic Visualizer**: High-performance, crash-resistant audio spectrum visualization optimized for Windows WebView2.
+- **Network Live Streams**: (NEW v0.4.6) Play online radio station URLs natively with built-in PLS and M3U playlist parsing inside Rust.
 
 ---
 
 ## 🚀 Getting Started
 
 ### ⚡ Quick Start (For Users)
-1. **Download**: Get the latest version (v0.4.5) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the installer (`Aideo_0.4.5_x64_en-US.msi`).
+1. **Download**: Get the latest version (v0.4.6) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the installer (`Aideo_0.4.6_x64_en-US.msi`).
 3. **Launch**: Open Aideo and start importing your music library!
 
 ---
