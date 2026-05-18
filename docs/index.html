@@ -9,199 +9,271 @@
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://github.com/Alirull18/Aideo-Music-Player/deployments/github-pages">
+    <meta property="og:url" content="https://alirull18.github.io/Aideo-Music-Player/">
     <meta property="og:title" content="Aideo | Premium Music Experience">
     <meta property="og:description" content="Pristine Sound. Dynamic Soul. Experience your music in high-fidelity with Aideo.">
     <meta property="og:image" content="https://github.com/user-attachments/assets/16daf271-533c-4485-a6fc-baf3ade720e4">
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image">
-    <meta property="twitter:url" content="http://aideo.qd.je/">
+    <meta property="twitter:url" content="https://alirull18.github.io/Aideo-Music-Player/">
     <meta property="twitter:title" content="Aideo | Premium Music Experience">
     <meta property="twitter:description" content="Pristine Sound. Dynamic Soul. Experience your music in high-fidelity with Aideo.">
     <meta property="twitter:image" content="https://github.com/user-attachments/assets/16daf271-533c-4485-a6fc-baf3ade720e4">
+    
+    <!-- Google Fonts & FontAwesome Icons -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
     <link rel="stylesheet" href="style.css">
-    <link rel="canonical" href="https://github.com/Alirull18/Aideo-Music-Player/deployments/github-pages" />
-    <style>
-        .section-header { text-align: center; margin-bottom: 4rem; }
-        .section-header h2 { font-size: 3.5rem; font-weight: 900; margin-bottom: 1rem; }
-        .section-header p { color: var(--text-dim); font-size: 1.2rem; max-width: 700px; margin: 0 auto; }
-        
-        .feature-showcase {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 60px;
-            padding: 8rem 10%;
-            align-items: center;
-        }
-        .feature-showcase:nth-child(even) { direction: rtl; }
-        .feature-showcase:nth-child(even) .showcase-text { direction: ltr; }
-        
-        .showcase-text h3 { font-size: 2.5rem; margin-bottom: 1.5rem; color: var(--primary); }
-        .showcase-text p { font-size: 1.1rem; color: var(--text-dim); margin-bottom: 2rem; }
-        
-        .badge {
-            display: inline-block;
-            padding: 6px 12px;
-            background: var(--primary-glow);
-            color: var(--text);
-            border-radius: 8px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-            text-transform: uppercase;
-        }
-        
-        .visual-demo {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            aspect-ratio: 16/10;
-            border-radius: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow: hidden;
-        }
-        .visual-demo i { font-size: 5rem; opacity: 0.2; color: var(--primary); }
-    </style>
+    <link rel="canonical" href="https://alirull18.github.io/Aideo-Music-Player/" />
 </head>
 <body>
-    <div class="glow-sphere" style="top: -10%; left: -10%;"></div>
-    <div class="glow-sphere" style="bottom: -10%; right: -10%; background: radial-gradient(circle, rgba(147, 51, 234, 0.3) 0%, transparent 70%);"></div>
+    <!-- Ambient Glow Backdrops -->
+    <div class="glow-sphere sphere-1"></div>
+    <div class="glow-sphere sphere-2"></div>
+    <div class="glow-sphere sphere-3"></div>
 
+    <!-- Navigation -->
     <nav>
-        <div class="logo"><span>AIDEO</span></div>
+        <div class="logo">
+            <div class="logo-icon"><i class="fas fa-wave-square"></i></div>
+            <span>AIDEO</span>
+        </div>
         <div class="nav-links">
-            <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn btn-secondary"><i class="fab fa-github"></i> GitHub</a>
+            <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn btn-secondary" style="padding: 10px 22px; font-size: 0.9rem;"><i class="fab fa-github"></i> GitHub</a>
         </div>
     </nav>
 
+    <!-- Hero Section -->
     <header class="hero">
-        <div class="badge">Version 0.4.5 Is Live</div>
+        <div class="badge">
+            <div class="badge-dot"></div>
+            Version 0.4.6 Is Live
+        </div>
         <h1>Pristine Sound.<br/>Dynamic Soul.</h1>
-        <p class="tagline">The Audiophile Evolution has arrived. High-fidelity upsampling, social listening, and smart metadata in the most advanced local music player ever built.</p>
+        <p class="tagline">The Audiophile Evolution has arrived. High-fidelity WASAPI Exclusive bypass, studio upsampling, smart metadata, and real-time social presence in a gorgeous adaptive interface.</p>
         
         <div class="cta-group">
             <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary"><i class="fas fa-download"></i> Download for Windows</a>
-            <a href="#v45" class="btn btn-secondary">See What's New</a>
+            <a href="#v46" class="btn btn-secondary">See What's New</a>
+        </div>
+
+        <!-- Window Mockup -->
+        <div class="mockup-container">
+            <div class="window-mockup">
+                <div class="window-bar">
+                    <div class="window-dots">
+                        <div class="window-dot dot-red"></div>
+                        <div class="window-dot dot-yellow"></div>
+                        <div class="window-dot dot-green"></div>
+                    </div>
+                    <div class="window-title">Aideo Music Player - Active Library</div>
+                    <div class="window-status"><i class="fas fa-wave-square"></i> BIT-PERFECT DIRECT</div>
+                </div>
+                <div class="window-body">
+                    <img src="https://github.com/user-attachments/assets/16daf271-533c-4485-a6fc-baf3ade720e4" alt="Aideo Music Player Main Interface Screen"/>
+                </div>
+            </div>
         </div>
     </header>
 
-    <!-- NEW v0.4.5 SHOWCASE -->
-    <section id="v45" style="padding: 10rem 10% 2rem;">
+    <!-- NEW v0.4.6 SHOWCASE -->
+    <section id="v46" style="padding: 6rem 0 2rem;">
         <div class="section-header">
-            <div class="badge">The Presence Update</div>
-            <h2>What's New in v0.4.5</h2>
-            <p>We've added intelligence and social connectivity to your local library. Music is better together.</p>
+            <div class="badge">THE PRESENCE UPDATE</div>
+            <h2>Premium Features in v0.4.6</h2>
+            <p>Intelligence, social connectivity, and custom DSP tailored to your audiophile workspace.</p>
         </div>
     </section>
 
-    <div class="feature-showcase">
-        <div class="showcase-text">
-            <h3>Social Listening</h3>
-            <p>Integrated Discord Rich Presence allows you to show off your library in real-time. Friends can see your high-res metadata and even jump to your download page with direct profile buttons.</p>
-            <ul style="list-style: none; color: var(--text-dim);">
-                <li style="margin-bottom: 10px;"><i class="fab fa-discord" style="color: var(--primary); margin-right: 10px;"></i> Real-time Track & Artist Status</li>
-                <li style="margin-bottom: 10px;"><i class="fas fa-link" style="color: var(--primary); margin-right: 10px;"></i> Custom "Listen with Aideo" Buttons</li>
-            </ul>
+    <!-- Feature Showcase Grid -->
+    <div class="feature-showcase-container">
+        <!-- Feature 1: Now Playing -->
+        <div class="feature-showcase">
+            <div class="showcase-text">
+                <h3>Immersive <span>Now Playing</span></h3>
+                <p>Experience your music visually. The entire interface breathes and transforms dynamically, extracting and blending color tones from your album artwork in real-time. Features fluid animations, high-res lyric alignment, and studio audio telemetry.</p>
+                <ul class="showcase-list">
+                    <li><i class="fas fa-paint-brush"></i> Adaptive Artwork Color Theming</li>
+                    <li><i class="fas fa-wave-square"></i> Fluid real-time FFT Spectrum Visualizer</li>
+                    <li><i class="fas fa-align-left"></i> Sub-millisecond lyric synchronization</li>
+                </ul>
+            </div>
+            <div class="showcase-visual">
+                <div class="visual-pane">
+                    <div class="window-bar" style="height: 38px; padding: 0 15px;">
+                        <div class="window-dots">
+                            <div class="window-dot dot-red" style="width: 10px; height: 10px;"></div>
+                            <div class="window-dot dot-yellow" style="width: 10px; height: 10px;"></div>
+                            <div class="window-dot dot-green" style="width: 10px; height: 10px;"></div>
+                        </div>
+                        <div class="window-title" style="font-size: 0.75rem;">Now Playing View</div>
+                    </div>
+                    <img src="https://github.com/user-attachments/assets/b1f80bfc-551e-4317-ae64-d5772728968d" alt="Now Playing Screen with Lyrics"/>
+                </div>
+            </div>
         </div>
-        <div class="visual-demo">
-            <i class="fab fa-discord"></i>
+
+        <!-- Feature 2: Audio Settings -->
+        <div class="feature-showcase">
+            <div class="showcase-visual">
+                <div class="visual-pane">
+                    <div class="window-bar" style="height: 38px; padding: 0 15px;">
+                        <div class="window-dots">
+                            <div class="window-dot dot-red" style="width: 10px; height: 10px;"></div>
+                            <div class="window-dot dot-yellow" style="width: 10px; height: 10px;"></div>
+                            <div class="window-dot dot-green" style="width: 10px; height: 10px;"></div>
+                        </div>
+                        <div class="window-title" style="font-size: 0.75rem;">Audio Control Panel</div>
+                    </div>
+                    <img src="https://github.com/user-attachments/assets/289f4e2a-d419-456a-9054-10afa928dbb7" alt="Audio Configuration Settings"/>
+                </div>
+            </div>
+            <div class="showcase-text">
+                <h3>Studio-Grade <span>Audio Console</span></h3>
+                <p>Take absolute control over your digital signal path. The dedicated audio console lets you negotiate hardware sampling rates, bypass default OS mixers, and load professional EQ profiles for pure, bit-perfect fidelity.</p>
+                <ul class="showcase-list">
+                    <li><i class="fas fa-sliders-h"></i> 10-band Parametric Equalizer & DSP Settings</li>
+                    <li><i class="fas fa-headphones"></i> High-fidelity crossfeed & spatial widening</li>
+                    <li><i class="fas fa-check-double"></i> Automatic Lossless & Hi-Res audio badges</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Feature 3: Discord Rich Presence -->
+        <div class="feature-showcase">
+            <div class="showcase-text">
+                <h3>Social <span>Listening Status</span></h3>
+                <p>Share your acoustic journey. Fully integrated Discord Rich Presence displays what track you're playing, high-resolution metadata, elapsed playback time, and dynamic custom action buttons for friends to download the player.</p>
+                <ul class="showcase-list">
+                    <li><i class="fab fa-discord"></i> Real-time status update & dynamic profile buttons</li>
+                    <li><i class="fas fa-magic"></i> MusicBrainz Magic Match database scanning</li>
+                    <li><i class="fas fa-language"></i> Romaji translation & global character support</li>
+                </ul>
+            </div>
+            <div class="showcase-visual">
+                <div class="discord-widget">
+                    <div class="discord-header">Playing a Game</div>
+                    <div class="discord-profile">
+                        <div class="discord-avatar-container">
+                            <div class="discord-avatar">A</div>
+                            <div class="discord-status"></div>
+                        </div>
+                        <div class="discord-info">
+                            <div class="discord-username">Alirul</div>
+                            <div class="discord-activity-title">
+                                <i class="fab fa-discord" style="color: #5865f2; margin-right: 4px;"></i> Playing <strong>Aideo</strong>
+                            </div>
+                            <div class="discord-track-details">
+                                <div class="discord-cover"><i class="fas fa-music"></i></div>
+                                <div class="discord-track-text">
+                                    <div class="discord-track-name">Pristine Melodies</div>
+                                    <div class="discord-track-artist">Aideo Exclusive Player</div>
+                                    <div class="discord-track-album">Bit-Perfect 192kHz</div>
+                                </div>
+                            </div>
+                            <div class="discord-progress-bar">
+                                <div class="discord-progress-fill"></div>
+                            </div>
+                            <div class="discord-buttons">
+                                <button class="discord-btn discord-btn-primary"><i class="fab fa-github"></i> Download Aideo</button>
+                                <button class="discord-btn"><i class="fas fa-external-link-alt"></i> Learn More</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div class="feature-showcase">
-        <div class="showcase-text">
-            <h3>Magic Match Metadata</h3>
-            <p>Stop settling for messy titles and missing covers. Our MusicBrainz integration analyzes your files and fetches official, studio-grade metadata with a single click.</p>
-            <ul style="list-style: none; color: var(--text-dim);">
-                <li style="margin-bottom: 10px;"><i class="fas fa-brain" style="color: var(--primary); margin-right: 10px;"></i> Global MusicBrainz DB Search</li>
-                <li style="margin-bottom: 10px;"><i class="fas fa-check-circle" style="color: var(--primary); margin-right: 10px;"></i> Automatic Artist & Album Tagging</li>
-            </ul>
-        </div>
-        <div class="visual-demo">
-            <i class="fas fa-magic"></i>
-        </div>
-    </div>
+    <!-- CORE ENGINE CARDS -->
+    <section id="features" class="section-header" style="margin-top: 6rem; margin-bottom: 3rem;">
+        <h2>The Core Engine</h2>
+        <p>Beneath the beautiful skin lies a powerhouse of digital signal processing engineered in Rust.</p>
+    </section>
 
-    <div class="feature-showcase">
-        <div class="showcase-text">
-            <h3>Pure Data Dashboard</h3>
-            <p>The new Last.fm Pure List dashboard delivers your stats without the noise. High-density activity logs and top artist charts designed for the data-obsessed listener.</p>
-            <ul style="list-style: none; color: var(--text-dim);">
-                <li style="margin-bottom: 10px;"><i class="fas fa-chart-line" style="color: var(--primary); margin-right: 10px;"></i> Minimalist Activity History</li>
-                <li style="margin-bottom: 10px;"><i class="fas fa-users" style="color: var(--primary); margin-right: 10px;"></i> Top Artist Insights (7-Day)</li>
-            </ul>
-        </div>
-        <div class="visual-demo">
-            <i class="fas fa-list-ul"></i>
-        </div>
-    </div>
-
-    <!-- CORE ENGINE -->
-    <section id="features" class="features">
-        <div class="section-header" style="grid-column: 1 / -1;">
-            <h2>The Core Engine</h2>
-            <p>Beneath the beautiful skin lies a powerhouse of digital signal processing.</p>
-        </div>
+    <div class="features">
         <div class="feature-card">
             <i class="fas fa-microchip"></i>
             <h3>Audiophile Logic</h3>
-            <p>Professional Sinc-interpolation upsampling and TPDF dithering for absolute signal integrity.</p>
+            <p>Professional Sinc-interpolation upsampling and TPDF dithering for absolute signal integrity, optimizing the dynamic range on high-end DACs.</p>
         </div>
-        <div class="feature-card">
+        <div class="feature-card sec-card">
             <i class="fas fa-bolt"></i>
             <h3>Lazy RAM Buffering</h3>
-            <p>Tracks start playing the millisecond you click. Background decoding ensures zero jitter and zero latency.</p>
+            <p>Tracks start playing the millisecond you click. Asynchronous background decoding ensures completely zero-jitter and zero-latency audio flow.</p>
         </div>
-        <div class="feature-card">
-            <i class="fas fa-magic"></i>
-            <h3>Dynamic Theming</h3>
-            <p>The interface breathes with your music. Colors intelligently adapt to your album artwork in real-time.</p>
-        </div>
-        <div class="feature-card">
+        <div class="feature-card third-card">
             <i class="fas fa-wave-square"></i>
             <h3>Bit-Perfect I/O</h3>
-            <p>Bypass the Windows mixer with WASAPI Exclusive Mode. Direct hardware communication for pristine audio.</p>
+            <p>Bypass the Windows kernel mixer with WASAPI Exclusive Mode. Direct-to-hardware communication delivers bit-perfect native playback.</p>
         </div>
+    </div>
+
+    <!-- TECH STACK INFO -->
+    <section class="section-header" style="margin-top: 4rem; margin-bottom: 4rem;">
+        <h2>Engineered Stack</h2>
+        <p>Powered by ultra-fast backend libraries and highly modern frontend frameworks.</p>
     </section>
 
-    <section id="roadmap" style="padding: 5rem 10% 10rem; background: rgba(255,255,255,0.01);">
-        <div class="section-header">
-            <h2>The Roadmap</h2>
+    <div class="tech-stack-container">
+        <div class="tech-item">
+            <div>Frontend</div>
+            <span>React 19 & TS</span>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px;">
-            <div class="feature-card" style="border-left: 4px solid #22c55e;">
-                <span style="font-size: 0.8rem; color: #22c55e; font-weight: 700;">COMPLETED</span>
-                <h4 style="margin-top: 10px;">Social Presence</h4>
-                <p style="font-size: 0.9rem;">Real-time Discord status & interactive buttons.</p>
-            </div>
-            <div class="feature-card" style="border-left: 4px solid #22c55e;">
-                <span style="font-size: 0.8rem; color: #22c55e; font-weight: 700;">COMPLETED</span>
-                <h4 style="margin-top: 10px;">Visualizer Engine</h4>
-                <p style="font-size: 0.9rem;">Real-time FFT audio visualization optimized for v0.4.5.</p>
-            </div>
-            <div class="feature-card" style="border-left: 4px solid var(--primary);">
-                <span style="font-size: 0.8rem; color: var(--primary); font-weight: 700;">NEXT-GEN CORE</span>
-                <h4 style="margin-top: 10px;">Native DSD & DSD64</h4>
-                <p style="font-size: 0.9rem;">Studio-grade DSF/DFF decoding with DoP support.</p>
-            </div>
-            <div class="feature-card" style="border-left: 4px solid var(--primary);">
-                <span style="font-size: 0.8rem; color: var(--primary); font-weight: 700;">NEXT-GEN CORE</span>
-                <h4 style="margin-top: 10px;">Neural Reconstruction</h4>
-                <p style="font-size: 0.9rem;">AI-assisted high-frequency restoration for compressed files.</p>
-            </div>
+        <div class="tech-item">
+            <div>Core Engine</div>
+            <span>Rust Backend</span>
         </div>
+        <div class="tech-item">
+            <div>DSP Core</div>
+            <span>cpal / symphonia</span>
+        </div>
+        <div class="tech-item">
+            <div>Framework</div>
+            <span>Tauri 2.0</span>
+        </div>
+    </div>
+
+    <!-- ROADMAP -->
+    <section class="section-header" style="margin-top: 2rem; margin-bottom: 4rem;">
+        <h2>The Roadmap</h2>
+        <p>Our ongoing commitment to next-generation audio playback innovation.</p>
     </section>
 
+    <div class="roadmap-grid">
+        <div class="roadmap-card">
+            <div class="roadmap-tag tag-done">Completed</div>
+            <h4>Social Presence</h4>
+            <p>Real-time Discord status, elapsed listening time, and custom profile redirection buttons.</p>
+        </div>
+        <div class="roadmap-card">
+            <div class="roadmap-tag tag-done">Completed</div>
+            <h4>Visualizer Engine</h4>
+            <p>High-performance FFT real-time spectrum analysis dynamically synchronized with system channels.</p>
+        </div>
+        <div class="roadmap-card">
+            <div class="roadmap-tag tag-next">Next-Gen Core</div>
+            <h4>Native DSD & DSD64</h4>
+            <p>Studio-grade DSF/DFF native file decoding with direct DSD-over-PCM (DoP) transport support.</p>
+        </div>
+        <div class="roadmap-card">
+            <div class="roadmap-tag tag-next">Next-Gen Core</div>
+            <h4>Neural Reconstruction</h4>
+            <p>AI-assisted up-sampling algorithm to restore lost high-frequency bands on compressed legacy formats.</p>
+        </div>
+    </div>
+
+    <!-- Footer -->
     <footer>
         <p>&copy; 2026 Aideo Music Player. Crafted with ❤️ by Alirul.</p>
-        <p style="margin-top: 10px; font-size: 0.8rem; opacity: 0.5;">Optimized for High-Performance Audiophiles.</p>
+        <p style="margin-top: 10px; font-size: 0.85rem; opacity: 0.5;">Optimized for High-Performance Audiophiles.</p>
+        <div class="footer-badge">
+            <i class="fas fa-check-circle"></i> ALL SYSTEMS BIT-PERFECT &bull; 192kHz NATIVE
+        </div>
     </footer>
 </body>
 </html>
