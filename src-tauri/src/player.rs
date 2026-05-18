@@ -232,10 +232,20 @@ fn prepare_decoder(
     }).map_err(|e| format!("Probe error: {}", e))?;
 
     let format = probed.format;
-    let track = format.default_track().ok_or("No default track")?.clone();
+    
+    let mut selected_track = None;
+    let mut decoder = None;
+    for t in format.tracks() {
+        if let Ok(d) = get_codecs().make(&t.codec_params, &DecoderOptions::default()) {
+            selected_track = Some(t.clone());
+            decoder = Some(d);
+            break;
+        }
+    }
+    
+    let track = selected_track.ok_or("No supported audio track found")?;
+    let decoder = decoder.unwrap();
     let track_id = track.id;
-    let decoder = get_codecs().make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| format!("Codec error: {}", e))?;
 
     let rate = track.codec_params.sample_rate.unwrap_or(44100) as usize;
     let ch = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
@@ -577,15 +587,23 @@ fn background_decode(
         Err(_) => return,
     };
     let mut format = probed.format;
-    let track = match format.default_track() {
-        Some(t) => t.clone(),
+    
+    let mut selected_track = None;
+    let mut decoder = None;
+    for t in format.tracks() {
+        if let Ok(d) = get_codecs().make(&t.codec_params, &DecoderOptions::default()) {
+            selected_track = Some(t.clone());
+            decoder = Some(d);
+            break;
+        }
+    }
+    
+    let track = match selected_track {
+        Some(t) => t,
         None => return,
     };
     let track_id = track.id;
-    let mut decoder = match get_codecs().make(&track.codec_params, &DecoderOptions::default()) {
-        Ok(d) => d,
-        Err(_) => return,
-    };
+    let mut decoder = decoder.unwrap();
 
     loop {
         if shutdown.load(Ordering::Relaxed) { break; }

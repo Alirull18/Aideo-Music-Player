@@ -5,7 +5,12 @@ const USER_AGENT: &str = "AideoMusicPlayer/0.4.5 ( https://github.com/Alirull18/
 
 pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String> {
     let client = Client::new();
-    let query = format!("recording:\"{}\" AND artist:\"{}\"", title, artist);
+    let query = if artist.trim().is_empty() {
+        // If we only have a title, do a loose general search across all fields
+        format!("\"{}\"", title)
+    } else {
+        format!("recording:\"{}\" AND artist:\"{}\"", title, artist)
+    };
     let url = format!("https://musicbrainz.org/ws/2/recording?query={}&fmt=json", urlencoding::encode(&query));
 
     let res = client.get(&url)

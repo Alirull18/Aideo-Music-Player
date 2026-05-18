@@ -10,6 +10,7 @@ import { Sidebar } from './components/Sidebar';
 import { LibraryView } from './components/LibraryView';
 import { NowPlayingView } from './components/NowPlayingView';
 import { LastfmView } from './components/LastfmView';
+import { YoutubeSearchView } from './components/YoutubeSearchView';
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
 import { SettingsModal } from './components/SettingsModal';
@@ -135,6 +136,12 @@ export default function App() {
             <motion.div key="lfm" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <LastfmView />
+            </motion.div>
+          )}
+          {view === 'youtube' && (
+            <motion.div key="yt" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <YoutubeSearchView />
             </motion.div>
           )}
         </AnimatePresence>

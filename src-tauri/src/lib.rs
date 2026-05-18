@@ -13,6 +13,7 @@ mod lastfm;
 mod scanner;
 mod musicbrainz;
 mod discord;
+pub mod youtube;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -359,8 +360,28 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
 
 #[tauri::command]
 fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let track = scanner::extract_metadata(std::path::Path::new(&path))
-        .ok_or_else(|| "Failed to extract metadata from file".to_string())?;
+    let track = match scanner::extract_metadata(std::path::Path::new(&path)) {
+        Some(t) => t,
+        None => {
+            // Fallback for raw streams (like yt-dlp native m4a downloads) that lack ID3 metadata
+            let title = std::path::Path::new(&path)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+                
+            db::Track {
+                id: 0,
+                path: path.clone(),
+                title: Some(title),
+                artist: Some("YouTube Audio".to_string()),
+                album: None,
+                duration: None,
+                format: Some("M4A".to_string()),
+                lyric_offset: 0,
+            }
+        }
+    };
     
     let conn = safe_lock(&state.db);
     db::save_tracks(&conn, &mut [track]).map_err(|e| e.to_string())?;
@@ -731,6 +752,8 @@ pub fn run() {
             remove_from_playlist,
             get_playlist_tracks,
             add_track_to_library,
+            youtube::search_youtube,
+            youtube::download_track,
         ])
         .setup(|app| {
             discord::init_discord();

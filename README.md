@@ -133,7 +133,7 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - [ ] **DSD/SACD Support**: Native DSD decoding (DSF/DFF) via DoP (Next-Gen).
 - [ ] **Convolution Engine**: FIR/Impulse Response loader for Headphone Correction (Next-Gen).
 - [ ] **Neural Reconstruction**: AI-based high-frequency restoration for compressed audio (Next-Gen).
-- [ ] **Cross-Platform Support**: Implementation for macOS (CoreAudio).
+
 
 ---
 

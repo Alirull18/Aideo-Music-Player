@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Search } from 'lucide-react';
 
 export function Sidebar() {
   const { view, setView, toggleSettings, playlists, currentPlaylist, loadPlaylistTracks, loadLibrary, createPlaylist, deletePlaylist, setCustomPrompt, setPlaybackError } = useStore();
@@ -37,6 +37,9 @@ export function Sidebar() {
       </div>
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
         <Headphones size={18} /> Now Playing
+      </div>
+      <div className={`nav-item ${view === 'youtube' ? 'active' : ''}`} onClick={() => setView('youtube')}>
+        <Search size={18} /> Discover
       </div>
       <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')}>
         <Radio size={18} /> Last.fm Stats

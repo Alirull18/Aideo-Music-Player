@@ -18,9 +18,25 @@ export function ToastContainer() {
     const unlisten = listen<string>('playback-error', (event) => {
       addToast(event.payload, 'error');
     });
+    const unlistenInfo = listen<string>('ui-toast-info', (event) => {
+      addToast(event.payload, 'info');
+    });
+    const unlistenSuccess = listen<string>('ui-toast-success', (event) => {
+      addToast(event.payload, 'success');
+    });
+
+    const handleToast = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      addToast(customEvent.detail.message, customEvent.detail.type);
+    };
+    
+    window.addEventListener('ui-toast', handleToast);
 
     return () => {
       unlisten.then(f => f());
+      unlistenInfo.then(f => f());
+      unlistenSuccess.then(f => f());
+      window.removeEventListener('ui-toast', handleToast);
     };
   }, []);
 

@@ -284,7 +284,20 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   matchMetadata: async (track: Track) => {
     try {
       set({ scanStatus: `Matching ${track.title || 'track'}...` });
-      const res: any = await invoke('mbz_search_recording', { title: track.title || '', artist: track.artist || '' });
+      
+      let searchTitle = track.title || '';
+      let searchArtist = track.artist || '';
+      
+      // Smart parsing for YouTube downloads
+      if (searchArtist === 'YouTube Audio' && searchTitle.includes(' - ')) {
+        const parts = searchTitle.split(' - ');
+        searchArtist = parts[0].trim();
+        searchTitle = parts.slice(1).join(' - ').trim();
+      } else if (searchArtist === 'YouTube Audio') {
+        searchArtist = '';
+      }
+      
+      const res: any = await invoke('mbz_search_recording', { title: searchTitle, artist: searchArtist });
       const recording = res.recordings?.[0];
       if (!recording) {
         set({ scanStatus: 'No match found on MusicBrainz.' });
