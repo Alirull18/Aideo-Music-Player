@@ -61,7 +61,10 @@ export function LyricsPanel() {
       const query = manualQuery || `${currentTrack?.artist ?? ''} ${currentTrack?.title ?? baseName(currentTrack?.path ?? '')}`;
       const r: SearchResult[] = await invoke('search_lyrics_online', { query });
       setResults(r);
-    } catch (e) { console.error(e); } finally { setSearching(false); }
+    } catch (e) { 
+      console.error(e); 
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Lyric search failed: ${e}`, type: 'error' } }));
+    } finally { setSearching(false); }
   };
 
   const pickResult = async (r: SearchResult, mode: 'lyrics' | 'art' | 'both') => {
@@ -86,7 +89,10 @@ export function LyricsPanel() {
       }
 
       setShowFinder(false);
-    } catch (e) { console.error(e); } finally { setSearching(false); }
+    } catch (e) { 
+      console.error(e); 
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to download lyric/art: ${e}`, type: 'error' } }));
+    } finally { setSearching(false); }
   };
 
   return (

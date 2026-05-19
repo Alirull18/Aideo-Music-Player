@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { emit } from '@tauri-apps/api/event';
-import { Search, Download, Loader2, Music, CheckCircle2 } from 'lucide-react';
+import { Search, Download, Loader2, Music, CheckCircle2, X } from 'lucide-react';
 import { useStore } from '../store';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface YoutubeTrack {
   id: string;
@@ -19,6 +19,8 @@ export function YoutubeSearchView() {
   const [results, setResults] = useState<YoutubeTrack[]>([]);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
+  const [searchMode, setSearchMode] = useState<'music' | 'video'>('music');
+  const [pendingDownload, setPendingDownload] = useState<YoutubeTrack | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,23 +28,31 @@ export function YoutubeSearchView() {
 
     setIsSearching(true);
     try {
-      const tracks = await invoke<YoutubeTrack[]>('search_youtube', { query });
+      const finalQuery = searchMode === 'music' ? `${query} Topic` : query;
+      const tracks = await invoke<YoutubeTrack[]>('search_youtube', { query: finalQuery });
       setResults(tracks);
     } catch (err) {
       console.error("Search error", err);
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `YouTube search failed: ${err}`, type: 'error' } }));
     } finally {
       setIsSearching(false);
     }
   };
 
-  const handleDownload = async (track: YoutubeTrack) => {
+  const handleDownload = (track: YoutubeTrack) => {
     if (downloadingId === track.id || downloadedIds.has(track.id)) return;
-    
+    setPendingDownload(track);
+  };
+
+  const confirmDownload = async (quality: string) => {
+    if (!pendingDownload) return;
+    const track = pendingDownload;
+    setPendingDownload(null);
     setDownloadingId(track.id);
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Downloading: ${track.title}...`, type: 'info' }}));
     
     try {
-      await invoke('download_track', { url: track.url });
+      await invoke('download_track', { url: track.url, quality });
       setDownloadedIds(prev => new Set(prev).add(track.id));
       useStore.getState().loadLibrary(); // Rescan immediately
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Download complete: ${track.title} added to library!`, type: 'success' }}));
@@ -62,28 +72,56 @@ export function YoutubeSearchView() {
         </h1>
         <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>Search the globe and download high-fidelity streams directly to your library.</p>
         
-        <form onSubmit={handleSearch} style={{ marginTop: 24, position: 'relative' }}>
-          <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }}>
-            <Search size={18} />
+        <form onSubmit={handleSearch} style={{ marginTop: 24, display: 'flex', gap: 12 }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }}>
+              <Search size={18} />
+            </div>
+            <input 
+              type="text" 
+              placeholder={searchMode === 'music' ? "Search official artists & albums..." : "Search all videos..."}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '16px 20px 16px 48px',
+                borderRadius: 16,
+                border: '1px solid rgba(255,255,255,0.05)',
+                background: 'rgba(0,0,0,0.3)',
+                color: 'white',
+                fontSize: 16,
+                fontWeight: 500,
+                outline: 'none',
+                boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.2)'
+              }}
+            />
           </div>
-          <input 
-            type="text" 
-            placeholder="Search artists, tracks, or albums..."
-            value={query}
-            onChange={e => setQuery(e.target.value)}
+
+          <select
+            value={searchMode}
+            onChange={e => setSearchMode(e.target.value as 'music' | 'video')}
             style={{
-              width: '100%',
-              padding: '16px 20px 16px 48px',
+              padding: '16px 36px 16px 20px',
               borderRadius: 16,
               border: '1px solid rgba(255,255,255,0.05)',
               background: 'rgba(0,0,0,0.3)',
               color: 'white',
-              fontSize: 16,
-              fontWeight: 500,
+              fontSize: 14,
+              fontWeight: 600,
               outline: 'none',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              appearance: 'none',
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 16px center',
+              minWidth: 180,
               boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.2)'
             }}
-          />
+          >
+            <option value="music" style={{ background: '#0c0c14' }}>YT Music (Official)</option>
+            <option value="video" style={{ background: '#0c0c14' }}>YT Video (Standard)</option>
+          </select>
         </form>
       </div>
 
@@ -146,6 +184,58 @@ export function YoutubeSearchView() {
           </div>
         )}
       </div>
+
+      {/* Quality Selection Modal */}
+      <AnimatePresence>
+        {pendingDownload && (
+          <div className="modal-overlay" onClick={() => setPendingDownload(null)}>
+            <motion.div 
+              className="modal-box" 
+              onClick={e => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0 }} 
+              animate={{ scale: 1, opacity: 1 }} 
+              exit={{ scale: 0.9, opacity: 0 }}
+              style={{ maxWidth: 400 }}
+            >
+              <div className="modal-header">
+                <h3>Select Audio Quality</h3>
+                <button className="modal-close" onClick={() => setPendingDownload(null)}><X size={20} /></button>
+              </div>
+              <div className="modal-body">
+                <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 20 }}>
+                  Choose the download quality for <strong style={{ color: 'white' }}>{pendingDownload.title}</strong>.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={() => confirmDownload('high')}
+                    style={{ padding: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <span style={{ fontWeight: 600 }}>High Quality</span>
+                    <span style={{ fontSize: 12, opacity: 0.8 }}>Best available (m4a/opus)</span>
+                  </button>
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => confirmDownload('standard')}
+                    style={{ padding: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <span style={{ fontWeight: 600 }}>Standard</span>
+                    <span style={{ fontSize: 12, opacity: 0.8 }}>~128kbps AAC</span>
+                  </button>
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => confirmDownload('low')}
+                    style={{ padding: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)' }}
+                  >
+                    <span style={{ fontWeight: 600, color: 'var(--text-dim)' }}>Data Saver</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Lowest usage</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

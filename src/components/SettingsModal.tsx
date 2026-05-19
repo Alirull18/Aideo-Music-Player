@@ -124,6 +124,7 @@ export function SettingsModal() {
                               await openUrl(`https://www.last.fm/api/auth/?api_key=${apiKey}&token=${token}`);
                             } catch (e: any) {
                               setLfmError(String(e));
+                              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Last.fm auth failed: ${e}`, type: 'error' } }));
                             } finally {
                               setLfmLoading(false);
                             }
@@ -146,6 +147,7 @@ export function SettingsModal() {
                                 useStore.setState({ lastfmToken: null });
                               } catch (e: any) {
                                 setLfmError("Could not find authorization. Did you click 'Allow' in your browser?");
+                                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Last.fm session error: ${e}`, type: 'error' } }));
                               } finally {
                                 setLfmLoading(false);
                               }

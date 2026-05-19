@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.4.6
+# 💎 Aideo Music Player v0.5.0
 
 **A High-Fidelity, Audiophile-Grade Music Engine with Dynamic Aesthetics & Social Presence.**
 
@@ -33,6 +33,7 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
   - **Hi-Res Upsampling**: Professional Sinc-interpolation upsampling (up to 384kHz) with hardware rate switching.
   - **TPDF Dithering**: High-precision triangular dithering to optimize noise floor on 24-bit/32-bit DACs.
   - **Buffer-Aware Sync**: Sub-millisecond lyric synchronization that accounts for hardware processing delays.
+  - **Native WASAPI Fallback**: (NEW v0.5.0) Instant, panic-free recovery to the system default device if your DAC or headphones are unplugged during playback.
 - **Studio-Grade DSP**: Features a 10-band parametric equalizer, spatial widening, and headphone crossfeed.
 - **High-Res Identification**: Automatic visual badges for lossless formats (FLAC, WAV) and Hi-Res status.
 - **Persistent Sync Memory**: Intelligent database that remembers your lyric synchronization offsets for every song.
@@ -42,6 +43,7 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 - **Glassmorphic Design**: A sleek, "Deep-Space" aesthetic featuring frosted glass effects and fluid motion.
 - **Micro-Animations**: Interactive elements respond with high-performance animations for a "living" interface.
 - **Smart Thumbnails**: Asynchronous background loading for high-resolution library artwork.
+- **Massive Performance Boost**: (NEW v0.5.0) React.memo rendering, UI virtualization, and 100x faster SQLite transactions designed to handle libraries with 10k+ tracks effortlessly. Includes a new real-time search filtering system.
 
 - **Global Support**: Integrated Romaji generation and one-click translation for international libraries.
 
@@ -57,8 +59,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 ## 🚀 Getting Started
 
 ### ⚡ Quick Start (For Users)
-1. **Download**: Get the latest version (v0.4.6) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the installer (`Aideo_0.4.6_x64_en-US.msi`).
+1. **Download**: Get the latest version (v0.5.0) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the installer (`Aideo_0.5.0_x64_en-US.msi`).
 3. **Launch**: Open Aideo and start importing your music library!
 
 ---

@@ -50,7 +50,7 @@ export interface CustomPromptState {
 }
 
 export interface PlayerState {
-  view: 'library' | 'nowplaying' | 'lastfm' | 'youtube';
+  view: 'library' | 'nowplaying' | 'lastfm' | 'youtube' | 'tidal';
   tracks: Track[];
   queue: Track[];
   currentTrackIndex: number;
@@ -89,7 +89,7 @@ export interface PlayerState {
   setCustomPrompt: (prompt: Partial<CustomPromptState>) => void;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'youtube') => void;
+  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'youtube' | 'tidal') => void;
   updateDiscordPresence: () => void;
   addScanDir: (dir: string) => void;
   removeScanDir: (dir: string) => void;

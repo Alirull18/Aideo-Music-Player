@@ -1,9 +1,10 @@
 [package]
 name = "aideo"
-version = "0.4.6"
+version = "0.5.0"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
+default-run = "aideo"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -50,4 +51,16 @@ tauri-plugin-single-instance = "2"
 dirs = "6.0.0"
 futures = "0.3"
 rusty_ytdl = "0.7.4"
-
+windows = { version = "0.52.0", features = [
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia"
+] }
+wasapi = "0.23.0"
+librqbit = "8.1.1"
+regex = "1.10.3"

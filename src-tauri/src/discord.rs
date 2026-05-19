@@ -1,5 +1,5 @@
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use lazy_static::lazy_static;
 
 // Placeholder Client ID - You can create your own at discord.com/developers
@@ -63,6 +63,7 @@ pub fn update_presence(details: &str, state: &str, is_playing: bool) {
     }
 }
 
+#[allow(dead_code)]
 pub fn clear_presence() {
     let mut global_client = DISCORD_CLIENT.lock().unwrap();
     if let Some(client) = global_client.as_mut() {

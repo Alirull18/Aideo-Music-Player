@@ -1,8 +1,7 @@
 use rusty_ytdl::search::{YouTube, SearchOptions, SearchType, SearchResult};
-use rusty_ytdl::{Video, VideoOptions, VideoQuality, VideoSearchOptions};
+use rusty_ytdl::{Video, VideoOptions};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tauri::{AppHandle, State};
+use tauri::State;
 use crate::AppState;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -49,8 +48,8 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[tauri::command]
-pub async fn download_track(url: String, state: State<'_, AppState>) -> Result<String, String> {
-    println!("[youtube] Initiating invisible yt-dlp download for URL: {}", url);
+pub async fn download_track(url: String, quality: String, state: State<'_, AppState>) -> Result<String, String> {
+    println!("[youtube] Initiating invisible yt-dlp download for URL: {} at quality: {}", url, quality);
     
     // 1. Auto-Installer setup
     let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -90,11 +89,18 @@ pub async fn download_track(url: String, state: State<'_, AppState>) -> Result<S
     std::fs::create_dir_all(&music_dir).map_err(|e| e.to_string())?;
     let file_path = music_dir.join(format!("{}.m4a", title));
     
-    // 4. Run yt-dlp invisibly!
-    println!("[youtube] Extracting perfectly muxed stream (Format 18) via invisible yt-dlp to {:?}...", file_path);
+    // Determine format string based on quality selection
+    // Note: We prefer m4a to avoid needing ffmpeg for format conversion, ensuring smooth playback.
+    let format_str = match quality.as_str() {
+        "high" => "bestaudio[ext=m4a]/bestaudio", // Best available audio, prefer m4a
+        "low" => "worstaudio[ext=m4a]/worstaudio", // Lowest data usage
+        _ => "140", // Standard 128kbps AAC (format 140)
+    };
+
+    println!("[youtube] Extracting audio stream (Format: {}) via invisible yt-dlp to {:?}...", format_str, file_path);
     let output = std::process::Command::new(&ytdlp_path)
         .arg("-f")
-        .arg("18")
+        .arg(format_str)
         .arg("-o")
         .arg(&file_path)
         .arg(&url)

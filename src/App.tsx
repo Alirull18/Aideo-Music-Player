@@ -11,6 +11,8 @@ import { LibraryView } from './components/LibraryView';
 import { NowPlayingView } from './components/NowPlayingView';
 import { LastfmView } from './components/LastfmView';
 import { YoutubeSearchView } from './components/YoutubeSearchView';
+
+import { TidalView } from './components/TidalView';
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
 import { SettingsModal } from './components/SettingsModal';
@@ -142,6 +144,13 @@ export default function App() {
             <motion.div key="yt" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <YoutubeSearchView />
+            </motion.div>
+          )}
+
+          {view === 'tidal' && (
+            <motion.div key="tid" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <TidalView />
             </motion.div>
           )}
         </AnimatePresence>

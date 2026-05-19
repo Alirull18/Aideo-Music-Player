@@ -14,6 +14,8 @@ mod scanner;
 mod musicbrainz;
 mod discord;
 pub mod youtube;
+pub mod wasapi_engine;
+pub mod tidal;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -352,9 +354,9 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
         all_tracks_to_save.extend(tracks);
     }
 
-    let conn = safe_lock(&state.db);
+    let mut conn = safe_lock(&state.db);
     let _ = conn.execute("DELETE FROM tracks", []);
-    db::save_tracks(&conn, &mut all_tracks_to_save).map_err(|e| e.to_string())?;
+    db::save_tracks(&mut conn, &mut all_tracks_to_save).map_err(|e| e.to_string())?;
     Ok(total_tracks)
 }
 
@@ -383,8 +385,8 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
         }
     };
     
-    let conn = safe_lock(&state.db);
-    db::save_tracks(&conn, &mut [track]).map_err(|e| e.to_string())?;
+    let mut conn = safe_lock(&state.db);
+    db::save_tracks(&mut conn, &mut [track]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -428,6 +430,31 @@ fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<V
 fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
     let conn = safe_lock(&state.db);
     db::get_all_tracks(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_track(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = safe_lock(&state.db);
+    db::delete_track(&conn, &path).map_err(|e| e.to_string())?;
+    
+    // 1. Delete the main audio file
+    let audio_path = std::path::Path::new(&path);
+    let _ = std::fs::remove_file(audio_path);
+
+    // 2. Delete sidecar files (.lrc, .jpg, .png)
+    if let (Some(parent), Some(stem)) = (audio_path.parent(), audio_path.file_stem()) {
+        if let Some(stem_str) = stem.to_str() {
+            let lrc_path = parent.join(format!("{}.lrc", stem_str));
+            let jpg_path = parent.join(format!("{}.jpg", stem_str));
+            let png_path = parent.join(format!("{}.png", stem_str));
+
+            let _ = std::fs::remove_file(lrc_path);
+            let _ = std::fs::remove_file(jpg_path);
+            let _ = std::fs::remove_file(png_path);
+        }
+    }
+
+    Ok(())
 }
 
 // ── Metadata commands ─────────────────────────────────────────────────────────
@@ -752,10 +779,28 @@ pub fn run() {
             remove_from_playlist,
             get_playlist_tracks,
             add_track_to_library,
+            delete_track,
             youtube::search_youtube,
             youtube::download_track,
+            tidal::tidal_login_start,
+            tidal::tidal_login_poll_status,
+            tidal::tidal_search,
+            tidal::tidal_download,
+            tidal::tidal_logout,
+            tidal::tidal_save_credentials,
+            tidal::tidal_get_credentials,
         ])
         .setup(|app| {
+            let tidal_state = std::sync::Arc::new(tidal::TidalState {
+                session: std::sync::Mutex::new(None),
+                logged_in: std::sync::Mutex::new(false),
+            });
+            if let Some(sess) = tidal::TidalState::load_cached_session(&app.handle()) {
+                *tidal_state.session.lock().unwrap() = Some(sess);
+                *tidal_state.logged_in.lock().unwrap() = true;
+            }
+            app.manage(tidal_state);
+
             discord::init_discord();
             let _handle = app.handle().clone();
             let app_data = app.path().app_data_dir().unwrap();

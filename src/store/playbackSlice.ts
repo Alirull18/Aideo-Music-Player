@@ -106,14 +106,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         return;
       }
 
-      // Skip Debounce Guard: If the user rapidly skipped tracks, the backend will cycle through
-      // intermediate tracks for a few milliseconds. We ignore these mismatches so the UI doesn't bounce.
-      const skipGuardActive = Date.now() - (get().playback.last_skip_time || 0) < 500;
-      if (skipGuardActive && newTrack !== prevTrack) {
+      // Strict Anti-Bounce: The frontend is the source of truth for track selections.
+      // If the backend reports a different track, it means the Rust audio pipeline 
+      // is still processing previous skip commands and lagging behind the UI.
+      if (prevTrack && newTrack && newTrack !== prevTrack) {
         return;
       }
 
-      if (newTrack && newTrack !== prevTrack) {
+      // Initial startup sync or backend-driven recovery
+      if (!prevTrack && newTrack) {
         get().handleTrackTransition(newTrack);
         return;
       }

@@ -18,6 +18,12 @@ use symphonia::default::{get_codecs, get_probe};
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use tauri::Emitter;
 
+#[allow(dead_code)]
+pub enum ActiveStream {
+    Cpal(cpal::Stream),
+    Wasapi(crate::wasapi_engine::WasapiStream),
+}
+
 /// 🛡️ Safe Lock Pattern: Handles mutex poisoning by recovering the inner data instead of panicking.
 fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     match mutex.lock() {
@@ -78,7 +84,7 @@ fn select_output_config(
             // Priority 2a: High-Res Integer (I32/I24)
             for c in &supported_configs {
                 if c.channels() as usize == file_ch && (c.sample_format() == cpal::SampleFormat::I32 || c.sample_format() == cpal::SampleFormat::I24) {
-                    if c.min_sample_rate() <= file_rate as u32 && c.max_sample_rate() >= file_rate as u32 {
+                    if c.min_sample_rate() <= (file_rate as u32) && c.max_sample_rate() >= (file_rate as u32) {
                         let cfg = c.with_sample_rate(file_rate as u32).config();
                         println!("AUDIOPHILE: Native Integer Match ({:?}): {}Hz", c.sample_format(), file_rate);
                         configs.push((cfg, c.sample_format()));
@@ -90,7 +96,7 @@ fn select_output_config(
             if configs.is_empty() {
                 for c in &supported_configs {
                     if c.channels() as usize == file_ch && c.sample_format() == cpal::SampleFormat::I16 {
-                        if c.min_sample_rate() <= file_rate as u32 && c.max_sample_rate() >= file_rate as u32 {
+                        if c.min_sample_rate() <= (file_rate as u32) && c.max_sample_rate() >= (file_rate as u32) {
                             let cfg = c.with_sample_rate(file_rate as u32).config();
                             println!("AUDIOPHILE: Native I16 Match: {}Hz", file_rate);
                             configs.push((cfg, c.sample_format()));
@@ -103,7 +109,7 @@ fn select_output_config(
             if configs.is_empty() {
                 for c in &supported_configs {
                     if c.channels() as usize == file_ch && c.sample_format() == cpal::SampleFormat::F32 {
-                        if c.min_sample_rate() <= file_rate as u32 && c.max_sample_rate() >= file_rate as u32 {
+                        if c.min_sample_rate() <= (file_rate as u32) && c.max_sample_rate() >= (file_rate as u32) {
                             let cfg = c.with_sample_rate(file_rate as u32).config();
                             println!("AUDIOPHILE: Native Float Match: {}Hz", file_rate);
                             configs.push((cfg, c.sample_format()));
@@ -558,9 +564,12 @@ fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>
 
 fn soft_limit(sample: f32) -> f32 {
     let abs = sample.abs();
-    if abs > 0.95 {
+    if abs > 0.90 {
         let sign = if sample > 0.0 { 1.0 } else { -1.0 };
-        sign * (0.95 + (abs - 0.95) / (1.0 + (abs - 0.95)))
+        let over = abs - 0.90;
+        // Asymptotically approach 1.0 (limit overage to max 0.1)
+        let compressed = over / (1.0 + over * 10.0);
+        sign * (0.90 + compressed)
     } else {
         sample
     }
@@ -656,6 +665,15 @@ fn play_file(
     fft_tx: &Sender<Vec<f32>>,
     ffmpeg_path: &str,
 ) -> Option<(String, f64)> {
+    // ELEVATE AUDIO PUMP THREAD PRIORITY
+    #[cfg(target_os = "windows")]
+    unsafe {
+        let _ = windows::Win32::System::Threading::SetThreadPriority(
+            windows::Win32::System::Threading::GetCurrentThread(),
+            windows::Win32::System::Threading::THREAD_PRIORITY_TIME_CRITICAL,
+        );
+    }
+
     *safe_lock(&current_track) = Some(path.to_string());
     
     // 1. Initialize Decoder
@@ -714,7 +732,7 @@ fn play_file(
         (None, None)
     };
 
-    let target = safe_lock(&target_device).clone();
+    let mut target = safe_lock(&target_device).clone();
 
     let host = if let Some(ref name) = target {
         if name.starts_with("[ASIO]") {
@@ -730,7 +748,7 @@ fn play_file(
     };
 
     let device = {
-        let dev = if let Some(ref full_name) = target {
+        let (dev, tried_target) = if let Some(ref full_name) = target {
             let actual_name = if full_name.starts_with("[ASIO] ") {
                 full_name.trim_start_matches("[ASIO] ").to_string()
             } else if full_name.starts_with("[WASAPI] ") {
@@ -738,25 +756,32 @@ fn play_file(
             } else {
                 full_name.clone()
             };
-
-            println!("[player] Attempting to open device: \"{}\" on host: \"{:?}\"", actual_name, host.id());
             
             #[allow(deprecated)]
-            match host.output_devices() {
+            let found_dev = match host.output_devices() {
                 Ok(mut ds) => ds.find(|d| d.name().unwrap_or_default() == actual_name),
                 Err(e) => {
                     eprintln!("[player] Could not list host devices: {}", e);
                     None
                 }
-            }
+            };
+            (found_dev, true)
         } else {
-            None
+            (None, false)
         };
+        
+        if dev.is_none() && tried_target {
+            *safe_lock(&target_device) = None;
+            target = None;
+            let _ = app_handle.emit("ui-toast", serde_json::json!({
+                "message": "Audio device disconnected. Falling back to default.",
+                "type": "warning"
+            }));
+        }
         
         match dev.or_else(|| host.default_output_device()) {
             Some(d) => d,
             None => {
-                println!("[player] Target device not found or host error. Falling back to system default.");
                 cpal::default_host().default_output_device().expect("No audio device available at all")
             }
         }
@@ -775,7 +800,7 @@ fn play_file(
         &device_display_name,
     );
 
-    let mut stream_info: Option<(cpal::Stream, cpal::StreamConfig)> = None;
+    let mut stream_info: Option<(ActiveStream, cpal::StreamConfig)> = None;
     let mut prod_opt = None;
     let flush_signal = Arc::new(AtomicBool::new(false));
 
@@ -783,14 +808,58 @@ fn play_file(
     // (Only for local files and when Bit-Perfect/Upsampling is requested)
     let request_exclusive = is_exclusive && !is_stream;
 
-    if request_exclusive {
-        println!("[player] AUDIOPHILE: Requesting EXCLUSIVE hardware access for bit-perfect output...");
-    }
-
     let stream_paused = Arc::new(AtomicBool::new(false));
     let stream_volume = Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
 
-    for (config, sample_format) in configs_to_try {
+    if request_exclusive && !device_display_name.starts_with("[ASIO]") {
+        if let Some((config, _)) = configs_to_try.first() {
+            let rate = config.sample_rate;
+            let channels = config.channels;
+            
+            let max_ring = rate as usize * channels as usize;
+            let rb = RingBuffer::<f32>::new(max_ring);
+            let (prod, mut cons) = rb.split();
+            
+            let paused_cb = Arc::clone(&stream_paused);
+            let volume_cb = Arc::clone(&stream_volume);
+            let flush_cb = Arc::clone(&flush_signal);
+
+            let actual_dev_name = if device_display_name.starts_with("[WASAPI] ") {
+                device_display_name.trim_start_matches("[WASAPI] ").to_string()
+            } else {
+                device_display_name.clone()
+            };
+
+            if let Ok(wasapi_stream) = crate::wasapi_engine::start_exclusive_stream(
+                &actual_dev_name,
+                rate,
+                channels,
+                move |data: &mut [f32]| {
+                    if paused_cb.load(Ordering::Relaxed) { data.fill(0.0); return; }
+                    if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
+                    let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
+                    let mut n = cons.pop_slice(data);
+                    if n < data.len() {
+                        n += cons.pop_slice(&mut data[n..]);
+                    }
+                    for i in 0..n { data[i] *= vol; }
+                    if n < data.len() { data[n..].fill(0.0); }
+                }
+            ) {
+                println!("[player] Successfully locked TRUE WASAPI Exclusive Mode!");
+                let _ = app_handle.emit("playback-success", "WASAPI Exclusive Mode Active");
+                stream_info = Some((ActiveStream::Wasapi(wasapi_stream), config.clone()));
+                prod_opt = Some(prod);
+            } else {
+                println!("[player] TRUE WASAPI Exclusive Mode failed. Falling back to CPAL Shared Mode.");
+                let _ = app_handle.emit("playback-error", "Device does not support WASAPI Exclusive Mode. Falling back to Shared Mode.");
+                *safe_lock(&exclusive_mode) = false;
+            }
+        }
+    }
+
+    if stream_info.is_none() {
+        for (config, sample_format) in configs_to_try {
         let paused_cb = Arc::clone(&stream_paused);
         let volume_cb = Arc::clone(&stream_volume);
         let flush_cb = Arc::clone(&flush_signal);
@@ -805,6 +874,8 @@ fn play_file(
 
         let config_inner = config.clone();
 
+        let mut buf = vec![0.0f32; 8192];
+        
         // 🛡️ TRUTH: For strict ASIO drivers, we must match the hardware's expected format exactly.
         let stream_res = match sample_format {
             cpal::SampleFormat::F32 => device.build_output_stream(
@@ -813,8 +884,14 @@ fn play_file(
                     if paused_cb.load(Ordering::Relaxed) { data.fill(0.0); return; }
                     if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
                     let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                    let n = cons.pop_slice(data);
-                    for i in 0..n { data[i] *= vol; }
+                    let mut n = cons.pop_slice(data);
+                    if n < data.len() {
+                        n += cons.pop_slice(&mut data[n..]);
+                    }
+                    for i in 0..n { 
+                        let s = data[i] * vol;
+                        data[i] = if s > 1.0 { 1.0 } else if s < -1.0 { -1.0 } else { s };
+                    }
                     if n < data.len() { data[n..].fill(0.0); }
                 },
                 |e| eprintln!("[player] stream error: {e}"),
@@ -826,10 +903,15 @@ fn play_file(
                     if paused_cb.load(Ordering::Relaxed) { data.fill(0); return; }
                     if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
                     let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                    let mut buf = vec![0.0; data.len()];
-                    let n = cons.pop_slice(&mut buf);
+                    if buf.len() < data.len() { buf.resize(data.len(), 0.0); }
+                    let mut n = cons.pop_slice(&mut buf[..data.len()]);
+                    if n < data.len() {
+                        n += cons.pop_slice(&mut buf[n..data.len()]);
+                    }
                     for i in 0..n { 
-                        data[i] = (buf[i] * vol * i16::MAX as f32) as i16; 
+                        let s = buf[i] * vol;
+                        let clamped = if s > 1.0 { 1.0 } else if s < -1.0 { -1.0 } else { s };
+                        data[i] = (clamped * i16::MAX as f32) as i16; 
                     }
                     if n < data.len() { data[n..].fill(0); }
                 },
@@ -842,12 +924,17 @@ fn play_file(
                     if paused_cb.load(Ordering::Relaxed) { data.fill(0); return; }
                     if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
                     let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                    let mut buf = vec![0.0; data.len()];
-                    let n = cons.pop_slice(&mut buf);
+                    if buf.len() < data.len() { buf.resize(data.len(), 0.0); }
+                    let mut n = cons.pop_slice(&mut buf[..data.len()]);
+                    if n < data.len() {
+                        n += cons.pop_slice(&mut buf[n..data.len()]);
+                    }
                     
                     // Handle I32/I24 (padded)
                     for i in 0..n { 
-                        data[i] = (buf[i] * vol * i32::MAX as f32) as i32; 
+                        let s = buf[i] * vol;
+                        let clamped = if s > 1.0 { 1.0 } else if s < -1.0 { -1.0 } else { s };
+                        data[i] = (clamped * i32::MAX as f32) as i32; 
                     }
                     if n < data.len() { data[n..].fill(0); }
                 },
@@ -872,7 +959,7 @@ fn play_file(
             println!("[player] AUDIOPHILE: Exclusive hardware stream established!");
             println!("         -> Host: {:?}", host.id());
             println!("         -> Rate: {}Hz", config.sample_rate);
-            stream_info = Some((s, config));
+            stream_info = Some((ActiveStream::Cpal(s), config));
             prod_opt = Some(prod);
             break;
         } else if let Err(e) = stream_res {
@@ -885,6 +972,7 @@ fn play_file(
             }
             println!("[player] Trying next config...");
         }
+    }
     }
 
     if stream_info.is_none() {
@@ -904,12 +992,16 @@ fn play_file(
                 let rb = RingBuffer::<f32>::new(cfg.sample_rate as usize * cfg.channels as usize);
                 let (prod, mut cons) = rb.split();
                 
+                let mut buf = vec![0.0f32; 8192];
                 let stream_res = match fmt {
                     cpal::SampleFormat::F32 => dev.build_output_stream(&cfg, move |d: &mut [f32], _| {
                         if paused_cb.load(Ordering::Relaxed) { d.fill(0.0); return; }
                         if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                        let n = cons.pop_slice(d);
+                        let mut n = cons.pop_slice(d);
+                        if n < d.len() {
+                            n += cons.pop_slice(&mut d[n..]);
+                        }
                         for i in 0..n { d[i] *= vol; }
                         if n < d.len() { d[n..].fill(0.0); }
                     }, |_| {}, None),
@@ -917,8 +1009,11 @@ fn play_file(
                         if paused_cb.load(Ordering::Relaxed) { d.fill(0); return; }
                         if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                        let mut buf = vec![0.0; d.len()];
-                        let n = cons.pop_slice(&mut buf);
+                        if buf.len() < d.len() { buf.resize(d.len(), 0.0); }
+                        let mut n = cons.pop_slice(&mut buf[..d.len()]);
+                        if n < d.len() {
+                            n += cons.pop_slice(&mut buf[n..d.len()]);
+                        }
                         for i in 0..n { d[i] = (buf[i] * vol * i16::MAX as f32) as i16; }
                         if n < d.len() { d[n..].fill(0); }
                     }, |_| {}, None),
@@ -926,7 +1021,7 @@ fn play_file(
 
                 if let Ok(s) = stream_res {
                     let _ = s.play();
-                    stream_info = Some((s, cfg));
+                    stream_info = Some((ActiveStream::Cpal(s), cfg));
                     prod_opt = Some(prod);
                 }
             }
@@ -950,7 +1045,7 @@ fn play_file(
     // REPORT ACTUAL HARDWARE RATE
     *safe_lock(&current_dev_rate) = dev_rate as u32;
 
-    let chunk_size = 512usize;
+    let chunk_size = 8192usize;
 
     let mut current_dsp = safe_lock(&dsp_state).clone();
     let mut fft_buffer = Vec::with_capacity(2048);
@@ -1069,7 +1164,7 @@ fn play_file(
                     break;
                 } else {
                     // STILL LOADING - Wait a bit
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    std::thread::sleep(std::time::Duration::from_millis(5));
                 }
             } else {
                 // FALLBACK TO CHUNKED (STREAMS)
@@ -1304,8 +1399,6 @@ fn play_file(
             let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
             *safe_lock(&position_secs) = true_pos.max(0.0);
         }
-
-        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
     // 5. WAIT FOR BUFFER TO DRAIN ENTIRELY

@@ -24,6 +24,9 @@ export function ToastContainer() {
     const unlistenSuccess = listen<string>('ui-toast-success', (event) => {
       addToast(event.payload, 'success');
     });
+    const unlistenPlaybackSuccess = listen<string>('playback-success', (event) => {
+      addToast(event.payload, 'success');
+    });
 
     const handleToast = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -36,6 +39,7 @@ export function ToastContainer() {
       unlisten.then(f => f());
       unlistenInfo.then(f => f());
       unlistenSuccess.then(f => f());
+      unlistenPlaybackSuccess.then(f => f());
       window.removeEventListener('ui-toast', handleToast);
     };
   }, []);

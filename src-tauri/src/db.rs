@@ -65,9 +65,10 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn save_tracks(conn: &Connection, tracks: &mut [Track]) -> Result<()> {
+pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
+    let tx = conn.transaction()?;
     for track in tracks {
-        conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO tracks (id, path, title, artist, album, duration, format, lyric_offset)
              VALUES (
                  (SELECT id FROM tracks WHERE path = :path),
@@ -84,6 +85,7 @@ pub fn save_tracks(conn: &Connection, tracks: &mut [Track]) -> Result<()> {
             },
         )?;
     }
+    tx.commit()?;
     Ok(())
 }
 
@@ -198,4 +200,9 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
         tracks.push(track?);
     }
     Ok(tracks)
+}
+
+pub fn delete_track(conn: &Connection, path: &str) -> Result<()> {
+    conn.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path])?;
+    Ok(())
 }
