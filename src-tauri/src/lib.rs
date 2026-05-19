@@ -16,6 +16,7 @@ mod discord;
 pub mod youtube;
 pub mod wasapi_engine;
 pub mod tidal;
+pub mod updater;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -720,7 +721,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let _ = app.emit("deep-link", argv);
@@ -789,6 +789,8 @@ pub fn run() {
             tidal::tidal_logout,
             tidal::tidal_save_credentials,
             tidal::tidal_get_credentials,
+            updater::check_update,
+            updater::download_and_install,
         ])
         .setup(|app| {
             let tidal_state = std::sync::Arc::new(tidal::TidalState {

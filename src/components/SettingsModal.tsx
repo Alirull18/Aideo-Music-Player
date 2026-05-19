@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Settings, Library, Radio, FolderSearch, RefreshCw, X } from 'lucide-react';
+import { Settings, Library, Radio, FolderSearch, RefreshCw, X, DownloadCloud } from 'lucide-react';
 
 export function SettingsModal() {
   const {
@@ -15,6 +15,8 @@ export function SettingsModal() {
   const [activeTab, setActiveTab] = useState('library');
   const [lfmLoading, setLfmLoading] = useState(false);
   const [lfmError, setLfmError] = useState('');
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState('');
 
   if (!showSettings) return null;
 
@@ -46,6 +48,9 @@ export function SettingsModal() {
             </div>
             <div className={`nav-item ${activeTab === 'services' ? 'active' : ''}`} onClick={() => setActiveTab('services')}>
               <Radio size={18} /> Services
+            </div>
+            <div className={`nav-item ${activeTab === 'updates' ? 'active' : ''}`} onClick={() => setActiveTab('updates')}>
+              <DownloadCloud size={18} /> Updates
             </div>
           </div>
 
@@ -183,6 +188,53 @@ export function SettingsModal() {
                 {lfmError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 12, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 6 }}>{lfmError}</div>}
                 <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
                   Aideo uses official Web Auth. We never see or store your Last.fm password.
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'updates' && (
+              <div>
+                <h3 style={{ margin: 0, marginBottom: 24, fontSize: 18, fontWeight: 500 }}>App Updates</h3>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 24 }}>
+                  Check for the latest version of Aideo Music Player.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 20px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>Auto-Updater</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>Pull the latest version directly from GitHub Releases.</div>
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      disabled={updateChecking}
+                      onClick={async () => {
+                        setUpdateChecking(true);
+                        setUpdateStatus('Checking for updates...');
+                        try {
+                          const res = await invoke<any>('check_update');
+                          if (res.available) {
+                            setUpdateStatus(`Version ${res.version} is available!`);
+                            // We dispatch event so App.tsx can show the popup
+                            window.dispatchEvent(new CustomEvent('update-available', { detail: res }));
+                          } else {
+                            setUpdateStatus(`You are on the latest version (${res.version}).`);
+                          }
+                        } catch (e: any) {
+                          setUpdateStatus(`Error checking for updates: ${e}`);
+                        } finally {
+                          setUpdateChecking(false);
+                        }
+                      }}
+                    >
+                      {updateChecking ? 'Checking...' : 'Check for Updates'}
+                    </button>
+                  </div>
+                  {updateStatus && (
+                    <div style={{ fontSize: 13, color: 'var(--accent)', marginTop: 8 }}>
+                      {updateStatus}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

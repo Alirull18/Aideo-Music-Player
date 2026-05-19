@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Radio, Check } from 'lucide-react';
+import { Radio, Check, Download, X } from 'lucide-react';
 import './App.css';
 
 import { Sidebar } from './components/Sidebar';
@@ -33,6 +33,8 @@ if (typeof window !== 'undefined') {
 
 export default function App() {
   const { view, pollStatus, loadLibrary, lastScrobble, fetchPlaylists, playbackError, playbackSuccess, customPrompt, setCustomPrompt, setPlaybackError, setPlaybackSuccess } = useStore();
+  const [updateInfo, setUpdateInfo] = useState<any>(null);
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
 
   useEffect(() => {
     const { fetchDevices, initializeQueue } = useStore.getState();
@@ -41,7 +43,19 @@ export default function App() {
     fetchDevices();
     initializeQueue();
 
-    return () => { };
+    // Silent background check for updates
+    invoke<any>('check_update').then(res => {
+      if (res.available) {
+        setUpdateInfo(res);
+      }
+    }).catch(e => console.error("Update check failed:", e));
+
+    const onUpdate = (e: any) => setUpdateInfo(e.detail);
+    window.addEventListener('update-available', onUpdate);
+
+    return () => {
+      window.removeEventListener('update-available', onUpdate);
+    };
   }, [loadLibrary, fetchPlaylists]);
 
   useEffect(() => {
@@ -176,6 +190,7 @@ export default function App() {
 
         {playbackSuccess && (
           <motion.div
+            key="playback-success"
             initial={{ opacity: 0, x: 50 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 50 }}
@@ -203,6 +218,75 @@ export default function App() {
                 <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', lineHeight: 1.4, opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{playbackSuccess}</div>
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {updateInfo && (
+          <motion.div
+            key="update-popup"
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            style={{
+              position: 'fixed',
+              bottom: 24,
+              right: 24,
+              width: 340,
+              background: 'var(--glass)',
+              backdropFilter: 'blur(24px)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: 16,
+              padding: 24,
+              boxShadow: '0 16px 40px rgba(0,0,0,0.5)',
+              zIndex: 10000,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ background: 'var(--accent)', borderRadius: '50%', padding: 8, display: 'flex' }}>
+                  <Download size={18} color="white" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>Update Available</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Version {updateInfo.version}</div>
+                </div>
+              </div>
+              <button 
+                className="modal-close" 
+                style={{ padding: 8, margin: -8, cursor: 'pointer' }} 
+                onClick={(e) => { e.stopPropagation(); setUpdateInfo(null); }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20, maxHeight: 60, overflowY: 'auto', lineHeight: 1.5 }}>
+              {updateInfo.body || 'A new version of Aideo is ready to install.'}
+            </div>
+
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
+              disabled={isDownloadingUpdate}
+              onClick={async () => {
+                setIsDownloadingUpdate(true);
+                try {
+                  await invoke('download_and_install', { url: updateInfo.download_url });
+                } catch (e: any) {
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Update failed: ${e}`, type: 'error' } }));
+                  setIsDownloadingUpdate(false);
+                }
+              }}
+            >
+              {isDownloadingUpdate ? (
+                'Downloading & Installing...'
+              ) : (
+                <>
+                  <Download size={16} />
+                  Install Update Now
+                </>
+              )}
+            </button>
           </motion.div>
         )}
 

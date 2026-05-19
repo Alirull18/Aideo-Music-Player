@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Aideo",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "identifier": "com.alirul.music-player",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -25,13 +25,6 @@
     }
   },
   "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERENzkyNUY2OTA5RTk0RkMKUldUOGxKNlE5aVY1M2NibHVCZGwrTUV4R3F5M09mZjNVSzhVWldSR2xOa21ySUlNVlpQOFpWenEK",
-      "endpoints": [
-        "https://raw.githubusercontent.com/Alirull18/Aideo-Music-Player/main/updater.json"
-      ],
-      "dialog": true
-    },
     "deep-link": {
       "desktop": {
         "schemes": [

@@ -110,6 +110,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // If the backend reports a different track, it means the Rust audio pipeline 
       // is still processing previous skip commands and lagging behind the UI.
       if (prevTrack && newTrack && newTrack !== prevTrack) {
+        const timeSinceSkip = Date.now() - (get().playback.last_skip_time || 0);
+        if (timeSinceSkip < 2000) {
+          return;
+        }
+        // If it's been more than 2 seconds since the last skip, this must be a natural track transition (e.g. backend reached EOF and played next in queue)
+        get().handleTrackTransition(newTrack);
         return;
       }
 

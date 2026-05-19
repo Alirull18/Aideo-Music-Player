@@ -1394,7 +1394,10 @@ fn play_file(
         // ACCURATE POSITION TRACKING (Subtract buffer delays)
         if !is_stream {
             let p_len = pending[0].len() as f64;
-            let r_len = prod.len() as f64 / (dev_ch as f64);
+            let mut r_len = prod.len() as f64 / (dev_ch as f64);
+            if flush_signal.load(Ordering::Relaxed) {
+                r_len = 0.0;
+            }
             let delay_secs = (p_len / file_rate as f64) + (r_len / dev_rate as f64);
             let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
             *safe_lock(&position_secs) = true_pos.max(0.0);
