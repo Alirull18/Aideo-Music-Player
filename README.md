@@ -14,11 +14,11 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 <div align="center">
   <p><b>Main Interface & Dynamic Themes</b></p>
-  <img src="https://github.com/user-attachments/assets/16daf271-533c-4485-a6fc-baf3ade720e4" alt="Main Library View" width="80%"/>
+  <img src="[INSERT_MAIN_LIBRARY_SCREENSHOT_HERE]" alt="Main Library View" width="80%"/>
   <br/><br/>
   <p><b>High-Fidelity Lyrics & Audio Engine</b></p>
-  <img src="https://github.com/user-attachments/assets/b1f80bfc-551e-4317-ae64-d5772728968d" alt="Now Playing View" width="48%"/>
-  <img src="https://github.com/user-attachments/assets/289f4e2a-d419-456a-9054-10afa928dbb7" alt="Audio Settings" width="48%"/>
+  <img src="[INSERT_NOW_PLAYING_SCREENSHOT_HERE]" alt="Now Playing View" width="48%"/>
+  <img src="[INSERT_AUDIO_SETTINGS_SCREENSHOT_HERE]" alt="Audio Settings" width="48%"/>
 </div>
 
 ---
