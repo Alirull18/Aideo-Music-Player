@@ -28,7 +28,7 @@ export function YoutubeSearchView() {
 
     setIsSearching(true);
     try {
-      const finalQuery = searchMode === 'music' ? `${query} Topic` : query;
+      const finalQuery = query.trim();
       const tracks = await invoke<YoutubeTrack[]>('search_youtube', { query: finalQuery });
       setResults(tracks);
     } catch (err) {
@@ -144,7 +144,7 @@ export function YoutubeSearchView() {
             {results.map((track) => (
               <div key={track.id} className="track-item" style={{ display: 'grid', gridTemplateColumns: '48px 1fr 200px 80px 60px', padding: '12px 16px', alignItems: 'center', borderRadius: 8, transition: 'background 0.2s', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                 <div style={{ width: 36, height: 36, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {track.cover_url ? <img src={track.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={16} color="var(--text-dim)" />}
+                  {track.cover_url ? <img src={track.cover_url} alt="" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Music size={16} color="var(--text-dim)" />}
                 </div>
                 
                 <div style={{ paddingRight: 16, overflow: 'hidden' }}>

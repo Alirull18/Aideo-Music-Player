@@ -4,13 +4,15 @@ import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Settings, Library, Radio, FolderSearch, RefreshCw, X, DownloadCloud } from 'lucide-react';
+import { Settings, Library, Radio, FolderSearch, RefreshCw, X, DownloadCloud, Activity } from 'lucide-react';
 
 export function SettingsModal() {
   const {
     showSettings, toggleSettings, scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus,
     toggleScrobble, setLastFmSession, lastfmSessionKey, lastfmToken,
     scrobbleThreshold, setScrobbleThreshold,
+    keepAwake, toggleKeepAwake,
+    discordEnabled, toggleDiscord,
   } = useStore();
   const [activeTab, setActiveTab] = useState('library');
   const [lfmLoading, setLfmLoading] = useState(false);
@@ -48,6 +50,9 @@ export function SettingsModal() {
             </div>
             <div className={`nav-item ${activeTab === 'services' ? 'active' : ''}`} onClick={() => setActiveTab('services')}>
               <Radio size={18} /> Services
+            </div>
+            <div className={`nav-item ${activeTab === 'behavior' ? 'active' : ''}`} onClick={() => setActiveTab('behavior')}>
+              <Activity size={18} /> Behavior
             </div>
             <div className={`nav-item ${activeTab === 'updates' ? 'active' : ''}`} onClick={() => setActiveTab('updates')}>
               <DownloadCloud size={18} /> Updates
@@ -188,6 +193,39 @@ export function SettingsModal() {
                 {lfmError && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 12, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 6 }}>{lfmError}</div>}
                 <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
                   Aideo uses official Web Auth. We never see or store your Last.fm password.
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'behavior' && (
+              <div>
+                <h3 style={{ margin: 0, marginBottom: 24, fontSize: 18, fontWeight: 500 }}>Player Behavior</h3>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13, marginBottom: 24 }}>
+                  Customize how Aideo interacts with your system.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>Prevent System Sleep</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>Keeps your PC awake while Aideo is open and playing music.</div>
+                    </div>
+                    <label className="switch">
+                      <input type="checkbox" checked={keepAwake} onChange={toggleKeepAwake} />
+                      <span className="slider round"></span>
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>Discord Rich Presence</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>Show your current song, artist, and playback status on Discord.</div>
+                    </div>
+                    <label className="switch">
+                      <input type="checkbox" checked={discordEnabled} onChange={toggleDiscord} />
+                      <span className="slider round"></span>
+                    </label>
+                  </div>
                 </div>
               </div>
             )}

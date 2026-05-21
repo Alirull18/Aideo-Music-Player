@@ -107,13 +107,17 @@ pub async fn download_and_install(url: String, app_handle: tauri::AppHandle) -> 
     let mut file = File::create(&temp_file_path).map_err(|e| e.to_string())?;
     file.write_all(&bytes).map_err(|e| e.to_string())?;
     
+    let temp_str = temp_file_path.to_string_lossy().into_owned();
     if is_msi {
-        Command::new("msiexec.exe")
-            .args(["/i", temp_file_path.to_str().unwrap(), "/qb"])
+        let cmd_str = format!("ping 127.0.0.1 -n 3 > nul && msiexec.exe /i \"{}\" /qb", temp_str);
+        Command::new("cmd.exe")
+            .args(["/C", &cmd_str])
             .spawn()
             .map_err(|e| e.to_string())?;
     } else {
-        Command::new(temp_file_path)
+        let cmd_str = format!("ping 127.0.0.1 -n 3 > nul && start \"\" \"{}\"", temp_str);
+        Command::new("cmd.exe")
+            .args(["/C", &cmd_str])
             .spawn()
             .map_err(|e| e.to_string())?;
     }

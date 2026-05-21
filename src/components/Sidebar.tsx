@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Search, Music2 } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Music2, Sparkles, DownloadCloud } from 'lucide-react';
 
 export function Sidebar() {
   const { view, setView, toggleSettings, playlists, currentPlaylist, loadPlaylistTracks, loadLibrary, createPlaylist, deletePlaylist, setCustomPrompt, setPlaybackError } = useStore();
@@ -32,14 +32,17 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
+      <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')}>
+        <Sparkles size={18} /> Aideo
+      </div>
+      <div className={`nav-item ${view === 'aideo_search' ? 'active' : ''}`} onClick={() => setView('aideo_search')}>
+        <DownloadCloud size={18} /> Aideo Search
+      </div>
       <div className={`nav-item ${view === 'library' && !currentPlaylist ? 'active' : ''}`} onClick={goLibrary}>
         <Library size={18} /> Library
       </div>
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
         <Headphones size={18} /> Now Playing
-      </div>
-      <div className={`nav-item ${view === 'youtube' ? 'active' : ''}`} onClick={() => setView('youtube')}>
-        <Search size={18} /> YouTube (Lossy)
       </div>
 
       <div className={`nav-item ${view === 'tidal' ? 'active' : ''}`} onClick={() => setView('tidal')}>

@@ -8,9 +8,11 @@ import './App.css';
 
 import { Sidebar } from './components/Sidebar';
 import { LibraryView } from './components/LibraryView';
+import { AideoView } from './components/AideoView';
 import { NowPlayingView } from './components/NowPlayingView';
 import { LastfmView } from './components/LastfmView';
-import { YoutubeSearchView } from './components/YoutubeSearchView';
+import { AideoSearchView } from './components/AideoSearchView';
+
 
 import { TidalView } from './components/TidalView';
 import { PlayerBar } from './components/PlayerBar';
@@ -19,6 +21,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
+import { ProAudioPanel } from './components/ProAudioPanel';
 
 // Global Error Logging to Backend Terminal
 if (typeof window !== 'undefined') {
@@ -32,7 +35,7 @@ if (typeof window !== 'undefined') {
 }
 
 export default function App() {
-  const { view, pollStatus, loadLibrary, lastScrobble, fetchPlaylists, playbackError, playbackSuccess, customPrompt, setCustomPrompt, setPlaybackError, setPlaybackSuccess } = useStore();
+  const { view, pollStatus, loadLibrary, lastScrobble, fetchPlaylists, playbackError, playbackSuccess, customPrompt, setCustomPrompt, setPlaybackError, setPlaybackSuccess, showProMode } = useStore();
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
 
@@ -136,6 +139,12 @@ export default function App() {
       <Sidebar />
       <main className="app-main">
         <AnimatePresence mode="wait">
+          {view === 'aideo' && (
+            <motion.div key="aideo" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <AideoView />
+            </motion.div>
+          )}
           {view === 'library' && (
             <motion.div key="lib" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -154,10 +163,11 @@ export default function App() {
               <LastfmView />
             </motion.div>
           )}
-          {view === 'youtube' && (
-            <motion.div key="yt" style={{ height: '100%' }}
+
+          {view === 'aideo_search' && (
+            <motion.div key="aideo_search" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <YoutubeSearchView />
+              <AideoSearchView />
             </motion.div>
           )}
 
@@ -175,6 +185,7 @@ export default function App() {
         <QueueView key="queue" />
         <AudioControlCenter key="audio-cc" />
         <SettingsModal key="settings" />
+        {showProMode && <ProAudioPanel key="pro-audio" />}
         {lastScrobble && (
           <motion.div
             key="scrobble-toast"

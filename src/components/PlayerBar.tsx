@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
-import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Volume2, SlidersHorizontal, X, ListMusic } from 'lucide-react';
+import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Volume2, SlidersHorizontal, X, ListMusic, Activity } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { fmt, baseName, getStreamName } from '../utils';
 
@@ -9,7 +9,7 @@ export function PlayerBar() {
   const {
     view, tracks, playback, currentDevice, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
-    playNext, playPrev, shuffle, toggleShuffle, dsp,
+    playNext, playPrev, shuffle, toggleShuffle, dsp, showProMode, toggleProMode
   } = useStore();
 
   const activeLyric = useMemo(() => {
@@ -138,6 +138,9 @@ export function PlayerBar() {
         </div>
         <button className={`pb-btn ${useStore.getState().showQueue ? 'active' : ''}`} onClick={() => useStore.getState().toggleQueue()} title="Up Next (Queue)">
           <ListMusic size={18} />
+        </button>
+        <button className={`pb-btn ${showProMode ? 'active' : ''}`} onClick={() => toggleProMode()} title="Aideo Pro Audio DSP Console">
+          <Activity size={18} />
         </button>
         <button className="pb-btn" onClick={() => useStore.getState().toggleControlCenter()} title="Audio Engine Settings">
           <SlidersHorizontal size={18} />

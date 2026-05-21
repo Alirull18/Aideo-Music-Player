@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState } from './types';
 
 export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
-  view: 'library',
+  view: 'aideo',
   accentColor: '#8b5cf6',
   showProMode: false,
   showControlCenter: false,
@@ -32,7 +32,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     if (msg) setTimeout(() => get().setPlaybackSuccess(null), 4000);
   },
 
-  setView: (view: 'library' | 'nowplaying' | 'lastfm') => set({ view }),
+  setView: (view: any) => set({ view }),
 
   toggleSettings: () => set(s => ({ showSettings: !s.showSettings })),
 
@@ -41,9 +41,30 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   toggleControlCenter: () => set(s => ({ showControlCenter: !s.showControlCenter })),
 
   resetProMode: () => {
-    const def = { width: 1.0, enabled: false, upsample_rate: 0, dither: false };
-    set({ dsp: def });
-    // Note: setDSP is in playbackSlice, but we can call it if needed.
-    // For now, we'll just set the state.
+    get().setDSP({
+      enabled: false,
+      width: 1.0,
+      upsample_rate: 0,
+      dither: false,
+      eq_enabled: false,
+      eq_parametric: false,
+      eq_graphic_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      eq_parametric_bands: [
+        { freq: 80, gain: 0, q: 0.7, band_type: 'lowshelf' },
+        { freq: 240, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 750, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 2200, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' }
+      ],
+      crossfeed_enabled: false,
+      crossfeed_level: -6.0,
+      crossfeed_corner: 700.0,
+      spatial_enabled: false,
+      spatial_haas_delay: 7.5,
+      spatial_wet: 0.15,
+      subsonic_enabled: false,
+      night_mode_enabled: false,
+      r128_enabled: false
+    });
   },
 });

@@ -25,20 +25,22 @@ impl Drop for WasapiStream {
 }
 
 #[cfg(target_os = "windows")]
-pub fn start_exclusive_stream<F>(
+pub fn start_exclusive_stream<F, E>(
     device_name: &str,
     sample_rate: u32,
     channels: u16,
     mut callback: F,
-) -> Result<WasapiStream, String>
+    mut on_error: E,
+) -> Result<(WasapiStream, u16, bool), String>
 where
     F: FnMut(&mut [f32]) + Send + 'static,
+    E: FnMut(String) + Send + 'static,
 {
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown);
     let dev_name = device_name.to_string();
 
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(u16, bool), String>>(1);
 
     let handle = thread::spawn(move || {
         let _ = initialize_mta();
@@ -177,14 +179,17 @@ where
             None,
         );
 
-        if client.start_stream().is_err() {
-            let _ = tx.send(Err("Failed to start stream".to_string()));
+        // Notify main thread of success FIRST
+        if tx.send(Ok((valid_bits as u16, is_float))).is_err() {
+            // Main thread dropped the receiver, abort
             return;
         }
 
-        // Notify main thread of success
-        if tx.send(Ok(())).is_err() {
-            // Main thread dropped the receiver, abort
+        // Give the main thread a tiny head start (50ms) to fill the ringbuffer
+        // This completely eliminates the "startup underrun" stutter.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        if client.start_stream().is_err() {
             return;
         }
 
@@ -193,6 +198,9 @@ where
 
         while !shutdown_clone.load(Ordering::Relaxed) {
             if event.wait_for_event(2000).is_err() {
+                if !shutdown_clone.load(Ordering::Relaxed) {
+                    on_error("WASAPI exclusive stream timed out".to_string());
+                }
                 break;
             }
             
@@ -252,11 +260,14 @@ where
                 }
             }
             
-            if render_client.write_to_device(
+            if let Err(e) = render_client.write_to_device(
                 num_frames,
                 &output_bytes,
                 None,
-            ).is_err() {
+            ) {
+                if !shutdown_clone.load(Ordering::Relaxed) {
+                    on_error(format!("WASAPI exclusive write failed: {}", e));
+                }
                 break;
             }
         }
@@ -265,24 +276,30 @@ where
     });
 
     match rx.recv() {
-        Ok(Ok(())) => Ok(WasapiStream {
-            shutdown,
-            handle: Some(handle),
-        }),
+        Ok(Ok((bits, is_float))) => Ok((
+            WasapiStream {
+                shutdown,
+                handle: Some(handle),
+            },
+            bits,
+            is_float,
+        )),
         Ok(Err(e)) => Err(e),
         Err(_) => Err("WASAPI initialization thread panicked".to_string()),
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn start_exclusive_stream<F>(
+pub fn start_exclusive_stream<F, E>(
     _device_name: &str,
     _sample_rate: u32,
     _channels: u16,
     _callback: F,
-) -> Result<WasapiStream, String>
+    _on_error: E,
+) -> Result<(WasapiStream, u16, bool), String>
 where
     F: FnMut(&mut [f32]) + Send + 'static,
+    E: FnMut(String) + Send + 'static,
 {
     Err("Exclusive mode only supported on Windows".to_string())
 }

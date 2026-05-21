@@ -209,7 +209,7 @@ export function LyricsPanel() {
                 {!searching && results.length === 0 && <div className="modal-empty">No results found.</div>}
                 {results.map((r, i) => (
                   <div key={i} className="modal-item" style={{ display: 'flex', alignItems: 'center', cursor: 'default' }}>
-                    {r.cover_url && <img src={r.cover_url} alt="cover" style={{ width: 36, height: 36, borderRadius: 4, marginRight: 12, objectFit: 'cover' }} />}
+                    {r.cover_url && <img src={r.cover_url} alt="cover" referrerPolicy="no-referrer" style={{ width: 36, height: 36, borderRadius: 4, marginRight: 12, objectFit: 'cover' }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="modal-item-title">{r.title}</div>
                       <div className="modal-item-sub">{r.artist} · {r.source}</div>

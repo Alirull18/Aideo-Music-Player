@@ -14,6 +14,7 @@ mod scanner;
 mod musicbrainz;
 mod discord;
 pub mod youtube;
+pub mod slider;
 pub mod wasapi_engine;
 pub mod tidal;
 pub mod updater;
@@ -268,6 +269,11 @@ async fn mbz_get_cover_art(release_id: String) -> Result<String, String> {
 #[tauri::command]
 fn update_discord_presence(details: String, state_str: String, is_playing: bool) {
     discord::update_presence(&details, &state_str, is_playing);
+}
+
+#[tauri::command]
+fn clear_discord_presence() {
+    discord::clear_presence();
 }
 
 // ── FX Commands ────────────────────────────────────────────────────────────
@@ -608,6 +614,16 @@ fn remove_from_queue(index: usize, state: State<'_, AppState>) -> Result<(), Str
 }
 
 #[tauri::command]
+fn remove_from_queue_bulk(count: usize, state: State<'_, AppState>) -> Result<(), String> {
+    let player = safe_lock(&state.player);
+    let mut q = player.queue.lock().unwrap();
+    for _ in 0..count {
+        q.pop_front();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn clear_queue(state: State<'_, AppState>) -> Result<(), String> {
     let player = safe_lock(&state.player);
     let mut q = player.queue.lock().unwrap();
@@ -715,6 +731,22 @@ fn log_error(msg: String) {
     println!("[frontend-error] {}", msg);
 }
 
+#[tauri::command]
+fn toggle_keep_awake(enable: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
+        if enable {
+            let _ = SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+            println!("[system] Power Management: Keep Awake ENABLED");
+        } else {
+            let _ = SetThreadExecutionState(ES_CONTINUOUS);
+            println!("[system] Power Management: Keep Awake DISABLED");
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     dotenvy::dotenv().ok();
@@ -760,6 +792,7 @@ pub fn run() {
             queue_next,
             add_to_queue,
             remove_from_queue,
+            remove_from_queue_bulk,
             clear_queue,
             reorder_queue,
             get_queue,
@@ -772,6 +805,7 @@ pub fn run() {
             mbz_search_recording,
             mbz_get_cover_art,
             update_discord_presence,
+            clear_discord_presence,
             get_playlists,
             create_playlist,
             delete_playlist,
@@ -782,6 +816,9 @@ pub fn run() {
             delete_track,
             youtube::search_youtube,
             youtube::download_track,
+            youtube::get_aideo_recommendations,
+            slider::search_slider,
+            slider::download_slider_track,
             tidal::tidal_login_start,
             tidal::tidal_login_poll_status,
             tidal::tidal_search,
@@ -791,6 +828,7 @@ pub fn run() {
             tidal::tidal_get_credentials,
             updater::check_update,
             updater::download_and_install,
+            toggle_keep_awake,
         ])
         .setup(|app| {
             let tidal_state = std::sync::Arc::new(tidal::TidalState {

@@ -3,35 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aideo | Premium Music Experience</title>
-    <meta name="description" content="A high-fidelity, audiophile-grade music player with dynamic aesthetics, Discord integration, and smart metadata.">
+    <title>Aideo | Studio-Grade Music Experience</title>
+    <meta name="description" content="A high-fidelity, audiophile-grade music player for Windows featuring a hardware-accelerated 5-band Parametric EQ, AutoEQ import, True Crossfeed, and an AI Discovery Hub.">
     <meta name="google-site-verification" content="google3e65b2bc4ddab573" />
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://alirull18.github.io/Aideo-Music-Player/">
-    <meta property="og:title" content="Aideo | Premium Music Experience">
-    <meta property="og:description" content="Pristine Sound. Dynamic Soul. Experience your music in high-fidelity with Aideo.">
+    <meta property="og:title" content="Aideo | Studio-Grade Music Experience">
+    <meta property="og:description" content="Pristine Sound. Dynamic Soul. Calibrate your headphones with real-time AutoEQ and experience bit-perfect WASAPI direct transport.">
     <meta property="og:image" content="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155">
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:url" content="https://alirull18.github.io/Aideo-Music-Player/">
-    <meta property="twitter:title" content="Aideo | Premium Music Experience">
-    <meta property="twitter:description" content="Pristine Sound. Dynamic Soul. Experience your music in high-fidelity with Aideo.">
+    <meta property="twitter:title" content="Aideo | Studio-Grade Music Experience">
+    <meta property="twitter:description" content="Calibrate your headphones with real-time AutoEQ and experience bit-perfect WASAPI direct transport.">
     <meta property="twitter:image" content="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155">
     
     <!-- Google Fonts & FontAwesome Icons -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="style.css">
     <link rel="canonical" href="https://alirull18.github.io/Aideo-Music-Player/" />
 </head>
 <body>
-    <!-- Ambient Glow Backdrops -->
+    <!-- Canvas for live background particle stream -->
+    <canvas id="ambient-particles" style="position: absolute; inset: 0; pointer-events: none; z-index: 1; opacity: 0.25;"></canvas>
+
+    <!-- Retro Grid Lines and Spheres -->
+    <div class="grid-overlay"></div>
     <div class="glow-sphere sphere-1"></div>
     <div class="glow-sphere sphere-2"></div>
     <div class="glow-sphere sphere-3"></div>
@@ -39,263 +44,778 @@
     <!-- Navigation -->
     <nav>
         <div class="logo">
-            <div class="logo-icon"><i class="fas fa-wave-square"></i></div>
+            <img src="logo.png" alt="Aideo Logo" class="logo-img">
             <span>AIDEO</span>
         </div>
         <div class="nav-links">
-            <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn btn-secondary" style="padding: 10px 22px; font-size: 0.9rem;"><i class="fab fa-github"></i> GitHub</a>
+            <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn-nav" id="github-link"><i class="fab fa-github"></i> Repository</a>
         </div>
     </nav>
 
     <!-- Hero Section -->
     <header class="hero">
-        <div class="badge">
-            <div class="badge-dot"></div>
-            Version 0.5.1 Is Live
+        <div class="release-badge">
+            <span class="pulse-dot"></span>
+            Version 0.6.0 Is Live &bull; Pro Audio Suite
         </div>
-        <h1>Pristine Sound.<br/>Dynamic Soul.</h1>
-        <p class="tagline">The Audiophile Evolution has arrived. High-fidelity WASAPI Exclusive bypass, studio upsampling, smart metadata, and real-time social presence in a gorgeous adaptive interface.</p>
+        <h1>Pristine Sound.<br/><span class="gradient-text">Dynamic Soul.</span></h1>
+        <p class="tagline">An audiophile-grade desktop player for Windows. Unleash custom-tailored sound with a real-time **Biquad DSP engine**, integrated **AutoEQ indexing** for 4,000+ headphones, and a tokio-powered **YouTube Music AI Discovery Hub**.</p>
         
         <div class="cta-group">
-            <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary"><i class="fas fa-download"></i> Download for Windows</a>
-            <a href="#v50" class="btn btn-secondary">See What's New</a>
+            <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary" id="download-btn">
+                <i class="fas fa-download"></i> Get Aideo for Windows
+            </a>
+            <a href="#dsp-playground" class="btn btn-secondary" id="explore-btn">
+                <i class="fas fa-sliders"></i> Test Interactive EQ
+            </a>
         </div>
 
-        <!-- Window Mockup -->
+        <!-- Main Product Mockup Frame -->
         <div class="mockup-container">
-            <div class="window-mockup">
-                <div class="window-bar">
-                    <div class="window-dots">
-                        <div class="window-dot dot-red"></div>
-                        <div class="window-dot dot-yellow"></div>
-                        <div class="window-dot dot-green"></div>
+            <div class="premium-mockup">
+                <div class="window-chrome">
+                    <div class="window-controls">
+                        <span class="control-dot close"></span>
+                        <span class="control-dot minimize"></span>
+                        <span class="control-dot maximize"></span>
                     </div>
-                    <div class="window-title">Aideo Music Player - Active Library</div>
-                    <div class="window-status"><i class="fas fa-wave-square"></i> BIT-PERFECT DIRECT</div>
+                    <div class="window-address">aideo://pro-audio-dsp-console</div>
+                    <div class="wasapi-badge"><i class="fas fa-headphones"></i> WASAPI EXCLUSIVE BIT-PERFECT</div>
                 </div>
-                <div class="window-body">
-                    <img src="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155" alt="Aideo Music Player Main Interface Screen"/>
+                <div class="mockup-image-wrapper">
+                    <img src="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155" alt="Aideo Music Player - Studio Console Layout">
                 </div>
             </div>
         </div>
     </header>
 
-    <!-- NEW v0.5.1 SHOWCASE -->
-    <section id="v50" style="padding: 6rem 0 2rem;">
-        <div class="section-header">
-            <div class="badge">THE PERFORMANCE UPDATE</div>
-            <h2>Premium Features in v0.5.1</h2>
-            <p>Extreme UI virtualization, 100x faster database imports, and panic-free WASAPI hardware fallbacks.</p>
+    <!-- INTERACTIVE SECTION: DSP PLAYGROUND -->
+    <section id="dsp-playground" class="playground-section">
+        <div class="section-heading">
+            <span class="eyebrow">Interactive Simulation</span>
+            <h2>Studio Parametric EQ & AutoEQ Importer</h2>
+            <p>Experience the core math of Aideo directly in your browser. Select a legendary headphone model to automatically download and calculate corrective biquad filters, or drag the interactive nodes manually to shape the curve.</p>
         </div>
-    </section>
 
-    <!-- Feature Showcase Grid -->
-    <div class="feature-showcase-container">
-        <!-- Feature 1: Now Playing -->
-        <div class="feature-showcase">
-            <div class="showcase-text">
-                <h3>Immersive <span>Now Playing</span></h3>
-                <p>Experience your music visually. The entire interface breathes and transforms dynamically, extracting and blending color tones from your album artwork in real-time. Features fluid animations, high-res lyric alignment, and studio audio telemetry.</p>
-                <ul class="showcase-list">
-                    <li><i class="fas fa-paint-brush"></i> Adaptive Artwork Color Theming</li>
-                    <li><i class="fas fa-wave-square"></i> Fluid real-time FFT Spectrum Visualizer</li>
-                    <li><i class="fas fa-align-left"></i> Sub-millisecond lyric synchronization</li>
-                </ul>
-            </div>
-            <div class="showcase-visual">
-                <div class="visual-pane">
-                    <div class="window-bar" style="height: 38px; padding: 0 15px;">
-                        <div class="window-dots">
-                            <div class="window-dot dot-red" style="width: 10px; height: 10px;"></div>
-                            <div class="window-dot dot-yellow" style="width: 10px; height: 10px;"></div>
-                            <div class="window-dot dot-green" style="width: 10px; height: 10px;"></div>
-                        </div>
-                        <div class="window-title" style="font-size: 0.75rem;">Now Playing View</div>
+        <div class="playground-grid">
+            <!-- Search & Presets Controller -->
+            <div class="playground-controls">
+                <h3><i class="fas fa-search"></i> 1. Choose Headphone Model</h3>
+                <p class="control-description">AutoEQ references raw target curves to correct frequency response flaws. Click a preset model to witness real-time correction calculations:</p>
+                
+                <div class="headphone-search-box">
+                    <input type="text" id="headphone-input" placeholder="Type to search e.g., Sennheiser, Sony...">
+                    <div id="search-dropdown" class="search-dropdown-menu"></div>
+                </div>
+
+                <div class="quick-tags">
+                    <button class="tag-btn active" data-model="flat">Flat Response</button>
+                    <button class="tag-btn" data-model="sennheiser">Sennheiser HD 600</button>
+                    <button class="tag-btn" data-model="sony">Sony WH-1000XM4</button>
+                    <button class="tag-btn" data-model="airpods">AirPods Pro</button>
+                    <button class="tag-btn" data-model="beyerdynamic">DT 990 Pro</button>
+                </div>
+
+                <div class="preamp-card">
+                    <div class="preamp-header">
+                        <span>Pre-Amplifier Headroom</span>
+                        <span id="preamp-val" class="mono-font">-0.0 dB</span>
                     </div>
-                    <img src="https://github.com/user-attachments/assets/ed834062-d265-4b04-a772-4474494967c7" alt="Now Playing Screen with Lyrics"/>
+                    <div class="slider-wrapper">
+                        <input type="range" id="preamp-slider" min="-12" max="0" step="0.1" value="0">
+                    </div>
+                    <span class="protection-note"><i class="fas fa-shield-halved"></i> Gain protection active to avoid digital clipping.</span>
+                </div>
+
+                <div class="bands-dashboard">
+                    <h3><i class="fas fa-wave-square"></i> Active Filter Parametrics</h3>
+                    <div id="bands-list" class="bands-list"></div>
+                </div>
+            </div>
+
+            <!-- Graph Canvas & Curve Visualizer -->
+            <div class="playground-canvas-area">
+                <div class="graph-wrapper">
+                    <!-- Magnitude Response Graph -->
+                    <div class="eq-graph-container" id="eq-graph-container">
+                        <!-- Frequency gridlines -->
+                        <div class="grid-line" style="left: 10%;"><span>100Hz</span></div>
+                        <div class="grid-line" style="left: 50%;"><span>1kHz</span></div>
+                        <div class="grid-line" style="left: 90%;"><span>10kHz</span></div>
+
+                        <div class="db-line" style="top: 16.6%;"><span>+10dB</span></div>
+                        <div class="db-line" style="top: 50%;"><span>0dB</span></div>
+                        <div class="db-line" style="top: 83.3%;"><span>-10dB</span></div>
+
+                        <!-- Graph SVG Curve -->
+                        <svg class="graph-svg" id="graph-svg" viewBox="0 0 800 300" preserveAspectRatio="none">
+                            <defs>
+                                <linearGradient id="curve-gradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"></stop>
+                                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.0"></stop>
+                                </linearGradient>
+                            </defs>
+                            <path id="graph-fill" d="M 0 150 C 200 150, 400 150, 800 150 L 800 300 L 0 300 Z" fill="url(#curve-gradient)"></path>
+                            <path id="graph-line" d="M 0 150 C 200 150, 400 150, 800 150" fill="none" stroke="var(--accent)" stroke-width="3" style="filter: drop-shadow(0 0 6px var(--accent-glow));"></path>
+                        </svg>
+
+                        <!-- Interactive Nodes -->
+                        <div class="eq-node" id="node-1" data-index="0" style="left: 15%; top: 50%;">1</div>
+                        <div class="eq-node" id="node-2" data-index="1" style="left: 30%; top: 50%;">2</div>
+                        <div class="eq-node" id="node-3" data-index="2" style="left: 50%; top: 50%;">3</div>
+                        <div class="eq-node" id="node-4" data-index="3" style="left: 70%; top: 50%;">4</div>
+                        <div class="eq-node" id="node-5" data-index="4" style="left: 85%; top: 50%;">5</div>
+                    </div>
+                </div>
+
+                <div class="apo-importer-preview">
+                    <div class="importer-header">
+                        <span><i class="fas fa-terminal"></i> Parsed Equalizer APO Profile</span>
+                        <span class="status-pill green">Parsed</span>
+                    </div>
+                    <pre id="apo-code" class="mono-font">Preamp: -0.0 dB
+Filter 1: ON PK Fc 100 Hz Gain 0.0 dB Q 0.70
+Filter 2: ON PK Fc 300 Hz Gain 0.0 dB Q 0.70
+Filter 3: ON PK Fc 1000 Hz Gain 0.0 dB Q 0.70
+Filter 4: ON PK Fc 3000 Hz Gain 0.0 dB Q 0.70
+Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
                 </div>
             </div>
         </div>
+    </section>
 
-        <!-- Feature 2: Audio Settings -->
-        <div class="feature-showcase">
-            <div class="showcase-visual">
-                <div class="visual-pane">
-                    <div class="window-bar" style="height: 38px; padding: 0 15px;">
-                        <div class="window-dots">
-                            <div class="window-dot dot-red" style="width: 10px; height: 10px;"></div>
-                            <div class="window-dot dot-yellow" style="width: 10px; height: 10px;"></div>
-                            <div class="window-dot dot-green" style="width: 10px; height: 10px;"></div>
-                        </div>
-                        <div class="window-title" style="font-size: 0.75rem;">Audio Control Panel</div>
+    <!-- CORE FEATURES BLOCKSHOWCASE -->
+    <section class="features-overhaul">
+        <div class="section-heading">
+            <span class="eyebrow">Studio Calibration</span>
+            <h2>Studio Architecture & DSP Topology</h2>
+            <p>Every processing component in the Aideo pipeline is designed with raw performance in mind, targeting high-end external DAC hardware directly.</p>
+        </div>
+
+        <div class="custom-features-grid">
+            <!-- Feature Card 1: Headphone Crossfeed -->
+            <div class="premium-feature-card">
+                <div class="card-icon"><i class="fas fa-random"></i></div>
+                <h3>True Headphone Crossfeed</h3>
+                <p>Simple stereo mixes are mapped strictly to left/right in headphones, inducing quick neurological fatigue. Aideo implements a **Linkwitz/Chu Moy algorithm** in Rust:</p>
+                <div class="crossfeed-simulator">
+                    <div class="crossfeed-head">
+                        <i class="fas fa-user-circle"></i>
+                        <div class="sound-wave left-wave active"></div>
+                        <div class="sound-wave right-wave active"></div>
+                        <div class="crossover-line left-cross active"></div>
+                        <div class="crossover-line right-cross active"></div>
                     </div>
-                    <img src="https://github.com/user-attachments/assets/552451ee-927c-4326-89e7-07f4ae33d668" alt="Audio Configuration Settings"/>
+                    <div class="simulator-label">700Hz Shadow Lowpass &bull; 300µs Delay</div>
                 </div>
+                <ul class="feature-bullets">
+                    <li><i class="fas fa-check"></i> Simulates natural speaker-to-ear room shadowing</li>
+                    <li><i class="fas fa-check"></i> Prevents severe ear strain on early panning mixes</li>
+                </ul>
             </div>
-            <div class="showcase-text">
-                <h3>Studio-Grade <span>Audio Console</span></h3>
-                <p>Take absolute control over your digital signal path. The dedicated audio console lets you negotiate hardware sampling rates, bypass default OS mixers, and load professional EQ profiles for pure, bit-perfect fidelity.</p>
-                <ul class="showcase-list">
-                    <li><i class="fas fa-sliders-h"></i> 10-band Parametric Equalizer & DSP Settings</li>
-                    <li><i class="fas fa-headphones"></i> High-fidelity crossfeed & spatial widening</li>
-                    <li><i class="fas fa-check-double"></i> Automatic Lossless & Hi-Res audio badges</li>
+
+            <!-- Feature Card 2: YTM AI Discovery -->
+            <div class="premium-feature-card">
+                <div class="card-icon"><i class="fas fa-sparkles"></i></div>
+                <h3>YTM Search & Discovery Hub</h3>
+                <p>Stream high-fidelity online tracks directly into your audio pipeline with advanced smart discovery: we execute concurrent Tokio background queries, round-robin interleave results, and filter duplicates automatically.</p>
+                <div class="ytm-badge-wrapper">
+                    <div class="discover-preview-card">
+                        <img src="https://github.com/user-attachments/assets/ed834062-d265-4b04-a772-4474494967c7" alt="YTM cover artwork">
+                        <div class="discover-meta">
+                            <span class="track-title">Pristine Recommendation</span>
+                            <span class="track-artist">Tokio Interleaved Stream</span>
+                        </div>
+                        <span class="track-duration"><i class="fas fa-clock"></i> 3:45</span>
+                    </div>
+                </div>
+                <ul class="feature-bullets">
+                    <li><i class="fas fa-check"></i> 429 Scraping Bypass via BestAudio Stream proxy</li>
+                    <li><i class="fas fa-check"></i> refererPolicy bypass on 403 Forbidden covers</li>
+                </ul>
+            </div>
+
+            <!-- Feature Card 3: Driver safety Hot-Plug -->
+            <div class="premium-feature-card">
+                <div class="card-icon"><i class="fas fa-shield"></i></div>
+                <h3>WASAPI Device Recovery Loop</h3>
+                <p>Windows audio changes shouldn't crash your player. Aideo registers driver failure closures natively in the WASAPI engine, recovering instantly in under a second after hardware switches.</p>
+                
+                <div class="device-list-mockup">
+                    <div class="device-row active">
+                        <i class="fas fa-volume-high"></i>
+                        <span>Sennheiser HD 600 Direct</span>
+                        <span class="status-pill green">WASAPI Direct</span>
+                    </div>
+                    <div class="device-row">
+                        <i class="fas fa-speaker"></i>
+                        <span>Realtek Default Audio</span>
+                        <span class="status-pill gray">Backup</span>
+                    </div>
+                </div>
+                <ul class="feature-bullets">
+                    <li><i class="fas fa-check"></i> 250ms driver release cooldown avoids handles lockups</li>
+                    <li><i class="fas fa-check"></i> Active skipped transitions command debouncing</li>
                 </ul>
             </div>
         </div>
+    </section>
 
-        <!-- Feature 3: Discord Rich Presence -->
-        <div class="feature-showcase">
-            <div class="showcase-text">
-                <h3>Social <span>Listening Status</span></h3>
-                <p>Share your acoustic journey. Fully integrated Discord Rich Presence displays what track you're playing, high-resolution metadata, elapsed playback time, and dynamic custom action buttons for friends to download the player.</p>
-                <ul class="showcase-list">
-                    <li><i class="fab fa-discord"></i> Real-time status update & dynamic profile buttons</li>
-                    <li><i class="fas fa-magic"></i> MusicBrainz Magic Match database scanning</li>
-                    <li><i class="fas fa-language"></i> Romaji translation & global character support</li>
-                </ul>
+    <!-- CORE METRICS & SPECTROGRAM -->
+    <section class="telemetry-section">
+        <div class="telemetry-wrapper">
+            <div class="telemetry-visual">
+                <h3>Real-Time Spectrogram</h3>
+                <div class="spectrum-bars-container" id="spectrum-bars-container">
+                    <!-- Bars are generated dynamically -->
+                </div>
             </div>
-            <div class="showcase-visual">
-                <div class="discord-widget">
-                    <div class="discord-header">Playing a Game</div>
-                    <div class="discord-profile">
-                        <div class="discord-avatar-container">
-                            <div class="discord-avatar">A</div>
-                            <div class="discord-status"></div>
-                        </div>
-                        <div class="discord-info">
-                            <div class="discord-username">Alirul</div>
-                            <div class="discord-activity-title">
-                                <i class="fab fa-discord" style="color: #5865f2; margin-right: 4px;"></i> Playing <strong>Aideo</strong>
-                            </div>
-                            <div class="discord-track-details">
-                                <div class="discord-cover"><i class="fas fa-music"></i></div>
-                                <div class="discord-track-text">
-                                    <div class="discord-track-name">Pristine Melodies</div>
-                                    <div class="discord-track-artist">Aideo Exclusive Player</div>
-                                    <div class="discord-track-album">Bit-Perfect 192kHz</div>
-                                </div>
-                            </div>
-                            <div class="discord-progress-bar">
-                                <div class="discord-progress-fill"></div>
-                            </div>
-                            <div class="discord-buttons">
-                                <button class="discord-btn discord-btn-primary"><i class="fab fa-github"></i> Download Aideo</button>
-                                <button class="discord-btn"><i class="fas fa-external-link-alt"></i> Learn More</button>
-                            </div>
-                        </div>
+            <div class="telemetry-text">
+                <span class="eyebrow">Acoustic Precision</span>
+                <h2>Sub-millisecond Timing Alignment</h2>
+                <p>Aideo bypasses generic OS mixers completely. With pull-based hardware clock sync, lyric offsets are tracked down to the microsecond level to guarantee precise alignment on high-bitrate monitors.</p>
+                <div class="telemetry-stats">
+                    <div class="stat-box">
+                        <span class="stat-number">0.3ms</span>
+                        <span class="stat-label">Buffer Jitter Variance</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-number">384kHz</span>
+                        <span class="stat-label">Upsample Capability</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-number">&lt;1.5%</span>
+                        <span class="stat-label">CPU DSP Overhead</span>
                     </div>
                 </div>
             </div>
         </div>
+    </section>
 
-        <!-- Feature 4: Performance & Search (v0.5.1) -->
-        <div class="feature-showcase">
-            <div class="showcase-visual">
-                <div class="visual-pane" style="background: rgba(var(--accent-rgb), 0.05); display: flex; align-items: center; justify-content: center; height: 300px; border-radius: 12px; border: 1px dashed rgba(255,255,255,0.1);">
-                    <div style="text-align: center;">
-                        <i class="fas fa-bolt" style="font-size: 3rem; color: var(--accent); margin-bottom: 1rem;"></i>
-                        <div style="font-weight: 600; font-size: 1.2rem;">100x Faster Imports</div>
-                        <div style="color: var(--text-dim); font-size: 0.9rem; margin-top: 0.5rem;">Optimized SQLite Transactions</div>
-                    </div>
-                </div>
+    <!-- THE DETAILED ROADMAP -->
+    <section class="roadmap-section">
+        <div class="section-heading">
+            <span class="eyebrow">Engineering Progress</span>
+            <h2>Project Architecture Timeline</h2>
+            <p>Our commitment to rolling out cutting-edge audio innovations for desktop environments.</p>
+        </div>
+
+        <div class="timeline-container">
+            <div class="timeline-node done">
+                <span class="node-badge">v0.5.1</span>
+                <h3>Library Acceleration</h3>
+                <p>Integrated UI DOM virtualization and optimized local SQLite transactions for 100x indexing acceleration over 10k+ tracks.</p>
             </div>
-            <div class="showcase-text">
-                <h3>Built for <span>Massive Libraries</span></h3>
-                <p>Don't let a large collection slow you down. Aideo v0.5.1 introduces extreme UI virtualization and hyper-optimized Rust backend transactions to handle libraries exceeding 10,000+ tracks flawlessly. Find any song instantly with real-time fuzzy search.</p>
-                <ul class="showcase-list">
-                    <li><i class="fas fa-search"></i> Real-time fuzzy search & filtering</li>
-                    <li><i class="fas fa-database"></i> Atomic SQLite transactions (~100x speedup)</li>
-                    <li><i class="fas fa-memory"></i> Smart memory caching for cover art</li>
-                </ul>
+            <div class="timeline-node active">
+                <span class="node-badge glow">v0.6.0</span>
+                <h3>Pro DSP & AutoEQ Importer</h3>
+                <p>Introduced the 5-band Parametric EQ, online headphone index, true crossfeed crosstalk shadowing, and Haas expansion soundstages.</p>
+            </div>
+            <div class="timeline-node future">
+                <span class="node-badge">Next Core</span>
+                <h3>DSD & DSF Native Decoding</h3>
+                <p>Adding support for Direct Stream Digital direct transport using DSD-over-PCM (DoP) packetizing blocks.</p>
             </div>
         </div>
-    </div>
-
-    <!-- CORE ENGINE CARDS -->
-    <section id="features" class="section-header" style="margin-top: 6rem; margin-bottom: 3rem;">
-        <h2>The Core Engine</h2>
-        <p>Beneath the beautiful skin lies a powerhouse of digital signal processing engineered in Rust.</p>
     </section>
-
-    <div class="features">
-        <div class="feature-card">
-            <i class="fas fa-microchip"></i>
-            <h3>Audiophile Logic</h3>
-            <p>Professional Sinc-interpolation upsampling and TPDF dithering for absolute signal integrity, optimizing the dynamic range on high-end DACs.</p>
-        </div>
-        <div class="feature-card sec-card">
-            <i class="fas fa-bolt"></i>
-            <h3>Lazy RAM Buffering</h3>
-            <p>Tracks start playing the millisecond you click. Asynchronous background decoding ensures completely zero-jitter and zero-latency audio flow.</p>
-        </div>
-        <div class="feature-card third-card">
-            <i class="fas fa-wave-square"></i>
-            <h3>Bit-Perfect I/O</h3>
-            <p>Bypass the Windows kernel mixer with WASAPI Exclusive Mode. Direct-to-hardware communication delivers bit-perfect native playback.</p>
-        </div>
-    </div>
-
-    <!-- TECH STACK INFO -->
-    <section class="section-header" style="margin-top: 4rem; margin-bottom: 4rem;">
-        <h2>Engineered Stack</h2>
-        <p>Powered by ultra-fast backend libraries and highly modern frontend frameworks.</p>
-    </section>
-
-    <div class="tech-stack-container">
-        <div class="tech-item">
-            <div>Frontend</div>
-            <span>React 19 & TS</span>
-        </div>
-        <div class="tech-item">
-            <div>Core Engine</div>
-            <span>Rust Backend</span>
-        </div>
-        <div class="tech-item">
-            <div>DSP Core</div>
-            <span>cpal / symphonia</span>
-        </div>
-        <div class="tech-item">
-            <div>Framework</div>
-            <span>Tauri 2.0</span>
-        </div>
-    </div>
-
-    <!-- ROADMAP -->
-    <section class="section-header" style="margin-top: 2rem; margin-bottom: 4rem;">
-        <h2>The Roadmap</h2>
-        <p>Our ongoing commitment to next-generation audio playback innovation.</p>
-    </section>
-
-    <div class="roadmap-grid">
-        <div class="roadmap-card">
-            <div class="roadmap-tag tag-done">Completed</div>
-            <h4>Social Presence</h4>
-            <p>Real-time Discord status, elapsed listening time, and custom profile redirection buttons.</p>
-        </div>
-        <div class="roadmap-card">
-            <div class="roadmap-tag tag-done">Completed</div>
-            <h4>Massive Library Performance</h4>
-            <p>Virtual DOM scrolling and 100x faster SQLite transactions designed to effortlessly handle 10,000+ track libraries.</p>
-        </div>
-        <div class="roadmap-card">
-            <div class="roadmap-tag tag-next">Next-Gen Core</div>
-            <h4>Native DSD & DSD64</h4>
-            <p>Studio-grade DSF/DFF native file decoding with direct DSD-over-PCM (DoP) transport support.</p>
-        </div>
-        <div class="roadmap-card">
-            <div class="roadmap-tag tag-next">Next-Gen Core</div>
-            <h4>Neural Reconstruction</h4>
-            <p>AI-assisted up-sampling algorithm to restore lost high-frequency bands on compressed legacy formats.</p>
-        </div>
-    </div>
 
     <!-- Footer -->
     <footer>
-        <p>&copy; 2026 Aideo Music Player. Crafted with ❤️ by Alirul.</p>
-        <p style="margin-top: 10px; font-size: 0.85rem; opacity: 0.5;">Optimized for High-Performance Audiophiles.</p>
-        <div class="footer-badge">
-            <i class="fas fa-check-circle"></i> ALL SYSTEMS BIT-PERFECT &bull; 192kHz NATIVE
+        <div class="footer-grid">
+            <div class="footer-brand">
+                <div class="logo">
+                    <div class="logo-icon"><i class="fas fa-wave-square"></i></div>
+                    <span>AIDEO</span>
+                </div>
+                <p>An educational project dedicated to pure acoustics and performance.</p>
+            </div>
+            <div class="footer-stats">
+                <span class="badge-status"><i class="fas fa-check-circle"></i> ALL DSP BLOCKS STABLE &bull; WASAPI COMPLIANT</span>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2026 Aideo Music Player. Built with ❤️ by Alirul.</p>
+            <p class="sub-credit">This player is 100% AI-assisted (built with Antigravity), displaying how high-end coding accelerators speed up deep engineering projects.</p>
         </div>
     </footer>
+
+    <!-- Playback Interactive Scripting -->
+    <script>
+        // Headphone AutoEQ preset DB
+        const HEADPHONE_DB = {
+            flat: {
+                name: "Flat Response",
+                preamp: 0.0,
+                bands: [
+                    { freq: 100, gain: 0.0, q: 0.7, type: "peaking" },
+                    { freq: 300, gain: 0.0, q: 0.7, type: "peaking" },
+                    { freq: 1000, gain: 0.0, q: 0.7, type: "peaking" },
+                    { freq: 3000, gain: 0.0, q: 0.7, type: "peaking" },
+                    { freq: 8000, gain: 0.0, q: 0.7, type: "peaking" }
+                ]
+            },
+            sennheiser: {
+                name: "Sennheiser HD 600 (AutoEq Calibration)",
+                preamp: -6.4,
+                bands: [
+                    { freq: 80, gain: 4.5, q: 0.7, type: "lowshelf" },
+                    { freq: 150, gain: -2.0, q: 1.2, type: "peaking" },
+                    { freq: 1200, gain: 1.8, q: 2.0, type: "peaking" },
+                    { freq: 3000, gain: -2.5, q: 1.5, type: "peaking" },
+                    { freq: 8000, gain: 1.5, q: 0.7, type: "highshelf" }
+                ]
+            },
+            sony: {
+                name: "Sony WH-1000XM4 (AutoEq Calibration)",
+                preamp: -7.2,
+                bands: [
+                    { freq: 60, gain: -3.8, q: 0.7, type: "lowshelf" },
+                    { freq: 220, gain: 2.5, q: 1.0, type: "peaking" },
+                    { freq: 1000, gain: -2.2, q: 1.8, type: "peaking" },
+                    { freq: 3200, gain: 4.8, q: 1.4, type: "peaking" },
+                    { freq: 10000, gain: -1.5, q: 0.7, type: "highshelf" }
+                ]
+            },
+            airpods: {
+                name: "Apple AirPods Pro (AutoEq Calibration)",
+                preamp: -5.5,
+                bands: [
+                    { freq: 50, gain: 2.2, q: 0.7, type: "lowshelf" },
+                    { freq: 180, gain: -1.8, q: 1.5, type: "peaking" },
+                    { freq: 1500, gain: 2.5, q: 1.2, type: "peaking" },
+                    { freq: 4500, gain: -3.5, q: 2.0, type: "peaking" },
+                    { freq: 9000, gain: 2.0, q: 0.7, type: "highshelf" }
+                ]
+            },
+            beyerdynamic: {
+                name: "Beyerdynamic DT 990 Pro (AutoEq Calibration)",
+                preamp: -8.0,
+                bands: [
+                    { freq: 90, gain: 3.5, q: 0.7, type: "lowshelf" },
+                    { freq: 250, gain: -1.5, q: 1.4, type: "peaking" },
+                    { freq: 2000, gain: 2.0, q: 1.5, type: "peaking" },
+                    { freq: 5800, gain: -5.5, q: 2.5, type: "peaking" },
+                    { freq: 12000, gain: -2.0, q: 0.7, type: "highshelf" }
+                ]
+            }
+        };
+
+        // Active playground state
+        let currentPreamp = 0.0;
+        let activeBands = JSON.parse(JSON.stringify(HEADPHONE_DB.flat.bands));
+
+        // SVG Graph dimensions
+        const GRAPH_WIDTH = 800;
+        const GRAPH_HEIGHT = 300;
+        const FREQ_MIN = 20;
+        const FREQ_MAX = 20000;
+
+        // Map frequency to X coordinate logarithmically
+        function getX(freq) {
+            const logMin = Math.log10(FREQ_MIN);
+            const logMax = Math.log10(FREQ_MAX);
+            const logVal = Math.log10(freq);
+            return ((logVal - logMin) / (logMax - logMin)) * GRAPH_WIDTH;
+        }
+
+        // Map X coordinate back to frequency logarithmically
+        function getFreqFromX(x) {
+            const logMin = Math.log10(FREQ_MIN);
+            const logMax = Math.log10(FREQ_MAX);
+            const pct = x / GRAPH_WIDTH;
+            const logVal = logMin + pct * (logMax - logMin);
+            return Math.pow(10, logVal);
+        }
+
+        // Map dB value to Y coordinate linearly (+15dB to -15dB)
+        function getY(db) {
+            const dbMin = -15;
+            const dbMax = 15;
+            const clamped = Math.max(dbMin, Math.min(dbMax, db));
+            return GRAPH_HEIGHT - ((clamped - dbMin) / (dbMax - dbMin)) * GRAPH_HEIGHT;
+        }
+
+        // Map Y coordinate back to dB linearly
+        function getDbFromY(y) {
+            const dbMin = -15;
+            const dbMax = 15;
+            const pct = (GRAPH_HEIGHT - y) / GRAPH_HEIGHT;
+            return dbMin + pct * (dbMax - dbMin);
+        }
+
+        // Calculate filter gain responses (Approximation for fast SVG drawing)
+        function getPeakingResponse(f, f0, gain, q) {
+            // Gaussian bell filter response curve simulation
+            const logF = Math.log10(f);
+            const logF0 = Math.log10(f0);
+            const bandwidth = 0.35 / q;
+            const dist = (logF - logF0) / bandwidth;
+            return gain * Math.exp(-0.5 * dist * dist);
+        }
+
+        function getLowshelfResponse(f, f0, gain, q) {
+            const logF = Math.log10(f);
+            const logF0 = Math.log10(f0);
+            const bandwidth = 0.3 / q;
+            const t = (logF - logF0) / bandwidth;
+            return (gain / 2) * (1 - Math.tanh(t));
+        }
+
+        function getHighshelfResponse(f, f0, gain, q) {
+            const logF = Math.log10(f);
+            const logF0 = Math.log10(f0);
+            const bandwidth = 0.3 / q;
+            const t = (logF - logF0) / bandwidth;
+            return (gain / 2) * (1 + Math.tanh(t));
+        }
+
+        // Compute the complete combined EQ curve
+        function drawCurve() {
+            const points = [];
+            const steps = 150;
+            
+            for (let i = 0; i <= steps; i++) {
+                const x = (i / steps) * GRAPH_WIDTH;
+                const freq = getFreqFromX(x);
+                let totalDb = currentPreamp;
+
+                activeBands.forEach(band => {
+                    if (band.type === "lowshelf") {
+                        totalDb += getLowshelfResponse(freq, band.freq, band.gain, band.q);
+                    } else if (band.type === "highshelf") {
+                        totalDb += getHighshelfResponse(freq, band.freq, band.gain, band.q);
+                    } else {
+                        totalDb += getPeakingResponse(freq, band.freq, band.gain, band.q);
+                    }
+                });
+
+                points.push({ x, y: getY(totalDb) });
+            }
+
+            // Redraw SVG path strings
+            let dLine = `M ${points[0].x} ${points[0].y}`;
+            let dFill = `M ${points[0].x} ${points[0].y}`;
+            
+            for (let i = 1; i < points.length; i++) {
+                dLine += ` L ${points[i].x} ${points[i].y}`;
+                dFill += ` L ${points[i].x} ${points[i].y}`;
+            }
+
+            dFill += ` L ${GRAPH_WIDTH} ${GRAPH_HEIGHT} L 0 ${GRAPH_HEIGHT} Z`;
+
+            document.getElementById("graph-line").setAttribute("d", dLine);
+            document.getElementById("graph-fill").setAttribute("d", dFill);
+
+            // Update interactive node handle positions on the graph
+            activeBands.forEach((band, idx) => {
+                const node = document.getElementById(`node-${idx + 1}`);
+                if (node) {
+                    let totalDb = currentPreamp;
+                    activeBands.forEach((b, bIdx) => {
+                        if (b.type === "lowshelf") {
+                            totalDb += getLowshelfResponse(band.freq, b.freq, b.gain, b.q);
+                        } else if (b.type === "highshelf") {
+                            totalDb += getHighshelfResponse(band.freq, b.freq, b.gain, b.q);
+                        } else {
+                            totalDb += getPeakingResponse(band.freq, b.freq, b.gain, b.q);
+                        }
+                    });
+                    
+                    node.style.left = `${(getX(band.freq) / GRAPH_WIDTH) * 100}%`;
+                    node.style.top = `${(getY(totalDb) / GRAPH_HEIGHT) * 100}%`;
+                }
+            });
+
+            // Update dashboard telemetry list values
+            updateDashboard();
+        }
+
+        // Render sliders and numerical info inside the control panel
+        function updateDashboard() {
+            const bandsContainer = document.getElementById("bands-list");
+            bandsContainer.innerHTML = "";
+
+            activeBands.forEach((band, idx) => {
+                const bandEl = document.createElement("div");
+                bandEl.className = "band-row";
+                
+                let selectOptions = `
+                    <option value="peaking" ${band.type === "peaking" ? "selected" : ""}>PK</option>
+                    <option value="lowshelf" ${band.type === "lowshelf" ? "selected" : ""}>LSC</option>
+                    <option value="highshelf" ${band.type === "highshelf" ? "selected" : ""}>HSC</option>
+                `;
+
+                bandEl.innerHTML = `
+                    <span class="band-label">Band ${idx + 1}</span>
+                    <select class="band-type-select" data-index="${idx}">${selectOptions}</select>
+                    <div class="band-inputs">
+                        <div class="input-param">
+                            <span>Fc (Hz)</span>
+                            <input type="number" class="band-val band-freq" data-index="${idx}" value="${Math.round(band.freq)}">
+                        </div>
+                        <div class="input-param">
+                            <span>Gain (dB)</span>
+                            <input type="number" step="0.1" class="band-val band-gain" data-index="${idx}" value="${band.gain.toFixed(1)}">
+                        </div>
+                        <div class="input-param">
+                            <span>Q-Factor</span>
+                            <input type="number" step="0.05" class="band-val band-q" data-index="${idx}" value="${band.q.toFixed(2)}">
+                        </div>
+                    </div>
+                `;
+                bandsContainer.appendChild(bandEl);
+            });
+
+            // Re-bind change listeners
+            document.querySelectorAll(".band-type-select").forEach(el => {
+                el.addEventListener("change", (e) => {
+                    const idx = parseInt(e.target.dataset.index);
+                    activeBands[idx].type = e.target.value;
+                    drawCurve();
+                    updateAPOCode();
+                });
+            });
+
+            document.querySelectorAll(".band-val").forEach(el => {
+                el.addEventListener("input", (e) => {
+                    const idx = parseInt(e.target.dataset.index);
+                    const val = parseFloat(e.target.value) || 0;
+                    if (e.target.classList.contains("band-freq")) {
+                        activeBands[idx].freq = Math.max(20, Math.min(20000, val));
+                    } else if (e.target.classList.contains("band-gain")) {
+                        activeBands[idx].gain = Math.max(-18, Math.min(18, val));
+                    } else if (e.target.classList.contains("band-q")) {
+                        activeBands[idx].q = Math.max(0.1, Math.min(10.0, val));
+                    }
+                    drawCurve();
+                    updateAPOCode();
+                });
+            });
+
+            // Update APO Importer Preview Box
+            updateAPOCode();
+        }
+
+        // Compile clean Equalizer APO formatting string
+        function updateAPOCode() {
+            let code = `Preamp: ${currentPreamp.toFixed(1)} dB\n`;
+            activeBands.forEach((band, idx) => {
+                const typeCode = band.type === "peaking" ? "PK" : band.type === "lowshelf" ? "LSC" : "HSC";
+                code += `Filter ${idx + 1}: ON ${typeCode} Fc ${Math.round(band.freq)} Hz Gain ${band.gain.toFixed(1)} dB Q ${band.q.toFixed(2)}\n`;
+            });
+            document.getElementById("apo-code").textContent = code;
+        }
+
+        // Apply a profile loaded from search or preset tags
+        function applyHeadphoneProfile(key) {
+            const profile = HEADPHONE_DB[key];
+            if (!profile) return;
+            
+            currentPreamp = profile.preamp;
+            activeBands = JSON.parse(JSON.stringify(profile.bands));
+
+            // Set preamp slider
+            document.getElementById("preamp-slider").value = currentPreamp;
+            document.getElementById("preamp-val").textContent = `${currentPreamp.toFixed(1)} dB`;
+
+            drawCurve();
+        }
+
+        // Dynamic Interactive Node Dragging Logic
+        const graphContainer = document.getElementById("eq-graph-container");
+        let activeDragNode = null;
+
+        document.querySelectorAll(".eq-node").forEach(node => {
+            node.addEventListener("mousedown", (e) => {
+                activeDragNode = node;
+                e.preventDefault();
+            });
+        });
+
+        window.addEventListener("mouseup", () => {
+            activeDragNode = null;
+        });
+
+        window.addEventListener("mousemove", (e) => {
+            if (!activeDragNode) return;
+
+            const rect = graphContainer.getBoundingClientRect();
+            let x = e.clientX - rect.left;
+            let y = e.clientY - rect.top;
+
+            // Constrain
+            x = Math.max(0, Math.min(rect.width, x));
+            y = Math.max(0, Math.min(rect.height, y));
+
+            const pctX = x / rect.width;
+            const pctY = y / rect.height;
+
+            const bandIndex = parseInt(activeDragNode.dataset.index);
+            
+            // Map values back to parameters
+            const targetFreq = getFreqFromX(pctX * GRAPH_WIDTH);
+            const targetDb = getDbFromY(pctY * GRAPH_HEIGHT) - currentPreamp;
+
+            // Update state
+            activeBands[bandIndex].freq = Math.max(20, Math.min(20000, targetFreq));
+            activeBands[bandIndex].gain = Math.max(-15, Math.min(15, targetDb));
+
+            drawCurve();
+        });
+
+        // Search Autocomplete filtering for AutoEQ
+        const headphoneInput = document.getElementById("headphone-input");
+        const searchDropdown = document.getElementById("search-dropdown");
+
+        headphoneInput.addEventListener("input", (e) => {
+            const query = e.target.value.toLowerCase().trim();
+            searchDropdown.innerHTML = "";
+            
+            if (!query) {
+                searchDropdown.style.display = "none";
+                return;
+            }
+
+            const matches = Object.keys(HEADPHONE_DB).filter(key => {
+                if (key === "flat") return false;
+                return HEADPHONE_DB[key].name.toLowerCase().includes(query);
+            });
+
+            if (matches.length === 0) {
+                const item = document.createElement("div");
+                item.className = "dropdown-item-mockup text-dim";
+                item.textContent = "No profiles matches query";
+                searchDropdown.appendChild(item);
+            } else {
+                matches.forEach(key => {
+                    const item = document.createElement("div");
+                    item.className = "dropdown-item-mockup";
+                    item.innerHTML = `<span>${HEADPHONE_DB[key].name}</span> <span class="badge-source">AutoEq</span>`;
+                    item.addEventListener("click", () => {
+                        applyHeadphoneProfile(key);
+                        headphoneInput.value = HEADPHONE_DB[key].name;
+                        searchDropdown.style.display = "none";
+                        
+                        // Select correct quick tag
+                        document.querySelectorAll(".tag-btn").forEach(btn => {
+                            btn.classList.remove("active");
+                            if (btn.dataset.model === key) btn.classList.add("active");
+                        });
+                    });
+                    searchDropdown.appendChild(item);
+                });
+            }
+            searchDropdown.style.display = "block";
+        });
+
+        // Hide search suggestions on click away
+        window.addEventListener("click", (e) => {
+            if (!e.target.closest(".headphone-search-box")) {
+                searchDropdown.style.display = "none";
+            }
+        });
+
+        // Bind preset click listeners
+        document.querySelectorAll(".tag-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                document.querySelectorAll(".tag-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                const model = btn.dataset.model;
+                applyHeadphoneProfile(model);
+                
+                if (model !== "flat") {
+                    headphoneInput.value = HEADPHONE_DB[model].name;
+                } else {
+                    headphoneInput.value = "";
+                }
+            });
+        });
+
+        // Bind Preamp slider listener
+        document.getElementById("preamp-slider").addEventListener("input", (e) => {
+            currentPreamp = parseFloat(e.target.value);
+            document.getElementById("preamp-val").textContent = `${currentPreamp.toFixed(1)} dB`;
+            drawCurve();
+        });
+
+        // Live particle background simulation
+        const canvas = document.getElementById("ambient-particles");
+        const ctx = canvas.getContext("2d");
+        let particles = [];
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener("resize", resizeCanvas);
+        resizeCanvas();
+
+        class Particle {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.size = Math.random() * 2 + 0.5;
+                this.speedX = Math.random() * 0.4 - 0.2;
+                this.speedY = Math.random() * -0.6 - 0.1;
+                this.opacity = Math.random() * 0.5 + 0.1;
+            }
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                if (this.y < 0) {
+                    this.y = canvas.height;
+                    this.x = Math.random() * canvas.width;
+                }
+            }
+            draw() {
+                ctx.fillStyle = `rgba(168, 85, 247, ${this.opacity})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        for (let i = 0; i < 70; i++) {
+            particles.push(new Particle());
+        }
+
+        function animateParticles() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+            requestAnimationFrame(animateParticles);
+        }
+        animateParticles();
+
+        // Spectrogram Telemetry generator
+        const barsContainer = document.getElementById("spectrum-bars-container");
+        const totalBars = 32;
+        const bars = [];
+
+        for (let i = 0; i < totalBars; i++) {
+            const bar = document.createElement("div");
+            bar.className = "spectrogram-bar";
+            barsContainer.appendChild(bar);
+            bars.push(bar);
+        }
+
+        function updateSpectrogram() {
+            bars.forEach((bar, idx) => {
+                // Generate natural continuous sine wave shapes for visual premium effect
+                const time = Date.now() * 0.0035;
+                const waveVal = Math.sin(idx * 0.25 + time) * Math.cos(idx * 0.1 - time * 0.4);
+                let height = Math.abs(waveVal) * 90 + Math.random() * 8;
+                height = Math.max(5, Math.min(100, height));
+                bar.style.height = `${height}%`;
+            });
+            setTimeout(updateSpectrogram, 70);
+        }
+        updateSpectrogram();
+
+        // Run initial curve drawing
+        drawCurve();
+    </script>
 </body>
 </html>

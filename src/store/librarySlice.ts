@@ -7,7 +7,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   tracks: [],
   currentTrackIndex: -1,
   shuffle: false,
-  playHistory: [],
+  playHistory: JSON.parse(localStorage.getItem('aideo_play_history') || '[]'),
+  playCounts: JSON.parse(localStorage.getItem('aideo_play_counts') || '{}'),
   scanDirs: JSON.parse(localStorage.getItem('aideo_scan_dirs') || '[]'),
   scanStatus: '',
   playlists: [],
@@ -49,10 +50,16 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const index = get().tracks.findIndex(t => t.path === track.path);
       const prevTrack = get().playback.current_track;
       const history = prevTrack && !isHistory ? [...get().playHistory, prevTrack].slice(-50) : get().playHistory;
+      localStorage.setItem('aideo_play_history', JSON.stringify(history));
+
+      const counts = { ...get().playCounts };
+      counts[track.path] = (counts[track.path] || 0) + 1;
+      localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
 
       set({
         currentTrackIndex: index,
         playHistory: history,
+        playCounts: counts,
         lyricOffset: track.lyric_offset || 0,
         lyrics: [],
         lyricStatus: 'loading',
@@ -127,10 +134,16 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
     const prevTrackStr = state.playback.current_track;
     const history = prevTrackStr ? [...state.playHistory, prevTrackStr].slice(-50) : state.playHistory;
+    localStorage.setItem('aideo_play_history', JSON.stringify(history));
+
+    const counts = { ...state.playCounts };
+    counts[path] = (counts[path] || 0) + 1;
+    localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
 
     set({
       currentTrackIndex: index,
       playHistory: history,
+      playCounts: counts,
       lyricOffset: track?.lyric_offset || 0,
       lyrics: [],
       lyricStatus: 'loading',
@@ -318,5 +331,93 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       set({ scanStatus: 'Match failed: ' + e });
       return null;
     }
+  },
+
+  playDynamicMix: async (mixType: 'supermix' | 'recap' | 'discovery' | 'chill') => {
+    const tracks = get().tracks;
+    if (tracks.length === 0) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Your library is empty. Add a music folder first.', type: 'warning' } }));
+      return;
+    }
+
+    const counts = get().playCounts;
+    let selectedTracks: Track[] = [];
+
+    if (mixType === 'recap') {
+      // Top played tracks descending
+      selectedTracks = [...tracks]
+        .filter(t => (counts[t.path] || 0) > 0)
+        .sort((a, b) => (counts[b.path] || 0) - (counts[a.path] || 0))
+        .slice(0, 20);
+      
+      // Fallback if no songs played yet, pick random
+      if (selectedTracks.length === 0) {
+        selectedTracks = [...tracks].sort(() => 0.5 - Math.random()).slice(0, 20);
+      }
+    } else if (mixType === 'supermix') {
+      // Top 10 + 15 random other tracks from the library
+      const topTracks = [...tracks]
+        .filter(t => (counts[t.path] || 0) > 0)
+        .sort((a, b) => (counts[b.path] || 0) - (counts[a.path] || 0))
+        .slice(0, 10);
+      
+      const rest = tracks.filter(t => !topTracks.some(tt => tt.path === t.path));
+      const randomRest = [...rest].sort(() => 0.5 - Math.random()).slice(0, 15);
+      selectedTracks = [...topTracks, ...randomRest];
+      
+      if (selectedTracks.length === 0) {
+        selectedTracks = [...tracks].sort(() => 0.5 - Math.random()).slice(0, 25);
+      }
+    } else if (mixType === 'discovery') {
+      // Never or least played tracks
+      const unplayed = tracks.filter(t => (counts[t.path] || 0) === 0);
+      if (unplayed.length > 0) {
+        selectedTracks = [...unplayed].sort(() => 0.5 - Math.random()).slice(0, 20);
+      } else {
+        selectedTracks = [...tracks]
+          .sort((a, b) => (counts[a.path] || 0) - (counts[b.path] || 0))
+          .slice(0, 20);
+      }
+    } else if (mixType === 'chill') {
+      const hrs = new Date().getHours();
+      let keywords: string[] = [];
+      if (hrs >= 5 && hrs < 12) {
+        keywords = ['upbeat', 'energy', 'morning', 'sunrise', 'wake', 'start', 'pop', 'dance', 'bright', 'sun', 'happy'];
+      } else if (hrs >= 12 && hrs < 17) {
+        keywords = ['focus', 'study', 'work', 'productive', 'beats', 'flow', 'ambient', 'instrumental', 'jazz', 'coding', 'lofi', 'lo-fi', 'classical'];
+      } else {
+        keywords = ['chill', 'relax', 'acoustic', 'sleep', 'night', 'dark', 'slow', 'blues', 'moon', 'dream', 'unwind', 'mood'];
+      }
+
+      let matches = tracks.filter(t => {
+        const title = (t.title || '').toLowerCase();
+        const artist = (t.artist || '').toLowerCase();
+        return keywords.some(k => title.includes(k) || artist.includes(k));
+      });
+      
+      if (matches.length < 5) {
+        matches = tracks;
+      }
+      selectedTracks = [...matches].sort(() => 0.5 - Math.random()).slice(0, 20);
+    }
+
+    if (selectedTracks.length === 0) return;
+
+    set({ queue: selectedTracks });
+    localStorage.setItem('aideo_queue', JSON.stringify(selectedTracks));
+    
+    await get().playTrack(selectedTracks[0]);
+
+    let mixName = 'Chill Mix';
+    if (mixType === 'supermix') mixName = 'My Supermix';
+    else if (mixType === 'recap') mixName = 'Aideo Recap Mix';
+    else if (mixType === 'discovery') mixName = 'Discovery Mix';
+    else if (mixType === 'chill') {
+      const hrs = new Date().getHours();
+      if (hrs >= 5 && hrs < 12) mixName = 'Sunrise Energy Mix';
+      else if (hrs >= 12 && hrs < 17) mixName = 'Productive Focus Mix';
+      else mixName = 'Chill & Unwind Mix';
+    }
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Playing ${mixName}!`, type: 'success' } }));
   },
 });

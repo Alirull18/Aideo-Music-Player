@@ -4,14 +4,42 @@ import { invoke } from '@tauri-apps/api/core';
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   playback: { status: 'Stopped', current_track: null, position_secs: 0, volume: 1.0, exclusive: false, bit_perfect: false, dev_rate: 0, driver_type: 'WASAPI' },
-  dsp: { width: 1.0, enabled: false, upsample_rate: 0, dither: false },
+  dsp: {
+    enabled: false,
+    width: 1.0,
+    upsample_rate: 0,
+    dither: false,
+    eq_enabled: false,
+    eq_parametric: false,
+    eq_graphic_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    eq_parametric_bands: [
+      { freq: 80, gain: 0, q: 0.7, band_type: 'lowshelf' },
+      { freq: 240, gain: 0, q: 1.0, band_type: 'peaking' },
+      { freq: 750, gain: 0, q: 1.0, band_type: 'peaking' },
+      { freq: 2200, gain: 0, q: 1.0, band_type: 'peaking' },
+      { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' }
+    ],
+    crossfeed_enabled: false,
+    crossfeed_level: -6.0,
+    crossfeed_corner: 700.0,
+    spatial_enabled: false,
+    spatial_haas_delay: 7.5,
+    spatial_wet: 0.15,
+    subsonic_enabled: false,
+    night_mode_enabled: false,
+    r128_enabled: false
+  },
   devices: [],
   currentDevice: null,
   showQueue: false,
   queue: [],
 
   updateDiscordPresence: () => {
-    const { playback, tracks } = get();
+    const { playback, tracks, discordEnabled } = get();
+    if (!discordEnabled) {
+      invoke('clear_discord_presence').catch(console.error);
+      return;
+    }
     if (!playback.current_track) {
       invoke('update_discord_presence', { details: "Idle", stateStr: "Browsing Library", isPlaying: false });
       return;
@@ -63,18 +91,16 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const current = get().playback.current_track;
       await invoke('stop_track');
       
-      const isUrl = current?.startsWith('http');
-      
       set({
         playback: { 
           ...get().playback, 
           status: 'Stopped',
-          current_track: isUrl ? null : current,
+          current_track: null,
           last_played_track: current || get().playback.last_played_track,
           position_secs: 0 
         },
-        coverArt: isUrl ? null : get().coverArt,
-        lyrics: isUrl ? [] : get().lyrics,
+        coverArt: null,
+        lyrics: [],
       });
       get().updateDiscordPresence();
     } catch (e) { console.error(e); }
@@ -184,6 +210,30 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     } catch (e) { console.error(e); }
   },
 
+  keepAwake: localStorage.getItem('aideo_keep_awake') === 'true',
+  
+  toggleKeepAwake: async () => {
+    const nextState = !get().keepAwake;
+    set({ keepAwake: nextState });
+    localStorage.setItem('aideo_keep_awake', String(nextState));
+    try {
+      await invoke('toggle_keep_awake', { enable: nextState });
+    } catch (e) { console.error(e); }
+  },
+
+  discordEnabled: localStorage.getItem('aideo_discord_enabled') !== 'false',
+
+  toggleDiscord: () => {
+    const nextState = !get().discordEnabled;
+    set({ discordEnabled: nextState });
+    localStorage.setItem('aideo_discord_enabled', String(nextState));
+    if (!nextState) {
+      invoke('clear_discord_presence').catch(console.error);
+    } else {
+      get().updateDiscordPresence();
+    }
+  },
+
   fetchDevices: async () => {
     try {
       const ds: string[] = await invoke('get_audio_devices');
@@ -256,9 +306,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     
     // Fire-and-forget the Rust IPC calls so we don't block the UI
     (async () => {
-        for (let i = 0; i <= index; i++) {
-            await invoke('remove_from_queue', { index: 0 }).catch(() => {});
-        }
+        await invoke('remove_from_queue_bulk', { count: index + 1 }).catch(() => {});
     })();
     
     get().playTrack(trackToPlay);

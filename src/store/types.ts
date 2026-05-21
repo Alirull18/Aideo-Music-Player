@@ -20,11 +20,39 @@ export interface LyricLine {
   translation?: string;
 }
 
+export interface EQBand {
+  freq: number;
+  gain: number;
+  q: number;
+  band_type: string; // 'lowshelf' | 'peaking' | 'highshelf'
+}
+
 export interface DSPState {
-  width: number;
   enabled: boolean;
+  width: number;
   upsample_rate: number;
   dither: boolean;
+
+  // EQ
+  eq_enabled: boolean;
+  eq_parametric: boolean;
+  eq_graphic_gains: number[];
+  eq_parametric_bands: EQBand[];
+
+  // Crossfeed
+  crossfeed_enabled: boolean;
+  crossfeed_level: number;
+  crossfeed_corner: number;
+
+  // Soundstage
+  spatial_enabled: boolean;
+  spatial_haas_delay: number;
+  spatial_wet: number;
+
+  // Dynamics
+  subsonic_enabled: boolean;
+  night_mode_enabled: boolean;
+  r128_enabled: boolean;
 }
 
 export interface PlaybackState {
@@ -50,12 +78,13 @@ export interface CustomPromptState {
 }
 
 export interface PlayerState {
-  view: 'library' | 'nowplaying' | 'lastfm' | 'youtube' | 'tidal';
+  view: 'library' | 'nowplaying' | 'lastfm' | 'tidal' | 'aideo' | 'aideo_search';
   tracks: Track[];
   queue: Track[];
   currentTrackIndex: number;
   shuffle: boolean;
   playHistory: string[];
+  playCounts: Record<string, number>;
   playback: PlaybackState;
   lyrics: LyricLine[];
   lyricOffset: number;
@@ -89,7 +118,7 @@ export interface PlayerState {
   setCustomPrompt: (prompt: Partial<CustomPromptState>) => void;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'youtube' | 'tidal') => void;
+  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'tidal' | 'aideo' | 'aideo_search') => void;
   updateDiscordPresence: () => void;
   addScanDir: (dir: string) => void;
   removeScanDir: (dir: string) => void;
@@ -97,11 +126,16 @@ export interface PlayerState {
   toggleSettings: () => void;
   toggleQueue: () => void;
   toggleScrobble: () => void;
+  keepAwake: boolean;
+  toggleKeepAwake: () => Promise<void>;
+  discordEnabled: boolean;
+  toggleDiscord: () => void;
   setLastFmSession: (key: string | null) => void;
   setShowRomaji: (val: boolean) => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
   playTrack: (track: Track, isHistory?: boolean) => Promise<void>;
+  playDynamicMix: (mixType: 'supermix' | 'recap' | 'discovery' | 'chill') => Promise<void>;
   addToQueue: (track: Track) => Promise<void>;
   playNextInQueue: (track: Track) => Promise<void>;
   playFromQueue: (index: number) => Promise<void>;
