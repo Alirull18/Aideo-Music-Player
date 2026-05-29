@@ -1,7 +1,8 @@
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, memo, useRef } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
@@ -21,30 +22,42 @@ function baseName(p: string | null) {
 const coverArtCache = new Map<string, string | null>();
 const pendingArtRequests = new Map<string, Promise<any>>();
 
-const TrackCardThumbnail = memo(({ path }: { path: string }) => {
-  const [art, setArt] = useState<string | null>(coverArtCache.get(path) || null);
+const TrackCardThumbnail = memo(({ path, coverUrl }: { path: string, coverUrl?: string | null }) => {
+  const isCloud = path.startsWith('http://') || path.startsWith('https://') || (coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://')));
+  const isSelfHosted = coverUrl && (coverUrl.startsWith('http://') || coverUrl.includes('/rest/getCoverArt.view') || coverUrl.includes('/Images/Primary'));
+  const isRemote = coverUrl && coverUrl.startsWith('https://') && !isSelfHosted;
+  const targetPath = isRemote ? coverUrl : (coverUrl || path);
+  const [art, setArt] = useState<string | null>(isRemote ? coverUrl : (coverArtCache.get(targetPath) || null));
 
   useEffect(() => {
-    if (!art && !coverArtCache.has(path)) {
-      if (!pendingArtRequests.has(path)) {
-        const req = invoke('get_cover_art', { path }).then((res: any) => {
+    if (isRemote) {
+      setArt(coverUrl);
+      return;
+    }
+    if (isCloud && !coverUrl) {
+      setArt(null);
+      return;
+    }
+    if (!art && !coverArtCache.has(targetPath)) {
+      if (!pendingArtRequests.has(targetPath)) {
+        const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
           const artUrl = (res && typeof res === 'string') ? res : null;
-          coverArtCache.set(path, artUrl);
+          coverArtCache.set(targetPath, artUrl);
           return artUrl;
         }).catch(() => {
-          coverArtCache.set(path, null);
+          coverArtCache.set(targetPath, null);
           return null;
         }).finally(() => {
-          pendingArtRequests.delete(path);
+          pendingArtRequests.delete(targetPath);
         });
-        pendingArtRequests.set(path, req);
+        pendingArtRequests.set(targetPath, req);
       }
       
-      pendingArtRequests.get(path)?.then(resolvedArt => {
+      pendingArtRequests.get(targetPath)?.then(resolvedArt => {
         if (resolvedArt) setArt(resolvedArt);
       });
     }
-  }, [path, art]);
+  }, [targetPath, art, isRemote, isCloud, coverUrl]);
 
   return (
     <img src={art || defaultCover} alt="" loading="lazy" className="aideo-track-img" />
@@ -59,11 +72,12 @@ export function AideoView() {
     playTrack, 
     playDynamicMix, 
     setView, 
-    toggleSettings, 
     playStream,
     playback,
     pauseTrack,
-    resumeTrack
+    resumeTrack,
+    generateSmartMix,
+    showSmartMixWidget
   } = useStore();
   const [greeting, setGreeting] = useState('Good morning');
   const [timeMix, setTimeMix] = useState({
@@ -74,32 +88,95 @@ export function AideoView() {
 
   const [recommendations, setRecommendations] = useState<any[]>([]);
   const [isLoadingRecs, setIsLoadingRecs] = useState(true);
+  const isFetchingRef = useRef(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, { percent: number; downloaded_mb: number; total_mb: number }>>({});
+
+  const [activeMood, setActiveMood] = useState('Chill');
+  const [activeSource, setActiveSource] = useState('Library History');
+  const [generatingMix, setGeneratingMix] = useState(false);
+
+  const handleGenerateSmartMix = async () => {
+    setGeneratingMix(true);
+    try {
+      await generateSmartMix(activeMood, activeSource);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setGeneratingMix(false);
+    }
+  };
+
+  useEffect(() => {
+    const sub = listen<any>('ytdlp-download-progress', (event) => {
+      const { url, percent, downloaded_mb, total_mb } = event.payload;
+      setDownloadProgress(prev => ({
+        ...prev,
+        [url]: { percent, downloaded_mb, total_mb }
+      }));
+    });
+
+    return () => {
+      sub.then(f => f());
+    };
+  }, []);
 
   const fetchRecommendations = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setIsLoadingRecs(true);
     try {
-      // 1. Calculate top artists from library
+      // 1. Fetch freshest state directly from store to prevent React closure/stale-state bugs
+      let currentStore = useStore.getState();
+      const currentTracks = currentStore.tracks;
+      const currentPlayCounts = currentStore.playCounts;
+      const isLfmConnected = !!currentStore.lastfmSessionKey;
+      const isLbConnected = !!currentStore.listenbrainzToken;
+      const discoveryLevel = currentStore.autoplayDiscoveryLevel;
+
+      // A. Load ListenBrainz collaborative filtering recommendations if connected
+      if (isLbConnected && (!currentStore.listenbrainzRecs || currentStore.listenbrainzRecs.length === 0)) {
+        try {
+          await currentStore.fetchListenbrainzDashboard();
+        } catch (e) {
+          console.error('Failed to auto-fetch ListenBrainz dashboard', e);
+        }
+      }
+
+      // B. Load Last.fm personalized top artists if connected
+      if (isLfmConnected && (!currentStore.lastfmTopArtists || currentStore.lastfmTopArtists.length === 0)) {
+        try {
+          await currentStore.fetchLastfmDashboard();
+        } catch (e) {
+          console.error('Failed to auto-fetch Last.fm dashboard', e);
+        }
+      }
+
+      // Refresh store state after potential background fetches
+      currentStore = useStore.getState();
+
+      // --- Find seed artists from offline library play history or frequencies ---
+      let offlineSeedArtists: string[] = [];
       const artistPlayCounts: Record<string, number> = {};
-      tracks.forEach(track => {
+      currentTracks.forEach(track => {
         if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio') {
-          const count = playCounts[track.path] || 0;
+          const count = currentPlayCounts[track.path] || 0;
           if (count > 0) {
             artistPlayCounts[track.artist] = (artistPlayCounts[track.artist] || 0) + count;
           }
         }
       });
 
-      const topArtists = Object.entries(artistPlayCounts)
+      offlineSeedArtists = Object.entries(artistPlayCounts)
         .sort((a, b) => b[1] - a[1])
         .map(entry => entry[0])
         .slice(0, 5);
 
-      if (topArtists.length === 0) {
+      if (offlineSeedArtists.length === 0) {
         const artistFrequencies: Record<string, number> = {};
-        tracks.forEach(track => {
+        currentTracks.forEach(track => {
           if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio') {
             artistFrequencies[track.artist] = (artistFrequencies[track.artist] || 0) + 1;
           }
@@ -108,24 +185,63 @@ export function AideoView() {
           .sort((a, b) => b[1] - a[1])
           .map(entry => entry[0])
           .slice(0, 5);
-        topArtists.push(...mostFrequent);
+        offlineSeedArtists.push(...mostFrequent);
       }
 
-      // 2. Query Tauri command
-      const rawRecs = await invoke<any[]>('get_aideo_recommendations', {
+      // Find top played artists for re-ranking
+      const topArtists = Object.entries(artistPlayCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(entry => entry[0])
+        .slice(0, 5);
+
+      if (topArtists.length === 0) {
+        topArtists.push(...offlineSeedArtists);
+      }
+
+      // Find library artists for re-ranking
+      const libraryArtists = Array.from(new Set(
+        currentTracks
+          .map(t => t.artist)
+          .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio')
+      ));
+
+      // Gather Last.fm Top Artists names
+      const lastfmTopArtistsList = (currentStore.lastfmTopArtists || []).map((a: any) => a.name as string);
+
+      // Gather ListenBrainz Recommended Tracks
+      const lbTracks: string[] = [];
+      if (isLbConnected && currentStore.listenbrainzRecs) {
+        const recsArray = Array.isArray(currentStore.listenbrainzRecs)
+          ? currentStore.listenbrainzRecs
+          : Object.entries(currentStore.listenbrainzRecs).map(([_, val]: [string, any]) => ({ ...val }));
+
+        recsArray.slice(0, 8).forEach((rec: any) => {
+          const artist = rec.artist?.name || rec.artist_credit_name || rec.recording?.artist_credit_name || '';
+          const title = rec.recording?.name || rec.recording_name || '';
+          if (artist && title) {
+            lbTracks.push(`${artist} - ${title}`);
+          }
+        });
+      }
+
+      // 🚀 Invoke new high-performance parallel backend command!
+      const resolved = await invoke<any[]>('get_personalized_discovery_hub', {
+        seedArtists: offlineSeedArtists,
         topArtists,
-        excludeIds: []
+        libraryArtists,
+        discoveryLevel,
+        lastfmConnected: isLfmConnected,
+        lastfmTopArtists: lastfmTopArtistsList,
+        listenbrainzConnected: isLbConnected,
+        listenbrainzRecs: lbTracks,
       });
 
-      // 3. Dual-layer filter (exclude tracks matching existing library titles)
-      const libraryTitles = new Set(tracks.map(t => (t.title || '').toLowerCase().trim()));
-      const filtered = rawRecs.filter(rec => !libraryTitles.has(rec.title.toLowerCase().trim()));
-
-      setRecommendations(filtered);
+      setRecommendations(resolved);
     } catch (err) {
-      console.error('Failed to load aideo recommendations:', err);
+      console.error('Failed to load personalized discovery recommendations:', err);
     } finally {
       setIsLoadingRecs(false);
+      isFetchingRef.current = false;
     }
   };
 
@@ -153,6 +269,8 @@ export function AideoView() {
       });
       // Refresh the library store immediately so it updates the downloaded state
       await useStore.getState().loadLibrary();
+      // Immediately refresh recommendations list to filter out the downloaded track
+      await fetchRecommendations();
       window.dispatchEvent(new CustomEvent('ui-toast', { 
         detail: { message: `Successfully added to offline library: ${track.title}!`, type: 'success' } 
       }));
@@ -216,14 +334,25 @@ export function AideoView() {
         detail: { message: `Streaming preview: ${track.title}...`, type: 'info' } 
       }));
       try {
-        await playStream(track.url);
+        const parsedSeconds = (() => {
+          const parts = (track.duration_raw || '').split(':').map(Number);
+          if (parts.length === 2) return parts[0] * 60 + parts[1];
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          return 0;
+        })();
+        await playStream(track.url, {
+          title: track.title,
+          artist: track.artist,
+          cover_url: track.cover_url || null,
+          duration: parsedSeconds
+        });
         
         // Update OS media metadata specifically for this stream with its title and artist info
         invoke('update_media_metadata', {
           title: track.title,
           artist: track.artist,
           coverUrl: track.cover_url || null,
-          duration: 0,
+          duration: parsedSeconds,
         }).catch(() => {});
       } catch (e) {
         console.error('Failed to stream track preview:', e);
@@ -261,7 +390,8 @@ export function AideoView() {
   }, []);
 
   // Compute "Recently Played" Track Objects
-  const recentTracks = playHistory
+  const recentTracks = [...playHistory]
+    .reverse()
     .map(path => tracks.find(t => t.path === path))
     .filter((t): t is typeof tracks[0] => !!t)
     // Show unique recent tracks, maintaining order (most recent first)
@@ -408,11 +538,11 @@ export function AideoView() {
         </div>
       </section>
 
-      {/* Section: Aideo AI Discovery Hub */}
+      {/* Section: Aideo Discovery Hub */}
       <section className="aideo-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h2 className="aideo-sec-title" style={{ margin: 0 }}>AI Discovery Hub</h2>
+            <h2 className="aideo-sec-title" style={{ margin: 0 }}>Discovery Hub</h2>
             <span style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 20, background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent)', border: '1px solid rgba(139, 92, 246, 0.2)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Tailored for You</span>
           </div>
           <button 
@@ -476,6 +606,50 @@ export function AideoView() {
                 <div className="discovery-meta">
                   <h4 className="discovery-title" title={track.title}>{track.title}</h4>
                   <p className="discovery-artist" title={track.artist}>{track.artist}</p>
+                  {track.recommendation_source && (
+                    <span style={{
+                      fontSize: 8,
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.5,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      marginTop: 4,
+                      display: 'inline-block',
+                      background: track.recommendation_source.includes('ListenBrainz') 
+                        ? 'rgba(235, 116, 59, 0.12)' 
+                        : track.recommendation_source.includes('Last.fm')
+                          ? 'rgba(139, 92, 246, 0.12)'
+                          : track.recommendation_source.includes('YouTube Music')
+                            ? 'rgba(239, 68, 68, 0.12)'
+                            : track.recommendation_source.includes('Based on your Favorites')
+                              ? 'rgba(239, 68, 68, 0.18)'
+                              : 'rgba(255, 255, 255, 0.04)',
+                      color: track.recommendation_source.includes('ListenBrainz')
+                        ? '#ff9e59'
+                        : track.recommendation_source.includes('Last.fm')
+                          ? '#a78bfa'
+                          : track.recommendation_source.includes('YouTube Music')
+                            ? '#f87171'
+                            : track.recommendation_source.includes('Based on your Favorites')
+                              ? '#ef4444'
+                              : 'var(--text-dim)',
+                      border: track.recommendation_source.includes('ListenBrainz')
+                        ? '1px solid rgba(235, 116, 59, 0.2)'
+                        : track.recommendation_source.includes('Last.fm')
+                          ? '1px solid rgba(139, 92, 246, 0.2)'
+                          : track.recommendation_source.includes('YouTube Music')
+                            ? '1px solid rgba(239, 68, 68, 0.2)'
+                            : track.recommendation_source.includes('Based on your Favorites')
+                              ? '1px solid rgba(239, 68, 68, 0.45)'
+                              : '1px solid rgba(255, 255, 255, 0.06)',
+                      boxShadow: track.recommendation_source.includes('Based on your Favorites')
+                        ? '0 0 12px rgba(239, 68, 68, 0.25)'
+                        : undefined
+                    }}>
+                      {track.recommendation_source}
+                    </span>
+                  )}
                 </div>
 
                 <div className="discovery-footer">
@@ -501,8 +675,49 @@ export function AideoView() {
                       <Check size={12} />
                     </div>
                   ) : downloadingIds.has(track.id) ? (
-                    <div className="discovery-download-btn downloading">
-                      <Loader2 size={12} className="spin" />
+                    <div 
+                      className="discovery-download-btn downloading" 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 4, 
+                        width: 'auto', 
+                        padding: '0 8px', 
+                        borderRadius: 20,
+                        background: 'rgba(16, 185, 129, 0.1)',
+                        border: '1px solid rgba(16, 185, 129, 0.2)',
+                        color: '#10b981',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        position: 'relative',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      {/* Dynamic Background Progress Fill */}
+                      {downloadProgress[track.url] && (
+                        <div 
+                          style={{ 
+                            position: 'absolute', 
+                            left: 0, 
+                            top: 0, 
+                            bottom: 0, 
+                            width: `${downloadProgress[track.url].percent}%`, 
+                            background: 'rgba(16, 185, 129, 0.18)', 
+                            zIndex: 0,
+                            transition: 'width 0.2s ease-out'
+                          }} 
+                        />
+                      )}
+                      <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Loader2 size={10} className="pulse" />
+                        {downloadProgress[track.url] ? (
+                          <span>
+                            {Math.round(downloadProgress[track.url].percent)}%
+                          </span>
+                        ) : (
+                          <span>Conn...</span>
+                        )}
+                      </span>
                     </div>
                   ) : (
                     <button 
@@ -537,7 +752,7 @@ export function AideoView() {
                 onClick={() => { playTrack(t); setView('nowplaying'); }}
               >
                 <div className="aideo-item-cover-wrap">
-                  <TrackCardThumbnail path={t.path} />
+                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
                   <div className="aideo-item-play-overlay">
                     <Play size={16} fill="white" color="white" />
                   </div>
@@ -564,13 +779,13 @@ export function AideoView() {
           <div className="aideo-empty-box">
             <Music size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
             <p style={{ marginBottom: 16 }}>Add folders in settings to scan and load tracks into your library.</p>
-            <button className="btn btn-primary" onClick={toggleSettings} style={{ padding: '8px 16px', fontSize: 12 }}>
+            <button className="btn btn-primary" onClick={() => setView('settings')} style={{ padding: '8px 16px', fontSize: 12 }}>
               Open Settings
             </button>
           </div>
         )}
       </section>
-
+ 
       {/* Section: Recently Played Horizontal Carousel */}
       <section className="aideo-section" style={{ marginBottom: 40 }}>
         <h2 className="aideo-sec-title">Recently Played</h2>
@@ -584,7 +799,7 @@ export function AideoView() {
                 onClick={() => { playTrack(t); setView('nowplaying'); }}
               >
                 <div className="carousel-cover-wrap">
-                  <TrackCardThumbnail path={t.path} />
+                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
                   <div className="carousel-play-overlay">
                     <div className="carousel-play-btn-circle">
                       <Play size={20} fill="white" color="white" />
@@ -609,6 +824,127 @@ export function AideoView() {
           </div>
         )}
       </section>
+
+      {/* Section: AI Smart Mix Builder */}
+      {showSmartMixWidget && (
+      <section className="aideo-section" style={{ marginBottom: 32 }}>
+        <h2 className="aideo-sec-title">AI Smart Mix Builder</h2>
+        <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline mixes custom-tailored to scrobble trends, listening history metrics, and mood parameters.</p>
+        
+        <div style={{
+          background: 'var(--glass)',
+          border: '1px solid var(--glass-border)',
+          borderRadius: 20,
+          padding: 24,
+          backdropFilter: 'blur(20px)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gap: 24,
+          alignItems: 'center'
+        }}>
+          {/* Mood Selector */}
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Select Mood</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {['Energetic', 'Chill', 'Focus', 'Melancholic', 'Happy'].map(m => {
+                const active = activeMood === m;
+                const emoji = m === 'Energetic' ? '⚡' : m === 'Chill' ? '☕' : m === 'Focus' ? '🎯' : m === 'Melancholic' ? '🌧️' : '☀️';
+                return (
+                  <button
+                    key={m}
+                    onClick={() => setActiveMood(m)}
+                    style={{
+                      background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+                      border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
+                      borderRadius: 10,
+                      padding: '8px 14px',
+                      color: 'white',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                  >
+                    {emoji} {m}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Seed Trend Source Selector */}
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Seed Trend Source</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {['Library History', 'Last.fm Trends', 'ListenBrainz Scrobbles'].map(s => {
+                const active = activeSource === s;
+                const icon = s.includes('Library') ? '💿' : s.includes('Last.fm') ? '📻' : '🎵';
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setActiveSource(s)}
+                    style={{
+                      background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+                      border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
+                      borderRadius: 10,
+                      padding: '8px 14px',
+                      color: 'white',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                  >
+                    {icon} {s}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Generator trigger button */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={handleGenerateSmartMix}
+              disabled={generatingMix}
+              style={{
+                padding: '14px 28px',
+                borderRadius: 12,
+                fontSize: 14,
+                fontWeight: 700,
+                background: 'linear-gradient(135deg, #a855f7, #6366f1)',
+                boxShadow: '0 0 20px rgba(168, 85, 247, 0.45)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                cursor: 'pointer',
+                border: 'none',
+                color: 'white',
+                transition: 'transform 0.2s, opacity 0.2s',
+                opacity: generatingMix ? 0.75 : 1
+              }}
+              onMouseEnter={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.03)'; }}
+              onMouseLeave={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.0)'; }}
+            >
+              {generatingMix ? (
+                <>
+                  <Loader2 className="spin" size={16} /> Compiling AI Patterns...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={16} /> Generate & Play AI Mix
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </section>
+      )}
     </div>
   );
 }

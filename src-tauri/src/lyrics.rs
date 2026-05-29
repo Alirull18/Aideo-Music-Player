@@ -5,9 +5,43 @@ pub struct LyricLine {
     pub text: String,
 }
 
-/// Finds a .lrc file next to the audio file and parses it.
+pub fn clean_url_for_lyrics(url_str: &str) -> String {
+    if let Ok(mut parsed) = url::Url::parse(url_str) {
+        let query_pairs: Vec<(String, String)> = parsed.query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .filter(|(k, _)| k != "t" && k != "s" && k != "u" && k != "api_key")
+            .collect();
+            
+        parsed.set_query(None);
+        if !query_pairs.is_empty() {
+            let mut serializer = parsed.query_pairs_mut();
+            for (k, v) in query_pairs {
+                serializer.append_pair(&k, &v);
+            }
+            drop(serializer);
+        }
+        parsed.to_string()
+    } else {
+        url_str.to_string()
+    }
+}
+
+pub fn get_lrc_path(audio_path: &str) -> std::path::PathBuf {
+    if audio_path.starts_with("http://") || audio_path.starts_with("https://") {
+        let cleaned = clean_url_for_lyrics(audio_path);
+        let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        let lyrics_dir = data_dir.join("Aideo").join("lyrics");
+        let _ = std::fs::create_dir_all(&lyrics_dir);
+        let hash = format!("{:x}", md5::compute(cleaned.as_bytes()));
+        lyrics_dir.join(format!("{}.lrc", hash))
+    } else {
+        std::path::Path::new(audio_path).with_extension("lrc")
+    }
+}
+
+/// Finds a .lrc file next to the audio file or in AppData cache and parses it.
 pub fn get_lyrics_for_track(audio_path: &str) -> Vec<LyricLine> {
-    let lrc_path = std::path::Path::new(audio_path).with_extension("lrc");
+    let lrc_path = get_lrc_path(audio_path);
     if !lrc_path.exists() {
         return Vec::new();
     }

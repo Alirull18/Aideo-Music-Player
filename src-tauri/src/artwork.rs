@@ -45,10 +45,16 @@ fn extract_art(audio_path: &str) -> Option<String> {
         }
     }
 
-    // Fallback 2: Look for specific local cover image (must match filename)
+    // Fallback 2: Look for specific local cover image or generic folder covers
     if let Some(parent) = std::path::Path::new(audio_path).parent() {
         let stem = std::path::Path::new(audio_path).file_stem().and_then(|s| s.to_str()).unwrap_or("cover");
-        let names = [format!("{}.jpg", stem), format!("{}.png", stem), format!("{}.jpeg", stem)];
+        let names = [
+            format!("{}.jpg", stem), format!("{}.png", stem), format!("{}.jpeg", stem),
+            "cover.jpg".to_string(), "cover.png".to_string(), "cover.jpeg".to_string(),
+            "folder.jpg".to_string(), "folder.png".to_string(),
+            "album.jpg".to_string(), "album.png".to_string(),
+            "front.jpg".to_string(), "front.png".to_string()
+        ];
         for name in names {
             let img_path = parent.join(&name);
             if img_path.exists() {

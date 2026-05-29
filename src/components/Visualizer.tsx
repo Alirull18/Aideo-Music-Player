@@ -2,9 +2,13 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store';
 
-export function Visualizer() {
+interface VisualizerProps {
+  mode?: 'baseline' | 'circle' | 'wave';
+}
+
+export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { accentColor, playback } = useStore();
+  const { accentColor, playback, lowSpecMode } = useStore();
   const spectrumRef = useRef<number[]>(new Array(64).fill(0));
 
   useEffect(() => {
@@ -25,9 +29,35 @@ export function Visualizer() {
 
     let animationId: number;
     const smoothedBands = new Array(64).fill(0);
+    
+    let width = canvas.clientWidth || 600;
+    let height = canvas.clientHeight || 80;
+
+    const resizeCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      width = rect.width || 600;
+      height = rect.height || 80;
+      
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      
+      // Reset context transform then scale to DPR
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    };
+
+    resizeCanvas();
+
+    const resizeObserver = new ResizeObserver(() => {
+      resizeCanvas();
+    });
+    
+    if (canvas.parentElement) {
+      resizeObserver.observe(canvas.parentElement);
+    }
 
     const render = () => {
-      const { width, height } = canvas;
       ctx.clearRect(0, 0, width, height);
 
       if (playback.status !== 'Playing') {
@@ -36,49 +66,127 @@ export function Visualizer() {
       }
 
       const bands = spectrumRef.current;
-      const barWidth = (width / bands.length) * 0.8;
-      const gap = (width / bands.length) * 0.2;
 
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = accentColor;
-      ctx.fillStyle = accentColor;
+      if (mode === 'baseline') {
+        const barWidth = (width / bands.length) * 0.8;
+        const gap = (width / bands.length) * 0.2;
 
-      for (let i = 0; i < bands.length; i++) {
-        // Smoothing
-        smoothedBands[i] += (bands[i] - smoothedBands[i]) * 0.2;
-        
-        const val = smoothedBands[i] * height * 0.8;
-        const x = i * (barWidth + gap);
-        const y = height - val;
+        if (!lowSpecMode) {
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = accentColor;
+        }
+        ctx.fillStyle = accentColor;
 
-        // Draw bar with rounded top
+        for (let i = 0; i < bands.length; i++) {
+          smoothedBands[i] += (bands[i] - smoothedBands[i]) * 0.2;
+          const val = smoothedBands[i] * height * 0.8;
+          const x = i * (barWidth + gap);
+          const y = height - val;
+
+          ctx.beginPath();
+          ctx.roundRect(x, y, barWidth, val, [4, 4, 0, 0]);
+          ctx.fill();
+        }
+
+        // Draw subtle glowing baseline to anchor the visualizer
         ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, val, [4, 4, 0, 0]);
-        ctx.fill();
-      }
+        ctx.moveTo(0, height - 1);
+        ctx.lineTo(width, height - 1);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = accentColor;
+        ctx.globalAlpha = 0.4;
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+      } else if (mode === 'circle') {
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const baseRadius = Math.min(width, height) * 0.32;
+        const numBars = bands.length;
 
-      // Draw subtle glowing baseline to anchor the visualizer
-      ctx.beginPath();
-      ctx.moveTo(0, height - 1);
-      ctx.lineTo(width, height - 1);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = accentColor;
-      ctx.globalAlpha = 0.4;
-      ctx.stroke();
-      ctx.globalAlpha = 1.0;
+        if (!lowSpecMode) {
+          ctx.shadowBlur = 12;
+          ctx.shadowColor = accentColor;
+        }
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+
+        for (let i = 0; i < numBars; i++) {
+          smoothedBands[i] += (bands[i] - smoothedBands[i]) * 0.2;
+          const val = smoothedBands[i] * (Math.min(width, height) * 0.28);
+
+          const angle = (i / numBars) * Math.PI * 2;
+          const x1 = centerX + Math.cos(angle) * baseRadius;
+          const y1 = centerY + Math.sin(angle) * baseRadius;
+          const x2 = centerX + Math.cos(angle) * (baseRadius + val);
+          const y2 = centerY + Math.sin(angle) * (baseRadius + val);
+
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, baseRadius, 0, Math.PI * 2);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = accentColor;
+        ctx.globalAlpha = 0.3;
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+      } else if (mode === 'wave') {
+        ctx.beginPath();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = accentColor;
+
+        if (!lowSpecMode) {
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = accentColor;
+        }
+
+        const len = bands.length;
+        const timeFactor = Date.now() / 180;
+
+        for (let x = 0; x < width; x += 2) {
+          const segment = Math.floor((x / width) * len);
+          smoothedBands[segment] += ((bands[segment] || 0) - (smoothedBands[segment] || 0)) * 0.2;
+          const val = smoothedBands[segment] || 0;
+
+          const sineFactor = Math.sin((x / width) * Math.PI * 8 + timeFactor);
+          const waveHeight = val * height * 0.42 * sineFactor;
+          const y = height / 2 + waveHeight;
+
+          if (x === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(0, height / 2);
+        ctx.lineTo(width, height / 2);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = accentColor;
+        ctx.globalAlpha = 0.25;
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+      }
 
       animationId = requestAnimationFrame(render);
     };
 
     render();
-    return () => cancelAnimationFrame(animationId);
-  }, [accentColor, playback.status]);
+    return () => {
+      cancelAnimationFrame(animationId);
+      resizeObserver.disconnect();
+    };
+  }, [accentColor, playback.status, lowSpecMode, mode]);
 
   return (
     <canvas 
       ref={canvasRef} 
-      width={600} 
-      height={80} 
       style={{ width: '100%', height: '100%', opacity: 0.8, display: 'block' }} 
     />
   );

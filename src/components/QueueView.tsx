@@ -2,11 +2,7 @@ import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Trash2, GripVertical } from 'lucide-react';
 import { useState } from 'react';
-
-function fmt(s: number | null) {
-  if (!s || isNaN(s) || s < 0) return '0:00';
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-}
+import { fmt } from '../utils';
 
 export function QueueView() {
   const { queue, showQueue, toggleQueue, playFromQueue, removeFromQueue, clearQueue, reorderQueue } = useStore();

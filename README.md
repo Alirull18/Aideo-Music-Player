@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.6.0
+# 💎 Aideo Music Player v0.7.0
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -7,6 +7,57 @@
 [![Rust](https://img.shields.io/badge/Rust-Backend-000000?logo=rust)](https://www.rust-lang.org)
 
 Aideo is a high-performance desktop music player engineered with **Tauri**, **Rust**, and **React**. Designed specifically for audiophiles, it prioritizes absolute signal purity and bit-perfect hardware direct transport while providing a gorgeous, glassmorphic adaptive interface.
+
+---
+
+## 📢 What's New in v0.7.0 (The Artwork Manager & Diagnostics Update)
+
+### 🎨 Advanced Cover Art Manager & Upload Center
+- **iTunes High-Res Search Integration**: Keyless, high-fidelity online cover lookup resolving global and K-Pop artists (e.g. *IVE*, *ive iam*) instantly with 600x600px high-definition graphics.
+- **Track-Specific Naming**: Saves covers as `{track_filename}.jpg/png` alongside songs instead of a folder-wide generic `cover.jpg` file, fully preventing artwork leakages in flat folders.
+- **Generic Album Fallbacks**: Intelligently auto-resolves generic directory cover images (`cover.jpg`, `folder.png`, etc.) if no embedded tag images are present.
+- **Drag-and-Drop / Browse Uploads**: Supports local drag-and-drop drops of custom cover sleeve images straight onto the modal view.
+
+### 🔔 Custom Notifications & Diagnostic Settings
+- **Notifications Muting Center**: Added toggles in settings to completely enable or disable all real-time overlay toast alerts across the player.
+- **Developer Diagnostics Mode**: Prepend internal backend function contexts (e.g., `Audio Engine (player.rs)`, `MagicMatch Metadata (scanner.rs)`) and raw exception trace codes to error logs in an elegant monospace font container.
+- **Consumer Friendly Formatting**: Dynamically translates highly technical system and driver errors into readable, reassuring, and helpful consumer descriptions.### 📺 Immersive Fullscreen HUD & Ambient Backdrop
+- **Cinematic Canvas**: A stunning, borderless fullscreen dashboard displaying high-fidelity artwork overlays, dynamic center-aligned lyrics, and real-time playback control suites.
+- **Ambient Visualizer Aura**: Integrates the Interactive Liquid Art visualizer into a full-bleed background, reacting dynamically with audio frequencies and dominant cover hues.
+- **Keyboard Shortcuts**: Fully responsive media controls optimized for large monitors and living room playback.
+
+### 🧠 AI Smart Mix Playlist Builder
+- **Mood-Based Curation**: Dynamically generates taste-weighted custom playlists based on user moods, current trends, or scrobble frequencies.
+- **Autoplay Taste Interleaving**: Real-time collaborative taste-weighting and ranking algorithms that automatically keep your queue alive with fresh recommendations.
+
+### ❤️ Favorite & Loved Songs Engine
+- **1-Click Track Favoriting**: Native favoriting system mapped to a database flag (`loved`) inside the SQLite schema.
+- **Dynamic Favorite Songs Playlist**: Automatically generates and updates a dedicated, sidebar-accessible *"Favorite Songs"* playlist on-the-fly.
+- **Last.fm Love Synchronization**: Integrates immediately with external scrobbling networks, pushing "Love" telemetry updates to connected profiles.
+
+### 🧙 Onboarding & Setup Wizard
+- **First-Boot Setup**: A premium multi-step onboarding walkthrough welcoming new users on startup.
+- **Acoustic Profiling**: Guides users to automatically pre-tune bit-perfect audio configurations, scan initial music directories, and select their optimal app mode (Local File Only vs. Hybrid Lossless Cloud).
+
+### 🔌 Dynamic Runtime Plugins Manager
+- **Visual Dependency Downloader**: A robust visual installer inside Settings to manage, inspect, install, or uninstall optional external engines (`yt-dlp` and `ffmpeg`).
+- **On-The-Fly Backend Updates**: Installs direct stream decoders and downloader proxies dynamically at runtime, avoiding manual developer setup steps.
+
+### 🔒 Secure Credentials Obfuscation Vault
+- **Zero-Plaintext Storage**: Eliminated insecure cleartext storage of Subsonic and music server passwords in `localStorage`.
+- **Symmetric XOR-128 Encryption**: Engineered a backend symmetric XOR-128 encryption vault in `cloud.rs` that writes encrypted bytes directly to local native `AppData` (`subsonic_pass.enc`).
+- **In-Memory Store Streams**: Decrypted credentials are bound strictly to active Zustand state slices in-memory at boot, preventing persistent plain-text disk footprints.
+
+### 🗃️ SQLite Database Hardening & Migrations
+- **Hybrid Streaming Playlists**: Dropped database path foreign-key constraints on custom playlists, letting you mix online web streams, Tidal Lossless tracks, and offline local files in the same playlist seamlessly.
+- **Non-Destructive DB Migration**: Written an auto-running SQLite schema migration step within `init_db()` in `db.rs` that safely modifies table structures at startup without risking any user library data.
+
+### 🛡️ Platform Logic & Security Hardening
+- **HTTPS TLS Certificate Verification**: Hardened remote communication by restoring strict TLS certificate verification on all online artwork queries.
+- **Dynamic Last.fm & Tidal Tokens**: Removed hardcoded fallback keys, resolving client credentials dynamically from runtime environments via secure `.env` parsers.
+- **Extension-Aware Downloads**: Refactored the local downloader to parse incoming yt-dlp media containers dynamically, preserving correct file extensions (e.g. `webm`, `opus`, `aac`) instead of hardcoding fallback rules.
+- **Discord Loop Cooldown**: Restrained the background Discord rich presence thread reconnection attempts to a maximum of 30 cycles (5 minutes) to completely avoid taskbar thread bloat.
+- **MusicBrainz Compliant Headers**: Dynamically resolve the client User-Agent version using modern crate compilers (`env!("CARGO_PKG_VERSION")`) to meet Web API specs.
 
 ---
 
@@ -55,8 +106,8 @@ Stream high-fidelity online tracks directly into your audio pipeline with advanc
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.6.0 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.6.0_x64_en-US.msi`).
+1. **Download**: Get the latest v0.7.0 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.7.0_x64_en-US.msi`).
 3. **Launch**: Add your library directory and experience pristine, bit-perfect sound!
 
 ---
@@ -83,13 +134,44 @@ Stream high-fidelity online tracks directly into your audio pipeline with advanc
    npm run tauri dev
    ```
 
+## 🛠️ System Architecture & Deep Tech Stack
+
+Aideo is built on a highly optimized hybrid architecture split between a secure, fluid web UI and a high-priority native audio thread:
+
+### 🎨 Frontend Layer (Aesthetics & Interaction)
+- **[React 19](https://react.dev)**: Next-generation reactive view orchestrations and rendering.
+- **[TypeScript](https://www.typescriptlang.org)**: Complete compile-time type-safety across UI modules and IPC channels.
+- **[Framer Motion](https://www.framer.com/motion/)**: Liquid visualizer backdrops, custom control center slide transitions, and physics-based animations.
+- **[Zustand](https://github.com/pmndrs/zustand)**: Clean, lightweight in-memory global state management and slices logic.
+- **[Lucide React](https://lucide.dev)**: Elegant, modern vector icon library.
+- **[Kpop & Wanakana](https://github.com/Wanakana/wanakana)**: Full-featured romaji/katakana/hangul lyric transliteration.
+
+### 🦀 Backend Core (Rust Engine)
+- **[Tauri 2.0](https://tauri.app)**: Highly secure native IPC bridge and webview container.
+- **[Symphonia](https://github.com/pdeljanov/Symphonia)**: 100% pure Rust audio decoding, tag indexing, and file-parsing framework (FLAC, MP3, AAC, DFF, DSF).
+- **[CPAL (Cross-Platform Audio Library)](https://github.com/RustAudio/cpal)**: Low-level audio hardware interface executing ASIO and WASAPI direct buffers.
+- **[Rubato](https://github.com/HEnquist/rubato)**: Asynchronous, highly precise multi-channel sample rate upsampler.
+- **[Biquad](https://crates.io/crates/biquad)**: Mathematical biquad filter calculations powering the Parametric EQ and subsonic high-pass.
+- **[Rusqlite](https://github.com/rusqlite/rusqlite)**: High-speed, secure local database transactions and migrations framework.
+- **[Reqwest](https://github.com/seanmonstar/reqwest)**: High-performance asynchronous network queries.
+
 ---
 
-## 🛠 Tech Stack
-- **Frontend**: React 19, TypeScript, Framer Motion, Zustand
-- **Backend**: Rust (Tauri 2.0 Framework)
-- **Audio Engine**: `cpal` (I/O), `symphonia` (Codecs), `rubato` (Resampling)
-- **Database**: SQLite (via `rusqlite`)
+## 🎁 Acknowledgements & Special Thanks
+
+Aideo would not be possible without the incredible contributions of the open-source audiophile, software development, and Web communities. We would like to extend our deepest gratitude to the creators and maintainers of:
+
+| Library / Tool / Service | Category | Purpose in Aideo | Special Thanks For |
+|:---|:---|:---|:---|
+| **[AutoEq](https://github.com/jaakkopasanen/AutoEq)** | Database | Corrective headphone curves | Maintaining 4,000+ headphone calibration presets |
+| **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** | Utility | YouTube Music streaming | Dynamic extraction bypass and robust proxy connections |
+| **[ffmpeg](https://ffmpeg.org)** | Multimedia | Audio transcoding | Asynchronous high-fidelity format streaming |
+| **[MusicBrainz](https://musicbrainz.org)** | Service | Metadata tagging | Unifying global open music recording lookups |
+| **[Last.fm API](https://www.lastfm.com)** | Service | Social Scrobbler | Scrobble logging and taste similarity matrices |
+| **[ListenBrainz API](https://listenbrainz.org)** | Service | Social Analytics | Listening feed aggregations and recommendations |
+| **[Tidal API](https://tidal.com)** | Service | Lossless Streaming | OAuth2 pairing and direct FLAC streaming access |
+| **[Google Translate](https://translate.google.com)** | Service | Translation | Real-time lyric translation bridges |
+| **[LRCLIB](https://lrclib.net)** | Service | Lyrics Database | Free, open, and synced LRC lookup APIs |
 
 ---
 

@@ -2,17 +2,102 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
+import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, onlineTrackCache } from '../utils';
+
+let isTransitioning = false;
+
+const fetchTrackMetadataAndLyrics = async (
+  track: Track,
+  set: any,
+  get: any,
+  isOnline: boolean
+) => {
+  const path = track.path;
+  if (track.cover_url) {
+    if (track.cover_url.startsWith('http://') || track.cover_url.startsWith('https://')) {
+      invoke('get_cover_art', { path: track.cover_url }).then(async (art: any) => {
+        if (!pathsEqual(get().playback.current_track, path)) return;
+        if (art && typeof art === 'string') {
+          set({ coverArt: art });
+          try {
+            const color = await extractDominantColor(art);
+            set({ accentColor: color });
+          } catch (_) {}
+          invoke('update_media_metadata', {
+            title: track.title || path.split(/[\\/]/).pop(),
+            artist: track.artist || 'Unknown Artist',
+            coverUrl: art,
+            duration: track.duration || 0,
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    } else {
+      extractDominantColor(track.cover_url).then((color) => {
+        set({ accentColor: color });
+      }).catch(() => {});
+    }
+  }
+
+  invoke('update_media_metadata', {
+    title: track.title || path.split(/[\\/]/).pop(),
+    artist: track.artist || 'Unknown Artist',
+    coverUrl: track.cover_url || null,
+    duration: track.duration || 0,
+  }).catch(() => { });
+
+  if (!isOnline && !track.cover_url) {
+    invoke('get_cover_art', { path }).then(async (art: any) => {
+      if (!pathsEqual(get().playback.current_track, path)) return;
+      if (art && typeof art === 'string') {
+        set({ coverArt: art });
+        try {
+          const color = await extractDominantColor(art);
+          set({ accentColor: color });
+        } catch (_) { }
+        invoke('update_media_metadata', {
+          title: track.title || path.split(/[\\/]/).pop(),
+          artist: track.artist || 'Unknown Artist',
+          coverUrl: art,
+          duration: track.duration || 0,
+        }).catch(() => { });
+      } else {
+        set({ coverArt: null, accentColor: '#8b5cf6' });
+      }
+    }).catch(() => {
+      if (pathsEqual(get().playback.current_track, path)) {
+        set({ coverArt: null, accentColor: '#8b5cf6' });
+      }
+    });
+  }
+
+  invoke('get_lyrics', { path }).then((lrc: any) => {
+    if (!pathsEqual(get().playback.current_track, path)) return;
+    if (Array.isArray(lrc) && lrc.length > 0) {
+      set({ lyrics: lrc, lyricStatus: 'found' });
+    } else {
+      get().autoFetchLyricsOnline(track);
+    }
+  }).catch(() => {
+    if (pathsEqual(get().playback.current_track, path)) get().autoFetchLyricsOnline(track);
+  });
+};
 
 export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   tracks: [],
   currentTrackIndex: -1,
+  currentTrack: null,
   shuffle: false,
+  repeat: (localStorage.getItem('aideo_repeat') as 'none' | 'all' | 'one') || 'none',
+  currentHistoryId: null,
+  autoplayEnabled: localStorage.getItem('aideo_autoplay') !== 'false',
+  autoplayDiscoveryLevel: (localStorage.getItem('aideo_autoplay_discovery_level') as 'familiarity' | 'balanced' | 'discovery') || 'balanced',
   playHistory: JSON.parse(localStorage.getItem('aideo_play_history') || '[]'),
   playCounts: JSON.parse(localStorage.getItem('aideo_play_counts') || '{}'),
   scanDirs: JSON.parse(localStorage.getItem('aideo_scan_dirs') || '[]'),
   scanStatus: '',
   playlists: [],
   currentPlaylist: null,
+  cachedCloudHashes: [],
 
   addScanDir: (dir: string) => {
     const newDirs = Array.from(new Set([...get().scanDirs, dir]));
@@ -41,13 +126,66 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     try {
       const tracks: Track[] = await invoke('get_library');
       set({ tracks });
+
+      // Synchronize currently playing track tags instantly
+      const current = get().currentTrack;
+      if (current) {
+        const updatedTrack = tracks.find(t => t.path === current.path);
+        if (updatedTrack) {
+          set({ currentTrack: updatedTrack });
+        }
+      }
+
+      // Synchronize queued tracks tags instantly
+      const currentQueue = get().queue;
+      if (currentQueue.length > 0) {
+        const updatedQueue = currentQueue.map(q => {
+          const matched = tracks.find(t => t.path === q.path);
+          return matched ? { ...q, title: matched.title, artist: matched.artist, album: matched.album } : q;
+        });
+        set({ queue: updatedQueue });
+      }
     } catch (e) { console.error('loadLibrary:', e); }
   },
 
-  playTrack: async (track: Track, isHistory?: boolean) => {
+  recordPlaybackTransition: async (newTrack: Track | null) => {
+    const prevHistoryId = get().currentHistoryId;
+    const prevTrack = get().currentTrack;
+    const currentPos = get().playback.position_secs;
+
+    if (prevHistoryId !== null) {
+      const duration = prevTrack?.duration || 0;
+      const skipped = duration > 0 ? currentPos < duration - 5.0 : false;
+      invoke('log_playback_end', {
+        historyId: prevHistoryId,
+        durationPlayed: currentPos,
+        skipped,
+      }).catch((e) => console.error("Failed to log playback end:", e));
+      set({ currentHistoryId: null });
+    }
+
+    if (newTrack) {
+      try {
+        const id = await invoke<number>('log_playback_start', {
+          path: newTrack.path,
+          title: newTrack.title || null,
+          artist: newTrack.artist || null,
+          album: null,
+          duration: newTrack.duration || null,
+          format: newTrack.format || null,
+        });
+        set({ currentHistoryId: id });
+      } catch (e) {
+        console.error("Failed to log playback start:", e);
+      }
+    }
+  },
+
+  playTrack: async (track: Track, isHistory?: boolean, forceResetAutoplay = true) => {
     if (!track) return;
     try {
-      const index = get().tracks.findIndex(t => t.path === track.path);
+      await get().recordPlaybackTransition(track);
+      const index = get().tracks.findIndex(t => pathsEqual(t.path, track.path));
       const prevTrack = get().playback.current_track;
       const history = prevTrack && !isHistory ? [...get().playHistory, prevTrack].slice(-50) : get().playHistory;
       localStorage.setItem('aideo_play_history', JSON.stringify(history));
@@ -56,61 +194,49 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       counts[track.path] = (counts[track.path] || 0) + 1;
       localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
 
+      const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://');
+      if (isOnline) {
+        onlineTrackCache.set(track.path, track);
+      }
+
       set({
         currentTrackIndex: index,
+        currentTrack: track,
         playHistory: history,
         playCounts: counts,
         lyricOffset: track.lyric_offset || 0,
         lyrics: [],
         lyricStatus: 'loading',
-        coverArt: null,
+        coverArt: track.cover_url || null,
         accentColor: '#8b5cf6',
         scrobbledCurrent: false,
         playback: { ...get().playback, current_track: track.path, status: 'Playing', position_secs: 0, last_skip_time: Date.now() },
       });
 
-      await invoke('play_track', { path: track.path });
-
-      invoke('update_media_metadata', {
-        title: track.title || track.path.split(/[\\/]/).pop(),
-        artist: track.artist || 'Unknown Artist',
-        coverUrl: null,
-        duration: track.duration || 0,
-      }).catch(() => { });
-
-      invoke('get_cover_art', { path: track.path }).then(async (art: any) => {
-        if (get().playback.current_track !== track.path) return;
-        if (art && typeof art === 'string') {
-          set({ coverArt: art });
-          try {
-            const color = await extractDominantColor(art);
-            set({ accentColor: color });
-          } catch (_) { }
-          invoke('update_media_metadata', {
-            title: track.title || track.path.split(/[\\/]/).pop(),
-            artist: track.artist || 'Unknown Artist',
-            coverUrl: art,
-            duration: track.duration || 0,
-          }).catch(() => { });
-        } else {
-          set({ coverArt: null, accentColor: '#8b5cf6' });
+      let finalPath = track.path;
+      if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+        try {
+          finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+          resolvedPathMap.set(finalPath, track.path);
+        } catch (e) {
+          console.error('Failed to resolve Tidal stream in playTrack:', e);
         }
-      }).catch(() => {
-        if (get().playback.current_track === track.path) {
-          set({ coverArt: null, accentColor: '#8b5cf6' });
-        }
-      });
+      }
 
-      invoke('get_lyrics', { path: track.path }).then((lrc: any) => {
-        if (get().playback.current_track !== track.path) return;
-        if (Array.isArray(lrc) && lrc.length > 0) {
-          set({ lyrics: lrc, lyricStatus: 'found' });
-        } else {
-          set({ lyrics: [], lyricStatus: 'not_found' });
+      await invoke('play_track', { path: finalPath });
+      get().triggerAutoplayRadio(track, forceResetAutoplay);
+
+      // 🚀 Background Pre-resolve the very next track in the queue for seamless transition
+      setTimeout(() => {
+        const nextTrack = get().queue[0];
+        if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://'))) {
+          if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
+            invoke('pre_resolve_youtube_url', { url: nextTrack.path }).catch(() => {});
+          }
         }
-      }).catch(() => {
-        if (get().playback.current_track === track.path) set({ lyricStatus: 'not_found' });
-      });
+      }, 500);
+
+      await fetchTrackMetadataAndLyrics(track, set, get, isOnline || track.format === 'Tidal FLAC');
 
     } catch (e) {
       console.error('playTrack error:', e);
@@ -119,117 +245,300 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const state = get();
     // Only auto-queue from library if the user's manual queue is empty
     if (state.queue.length === 0 && state.tracks.length > 0 && state.currentTrackIndex >= 0) {
-      let nextIndex = state.shuffle
-        ? Math.floor(Math.random() * state.tracks.length)
-        : (state.currentTrackIndex + 1) % state.tracks.length;
-      try { await invoke('add_to_queue', { path: state.tracks[nextIndex].path }); } catch (e) { }
+      if (state.repeat === 'one') {
+        // Repeat One: re-queue the same track so the backend loops it
+        try { await invoke('add_to_queue', { path: track.path }); } catch (e) { }
+      } else if (state.repeat === 'none') {
+        // Repeat None: don't queue if we're at the last track
+        const nextIndex = state.shuffle
+          ? Math.floor(Math.random() * state.tracks.length)
+          : state.currentTrackIndex + 1;
+        if (nextIndex < state.tracks.length) {
+          try { await invoke('add_to_queue', { path: state.tracks[nextIndex].path }); } catch (e) { }
+        }
+      } else {
+        // Repeat All: wrap around
+        const nextIndex = state.shuffle
+          ? Math.floor(Math.random() * state.tracks.length)
+          : (state.currentTrackIndex + 1) % state.tracks.length;
+        try { await invoke('add_to_queue', { path: state.tracks[nextIndex].path }); } catch (e) { }
+      }
     }
     get().updateDiscordPresence();
   },
 
   handleTrackTransition: async (path: string) => {
-    const state = get();
-    const index = state.tracks.findIndex(t => t.path === path);
-    const track = index !== -1 ? state.tracks[index] : null;
+    if (isTransitioning) return;
+    isTransitioning = true;
+    try {
+      const state = get();
+      const index = state.tracks.findIndex(t => pathsEqual(t.path, path));
+      let track = index !== -1 ? state.tracks[index] : null;
 
-    const prevTrackStr = state.playback.current_track;
-    const history = prevTrackStr ? [...state.playHistory, prevTrackStr].slice(-50) : state.playHistory;
-    localStorage.setItem('aideo_play_history', JSON.stringify(history));
-
-    const counts = { ...state.playCounts };
-    counts[path] = (counts[path] || 0) + 1;
-    localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
-
-    set({
-      currentTrackIndex: index,
-      playHistory: history,
-      playCounts: counts,
-      lyricOffset: track?.lyric_offset || 0,
-      lyrics: [],
-      lyricStatus: 'loading',
-      coverArt: null,
-      accentColor: '#8b5cf6',
-      scrobbledCurrent: false,
-      playback: { ...state.playback, current_track: path, status: 'Playing', position_secs: 0, last_skip_time: Date.now() },
-    });
-    get().updateDiscordPresence();
-
-    invoke('update_media_metadata', {
-      title: track?.title || path.split(/[\\/]/).pop(),
-      artist: track?.artist || 'Unknown Artist',
-      coverUrl: null,
-      duration: track?.duration || 0,
-    }).catch(() => { });
-
-    invoke('get_cover_art', { path }).then(async (art: any) => {
-      if (get().playback.current_track !== path) return;
-      if (art && typeof art === 'string') {
-        set({ coverArt: art });
-        try {
-          const color = await extractDominantColor(art);
-          set({ accentColor: color });
-        } catch (_) { }
-        invoke('update_media_metadata', {
-          title: track?.title || path.split(/[\\/]/).pop(),
-          artist: track?.artist || 'Unknown Artist',
-          coverUrl: art,
-          duration: track?.duration || 0,
-        }).catch(() => { });
-      } else {
-        set({ coverArt: null, accentColor: '#8b5cf6' });
+      // Check active queue for metadata if it is an online track
+      if (!track) {
+        track = state.queue.find(t => pathsEqual(t.path, path)) || null;
       }
-    }).catch(() => {
-      if (get().playback.current_track === path) {
-        set({ coverArt: null, accentColor: '#8b5cf6' });
-      }
-    });
 
-    invoke('get_lyrics', { path }).then((lrc: any) => {
-      if (get().playback.current_track !== path) return;
-      if (Array.isArray(lrc) && lrc.length > 0) {
-        set({ lyrics: lrc, lyricStatus: 'found' });
-      } else {
-        set({ lyrics: [], lyricStatus: 'not_found' });
+      // Check currentTrack first if it matches
+      if (!track && state.currentTrack && pathsEqual(state.currentTrack.path, path)) {
+        track = state.currentTrack;
       }
-    }).catch(() => {
-      if (get().playback.current_track === path) set({ lyricStatus: 'not_found' });
-    });
 
-    const newState = get();
-    await newState.fetchQueue();
-    if (newState.queue.length === 0) {
-      let nextIndex = newState.shuffle
-        ? Math.floor(Math.random() * newState.tracks.length)
-        : (newState.currentTrackIndex + 1) % newState.tracks.length;
-      try { await invoke('add_to_queue', { path: newState.tracks[nextIndex].path }); } catch (e) { }
+      // Construct high-fidelity virtual Track object as fallback to ensure seek bar work
+      if (!track) {
+        const isOnline = path.startsWith('http://') || path.startsWith('https://');
+        const meta = isOnline ? parseStreamMetadata(path) : { title: baseName(path), artist: '—', album: '' };
+        track = {
+          id: -9999,
+          path,
+          title: meta.title,
+          artist: meta.artist,
+          duration: null,
+          format: isOnline ? 'URL' : 'MP3/FLAC',
+          lyric_offset: 0
+        };
+      }
+
+      const prevTrackStr = state.playback.current_track;
+      const history = prevTrackStr ? [...state.playHistory, prevTrackStr].slice(-50) : state.playHistory;
+      localStorage.setItem('aideo_play_history', JSON.stringify(history));
+
+      const counts = { ...state.playCounts };
+      counts[path] = (counts[path] || 0) + 1;
+      localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
+
+      const isOnline = path.startsWith('http://') || path.startsWith('https://');
+
+      set({
+        currentTrackIndex: index,
+        currentTrack: track,
+        playHistory: history,
+        playCounts: counts,
+        lyricOffset: track?.lyric_offset || 0,
+        lyrics: [],
+        lyricStatus: 'loading',
+        coverArt: track?.cover_url || null,
+        accentColor: '#8b5cf6',
+        scrobbledCurrent: false,
+        playback: { ...state.playback, current_track: path, status: 'Playing', position_secs: 0, last_skip_time: Date.now() },
+      });
+      get().updateDiscordPresence();
+
+      if (track) {
+        await fetchTrackMetadataAndLyrics(track, set, get, isOnline);
+        get().triggerAutoplayRadio(track, false);
+
+        // 🚀 Background Pre-resolve the very next track in the queue for seamless transition
+        setTimeout(() => {
+          const nextTrack = get().queue[0];
+          if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://'))) {
+            if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
+              invoke('pre_resolve_youtube_url', { url: nextTrack.path }).catch(() => {});
+            }
+          }
+        }, 500);
+      }
+
+      const newState = get();
+      await newState.fetchQueue();
+      if (newState.queue.length === 0 && newState.tracks.length > 0) {
+        if (newState.repeat === 'one' && track) {
+          // Repeat One: re-queue the same track
+          try { await invoke('add_to_queue', { path: track.path }); } catch (e) { }
+        } else if (newState.repeat === 'none') {
+          // Repeat None: don't queue past the last track
+          const nextIndex = newState.shuffle
+            ? Math.floor(Math.random() * newState.tracks.length)
+            : newState.currentTrackIndex + 1;
+          if (nextIndex < newState.tracks.length) {
+            try { await invoke('add_to_queue', { path: newState.tracks[nextIndex].path }); } catch (e) { }
+          }
+        } else {
+          // Repeat All: wrap around
+          const nextIndex = newState.shuffle
+            ? Math.floor(Math.random() * newState.tracks.length)
+            : (newState.currentTrackIndex + 1) % newState.tracks.length;
+          try { await invoke('add_to_queue', { path: newState.tracks[nextIndex].path }); } catch (e) { }
+        }
+      }
+    } finally {
+      isTransitioning = false;
     }
   },
 
   playNext: async () => {
-    const { tracks, currentTrackIndex, shuffle, queue, playFromQueue, playTrack } = get();
-    
+    const { tracks, currentTrackIndex, shuffle, repeat, queue, playFromQueue, playTrack, currentTrack } = get();
+
+    // Repeat One: replay current track immediately
+    if (repeat === 'one' && currentTrack) {
+      await playTrack(currentTrack, true);
+      return;
+    }
+
     // Manual queue priority
     if (queue.length > 0) {
        await playFromQueue(0);
        return;
     }
 
+    // Prevent cloud/online streams from falling back to local files, and trigger Autoplay Loop if enabled
+    const isCurrentTrackOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC';
+    if (isCurrentTrackOnline) {
+      if (get().autoplayEnabled && currentTrack) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `✨ Autoplay: Customizing your infinite radio...`, type: 'info' } 
+        }));
+
+        try {
+          let recommendedTracks: Track[] = [];
+          const isTidal = currentTrack.format === 'Tidal FLAC' || currentTrack.path.includes('api.tidal.com');
+
+          if (isTidal) {
+            let trackId = currentTrack.path;
+            if (trackId.startsWith('http')) {
+              const parts = trackId.split('/');
+              trackId = parts[parts.length - 1] || trackId;
+            }
+            const tracks = await invoke<any[]>('get_tidal_autoplay_recommendations', {
+              artist: currentTrack.artist,
+              title: currentTrack.title
+            });
+            recommendedTracks = tracks.map(t => ({
+              id: -20000 - Number(t.id),
+              path: t.id,
+              title: t.title,
+              artist: t.artist,
+              duration: t.duration,
+              format: 'Tidal FLAC',
+              lyric_offset: 0,
+              cover_url: t.cover_url,
+              is_autoplay: true
+            }));
+          } else {
+            let videoId = '';
+            const match = currentTrack.path.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/);
+            if (match && match[1]) {
+              videoId = match[1];
+            } else if (currentTrack.path.startsWith('http')) {
+              const urlParts = currentTrack.path.split(/[=]/);
+              if (urlParts.length > 1) videoId = urlParts.pop() || '';
+            }
+
+            const tracks = await invoke<any[]>('get_youtube_autoplay_recommendations', {
+              videoId,
+              artist: currentTrack.artist,
+              title: currentTrack.title
+            });
+
+            const parseDuration = (raw: string): number => {
+              if (!raw) return 0;
+              const parts = raw.split(':').map(Number);
+              if (parts.some(isNaN)) return 0;
+              if (parts.length === 3) {
+                return parts[0] * 3600 + parts[1] * 60 + parts[2];
+              } else if (parts.length === 2) {
+                return parts[0] * 60 + parts[1];
+              }
+              return parts[0] || 0;
+            };
+
+            recommendedTracks = tracks.map(t => ({
+              id: -30000,
+              path: t.url,
+              title: t.title,
+              artist: t.artist,
+              duration: parseDuration(t.duration_raw),
+              format: 'YouTube Direct',
+              lyric_offset: 0,
+              cover_url: t.cover_url,
+              is_autoplay: true
+            }));
+          }
+
+          // Filter out previously played tracks
+          const playedSet = new Set(get().playHistory);
+          let finalRecommended = recommendedTracks.filter(t => !playedSet.has(t.path));
+          if (finalRecommended.length === 0) {
+            finalRecommended = recommendedTracks;
+          }
+
+          if (finalRecommended.length > 0) {
+            // Append top 5 recommended tracks to the queue
+            for (const rt of finalRecommended.slice(0, 5)) {
+              await get().addToQueue(rt);
+            }
+            // Play the first one immediately!
+            await get().playFromQueue(0);
+            return;
+          }
+        } catch (err) {
+          console.error('Autoplay recommendation loop failed:', err);
+        }
+      }
+
+      const allowAutoplay = localStorage.getItem('aideo_autoplay_local_for_cloud') === 'true';
+      if (!allowAutoplay) {
+        const { stopTrack } = get();
+        await stopTrack();
+        return;
+      }
+    }
+
     if (tracks.length === 0) return;
-    let nextIndex = shuffle
-      ? Math.floor(Math.random() * tracks.length)
-      : (currentTrackIndex + 1) % tracks.length;
-    await playTrack(tracks[nextIndex]);
+
+    if (shuffle) {
+      const nextIndex = Math.floor(Math.random() * tracks.length);
+      await playTrack(tracks[nextIndex]);
+      return;
+    }
+
+    const nextIndex = currentTrackIndex + 1;
+
+    // Repeat None: stop at end of library
+    if (repeat === 'none' && nextIndex >= tracks.length) {
+      return;
+    }
+
+    // Repeat All: wrap around
+    await playTrack(tracks[nextIndex % tracks.length]);
   },
 
   playPrev: async () => {
-    const { tracks, currentTrackIndex, playHistory } = get();
-    if (tracks.length === 0) return;
+    const state = get();
+    const { tracks, currentTrackIndex, playHistory, queue, currentTrack } = state;
     
     // If we have history, pop the last track and play it
     if (playHistory.length > 0) {
       const newHistory = [...playHistory];
       const lastPath = newHistory.pop()!;
-      const t = tracks.find(x => x.path === lastPath);
+
+      // Search local library first
+      let t = tracks.find(x => pathsEqual(x.path, lastPath)) || null;
+
+      // Then check the active queue (for cloud/stream tracks)
+      if (!t) t = queue.find(x => pathsEqual(x.path, lastPath)) || null;
+
+      // Then check the current track itself
+      if (!t && currentTrack && pathsEqual(currentTrack.path, lastPath)) t = currentTrack;
+
+      // Then check the online track metadata cache
+      if (!t && onlineTrackCache.has(lastPath)) t = onlineTrackCache.get(lastPath)!;
+
+      // Fallback: dynamically reconstruct the online track
+      if (!t && (lastPath.startsWith('http://') || lastPath.startsWith('https://'))) {
+        const meta = parseStreamMetadata(lastPath);
+        t = {
+          id: -9999,
+          path: lastPath,
+          title: meta.title,
+          artist: meta.artist,
+          duration: null,
+          format: 'URL',
+          lyric_offset: 0
+        };
+      }
+
       if (t) {
         set({ playHistory: newHistory });
         await get().playTrack(t, true);
@@ -237,12 +546,199 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
     }
     
-    // Fallback if no history
+    // Fallback: sequential previous from local library
+    if (tracks.length === 0) return;
     const prevIndex = (currentTrackIndex - 1 + tracks.length) % tracks.length;
     await get().playTrack(tracks[prevIndex]);
   },
 
   toggleShuffle: () => set(s => ({ shuffle: !s.shuffle })),
+
+  toggleRepeat: () => {
+    const current = get().repeat;
+    const next = current === 'none' ? 'all' : current === 'all' ? 'one' : 'none';
+    localStorage.setItem('aideo_repeat', next);
+    set({ repeat: next });
+  },
+
+  triggerAutoplayRadio: async (track: Track, forceReset = false) => {
+    if (!track) return;
+    const isCurrentTrackOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC';
+    if (!isCurrentTrackOnline || !get().autoplayEnabled) return;
+
+    try {
+      console.log('[autoplay] Generating upcoming radio queue in the background...');
+      let recommendedTracks: Track[] = [];
+      const isTidal = track.format === 'Tidal FLAC' || track.path.includes('api.tidal.com');
+
+      if (isTidal) {
+        const tracks = await invoke<any[]>('get_tidal_autoplay_recommendations', {
+          artist: track.artist || 'Unknown Artist',
+          title: track.title || 'Unknown Title'
+        });
+        recommendedTracks = tracks.map(t => ({
+          id: -20000 - Number(t.id),
+          path: t.id,
+          title: t.title,
+          artist: t.artist,
+          duration: t.duration,
+          format: 'Tidal FLAC',
+          lyric_offset: 0,
+          cover_url: t.cover_url,
+          is_autoplay: true
+        }));
+      } else {
+        let videoId = '';
+        const match = track.path.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/);
+        if (match && match[1]) {
+          videoId = match[1];
+        } else if (track.path.startsWith('http')) {
+          const urlParts = track.path.split(/[=]/);
+          if (urlParts.length > 1) videoId = urlParts.pop() || '';
+        }
+
+        const tracksState = get().tracks;
+        const playCountsState = get().playCounts;
+        
+        const artistPlayCounts: Record<string, number> = {};
+        tracksState.forEach(t => {
+          if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio') {
+            const count = playCountsState[t.path] || 0;
+            if (count > 0) {
+              artistPlayCounts[t.artist] = (artistPlayCounts[t.artist] || 0) + count;
+            }
+          }
+        });
+
+        const topArtists = Object.entries(artistPlayCounts)
+          .sort((a, b) => b[1] - a[1])
+          .map(entry => entry[0])
+          .slice(0, 5);
+
+        if (topArtists.length === 0) {
+          const artistFrequencies: Record<string, number> = {};
+          tracksState.forEach(t => {
+            if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio') {
+              artistFrequencies[t.artist] = (artistFrequencies[t.artist] || 0) + 1;
+            }
+          });
+          const mostFrequent = Object.entries(artistFrequencies)
+            .sort((a, b) => b[1] - a[1])
+            .map(entry => entry[0])
+            .slice(0, 5);
+          topArtists.push(...mostFrequent);
+        }
+
+        const libraryArtists = Array.from(new Set(
+          tracksState
+            .map(t => t.artist)
+            .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio')
+        ));
+
+        const discoveryLevel = get().autoplayDiscoveryLevel;
+
+        const tracks = await invoke<any[]>('get_youtube_autoplay_recommendations', {
+          videoId,
+          artist: track.artist || 'Unknown Artist',
+          title: track.title || 'Unknown Title',
+          topArtists,
+          libraryArtists,
+          discoveryLevel
+        });
+
+        const parseDuration = (raw: string): number => {
+          if (!raw) return 0;
+          const parts = raw.split(':').map(Number);
+          if (parts.some(isNaN)) return 0;
+          if (parts.length === 3) {
+            return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          } else if (parts.length === 2) {
+            return parts[0] * 60 + parts[1];
+          }
+          return parts[0] || 0;
+        };
+
+        recommendedTracks = tracks.map(t => ({
+          id: -30000,
+          path: t.url,
+          title: t.title,
+          artist: t.artist,
+          duration: parseDuration(t.duration_raw),
+          format: 'YouTube Direct',
+          lyric_offset: 0,
+          cover_url: t.cover_url,
+          is_autoplay: true
+        }));
+      }
+
+      const currentQueue = get().queue;
+      const manualQueue = currentQueue.filter(t => !t.is_autoplay);
+      const existingAutoplay = forceReset ? [] : currentQueue.filter(t => t.is_autoplay);
+
+      const playedSet = new Set(get().playHistory);
+      const currentTrackPath = track.path;
+      const existingPaths = new Set([
+        currentTrackPath,
+        ...manualQueue.map(t => t.path),
+        ...existingAutoplay.map(t => t.path)
+      ]);
+
+      let finalRecommended = recommendedTracks.filter(t => !playedSet.has(t.path) && !existingPaths.has(t.path));
+      if (finalRecommended.length === 0) {
+        finalRecommended = recommendedTracks.filter(t => !existingPaths.has(t.path));
+      }
+
+      const needed = Math.max(0, 5 - existingAutoplay.length);
+      const toAppend = finalRecommended.slice(0, needed);
+
+      const newQueue = [...manualQueue, ...existingAutoplay, ...toAppend];
+      set({ queue: newQueue });
+      localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+
+      await invoke('clear_queue');
+      if (newQueue.length > 0) {
+        const paths: string[] = [];
+        for (const t of newQueue) {
+          let p = t.path;
+          if (t.format === 'Tidal FLAC' && !t.path.startsWith('http://') && !t.path.startsWith('https://')) {
+            try {
+              p = await invoke<string>('tidal_get_stream_url', { trackId: t.path });
+              resolvedPathMap.set(p, t.path);
+            } catch (err) {
+              console.error('Failed to resolve Tidal autoplay recommended stream:', err);
+            }
+          }
+          paths.push(p);
+        }
+        await invoke('add_to_queue_bulk', { paths });
+      }
+
+      // 🚀 Background Pre-resolve: Fetch direct streaming URLs in the background
+      // for the next 2 tracks in the queue to make playback transitions instantaneous!
+      for (const t of newQueue.slice(0, 2)) {
+        if (t.path.startsWith('http://') || t.path.startsWith('https://')) {
+          if (t.path.includes("youtube.com") || t.path.includes("youtu.be")) {
+            invoke('pre_resolve_youtube_url', { url: t.path }).catch(() => {});
+          }
+        }
+      }
+
+      console.log('[autoplay] Dynamically populated upcoming queue with recommendations!');
+    } catch (err) {
+      console.error('Autoplay background resolution failed:', err);
+    }
+  },
+
+  toggleAutoplay: () => {
+    const next = !get().autoplayEnabled;
+    localStorage.setItem('aideo_autoplay', String(next));
+    set({ autoplayEnabled: next });
+  },
+
+  setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => {
+    localStorage.setItem('aideo_autoplay_discovery_level', level);
+    set({ autoplayDiscoveryLevel: level });
+  },
 
   fetchPlaylists: async () => {
     try {
@@ -292,6 +788,181 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const tracks = await invoke<Track[]>('get_playlist_tracks', { playlistId: id });
       set({ tracks, currentPlaylist: get().playlists.find(p => p.id === id) || null });
     } catch (e) { console.error(e); }
+  },
+
+  toggleLoveTrack: async (path: string) => {
+    try {
+      const track = get().tracks.find(t => t.path === path) || (get().currentTrack?.path === path ? get().currentTrack : null);
+      if (!track) return;
+      const isLovedNow = track.loved === 1 ? 0 : 1;
+      
+      await invoke('toggle_love_track', { path, loved: isLovedNow === 1 });
+      
+      const updatedTracks = get().tracks.map(t => {
+        if (t.path === path) {
+          return { ...t, loved: isLovedNow };
+        }
+        return t;
+      });
+      set({ tracks: updatedTracks });
+      
+      const current = get().currentTrack;
+      if (current && current.path === path) {
+        set({ currentTrack: { ...current, loved: isLovedNow } });
+      }
+
+      const updatedQueue = get().queue.map(q => {
+        if (q.path === path) {
+          return { ...q, loved: isLovedNow };
+        }
+        return q;
+      });
+      set({ queue: updatedQueue });
+
+      await get().fetchPlaylists();
+
+      const playlist = get().currentPlaylist;
+      if (playlist) {
+        await get().loadPlaylistTracks(playlist.id);
+      }
+    } catch (e) {
+      console.error('toggleLoveTrack:', e);
+    }
+  },
+
+  fetchCachedCloudHashes: async () => {
+    try {
+      const hashes = await invoke<string[]>('get_all_cached_cloud_hashes');
+      set({ cachedCloudHashes: hashes });
+    } catch (e) {
+      console.error('fetchCachedCloudHashes:', e);
+    }
+  },
+
+  cacheCloudTrack: async (streamUrl: string) => {
+    try {
+      await invoke('cache_cloud_track', { streamUrl });
+      await get().fetchCachedCloudHashes();
+    } catch (e) {
+      console.error('cacheCloudTrack:', e);
+    }
+  },
+
+  generateSmartMix: async (mood: string, trendSource: string) => {
+    const tracks = get().tracks;
+    if (tracks.length === 0) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Your library is empty. Add a music folder first.', type: 'warning' } }));
+      return;
+    }
+
+    try {
+      // 1. Define Mood Keywords
+      let keywords: string[] = [];
+      const moodLower = mood.toLowerCase();
+      if (moodLower === 'energetic') {
+        keywords = ['rock', 'dance', 'metal', 'energy', 'upbeat', 'electronic', 'gym', 'fast', 'hype', 'hard', 'heavy', 'loud', 'synthwave', 'run', 'workout'];
+      } else if (moodLower === 'chill') {
+        keywords = ['chill', 'relax', 'acoustic', 'slow', 'ambient', 'lofi', 'lo-fi', 'sleep', 'jazz', 'folk', 'cozy', 'soft', 'calm', 'smooth'];
+      } else if (moodLower === 'focus') {
+        keywords = ['focus', 'study', 'coding', 'instrument', 'classical', 'piano', 'ambient', 'synth', 'study', 'instrumental', 'post-rock'];
+      } else if (moodLower === 'melancholic') {
+        keywords = ['sad', 'blue', 'rain', 'dark', 'tear', 'cry', 'slow', 'emotional', 'acoustic', 'autumn', 'cold', 'lost', 'memory', 'melancholic'];
+      } else if (moodLower === 'happy') {
+        keywords = ['happy', 'joy', 'sun', 'summer', 'pop', 'fun', 'disco', 'bright', 'smile', 'positive', 'feel-good', 'celebrate'];
+      }
+
+      // 2. Score tracks based on mood keywords
+      let moodTracks = tracks.filter(t => {
+        const title = (t.title || '').toLowerCase();
+        const artist = (t.artist || '').toLowerCase();
+        const album = (t.album || '').toLowerCase();
+        return keywords.some(k => title.includes(k) || artist.includes(k) || album.includes(k));
+      });
+
+      // Fallback if mood matches are thin
+      if (moodTracks.length < 5) {
+        moodTracks = [...tracks];
+      }
+
+      // 3. Re-rank based on seed/trend source
+      let sortedTracks = [...moodTracks];
+      const sourceLower = trendSource.toLowerCase();
+
+      if (sourceLower.includes('history')) {
+        // Library Play Counts
+        const counts = get().playCounts;
+        sortedTracks.sort((a, b) => (counts[b.path] || 0) - (counts[a.path] || 0));
+      } else if (sourceLower.includes('last.fm')) {
+        // Last.fm Top Artists scrobble trends
+        const lfmArtists = (get().lastfmTopArtists || []).map((a: any) => (a.name || '').toLowerCase());
+        if (lfmArtists.length > 0) {
+          sortedTracks.sort((a, b) => {
+            const aArtist = (a.artist || '').toLowerCase();
+            const bArtist = (b.artist || '').toLowerCase();
+            const aMatches = lfmArtists.some((la: string) => aArtist.includes(la) || la.includes(aArtist));
+            const bMatches = lfmArtists.some((la: string) => bArtist.includes(la) || la.includes(bArtist));
+            return (bMatches ? 1 : 0) - (aMatches ? 1 : 0);
+          });
+        }
+      } else if (sourceLower.includes('listenbrainz')) {
+        // ListenBrainz Recent Scrobbles scrobble trends
+        const lbListens = (get().listenbrainzRecent || []).map((l: any) => {
+          const meta = l.track_metadata;
+          return (meta?.artist_name || '').toLowerCase();
+        });
+        if (lbListens.length > 0) {
+          sortedTracks.sort((a, b) => {
+            const aArtist = (a.artist || '').toLowerCase();
+            const bArtist = (b.artist || '').toLowerCase();
+            const aMatches = lbListens.some((lb: string) => aArtist.includes(lb) || lb.includes(aArtist));
+            const bMatches = lbListens.some((lb: string) => bArtist.includes(lb) || lb.includes(bArtist));
+            return (bMatches ? 1 : 0) - (aMatches ? 1 : 0);
+          });
+        }
+      }
+
+      // Select top 20 tracks for our smart mix
+      const selectedMix = sortedTracks.slice(0, 20);
+      if (selectedMix.length === 0) return;
+
+      // 4. Create/Sync a local playlist named "AI Smart Mix - [Mood]"
+      const playlistName = `AI Smart Mix - ${mood}`;
+      await invoke('create_playlist', { name: playlistName });
+      await get().fetchPlaylists();
+
+      // Find the playlist ID
+      const targetPlaylist = get().playlists.find(p => p.name === playlistName);
+      if (targetPlaylist) {
+        // Clear old tracks in this playlist
+        await invoke('delete_playlist', { id: targetPlaylist.id });
+        await invoke('create_playlist', { name: playlistName });
+        await get().fetchPlaylists();
+        const reCreated = get().playlists.find(p => p.name === playlistName);
+        if (reCreated) {
+          for (const t of selectedMix) {
+            await invoke('add_to_playlist', { playlistId: reCreated.id, path: t.path });
+          }
+        }
+      }
+
+      // 5. Play first track and queue the rest
+      const upcoming = selectedMix.slice(1);
+      set({ queue: upcoming });
+      localStorage.setItem('aideo_queue', JSON.stringify(upcoming));
+
+      await invoke('clear_queue');
+      if (upcoming.length > 0) {
+        const paths = upcoming.map(t => t.path);
+        await invoke('add_to_queue_bulk', { paths });
+      }
+
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Generated dynamic offline AI mix: "${playlistName}"`, type: 'success' } }));
+      
+      await get().playTrack(selectedMix[0]);
+      get().setView('nowplaying');
+    } catch (err) {
+      console.error('generateSmartMix:', err);
+    }
   },
 
   matchMetadata: async (track: Track) => {
@@ -403,8 +1074,19 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
     if (selectedTracks.length === 0) return;
 
-    set({ queue: selectedTracks });
-    localStorage.setItem('aideo_queue', JSON.stringify(selectedTracks));
+    const upcomingTracks = selectedTracks.slice(1);
+    set({ queue: upcomingTracks });
+    localStorage.setItem('aideo_queue', JSON.stringify(upcomingTracks));
+    
+    try {
+      await invoke('clear_queue');
+      if (upcomingTracks.length > 0) {
+        const paths = upcomingTracks.map(t => t.path);
+        await invoke('add_to_queue_bulk', { paths });
+      }
+    } catch (e) {
+      console.error('Failed to sync dynamic mix queue to backend:', e);
+    }
     
     await get().playTrack(selectedTracks[0]);
 

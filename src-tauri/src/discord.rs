@@ -25,8 +25,11 @@ fn trigger_reconnection() {
     if IS_CONNECTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
         thread::spawn(|| {
             println!("[Discord] Spawning background reconnection loop...");
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 30; // 5 minutes total (30 * 10 seconds)
             loop {
-                println!("[Discord] Attempting to connect with ID: {}", DISCORD_CLIENT_ID);
+                attempts += 1;
+                println!("[Discord] Attempting to connect with ID: {} (attempt {}/{})", DISCORD_CLIENT_ID, attempts, MAX_ATTEMPTS);
                 match DiscordIpcClient::new(DISCORD_CLIENT_ID) {
                     Ok(mut client) => {
                         match client.connect() {
@@ -56,6 +59,12 @@ fn trigger_reconnection() {
                     Err(e) => {
                         println!("[Discord] Client Creation Error: {}. Retrying in 10s...", e);
                     }
+                }
+                
+                if attempts >= MAX_ATTEMPTS {
+                    println!("[Discord] Max reconnection attempts ({}) reached. Stopping background loop.", MAX_ATTEMPTS);
+                    IS_CONNECTING.store(false, Ordering::SeqCst);
+                    break;
                 }
                 thread::sleep(Duration::from_secs(10));
             }

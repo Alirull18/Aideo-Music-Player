@@ -41,6 +41,10 @@ tauri.key.password
 handler.md
 final_aideo.key
 
+# AI Handbooks
+docs/AI_CONTEXT.md
+docs/ARCHITECTURE.md
+
 # Binaries
 ffmpeg.exe
 ytdlp.exe

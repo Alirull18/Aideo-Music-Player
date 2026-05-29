@@ -1,23 +1,52 @@
 import { StateCreator } from 'zustand';
-import { PlayerState, DSPState, Track } from './types';
+import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache } from '../utils';
+
+let isPolling = false;
+let dspThrottleTimeout: any = null;
+let lastDspInvokeTime = 0;
+let pendingDspState: any = null;
+
+const THROTTLE_MS = 16; // 60Hz update rate for ultra-low latency, real-time feel
+
+const performDspInvoke = async (dsp: any) => {
+  try {
+    await invoke('set_dsp_state', { dsp });
+    lastDspInvokeTime = Date.now();
+  } catch (e) {
+    console.error('set_dsp_state error:', e);
+  }
+};
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   playback: { status: 'Stopped', current_track: null, position_secs: 0, volume: 1.0, exclusive: false, bit_perfect: false, dev_rate: 0, driver_type: 'WASAPI' },
   dsp: {
     enabled: false,
+    low_spec_mode: localStorage.getItem('aideo_low_spec') === 'true',
+    audio_profile: (localStorage.getItem('aideo_audio_profile') as any) || 'normal',
+    resampler_interpolation: (localStorage.getItem('aideo_resampler_interpolation') as any) || 'linear',
+    resampler_sinc_len: Number(localStorage.getItem('aideo_resampler_sinc_len') || 128) as any,
+    resampler_oversampling: Number(localStorage.getItem('aideo_resampler_oversampling') || 256) as any,
+    ffmpeg_transcode_quality: (localStorage.getItem('aideo_ffmpeg_transcode_quality') as any) || 'studio',
     width: 1.0,
     upsample_rate: 0,
     dither: false,
+    exclusive_mode_timing: (localStorage.getItem('aideo_exclusive_timing') as any) || 'polling',
     eq_enabled: false,
     eq_parametric: false,
     eq_graphic_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     eq_parametric_bands: [
       { freq: 80, gain: 0, q: 0.7, band_type: 'lowshelf' },
+      { freq: 120, gain: 0, q: 1.0, band_type: 'peaking' },
       { freq: 240, gain: 0, q: 1.0, band_type: 'peaking' },
+      { freq: 400, gain: 0, q: 1.0, band_type: 'peaking' },
       { freq: 750, gain: 0, q: 1.0, band_type: 'peaking' },
+      { freq: 1500, gain: 0, q: 1.0, band_type: 'peaking' },
       { freq: 2200, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' }
+      { freq: 4000, gain: 0, q: 1.0, band_type: 'peaking' },
+      { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' },
+      { freq: 10000, gain: 0, q: 0.7, band_type: 'peaking' }
     ],
     crossfeed_enabled: false,
     crossfeed_level: -6.0,
@@ -44,7 +73,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       invoke('update_discord_presence', { details: "Idle", stateStr: "Browsing Library", isPlaying: false });
       return;
     }
-    const track = tracks.find(t => t.path === playback.current_track);
+    const track = tracks.find(t => pathsEqual(t.path, playback.current_track));
     const details = track?.title || 'Unknown Track';
     const stateStr = `by ${track?.artist || 'Unknown Artist'}`;
     invoke('update_discord_presence', {
@@ -69,7 +98,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (state.playback.status === 'Stopped') {
         const targetPath = state.playback.current_track || state.playback.last_played_track;
         if (targetPath) {
-          const t = state.tracks.find(x => x.path === targetPath);
+          const t = state.tracks.find(x => pathsEqual(x.path, targetPath));
           if (t) {
             get().playTrack(t);
             return;
@@ -88,10 +117,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   stopTrack: async () => {
     try {
+      await get().recordPlaybackTransition(null);
       const current = get().playback.current_track;
       await invoke('stop_track');
       
       set({
+        currentTrack: null,
         playback: { 
           ...get().playback, 
           status: 'Stopped',
@@ -119,7 +150,20 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   pollStatus: async () => {
+    if (isPolling) return;
+    isPolling = true;
     try {
+      const state = get();
+      const currentStatus = state.playback.status;
+      if (currentStatus === 'Stopped' || currentStatus === 'Paused') {
+        const lastPollTime = state.playback.last_poll_time || 0;
+        const now = Date.now();
+        if (now - lastPollTime < 2000) {
+          return;
+        }
+        set(s => ({ playback: { ...s.playback, last_poll_time: now } }));
+      }
+
       const status: any = await invoke('get_playback_status');
       if (!status) return;
 
@@ -135,19 +179,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // Strict Anti-Bounce: The frontend is the source of truth for track selections.
       // If the backend reports a different track, it means the Rust audio pipeline 
       // is still processing previous skip commands and lagging behind the UI.
-      if (prevTrack && newTrack && newTrack !== prevTrack) {
+      if (prevTrack && newTrack && !pathsEqual(newTrack, prevTrack)) {
         const timeSinceSkip = Date.now() - (get().playback.last_skip_time || 0);
         if (timeSinceSkip < 2000) {
           return;
         }
         // If it's been more than 2 seconds since the last skip, this must be a natural track transition (e.g. backend reached EOF and played next in queue)
-        get().handleTrackTransition(newTrack);
+        await get().handleTrackTransition(newTrack);
         return;
       }
 
       // Initial startup sync or backend-driven recovery
       if (!prevTrack && newTrack) {
-        get().handleTrackTransition(newTrack);
+        await get().handleTrackTransition(newTrack);
         return;
       }
 
@@ -159,36 +203,175 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       // Auto Scrobble Logic
       const { current_track, position_secs } = status;
-      const { scrobbleEnabled, lastfmSessionKey, scrobbledCurrent, tracks, scrobbleThreshold } = get();
-      if (scrobbleEnabled && lastfmSessionKey && !scrobbledCurrent && current_track && status.status === 'Playing') {
-        const tr = tracks.find(t => t.path === current_track);
+      const { 
+        scrobbleEnabled, lastfmSessionKey, 
+        listenbrainzEnabled, listenbrainzToken, 
+        scrobbledCurrent, tracks, scrobbleThreshold 
+      } = get();
+
+      const canLfm = scrobbleEnabled && lastfmSessionKey;
+      const canLb = listenbrainzEnabled && listenbrainzToken;
+
+      if ((canLfm || canLb) && !scrobbledCurrent && current_track && status.status === 'Playing') {
+        const tr = tracks.find(t => pathsEqual(t.path, current_track));
         if (tr && tr.artist && tr.title) {
           const dur = tr.duration || 200;
           const thresholdSecs = (scrobbleThreshold / 100) * dur;
           if (position_secs > thresholdSecs || position_secs > 240) {
             set({ scrobbledCurrent: true });
             const ts = Math.floor(Date.now() / 1000) - Math.floor(position_secs);
-            invoke('lastfm_scrobble', { artist: tr.artist, track: tr.title, timestamp: ts, sessionKey: lastfmSessionKey })
-              .then(() => {
-                set({ lastScrobble: { artist: tr.artist ?? 'Unknown', track: tr.title ?? 'Unknown' } });
-                setTimeout(() => set({ lastScrobble: null }), 5000);
+
+            // 1. Last.fm Scrobble
+            if (canLfm) {
+              invoke('lastfm_scrobble', { artist: tr.artist, track: tr.title, timestamp: ts, sessionKey: lastfmSessionKey })
+                .then(() => {
+                  set({ lastScrobble: { artist: tr.artist ?? 'Unknown', track: tr.title ?? 'Unknown' } });
+                  setTimeout(() => set({ lastScrobble: null }), 5000);
+                })
+                .catch((e: any) => {
+                  const msg = String(e);
+                  console.error('Last.fm Scrobble error:', msg);
+                  set({ lastScrobble: { artist: '⚠️ Last.fm Failed', track: msg } });
+                  setTimeout(() => set({ lastScrobble: null }), 8000);
+                });
+            }
+
+            // 2. ListenBrainz Scrobble (Natively in Rust)
+            if (canLb) {
+              invoke('listenbrainz_scrobble', {
+                artist: tr.artist,
+                track: tr.title,
+                timestamp: ts,
+                token: listenbrainzToken
               })
-              .catch((e: any) => {
-                const msg = String(e);
-                console.error('Scrobble error:', msg);
-                set({ lastScrobble: { artist: '⚠️ Scrobble Failed', track: msg } });
-                setTimeout(() => set({ lastScrobble: null }), 8000);
+              .then(() => {
+                if (!canLfm) {
+                  // Only show toast status if Last.fm isn't already doing it
+                  set({ lastScrobble: { artist: `${tr.artist} (LB)`, track: tr.title ?? 'Unknown' } });
+                  setTimeout(() => set({ lastScrobble: null }), 5000);
+                }
+              })
+              .catch(e => {
+                console.error('ListenBrainz scrobble error:', e);
               });
+            }
           }
         }
       }
-    } catch (e) { }
+    } catch (e) {
+      console.error('pollStatus error:', e);
+      invoke('log_error', { msg: `pollStatus error: ${e}` }).catch(() => {});
+    } finally {
+      isPolling = false;
+    }
   },
 
   setDSP: async (newDSP: Partial<DSPState>) => {
-    const full = { ...get().dsp, ...newDSP } as DSPState;
+    // 🛡️ Bit-Perfect vs. DSP Coexistence: If the user interacts with any Aideo Lab DSP/equalizer controls
+    // while Bit-Perfect is active, automatically turn Bit-Perfect OFF so their audio adjustments take effect immediately.
+    const dspKeys = [
+      'enabled', 'eq_enabled', 'eq_parametric', 'eq_graphic_gains', 
+      'eq_parametric_bands', 'crossfeed_enabled', 'crossfeed_level', 
+      'crossfeed_corner', 'spatial_enabled', 'spatial_haas_delay', 
+      'spatial_wet', 'subsonic_enabled', 'night_mode_enabled', 
+      'r128_enabled', 'width', 'upsample_rate', 'dither'
+    ];
+    const isActivatingDSP = dspKeys.some(key => {
+      if (key === 'upsample_rate') {
+        return newDSP.upsample_rate !== undefined && newDSP.upsample_rate > 0;
+      }
+      if (key === 'enabled') {
+        return newDSP.enabled === true;
+      }
+      return (newDSP as any)[key] !== undefined;
+    });
+
+    if (isActivatingDSP && get().playback.bit_perfect) {
+      try {
+        await get().toggleBitPerfect();
+      } catch (e) {
+        console.error('Failed to toggle bit-perfect off:', e);
+      }
+      newDSP.enabled = true;
+    }
+
+    let full = { ...get().dsp, ...newDSP } as DSPState;
+
+    // A. If the user changed the overall preset directly
+    if (newDSP.audio_profile !== undefined && newDSP.audio_profile !== 'custom') {
+      const preset = newDSP.audio_profile;
+      if (preset === 'low') {
+        full.resampler_interpolation = 'linear';
+        full.resampler_sinc_len = 64;
+        full.resampler_oversampling = 128;
+        full.ffmpeg_transcode_quality = 'standard';
+      } else if (preset === 'normal') {
+        full.resampler_interpolation = 'cubic';
+        full.resampler_sinc_len = 128;
+        full.resampler_oversampling = 256;
+        full.ffmpeg_transcode_quality = 'studio';
+      } else if (preset === 'high') {
+        full.resampler_interpolation = 'cubic';
+        full.resampler_sinc_len = 256;
+        full.resampler_oversampling = 512;
+        full.ffmpeg_transcode_quality = 'hires';
+      }
+    } 
+    // B. If they changed an individual parameter, auto-detect the matching preset
+    else if (
+      newDSP.resampler_interpolation !== undefined ||
+      newDSP.resampler_sinc_len !== undefined ||
+      newDSP.resampler_oversampling !== undefined ||
+      newDSP.ffmpeg_transcode_quality !== undefined
+    ) {
+      const interp = full.resampler_interpolation;
+      const sinc = full.resampler_sinc_len;
+      const over = full.resampler_oversampling;
+      const ffmpeg = full.ffmpeg_transcode_quality;
+
+      if (interp === 'linear' && sinc === 64 && over === 128 && ffmpeg === 'standard') {
+        full.audio_profile = 'low';
+      } else if (interp === 'cubic' && sinc === 128 && over === 256 && ffmpeg === 'studio') {
+        full.audio_profile = 'normal';
+      } else if (interp === 'cubic' && sinc === 256 && over === 512 && ffmpeg === 'hires') {
+        full.audio_profile = 'high';
+      } else {
+        full.audio_profile = 'custom';
+      }
+    }
+
+    // Save all to localStorage
+    localStorage.setItem('aideo_audio_profile', full.audio_profile);
+    localStorage.setItem('aideo_resampler_interpolation', full.resampler_interpolation);
+    localStorage.setItem('aideo_resampler_sinc_len', String(full.resampler_sinc_len));
+    localStorage.setItem('aideo_resampler_oversampling', String(full.resampler_oversampling));
+    localStorage.setItem('aideo_ffmpeg_transcode_quality', full.ffmpeg_transcode_quality);
+    localStorage.setItem('aideo_exclusive_timing', full.exclusive_mode_timing);
+
+    // 1. Update React Zustand state instantly for fluid 60fps UI
     set({ dsp: full });
-    try { await invoke('set_dsp_state', { dsp: full }); } catch (e) { console.error(e); }
+    
+    // 2. Manage throttled IPC dispatching to prevent channel flooding
+    pendingDspState = full;
+    const now = Date.now();
+    const timeSinceLast = now - lastDspInvokeTime;
+    
+    if (timeSinceLast >= THROTTLE_MS) {
+      if (dspThrottleTimeout) {
+        clearTimeout(dspThrottleTimeout);
+        dspThrottleTimeout = null;
+      }
+      performDspInvoke(full);
+    } else {
+      if (!dspThrottleTimeout) {
+        dspThrottleTimeout = setTimeout(() => {
+          dspThrottleTimeout = null;
+          if (pendingDspState) {
+            performDspInvoke(pendingDspState);
+          }
+        }, THROTTLE_MS - timeSinceLast);
+      }
+    }
   },
 
   toggleExclusive: async () => {
@@ -252,23 +435,77 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set(s => ({ playback: { ...s.playback, driver_type: type } }));
   },
 
-  playStream: async (url: string) => {
+  playStream: async (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }) => {
     try {
+      const streamName = metadata?.title || getStreamName(url);
+      const virtualTrack: Track = {
+        id: -9999,
+        path: url,
+        title: streamName,
+        artist: metadata?.artist || 'Online Stream',
+        duration: metadata?.duration || null,
+        format: 'URL',
+        lyric_offset: 0,
+        cover_url: metadata?.cover_url || null
+      };
+      await get().recordPlaybackTransition(virtualTrack);
+      onlineTrackCache.set(url, virtualTrack);
       set({
-        coverArt: null,
+        coverArt: metadata?.cover_url || null,
         accentColor: '#8b5cf6',
         lyrics: [],
         lyricStatus: 'idle',
-        playback: { ...get().playback, current_track: url, status: 'Playing', position_secs: 0 },
+        currentTrack: virtualTrack,
+        playback: { ...get().playback, current_track: url, status: 'Playing', position_secs: 0, last_skip_time: Date.now() },
       });
+
+      if (metadata?.cover_url) {
+        if (metadata.cover_url.startsWith('http://') || metadata.cover_url.startsWith('https://')) {
+          invoke('get_cover_art', { path: metadata.cover_url }).then(async (art: any) => {
+            if (get().playback.current_track !== url) return;
+            if (art && typeof art === 'string') {
+              set({ coverArt: art });
+              try {
+                const color = await extractDominantColor(art);
+                set({ accentColor: color });
+              } catch (_) {}
+              invoke('update_media_metadata', {
+                title: streamName,
+                artist: metadata?.artist || 'Online Stream',
+                coverUrl: art,
+                duration: metadata?.duration || 0,
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+        } else {
+          extractDominantColor(metadata.cover_url).then((color) => {
+            set({ accentColor: color });
+          }).catch(() => {});
+        }
+      }
+
       await invoke('play_track', { path: url });
+      get().triggerAutoplayRadio(virtualTrack, true).catch(console.error);
+
+      // Trigger high-fidelity lyric lookup for stream/preview
+      set({ lyricStatus: 'loading' });
+      invoke('get_lyrics', { path: url }).then((lrc: any) => {
+        if (!pathsEqual(get().playback.current_track, url)) return;
+        if (Array.isArray(lrc) && lrc.length > 0) {
+          set({ lyrics: lrc, lyricStatus: 'found' });
+        } else {
+          get().autoFetchLyricsOnline(virtualTrack);
+        }
+      }).catch(() => {
+        if (pathsEqual(get().playback.current_track, url)) get().autoFetchLyricsOnline(virtualTrack);
+      });
 
       // Update OS media controls
       invoke('update_media_metadata', {
-        title: url.split('/').pop() || 'Live Stream',
-        artist: 'Online Radio',
-        coverUrl: null,
-        duration: 0,
+        title: streamName,
+        artist: metadata?.artist || 'Online Stream',
+        coverUrl: metadata?.cover_url || null,
+        duration: metadata?.duration || 0,
       }).catch(() => { });
 
       await invoke('update_media_playback', { playing: true });
@@ -277,7 +514,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   addToQueue: async (track: Track) => {
     try {
-      await invoke('add_to_queue', { path: track.path });
+      // Prevent duplicates: skip if track already exists in queue
+      const existsInQueue = get().queue.some(t => pathsEqual(t.path, track.path));
+      if (existsInQueue) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Track is already in the queue', type: 'warning' } }));
+        return;
+      }
+
+      let finalPath = track.path;
+      if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+        try {
+          finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+          resolvedPathMap.set(finalPath, track.path);
+        } catch (err) {
+          console.error('Failed to resolve Tidal stream in addToQueue:', err);
+        }
+      }
+
+      await invoke('add_to_queue', { path: finalPath });
       const newQueue = [...get().queue, track];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
@@ -286,7 +540,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   playNextInQueue: async (track: Track) => {
     try {
-      await invoke('queue_next', { path: track.path });
+      // Prevent duplicates: skip if track already exists in queue
+      const existsInQueue = get().queue.some(t => pathsEqual(t.path, track.path));
+      if (existsInQueue) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Track is already in the queue', type: 'warning' } }));
+        return;
+      }
+
+      let finalPath = track.path;
+      if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+        try {
+          finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+          resolvedPathMap.set(finalPath, track.path);
+        } catch (err) {
+          console.error('Failed to resolve Tidal stream in playNextInQueue:', err);
+        }
+      }
+
+      await invoke('queue_next', { path: finalPath });
       const newQueue = [track, ...get().queue];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
@@ -298,7 +569,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (index < 0 || index >= queue.length) return;
     
     const trackToPlay = queue[index];
-    const newQueue = queue.slice(index + 1);
+    const newQueue = [...queue];
+    newQueue.splice(index, 1);
     
     // SSOT: Update React state immediately so rapid clicks don't double-pop
     set({ queue: newQueue });
@@ -306,10 +578,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     
     // Fire-and-forget the Rust IPC calls so we don't block the UI
     (async () => {
-        await invoke('remove_from_queue_bulk', { count: index + 1 }).catch(() => {});
+        await invoke('remove_from_queue', { index }).catch(() => {});
     })();
     
-    get().playTrack(trackToPlay);
+    get().playTrack(trackToPlay, undefined, false);
   },
 
   removeFromQueue: async (index: number) => {
@@ -353,9 +625,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         const parsed: Track[] = JSON.parse(saved);
         if (parsed.length > 0) {
           await invoke('clear_queue');
-          for (const track of parsed) {
-            await invoke('add_to_queue', { path: track.path });
-          }
+          const paths = parsed.map(t => t.path);
+          await invoke('add_to_queue_bulk', { paths });
           set({ queue: parsed });
         }
       }
@@ -365,14 +636,47 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   fetchQueue: async () => {
     try {
       const paths: string[] = await invoke('get_queue');
-      const { tracks } = get();
-      const queueTracks = paths.map(p => tracks.find(t => t.path === p)).filter(t => !!t) as Track[];
+      const { tracks, queue: currentQueue } = get();
+      
+      const queueTracks = paths.map((p, idx) => {
+        // 1. Check if the track exists in local library tracks
+        const libTrack = tracks.find(t => pathsEqual(t.path, p));
+        if (libTrack) return libTrack;
+
+        // 2. Check if the track metadata already exists in the current queue state
+        const existingTrack = currentQueue.find(t => pathsEqual(t.path, p));
+        if (existingTrack) return existingTrack;
+
+        // 3. Fallback: Construct a high-fidelity virtual Track object for online/streaming paths
+        const isOnline = p.startsWith('http://') || p.startsWith('https://');
+        const meta = isOnline ? parseStreamMetadata(p) : { title: baseName(p), artist: 'YouTube Music' };
+        const virtualTrack: Track = {
+          id: -1000 - idx, // ensure a unique negative ID to prevent conflicts with database IDs
+          path: p,
+          title: meta.title,
+          artist: meta.artist,
+          duration: null,
+          format: isOnline ? 'URL' : 'MP3/FLAC',
+          lyric_offset: 0
+        };
+        return virtualTrack;
+      });
+
       set({ queue: queueTracks });
       localStorage.setItem('aideo_queue', JSON.stringify(queueTracks));
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Failed to fetch queue:", e); }
   },
 
   toggleQueue: () => {
     set(s => ({ showQueue: !s.showQueue }));
+  },
+
+  lowSpecMode: localStorage.getItem('aideo_low_spec') === 'true',
+
+  toggleLowSpecMode: () => {
+    const next = !get().lowSpecMode;
+    set({ lowSpecMode: next });
+    localStorage.setItem('aideo_low_spec', String(next));
+    get().setDSP({ low_spec_mode: next });
   },
 });

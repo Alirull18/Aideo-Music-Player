@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "aideo"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "biquad",
@@ -54,6 +54,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "lazy_static",
+ "libloading 0.8.9",
  "librqbit",
  "md5",
  "rand 0.9.4",

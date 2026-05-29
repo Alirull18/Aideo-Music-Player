@@ -4,9 +4,15 @@ use serde_json::Value;
 
 // IMPORTANT: You MUST replace these with your actual Last.fm API Key and Secret
 // Get them here: https://www.last.fm/api/account/create
-// Trigger Rebuild
-const API_KEY: &str = match option_env!("LASTFM_API_KEY") { Some(v) => v, None => "YOUR_LASTFM_API_KEY" };
-const API_SECRET: &str = match option_env!("LASTFM_API_SECRET") { Some(v) => v, None => "YOUR_LASTFM_API_SECRET" };
+fn get_api_key() -> String {
+    std::env::var("LASTFM_API_KEY")
+        .unwrap_or_else(|_| option_env!("LASTFM_API_KEY").unwrap_or("YOUR_LASTFM_API_KEY").to_string())
+}
+
+fn get_api_secret() -> String {
+    std::env::var("LASTFM_API_SECRET")
+        .unwrap_or_else(|_| option_env!("LASTFM_API_SECRET").unwrap_or("YOUR_LASTFM_API_SECRET").to_string())
+}
 const API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 
 fn sign_request(params: &mut BTreeMap<String, String>) {
@@ -17,7 +23,7 @@ fn sign_request(params: &mut BTreeMap<String, String>) {
             sig_string.push_str(v);
         }
     }
-    sig_string.push_str(API_SECRET);
+    sig_string.push_str(&get_api_secret());
     let digest = md5::compute(sig_string);
     params.insert("api_sig".to_string(), format!("{:x}", digest));
 }
@@ -39,7 +45,7 @@ fn encode_params(params: &BTreeMap<String, String>) -> String {
 pub async fn get_auth_token() -> Result<String, String> {
     let mut params = BTreeMap::new();
     params.insert("method".to_string(), "auth.getToken".to_string());
-    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("api_key".to_string(), get_api_key());
 
     sign_request(&mut params); // auth.getToken requires a signature
     params.insert("format".to_string(), "json".to_string());
@@ -69,7 +75,7 @@ pub async fn get_session(token: &str) -> Result<String, String> {
     let mut params = BTreeMap::new();
     params.insert("method".to_string(), "auth.getSession".to_string());
     params.insert("token".to_string(), token.to_string());
-    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("api_key".to_string(), get_api_key());
     
     sign_request(&mut params);
     params.insert("format".to_string(), "json".to_string());
@@ -96,7 +102,7 @@ pub async fn scrobble(artist: &str, track: &str, timestamp: i64, session_key: &s
     params.insert("artist".to_string(), artist.to_string());
     params.insert("track".to_string(), track.to_string());
     params.insert("timestamp".to_string(), timestamp.to_string());
-    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("api_key".to_string(), get_api_key());
     params.insert("sk".to_string(), session_key.to_string());
     
     sign_request(&mut params);
@@ -127,7 +133,7 @@ pub async fn scrobble(artist: &str, track: &str, timestamp: i64, session_key: &s
 pub async fn get_user_info(session_key: &str) -> Result<Value, String> {
     let mut params = BTreeMap::new();
     params.insert("method".to_string(), "user.getInfo".to_string());
-    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("api_key".to_string(), get_api_key());
     params.insert("sk".to_string(), session_key.to_string());
     
     sign_request(&mut params);
@@ -145,7 +151,7 @@ pub async fn get_recent_tracks(username: &str) -> Result<Value, String> {
     let mut params = BTreeMap::new();
     params.insert("method".to_string(), "user.getRecentTracks".to_string());
     params.insert("user".to_string(), username.to_string());
-    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("api_key".to_string(), get_api_key());
     params.insert("limit".to_string(), "10".to_string());
     
     params.insert("format".to_string(), "json".to_string());
@@ -162,7 +168,7 @@ pub async fn get_top_artists(username: &str) -> Result<Value, String> {
     let mut params = BTreeMap::new();
     params.insert("method".to_string(), "user.getTopArtists".to_string());
     params.insert("user".to_string(), username.to_string());
-    params.insert("api_key".to_string(), API_KEY.to_string());
+    params.insert("api_key".to_string(), get_api_key());
     params.insert("limit".to_string(), "10".to_string());
     params.insert("period".to_string(), "7day".to_string());
     

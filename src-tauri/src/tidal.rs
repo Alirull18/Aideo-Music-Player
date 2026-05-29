@@ -3,6 +3,7 @@ use base64::Engine;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State, Manager};
 use tokio::time::{sleep, Duration};
+use futures::StreamExt;
 
 const BOLD: &str = "\x1b[1m";
 const CYAN: &str = "\x1b[36m";
@@ -63,6 +64,19 @@ impl TidalState {
                 }
             }
         }
+        
+        // Prioritize environment variables if available
+        let env_id = std::env::var("TIDAL_CLIENT_ID").ok();
+        let env_secret = std::env::var("TIDAL_CLIENT_SECRET").ok();
+        if let (Some(id), Some(secret)) = (env_id, env_secret) {
+            if !id.trim().is_empty() && !secret.trim().is_empty() {
+                return TidalCredentials {
+                    client_id: id,
+                    client_secret: secret,
+                };
+            }
+        }
+
         TidalCredentials {
             client_id: CLIENT_ID.to_string(),
             client_secret: CLIENT_SECRET.to_string(),
@@ -155,7 +169,7 @@ fn get_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState) -> Result<String, String> {
+async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: bool) -> Result<String, String> {
     let current_sess = state.session.lock().unwrap().clone();
     
     if let Some(mut sess) = current_sess {
@@ -164,9 +178,9 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState) -> Resul
             .unwrap()
             .as_secs();
 
-        // If the token expires in less than 5 minutes, try to refresh it
-        if sess.expires_at < now + 300 {
-            println!("{BOLD}{YELLOW}[TIDAL ENGINE] Access token near expiration. Refreshing...{RESET}");
+        // If force is true, or the token expires in less than 5 minutes, try to refresh it
+        if force || sess.expires_at < now + 300 {
+            println!("{BOLD}{YELLOW}[TIDAL ENGINE] Access token refresh triggered (force={})...{RESET}", force);
             
             let creds = TidalState::load_credentials(app_handle);
             let client = get_client();
@@ -200,8 +214,13 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState) -> Resul
                         }
                     } else {
                         let status = res.status();
-                        println!("{BOLD}{RED}✘ [TIDAL ENGINE] Refresh rejected ({}). Falling back to existing token.{RESET}", status);
-                        // Fall through — if existing token hasn't hard-expired, still use it
+                        println!("{BOLD}{RED}✘ [TIDAL ENGINE] Refresh rejected ({}).{RESET}", status);
+                        if force || status.is_client_error() {
+                            TidalState::clear_session(app_handle);
+                            *state.logged_in.lock().unwrap() = false;
+                            *state.session.lock().unwrap() = None;
+                            return Err("Tidal session has expired. Please logout and connect again under Settings/Search panel.".to_string());
+                        }
                         return Ok(sess.access_token);
                     }
                 }
@@ -368,7 +387,7 @@ pub async fn tidal_search(
     query: String,
     region: Option<String>,
 ) -> Result<Vec<TidalTrackResult>, String> {
-    let token = ensure_valid_token(&app_handle, &state).await?;
+    let mut token = ensure_valid_token(&app_handle, &state, false).await?;
     let _creds = TidalState::load_credentials(&app_handle);
 
     let mut country = region.filter(|r| !r.trim().is_empty());
@@ -416,11 +435,21 @@ pub async fn tidal_search(
     println!("{BOLD}{MAGENTA}└────────────────────────────────────────────────────────┘{RESET}");
 
     let client = get_client();
-    let res = client.get(&search_url)
+    let mut res = client.get(&search_url)
         .bearer_auth(&token)
         .send()
         .await
         .map_err(|e| format!("Failed to search Tidal: {:?}", e))?;
+
+    if res.status().as_u16() == 401 {
+        println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Search unauthorized (401). Forcing token refresh...{RESET}");
+        token = ensure_valid_token(&app_handle, &state, true).await?;
+        res = client.get(&search_url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to search Tidal retry: {:?}", e))?;
+    }
 
     if !res.status().is_success() {
         let status = res.status();
@@ -489,6 +518,7 @@ pub async fn tidal_search(
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct DecodedManifest {
     #[serde(rename = "mimeType")]
     mime_type: String,
@@ -507,52 +537,129 @@ pub async fn tidal_download(
     album: String,
     duration: u32,
 ) -> Result<bool, String> {
-    let token = ensure_valid_token(&app_handle, &state).await?;
-    let play_url = format!("https://api.tidal.com/v1/tracks/{}/playbackinfopostpaywall?playbackmode=STREAM&audioquality=LOSSLESS&assetpresentation=FULL", track_id);
-
-    println!("\n{BOLD}{YELLOW}┌────────────────────────────────────────────────────────┐{RESET}");
-    println!("{BOLD}{YELLOW}│  [TIDAL ENGINE] Initiating Lossless FLAC stream...     │{RESET}");
-    println!("{BOLD}{YELLOW}│  Track ID: {:<44}│{RESET}", track_id);
-    println!("{BOLD}{YELLOW}└────────────────────────────────────────────────────────┘{RESET}");
-
-    let _creds = TidalState::load_credentials(&app_handle);
+    let mut token = ensure_valid_token(&app_handle, &state, false).await?;
+    let qualities = vec!["HI_RES", "LOSSLESS", "HIGH", "LOW"];
+    let mut playback_info = None;
+    let mut last_error = "Failed to fetch any stream".to_string();
     let client = get_client();
-    let res = client.get(&play_url)
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to get stream: {:?}", e))?;
+    let mut token_refreshed = false;
 
-    if !res.status().is_success() {
+    for q in qualities {
+        let play_url = format!(
+            "https://api.tidal.com/v1/tracks/{}/playbackinfopostpaywall?playbackmode=STREAM&audioquality={}&assetpresentation=FULL",
+            track_id, q
+        );
+        println!("[TIDAL ENGINE] Requesting stream quality: {}", q);
+        let mut res = match client.get(&play_url).bearer_auth(&token).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = format!("Network error for quality {}: {:?}", q, e);
+                continue;
+            }
+        };
+
+        if res.status().as_u16() == 401 {
+            if !token_refreshed {
+                println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Request unauthorized (401). Forcing token refresh...{RESET}");
+                token_refreshed = true;
+                match ensure_valid_token(&app_handle, &state, true).await {
+                    Ok(new_token) => {
+                        token = new_token;
+                        match client.get(&play_url).bearer_auth(&token).send().await {
+                            Ok(r) => res = r,
+                            Err(e) => {
+                                last_error = format!("Network error after retry for quality {}: {:?}", q, e);
+                                continue;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        last_error = format!("Forced token refresh failed: {}", err);
+                        break;
+                    }
+                }
+            } else {
+                println!("{BOLD}{RED}⚠ [TIDAL ENGINE] Request still unauthorized (401) even after token refresh. Skipping quality {}.{RESET}", q);
+            }
+        }
+
         let status = res.status();
-        let body = res.text().await.unwrap_or_default();
-        return Err(format!("Tidal stream failed ({}): {}", status, body));
+        if status.is_success() {
+            if let Ok(json) = res.json::<serde_json::Value>().await {
+                if json["manifest"].as_str().is_some() {
+                    playback_info = Some(json);
+                    break;
+                } else {
+                    let err_msg = json["message"].as_str().unwrap_or("No manifest in success payload");
+                    last_error = format!("Quality {} rejected: {}", q, err_msg);
+                    println!("{BOLD}{YELLOW}[TIDAL ENGINE] Quality {} payload error: {}{RESET}", q, err_msg);
+                }
+            } else {
+                last_error = format!("Quality {} returned invalid JSON", q);
+            }
+        } else {
+            let err_body = res.text().await.unwrap_or_default();
+            last_error = format!("Quality {} returned HTTP {}: {}", q, status, err_body);
+            println!("{BOLD}{YELLOW}[TIDAL ENGINE] Quality {} rejected ({}): {}{RESET}", q, status, err_body);
+        }
     }
 
-    let playback_info = res.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
+    let playback_info = playback_info.ok_or_else(|| last_error)?;
     
     // 1. Get base64 encoded manifest
     let manifest_b64 = playback_info["manifest"].as_str()
         .ok_or_else(|| "Playback info did not contain manifest".to_string())?;
 
-    // 2. Decode base64 manifest
+    // 2. Decode base64 manifest robustly (trying both standard and URL-safe encodings)
     let decoded_bytes = base64::engine::general_purpose::STANDARD.decode(manifest_b64)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(manifest_b64))
         .map_err(|e| format!("Base64 decoding failed: {:?}", e))?;
 
     let decoded_str = String::from_utf8(decoded_bytes)
         .map_err(|e| format!("Invalid manifest encoding: {:?}", e))?;
 
-    let manifest_json: DecodedManifest = serde_json::from_str(&decoded_str)
-        .map_err(|e| format!("Parsing decoded manifest failed: {:?}", e))?;
+    // 3. Robustly parse the direct stream URL (supporting both JSON and MPEG-DASH XML formats)
+    let direct_url = if decoded_str.trim().starts_with('{') {
+        // Parse JSON manifest
+        let manifest_json: DecodedManifest = serde_json::from_str(&decoded_str)
+            .map_err(|e| format!("Parsing decoded JSON manifest failed: {:?}", e))?;
+        if manifest_json.urls.is_empty() {
+            return Err("Decoded JSON manifest contained zero direct audio links".to_string());
+        }
+        manifest_json.urls[0].clone()
+    } else if decoded_str.contains("<BaseURL>") {
+        // Parse XML manifest by extracting BaseURL
+        let start_tag = "<BaseURL>";
+        let end_tag = "</BaseURL>";
+        if let Some(start_idx) = decoded_str.find(start_tag) {
+            if let Some(end_idx) = decoded_str.find(end_tag) {
+                let url_content = &decoded_str[start_idx + start_tag.len()..end_idx];
+                url_content.replace("&amp;", "&").trim().to_string()
+            } else {
+                return Err("Decoded XML manifest was malformed (missing </BaseURL>)".to_string());
+            }
+        } else {
+            return Err("Decoded XML manifest did not contain a <BaseURL>".to_string());
+        }
+    } else {
+        return Err("Unknown manifest format (neither JSON nor XML with BaseURL)".to_string());
+    };
 
-    if manifest_json.urls.is_empty() {
-        return Err("Decoded manifest contained zero direct audio links".to_string());
-    }
+    let is_flac = decoded_str.to_lowercase().contains("flac");
+    let is_dolby = decoded_str.to_lowercase().contains("ec-3")
+        || decoded_str.to_lowercase().contains("ec3")
+        || decoded_str.to_lowercase().contains("eac3")
+        || decoded_str.to_lowercase().contains("atmos");
 
-    let direct_url = &manifest_json.urls[0];
-    let is_flac = manifest_json.mime_type.contains("flac");
+    let format_str = if is_flac {
+        "FLAC".to_string()
+    } else if is_dolby {
+        "DOLBY ATMOS".to_string()
+    } else {
+        "M4A".to_string()
+    };
 
-    println!("[TIDAL ENGINE] Stream details: MimeType = {}, Codec = FLAC", manifest_json.mime_type);
+    println!("[TIDAL ENGINE] Stream details: Codec = {}, Mime = {}", if is_flac { "FLAC" } else if is_dolby { "DOLBY ATMOS (E-AC-3)" } else { "AAC" }, if is_flac { "audio/flac" } else if is_dolby { "audio/eac3" } else { "audio/mp4" });
     println!("[TIDAL ENGINE] Direct CDN Stream URL acquired.");
 
     // Setup Target Path inside user's Music folder
@@ -560,7 +667,7 @@ pub async fn tidal_download(
         app_handle.path().audio_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     });
     
-    let tidal_dir = user_music.join("Aideo_Tidal");
+    let tidal_dir = user_music.join("Aideo Downloads");
     let _ = std::fs::create_dir_all(&tidal_dir);
 
     // Filter file name to be fully safe
@@ -572,11 +679,13 @@ pub async fn tidal_download(
 
     let app_handle_clone = app_handle.clone();
     let filename_clone = safe_filename.clone();
+    let track_id_clone = track_id.clone();
     let direct_url_clone = direct_url.clone();
     let db_clone = app_state.db.clone();
     let title_clone = title.clone();
     let artist_clone = artist.clone();
     let album_clone = album.clone();
+    let format_str_clone = format_str.clone();
 
     // Spawn downloader in background to keep UI fully responsive
     tokio::spawn(async move {
@@ -584,10 +693,55 @@ pub async fn tidal_download(
         if let Ok(dl_res) = client.get(&direct_url_clone).send().await {
             let status = dl_res.status();
             if status.is_success() {
-                if let Ok(bytes) = dl_res.bytes().await {
-                    if std::fs::write(&file_path, bytes).is_ok() {
+                let total_size = dl_res.content_length().unwrap_or(0);
+                let mut downloaded: u64 = 0;
+
+                if let Ok(mut file) = std::fs::File::create(&file_path) {
+                     use std::io::Write;
+                     let mut stream = dl_res.bytes_stream();
+                     let mut last_emit_time = std::time::Instant::now();
+                     let mut failed = false;
+
+                     while let Some(chunk_res) = stream.next().await {
+                        match chunk_res {
+                            Ok(chunk) => {
+                                if file.write_all(&chunk).is_err() {
+                                    failed = true;
+                                    break;
+                                }
+                                downloaded += chunk.len() as u64;
+
+                                // Throttle progress events to prevent flooding (max once every 150ms)
+                                if last_emit_time.elapsed() >= std::time::Duration::from_millis(150) {
+                                    let percent = if total_size > 0 {
+                                        (downloaded as f64 / total_size as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    let downloaded_mb = downloaded as f64 / (1024.0 * 1024.0);
+                                    let total_mb = total_size as f64 / (1024.0 * 1024.0);
+
+                                    let _ = app_handle_clone.emit("tidal-download-progress", serde_json::json!({
+                                        "filename": filename_clone.clone(),
+                                        "track_id": track_id_clone.clone(),
+                                        "percent": percent,
+                                        "downloaded_mb": downloaded_mb,
+                                        "total_mb": total_mb
+                                    }));
+                                    last_emit_time = std::time::Instant::now();
+                                }
+                            }
+                            Err(_) => {
+                                failed = true;
+                                break;
+                            }
+                        }
+                     }
+
+                     if !failed {
+                        let _ = file.flush();
                         println!("{BOLD}{GREEN}✔ [TIDAL MONITOR] Direct download completed!{RESET}");
-                        
+
                         // Auto-import completed file into library
                         if file_path.exists() {
                             let new_track = crate::db::Track {
@@ -597,23 +751,157 @@ pub async fn tidal_download(
                                 artist: Some(artist_clone.clone()),
                                 album: Some(album_clone.clone()),
                                 duration: Some(duration as f64),
-                                format: Some(extension.to_uppercase()),
+                                format: Some(format_str_clone),
                                 lyric_offset: 0,
+                                loved: Some(0),
                             };
                             let mut tracks = vec![new_track];
                             let mut conn = crate::safe_lock(&db_clone);
                             let _ = crate::db::save_tracks(&mut conn, &mut tracks);
                         }
-                        let _ = app_handle_clone.emit("tidal-download-complete", filename_clone.clone());
+
+                        // Emit final 100% progress
+                        let downloaded_mb = downloaded as f64 / (1024.0 * 1024.0);
+                        let _ = app_handle_clone.emit("tidal-download-progress", serde_json::json!({
+                            "filename": filename_clone.clone(),
+                            "track_id": track_id_clone.clone(),
+                            "percent": 100.0,
+                            "downloaded_mb": downloaded_mb,
+                            "total_mb": downloaded_mb
+                        }));
+
+                        let _ = app_handle_clone.emit("tidal-download-complete", serde_json::json!({
+                            "filename": filename_clone.clone(),
+                            "track_id": track_id_clone.clone()
+                        }));
                         return;
-                    }
+                     }
                 }
             }
         }
-        let _ = app_handle_clone.emit("tidal-download-error", filename_clone.clone());
+        let _ = app_handle_clone.emit("tidal-download-error", serde_json::json!({
+            "filename": filename_clone.clone(),
+            "track_id": track_id_clone.clone()
+        }));
     });
 
     Ok(true)
+}
+
+
+#[tauri::command]
+pub async fn tidal_get_stream_url(
+    state: State<'_, Arc<TidalState>>,
+    app_handle: AppHandle,
+    track_id: String,
+) -> Result<String, String> {
+    let mut token = ensure_valid_token(&app_handle, &state, false).await?;
+    let qualities = vec!["HI_RES", "LOSSLESS", "HIGH", "LOW"];
+    let mut playback_info = None;
+    let mut last_error = "Failed to fetch any stream".to_string();
+    let client = get_client();
+    let mut token_refreshed = false;
+
+    for q in qualities {
+        let play_url = format!(
+            "https://api.tidal.com/v1/tracks/{}/playbackinfopostpaywall?playbackmode=STREAM&audioquality={}&assetpresentation=FULL",
+            track_id, q
+        );
+        println!("[TIDAL ENGINE] Requesting stream quality for preview: {}", q);
+        let mut res = match client.get(&play_url).bearer_auth(&token).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = format!("Network error for quality {}: {:?}", q, e);
+                continue;
+            }
+        };
+
+        if res.status().as_u16() == 401 {
+            if !token_refreshed {
+                println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Preview unauthorized (401). Forcing token refresh...{RESET}");
+                token_refreshed = true;
+                match ensure_valid_token(&app_handle, &state, true).await {
+                    Ok(new_token) => {
+                        token = new_token;
+                        match client.get(&play_url).bearer_auth(&token).send().await {
+                            Ok(r) => res = r,
+                            Err(e) => {
+                                last_error = format!("Network error after retry for quality {}: {:?}", q, e);
+                                continue;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        last_error = format!("Forced token refresh failed: {}", err);
+                        break;
+                    }
+                }
+            } else {
+                println!("{BOLD}{RED}⚠ [TIDAL ENGINE] Preview still unauthorized (401) even after token refresh. Skipping quality {}.{RESET}", q);
+            }
+        }
+
+        let status = res.status();
+        if status.is_success() {
+            if let Ok(json) = res.json::<serde_json::Value>().await {
+                if json["manifest"].as_str().is_some() {
+                    playback_info = Some(json);
+                    break;
+                } else {
+                    let err_msg = json["message"].as_str().unwrap_or("No manifest in success payload");
+                    last_error = format!("Quality {} rejected: {}", q, err_msg);
+                }
+            } else {
+                last_error = format!("Quality {} returned invalid JSON", q);
+            }
+        } else {
+            let err_body = res.text().await.unwrap_or_default();
+            last_error = format!("Quality {} returned HTTP {}: {}", q, status, err_body);
+        }
+    }
+
+    let playback_info = playback_info.ok_or_else(|| last_error)?;
+    
+    // 1. Get base64 encoded manifest
+    let manifest_b64 = playback_info["manifest"].as_str()
+        .ok_or_else(|| "Playback info did not contain manifest".to_string())?;
+
+    // 2. Decode base64 manifest robustly (trying both standard and URL-safe encodings)
+    let decoded_bytes = base64::engine::general_purpose::STANDARD.decode(manifest_b64)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(manifest_b64))
+        .map_err(|e| format!("Base64 decoding failed: {:?}", e))?;
+
+    let decoded_str = String::from_utf8(decoded_bytes)
+        .map_err(|e| format!("Invalid manifest encoding: {:?}", e))?;
+
+    // 3. Robustly parse the direct stream URL (supporting both JSON and MPEG-DASH XML formats)
+    let direct_url = if decoded_str.trim().starts_with('{') {
+        // Parse JSON manifest
+        let manifest_json: DecodedManifest = serde_json::from_str(&decoded_str)
+            .map_err(|e| format!("Parsing decoded JSON manifest failed: {:?}", e))?;
+        if manifest_json.urls.is_empty() {
+            return Err("Decoded JSON manifest contained zero direct audio links".to_string());
+        }
+        manifest_json.urls[0].clone()
+    } else if decoded_str.contains("<BaseURL>") {
+        // Parse XML manifest by extracting BaseURL
+        let start_tag = "<BaseURL>";
+        let end_tag = "</BaseURL>";
+        if let Some(start_idx) = decoded_str.find(start_tag) {
+            if let Some(end_idx) = decoded_str.find(end_tag) {
+                let url_content = &decoded_str[start_idx + start_tag.len()..end_idx];
+                url_content.replace("&amp;", "&").trim().to_string()
+            } else {
+                return Err("Decoded XML manifest was malformed (missing </BaseURL>)".to_string());
+            }
+        } else {
+            return Err("Decoded XML manifest did not contain a <BaseURL>".to_string());
+        }
+    } else {
+        return Err("Unknown manifest format (neither JSON nor XML with BaseURL)".to_string());
+    };
+
+    Ok(direct_url)
 }
 
 #[tauri::command]
@@ -626,4 +914,172 @@ pub async fn tidal_logout(
     *state.logged_in.lock().unwrap() = false;
     println!("{BOLD}{YELLOW}[TIDAL ENGINE] Logged out of Tidal successfully.{RESET}");
     Ok(true)
+}
+
+fn clean_title(title: &str) -> String {
+    let mut title_lower = title.to_lowercase();
+    if let Ok(re) = regex::Regex::new(r"[\(\[][^\)\]]+[\)\]]") {
+        title_lower = re.replace_all(&title_lower, "").into_owned();
+    }
+    if let Some(idx) = title_lower.find(" feat.") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" ft.") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" featuring") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" official audio") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" official video") { title_lower.truncate(idx); }
+    title_lower.trim().to_string()
+}
+
+fn is_semantic_noise(title: &str, seed_title: &str) -> bool {
+    let title_lower = title.to_lowercase();
+    let seed_lower = seed_title.to_lowercase();
+    let noise_words = ["instrumental", "karaoke", "backing track", "tribute", "cover", "acapella", "8d"];
+    for &word in &noise_words {
+        if title_lower.contains(word) && !seed_lower.contains(word) {
+            return true;
+        }
+    }
+    false
+}
+
+fn fuzzy_title_similarity(s1: &str, s2: &str) -> f64 {
+    let s1_clean = clean_title(s1);
+    let s2_clean = clean_title(s2);
+    if s1_clean == s2_clean {
+        return 1.0;
+    }
+    let s1_chars: Vec<char> = s1_clean.chars().collect();
+    let s2_chars: Vec<char> = s2_clean.chars().collect();
+    if s1_chars.len() < 2 || s2_chars.len() < 2 {
+        return if s1_clean == s2_clean { 1.0 } else { 0.0 };
+    }
+
+    let mut s1_bigrams = std::collections::HashSet::new();
+    for i in 0..s1_chars.len() - 1 {
+        s1_bigrams.insert((s1_chars[i], s1_chars[i+1]));
+    }
+
+    let mut s2_bigrams = std::collections::HashSet::new();
+    for i in 0..s2_chars.len() - 1 {
+        s2_bigrams.insert((s2_chars[i], s2_chars[i+1]));
+    }
+
+    let intersection = s1_bigrams.intersection(&s2_bigrams).count();
+    let total = s1_bigrams.len() + s2_bigrams.len();
+    if total == 0 {
+        return 0.0;
+    }
+    (2.0 * intersection as f64) / total as f64
+}
+
+#[tauri::command]
+pub async fn get_tidal_autoplay_recommendations(
+    state: State<'_, Arc<TidalState>>,
+    app_handle: AppHandle,
+    artist: String,
+    title: String,
+) -> Result<Vec<TidalTrackResult>, String> {
+    println!("[tidal] Aideo Autoplay Engine v2: Resolving Tidal Radio for '{}' by '{}'", title, artist);
+    
+    let query = format!("{} Radio", artist);
+    let search_results = tidal_search(state, app_handle, query, None).await;
+
+    match search_results {
+        Ok(tracks) => {
+            let artist_lower = artist.to_lowercase();
+
+            let mut filtered_tracks = Vec::new();
+            let mut seen_titles = std::collections::HashSet::new();
+
+            for track in tracks {
+                // 0. Instrumental/Third-Party Filter
+                if crate::youtube::is_third_party_or_instrumental(&track.title, &track.artist) {
+                    println!("[autoplay-filter] Drop instrumental/third-party track: '{}' by '{}'", track.title, track.artist);
+                    continue;
+                }
+
+                // 1. Semantic Noise Filter
+                if is_semantic_noise(&track.title, &title) {
+                    println!("[autoplay-filter] Drop semantic noise: '{}' by '{}'", track.title, track.artist);
+                    continue;
+                }
+
+                // 2. Fuzzy Title De-duplication (Similarity >70% against seed title)
+                let sim = fuzzy_title_similarity(&track.title, &title);
+                if sim > 0.70 {
+                    println!("[autoplay-filter] Drop duplicate song: '{}' (Similarity: {:.2}%)", track.title, sim * 100.0);
+                    continue;
+                }
+
+                // 3. Track Duration Filter (Drop >15 mins / 900s)
+                if track.duration > 900 {
+                    println!("[autoplay-filter] Drop long-duration track: '{}' ({}s)", track.title, track.duration);
+                    continue;
+                }
+
+                // 4. De-duplicate clean titles inside the recommended list itself
+                let clean = clean_title(&track.title);
+                if seen_titles.contains(&clean) {
+                    continue;
+                }
+                seen_titles.insert(clean);
+
+                filtered_tracks.push(track);
+            }
+
+            // 5. Segregate same-artist vs discovery pools
+            let mut same_artist_pool = Vec::new();
+            let mut discovery_pool = Vec::new();
+
+            for track in filtered_tracks {
+                let candidate_artist_lower = track.artist.to_lowercase();
+                if candidate_artist_lower.contains(&artist_lower) || artist_lower.contains(&candidate_artist_lower) {
+                    same_artist_pool.push(track);
+                } else {
+                    discovery_pool.push(track);
+                }
+            }
+
+            // 6. Interleave and build the final queue (limiting same-artist consecutive repetition)
+            let mut final_queue = Vec::new();
+            
+            // Smooth transition: Start with 1 same-artist track if available
+            if let Some(first_same) = same_artist_pool.pop() {
+                final_queue.push(first_same);
+            }
+
+            // Interleave remaining tracks (capping same artist representation in the first few tracks)
+            let mut same_artist_count = final_queue.len();
+            
+            let mut discovery_iter = discovery_pool.into_iter();
+            let mut same_artist_iter = same_artist_pool.into_iter();
+
+            while final_queue.len() < 8 {
+                let mut added = false;
+                if let Some(disc_track) = discovery_iter.next() {
+                    final_queue.push(disc_track);
+                    added = true;
+                }
+
+                let same_artist_limit = if discovery_iter.len() == 0 { 8 } else { 4 };
+                if final_queue.len() < 8 && same_artist_count < same_artist_limit {
+                    if let Some(same_track) = same_artist_iter.next() {
+                        final_queue.push(same_track);
+                        same_artist_count += 1;
+                        added = true;
+                    }
+                }
+
+                if !added {
+                    break;
+                }
+            }
+
+            println!("[autoplay] Engine v2 finalized Tidal queue with {} highly matching tracks.", final_queue.len());
+            Ok(final_queue)
+        }
+        Err(e) => {
+            eprintln!("[tidal] Autoplay search failed: {}", e);
+            Err(e)
+        }
+    }
 }

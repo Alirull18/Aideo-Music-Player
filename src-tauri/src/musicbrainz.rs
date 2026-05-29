@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde_json::Value;
 
-const USER_AGENT: &str = "AideoMusicPlayer/0.4.5 ( https://github.com/Alirull18/Aideo-Music-Player )";
+const USER_AGENT: &str = concat!("AideoMusicPlayer/", env!("CARGO_PKG_VERSION"), " ( https://github.com/Alirull18/Aideo-Music-Player )");
 
 pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String> {
     let mut clean_t = title.to_string();

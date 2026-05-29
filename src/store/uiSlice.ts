@@ -7,8 +7,17 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showProMode: false,
   showControlCenter: false,
   showSettings: false,
+  sidebarLastfmVisible: localStorage.getItem('aideo-sidebar-lastfm') !== 'false',
+  sidebarListenbrainzVisible: localStorage.getItem('aideo-sidebar-listenbrainz') !== 'false',
+  liquidBackgroundEnabled: localStorage.getItem('aideo-liquid-bg') !== 'false',
+  showSmartMixWidget: localStorage.getItem('aideo-show-smart-mix') !== 'false',
   playbackError: null,
   playbackSuccess: null,
+  appMode: (localStorage.getItem('aideo-app-mode') as 'local' | 'hybrid') || 'hybrid',
+  onboardingCompleted: localStorage.getItem('aideo-onboarding-completed') === 'true',
+  showOnboarding: localStorage.getItem('aideo-onboarding-completed') !== 'true',
+  notificationsEnabled: localStorage.getItem('aideo-notifications-enabled') !== 'false',
+  developerNotifications: localStorage.getItem('aideo-developer-notifications') === 'true',
   customPrompt: {
     open: false,
     title: '',
@@ -22,6 +31,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     customPrompt: { ...s.customPrompt, ...prompt }
   })),
 
+  coverArtModalTrack: null,
+  setCoverArtModalTrack: (track: any) => set({ coverArtModalTrack: track }),
+
   setPlaybackError: (err: string | null) => {
     set({ playbackError: err });
     if (err) setTimeout(() => get().setPlaybackError(null), 5000);
@@ -34,15 +46,64 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   setView: (view: any) => set({ view }),
 
+  toggleNotificationsEnabled: () => {
+    const next = !get().notificationsEnabled;
+    localStorage.setItem('aideo-notifications-enabled', String(next));
+    set({ notificationsEnabled: next });
+  },
+
+  toggleDeveloperNotifications: () => {
+    const next = !get().developerNotifications;
+    localStorage.setItem('aideo-developer-notifications', String(next));
+    set({ developerNotifications: next });
+  },
+
+  setAppMode: (mode: 'local' | 'hybrid') => {
+    localStorage.setItem('aideo-app-mode', mode);
+    set({ appMode: mode });
+  },
+
+  setOnboardingCompleted: (completed: boolean) => {
+    localStorage.setItem('aideo-onboarding-completed', String(completed));
+    set({ onboardingCompleted: completed });
+  },
+
+  setShowOnboarding: (show: boolean) => set({ showOnboarding: show }),
+
   toggleSettings: () => set(s => ({ showSettings: !s.showSettings })),
 
   toggleProMode: () => set(s => ({ showProMode: !s.showProMode })),
 
   toggleControlCenter: () => set(s => ({ showControlCenter: !s.showControlCenter })),
 
+  toggleSidebarLastfmVisible: () => {
+    const next = !get().sidebarLastfmVisible;
+    localStorage.setItem('aideo-sidebar-lastfm', String(next));
+    set({ sidebarLastfmVisible: next });
+  },
+
+  toggleSidebarListenbrainzVisible: () => {
+    const next = !get().sidebarListenbrainzVisible;
+    localStorage.setItem('aideo-sidebar-listenbrainz', String(next));
+    set({ sidebarListenbrainzVisible: next });
+  },
+
+  toggleLiquidBackground: () => {
+    const next = !get().liquidBackgroundEnabled;
+    localStorage.setItem('aideo-liquid-bg', String(next));
+    set({ liquidBackgroundEnabled: next });
+  },
+
+  toggleSmartMixWidget: () => {
+    const next = !get().showSmartMixWidget;
+    localStorage.setItem('aideo-show-smart-mix', String(next));
+    set({ showSmartMixWidget: next });
+  },
+
   resetProMode: () => {
     get().setDSP({
       enabled: false,
+      low_spec_mode: false,
       width: 1.0,
       upsample_rate: 0,
       dither: false,
@@ -51,10 +112,15 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
       eq_graphic_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       eq_parametric_bands: [
         { freq: 80, gain: 0, q: 0.7, band_type: 'lowshelf' },
+        { freq: 120, gain: 0, q: 1.0, band_type: 'peaking' },
         { freq: 240, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 400, gain: 0, q: 1.0, band_type: 'peaking' },
         { freq: 750, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 1500, gain: 0, q: 1.0, band_type: 'peaking' },
         { freq: 2200, gain: 0, q: 1.0, band_type: 'peaking' },
-        { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' }
+        { freq: 4000, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' },
+        { freq: 10000, gain: 0, q: 0.7, band_type: 'peaking' }
       ],
       crossfeed_enabled: false,
       crossfeed_level: -6.0,

@@ -1,15 +1,17 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
-import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Volume2, SlidersHorizontal, X, ListMusic, Activity } from 'lucide-react';
+import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { fmt, baseName, getStreamName } from '../utils';
 
 export function PlayerBar() {
   const {
-    view, tracks, playback, currentDevice, coverArt, lyrics, lyricOffset,
+    view, playback, currentDevice, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
-    playNext, playPrev, shuffle, toggleShuffle, dsp, showProMode, toggleProMode
+    playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
+    dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
+    autoplayEnabled, toggleAutoplay
   } = useStore();
 
   const activeLyric = useMemo(() => {
@@ -22,7 +24,7 @@ export function PlayerBar() {
     return current;
   }, [lyrics, playback.position_secs, lyricOffset]);
 
-  const current = tracks.find(t => t.path === playback.current_track);
+  const current = currentTrack;
   const duration = current?.duration ?? 0;
   const pct = duration > 0 ? (playback.position_secs / duration) * 100 : 0;
 
@@ -37,28 +39,61 @@ export function PlayerBar() {
       <div className="pb-left">
         <div className="pb-thumb" onClick={() => setView('nowplaying')}>
           <img src={coverArt || defaultCover} alt="" />
-          {playback.current_track?.startsWith('http') && (
+          {playback.current_track?.startsWith('http') && !duration && (
             <div className="stream-badge-mini">LIVE</div>
           )}
         </div>
         <div className="pb-info" onClick={() => setView('nowplaying')}>
-          <div className="pb-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : (current?.title || baseName(playback.current_track))}
-            {playback.current_track?.startsWith('http') && (
+          <div className="pb-title" style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '240px', overflow: 'hidden' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1 }}>
+              {current?.title || (playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : baseName(playback.current_track))}
+            </span>
+            {current?.format && (
+              <span 
+                className={`quality-tag ${
+                  current.format.toLowerCase() === 'flac' || current.format.toLowerCase() === 'wav' ? 'high-res' : ''
+                } ${
+                  current.format.toLowerCase().includes('dsf') || current.format.toLowerCase().includes('dff') || current.format.toLowerCase().includes('dsd') ? 'dsd-gold' : ''
+                } ${
+                  current.format.toLowerCase() === 'dolby' || current.format.toLowerCase() === 'atmos' || current.format.toLowerCase() === 'dolby atmos' ? 'dolby-atmos' : ''
+                }`} 
+                style={{ 
+                  fontSize: 8, 
+                  padding: '1px 5px', 
+                  flexShrink: 0,
+                  background: (current.format.toLowerCase().includes('dsf') || current.format.toLowerCase().includes('dff') || current.format.toLowerCase().includes('dsd'))
+                    ? 'linear-gradient(135deg, #FFE082, #FFB300, #FF8F00)'
+                    : undefined,
+                  boxShadow: (current.format.toLowerCase().includes('dsf') || current.format.toLowerCase().includes('dff') || current.format.toLowerCase().includes('dsd'))
+                    ? '0 0 10px rgba(255, 179, 0, 0.45)'
+                    : undefined,
+                  border: (current.format.toLowerCase().includes('dsf') || current.format.toLowerCase().includes('dff') || current.format.toLowerCase().includes('dsd'))
+                    ? '1px solid rgba(255, 224, 130, 0.4)'
+                    : undefined,
+                  color: (current.format.toLowerCase().includes('dsf') || current.format.toLowerCase().includes('dff') || current.format.toLowerCase().includes('dsd'))
+                    ? '#0a0a0f'
+                    : undefined,
+                  fontWeight: (current.format.toLowerCase().includes('dsf') || current.format.toLowerCase().includes('dff') || current.format.toLowerCase().includes('dsd'))
+                    ? 800
+                    : undefined
+                }}
+              >
+                {current.format.toUpperCase()}
+              </span>
+            )}
+            {playback.current_track?.startsWith('http') && !duration && (
               <motion.div 
                 animate={{ opacity: [1, 0.4, 1] }} 
                 transition={{ duration: 1.5, repeat: Infinity }}
-                style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 8px #ef4444' }} 
+                style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', boxShadow: '0 0 8px #ef4444', flexShrink: 0 }} 
               />
             )}
           </div>
           <div className="pb-artist" style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: 0.6 }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {playback.current_track?.startsWith('http')
-                ? (getStreamName(playback.current_track) === playback.current_track ? 'Direct URL Stream' : playback.current_track)
-                : (current?.artist || '—')}
+              {current?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—')}
             </span>
-            {playback.current_track?.startsWith('http') && (
+            {playback.current_track?.startsWith('http') && !duration && (
               <button 
                 className="icon-btn-danger" 
                 title="Stop and Close Stream"
@@ -95,10 +130,16 @@ export function PlayerBar() {
           <button className="pb-btn" onClick={stopTrack} title="Stop">
             <Square size={14} fill="currentColor" />
           </button>
+          <button className={`pb-btn ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title={`Repeat: ${repeat === 'none' ? 'Off' : repeat === 'all' ? 'All' : 'One'}`}>
+            {repeat === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
+          </button>
+          <button className={`pb-btn ${autoplayEnabled ? 'active autoplay-active' : ''}`} onClick={toggleAutoplay} title={`Endless Autoplay (Radio): ${autoplayEnabled ? 'On' : 'Off'}`} style={{ marginLeft: 4 }}>
+            <InfinityIcon size={18} />
+          </button>
         </div>
         <div className="progress-row">
           <span className="prog-time">{fmt(playback.position_secs)}</span>
-          {playback.current_track?.startsWith('http') ? (
+          {playback.current_track?.startsWith('http') && !duration ? (
             <div className="prog-track stream-active">
               <motion.div 
                 className="stream-progress-fill"
@@ -114,7 +155,7 @@ export function PlayerBar() {
               <div className="prog-fill" style={{ width: `${pct}%` }} />
             </div>
           )}
-          <span className="prog-time">{playback.current_track?.startsWith('http') ? 'LIVE' : fmt(duration)}</span>
+          <span className="prog-time">{playback.current_track?.startsWith('http') && !duration ? 'LIVE' : fmt(duration)}</span>
         </div>
       </div>
 
@@ -136,14 +177,17 @@ export function PlayerBar() {
           <input className="vol-slider" type="range" min={0} max={1} step={0.01} style={{ width: 80 }}
             value={playback.volume} onChange={e => setVolume(+e.target.value)} />
         </div>
-        <button className={`pb-btn ${useStore.getState().showQueue ? 'active' : ''}`} onClick={() => useStore.getState().toggleQueue()} title="Up Next (Queue)">
+        <button className={`pb-btn ${showQueue ? 'active' : ''}`} onClick={toggleQueue} title="Up Next (Queue)">
           <ListMusic size={18} />
         </button>
-        <button className={`pb-btn ${showProMode ? 'active' : ''}`} onClick={() => toggleProMode()} title="Aideo Pro Audio DSP Console">
+        <button className={`pb-btn ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView(view === 'aideo_lab' ? 'nowplaying' : 'aideo_lab')} title="Aideo Lab DSP Laboratory">
           <Activity size={18} />
         </button>
-        <button className="pb-btn" onClick={() => useStore.getState().toggleControlCenter()} title="Audio Engine Settings">
+        <button className="pb-btn" onClick={toggleControlCenter} title="Audio Engine Settings">
           <SlidersHorizontal size={18} />
+        </button>
+        <button className="pb-btn" onClick={() => setView('fullscreen')} title="Enter Theater Fullscreen">
+          <Maximize2 size={18} />
         </button>
       </div>
     </div>

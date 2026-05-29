@@ -3,21 +3,20 @@ import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, X } from 'lucide-react';
-
-function fmt(s: number | null) {
-  if (!s || isNaN(s) || s < 0) return '0:00';
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-}
-
-function baseName(p: string | null) {
-  return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
-}
+import { fmt, baseName } from '../utils';
 
 interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; cover_url?: string; }
 
 export function LyricsPanel() {
-  const { lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, tracks, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover, setCustomPrompt } = useStore();
+  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover, setCustomPrompt } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [lyricMode, setLyricMode] = useState<'lrc' | 'text'>(() => {
+    return (localStorage.getItem('aideo-lyric-mode') as 'lrc' | 'text') || 'lrc';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('aideo-lyric-mode', lyricMode);
+  }, [lyricMode]);
   const [userScrolling, setUserScrolling] = useState(false);
   const userScrollTimer = useRef<number | null>(null);
   const [showFinder, setShowFinder] = useState(false);
@@ -25,8 +24,18 @@ export function LyricsPanel() {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [editContent, setEditContent] = useState('');
+  const [showFallbackSearch, setShowFallbackSearch] = useState(false);
 
-  const currentTrack = tracks.find(t => t.path === playback.current_track);
+  useEffect(() => {
+    if (lyricStatus === 'loading') {
+      const timer = setTimeout(() => {
+        setShowFallbackSearch(true);
+      }, 10000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowFallbackSearch(false);
+    }
+  }, [lyricStatus]);
 
   const activeIdx = useMemo(() => {
     if (!lyrics.length) return -1;
@@ -39,7 +48,7 @@ export function LyricsPanel() {
   }, [lyrics, playback.position_secs, lyricOffset]);
 
   useEffect(() => {
-    if (userScrolling || !scrollRef.current || activeIdx === -1) return;
+    if (lyricMode === 'text' || userScrolling || !scrollRef.current || activeIdx === -1) return;
     const el = scrollRef.current.querySelector(`[data-idx="${activeIdx}"]`) as HTMLElement | null;
     if (el) {
       const container = scrollRef.current;
@@ -154,10 +163,16 @@ export function LyricsPanel() {
         >
           {isTranslating ? 'Working…' : 'Romaji'}
         </button>
+        <button
+          className="lyric-btn"
+          onClick={() => setLyricMode(prev => prev === 'lrc' ? 'text' : 'lrc')}
+        >
+          {lyricMode === 'lrc' ? '📄 Plain Text' : '⏱️ Synced LRC'}
+        </button>
       </div>
 
       {/* Lyrics scroll */}
-      <div className="lyrics-fade-wrap">
+      <div className={`lyrics-fade-wrap ${lyricMode === 'text' ? 'plain-mode' : ''}`}>
         <div className="lyrics-scroll" ref={scrollRef} onScroll={onScroll}>
           <div className="lyric-spacer-top" />
           {lyrics.length === 0 ? (
@@ -166,14 +181,54 @@ export function LyricsPanel() {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
                   <RefreshCw size={32} className="spin" style={{ color: 'var(--accent)' }} />
                   <div style={{ fontSize: 14 }}>Fetching lyrics...</div>
+                  {showFallbackSearch && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, marginTop: 12 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                        Taking longer than expected. Search online or edit:
+                      </div>
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => doSearch()}>
+                          🔍 Auto
+                        </button>
+                        <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => {
+                          setCustomPrompt({
+                            open: true,
+                            title: 'Manual Lyric Search',
+                            placeholder: 'Enter Artist and Track Name...',
+                            initialValue: `${currentTrack?.artist ?? ''} ${currentTrack?.title ?? ''}`.trim(),
+                            actionLabel: 'Search Online',
+                            onSubmit: (val) => doSearch(val)
+                          });
+                        }}>
+                          🔍 Manual
+                        </button>
+                        <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => {
+                          setEditContent('');
+                          setShowEditor(true);
+                        }}>
+                          ✍️ Studio
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : lyricStatus === 'not_found' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
                   <X size={32} style={{ color: '#ef4444' }} />
-                  <div style={{ fontSize: 14 }}>No lyrics found in file.</div>
+                  <div style={{ fontSize: 14 }}>No lyrics found.</div>
                   <div style={{ display: 'flex', gap: 12 }}>
-                    <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => doSearch()}>Try Online Finder</button>
-                    <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => { setEditContent(''); setShowEditor(true); }}>Open Studio</button>
+                    <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => doSearch()}>🔍 Auto</button>
+                    <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => {
+                      setCustomPrompt({
+                        open: true,
+                        title: 'Manual Lyric Search',
+                        placeholder: 'Enter Artist and Track Name...',
+                        initialValue: `${currentTrack?.artist ?? ''} ${currentTrack?.title ?? ''}`.trim(),
+                        actionLabel: 'Search Online',
+                        onSubmit: (val) => doSearch(val)
+                      });
+                    }}>🔍 Manual</button>
+                    <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => { setEditContent(''); setShowEditor(true); }}>✍️ Studio</button>
                   </div>
                 </div>
               ) : (
@@ -182,8 +237,17 @@ export function LyricsPanel() {
             </div>
           ) : (
             lyrics.map((l, i) => (
-              <div key={i} data-idx={i} className={`lyric-line${i === activeIdx ? ' active' : ''}`}
-                onClick={() => seek(l.time_secs - lyricOffset / 1000)}>
+              <div 
+                key={i} 
+                data-idx={i} 
+                className={`lyric-line${(lyricMode === 'lrc' && i === activeIdx) ? ' active' : ''}`}
+                style={{ cursor: lyricMode === 'lrc' ? 'pointer' : 'default' }}
+                onClick={() => {
+                  if (lyricMode === 'lrc') {
+                    seek(l.time_secs - lyricOffset / 1000);
+                  }
+                }}
+              >
                 <div>{l.text || '♪'}</div>
                 {showRomaji && l.romaji && l.romaji !== l.text && <div className="lyric-romaji">{l.romaji}</div>}
                 {l.translation && <div className="lyric-translation">{l.translation}</div>}

@@ -1,9 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../store';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Music2, Sparkles, DownloadCloud } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, DownloadCloud, Activity } from 'lucide-react';
 
 export function Sidebar() {
-  const { view, setView, toggleSettings, playlists, currentPlaylist, loadPlaylistTracks, loadLibrary, createPlaylist, deletePlaylist, setCustomPrompt, setPlaybackError } = useStore();
+  const { 
+    view, 
+    setView, 
+    playlists, 
+    currentPlaylist, 
+    loadPlaylistTracks, 
+    loadLibrary, 
+    createPlaylist, 
+    deletePlaylist, 
+    setCustomPrompt, 
+    setPlaybackError,
+    lastfmSessionKey,
+    listenbrainzToken,
+    sidebarLastfmVisible,
+    sidebarListenbrainzVisible,
+    appMode
+  } = useStore();
+
+  useEffect(() => {
+    if (appMode === 'local' && (view === 'aideo' || view === 'aideo_search')) {
+      setView('library');
+    }
+  }, [appMode, view, setView]);
   const [creating, setCreating] = useState(false);
   const [newPName, setNewPName] = useState('');
 
@@ -32,11 +54,18 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')}>
-        <Sparkles size={18} /> Aideo
-      </div>
-      <div className={`nav-item ${view === 'aideo_search' ? 'active' : ''}`} onClick={() => setView('aideo_search')}>
-        <DownloadCloud size={18} /> Aideo Search
+      {appMode === 'hybrid' && (
+        <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')}>
+          <Sparkles size={18} /> Aideo
+        </div>
+      )}
+      {appMode === 'hybrid' && (
+        <div className={`nav-item ${view === 'aideo_search' ? 'active' : ''}`} onClick={() => setView('aideo_search')}>
+          <DownloadCloud size={18} /> Aideo Search
+        </div>
+      )}
+      <div className={`nav-item ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView('aideo_lab')}>
+        <Activity size={18} /> Aideo Lab
       </div>
       <div className={`nav-item ${view === 'library' && !currentPlaylist ? 'active' : ''}`} onClick={goLibrary}>
         <Library size={18} /> Library
@@ -44,13 +73,16 @@ export function Sidebar() {
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
         <Headphones size={18} /> Now Playing
       </div>
-
-      <div className={`nav-item ${view === 'tidal' ? 'active' : ''}`} onClick={() => setView('tidal')}>
-        <Music2 size={18} /> Tidal (Hi-Res)
-      </div>
-      <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')}>
-        <Radio size={18} /> Last.fm Stats
-      </div>
+      {lastfmSessionKey && sidebarLastfmVisible && (
+        <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')}>
+          <Radio size={18} /> Last.fm Stats
+        </div>
+      )}
+      {listenbrainzToken && sidebarListenbrainzVisible && (
+        <div className={`nav-item ${view === 'listenbrainz' ? 'active' : ''}`} onClick={() => setView('listenbrainz')}>
+          <Radio size={18} style={{ color: 'rgba(235, 116, 59, 0.95)' }} /> ListenBrainz
+        </div>
+      )}
 
       {/* Playlists */}
       <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
@@ -107,29 +139,31 @@ export function Sidebar() {
       </div>
 
       {/* Online Tools */}
-      <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 8 }}>Online Tools</span>
-        <div className="nav-item" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => {
-          setCustomPrompt({
-            open: true,
-            title: 'Stream Radio / URL',
-            placeholder: 'Enter http:// or https:// stream URL...',
-            actionLabel: 'Play Stream',
-            onSubmit: async (url) => {
-              if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
-                useStore.getState().playStream(url);
-              } else {
-                setPlaybackError('Invalid stream URL. Must start with http:// or https://');
+      {appMode === 'hybrid' && (
+        <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 8 }}>Online Tools</span>
+          <div className="nav-item" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => {
+            setCustomPrompt({
+              open: true,
+              title: 'Stream Radio / URL',
+              placeholder: 'Enter http:// or https:// stream URL...',
+              actionLabel: 'Play Stream',
+              onSubmit: async (url) => {
+                if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                  useStore.getState().playStream(url);
+                } else {
+                  setPlaybackError('Invalid stream URL. Must start with http:// or https://');
+                }
               }
-            }
-          });
-        }}>
-          <Radio size={16} /> Play Stream URL
+            });
+          }}>
+            <Radio size={16} /> Play Stream URL
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Settings */}
-      <div style={{ marginTop: 'auto' }} className={`nav-item`} onClick={toggleSettings}>
+      <div style={{ marginTop: 'auto' }} className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
         <Settings size={18} /> Settings
       </div>
     </aside>

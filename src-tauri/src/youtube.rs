@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::AppState;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct YoutubeTrack {
     pub id: String,
     pub title: String,
@@ -10,6 +10,8 @@ pub struct YoutubeTrack {
     pub cover_url: Option<String>,
     pub duration_raw: String,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation_source: Option<String>,
 }
 
 fn is_duration(s: &str) -> bool {
@@ -81,6 +83,8 @@ fn find_list_items(val: &serde_json::Value, items: &mut Vec<serde_json::Value>) 
     }
 }
 
+const FALLBACK_INNERTUBE_KEY: &str = "AIzaSyAO_Cq3eb5CuuaQSS9g-U37stSrb7Sg5gQ";
+
 async fn fetch_innertube_key() -> String {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -88,7 +92,10 @@ async fn fetch_innertube_key() -> String {
 
     let client = match client {
         Ok(c) => c,
-        Err(_) => return "AIzaSyAO_Cq3eb5CuuaQSS9g-U37stSrb7Sg5gQ".to_string(),
+        Err(_) => {
+            println!("⚠ [YOUTUBE ENGINE] Failed to build reqwest client. Using fallback InnerTube API key.");
+            return FALLBACK_INNERTUBE_KEY.to_string();
+        }
     };
 
     let response = client.get("https://music.youtube.com/")
@@ -98,7 +105,10 @@ async fn fetch_innertube_key() -> String {
 
     let html = match response {
         Ok(res) => res.text().await.unwrap_or_default(),
-        Err(_) => return "AIzaSyAO_Cq3eb5CuuaQSS9g-U37stSrb7Sg5gQ".to_string(),
+        Err(_) => {
+            println!("⚠ [YOUTUBE ENGINE] Failed to connect to music.youtube.com. Using fallback InnerTube API key.");
+            return FALLBACK_INNERTUBE_KEY.to_string();
+        }
     };
 
     let re = regex::Regex::new(r#""INNERTUBE_API_KEY"\s*:\s*"([^"]+)""#).unwrap();
@@ -111,7 +121,8 @@ async fn fetch_innertube_key() -> String {
         return caps.get(1).unwrap().as_str().to_string();
     }
 
-    "AIzaSyAO_Cq3eb5CuuaQSS9g-U37stSrb7Sg5gQ".to_string()
+    println!("⚠ [YOUTUBE ENGINE] Could not extract InnerTube API key from music.youtube.com HTML. Using fallback key.");
+    FALLBACK_INNERTUBE_KEY.to_string()
 }
 
 async fn fetch_track_duration(client: &reqwest::Client, api_key: &str, video_id: &str) -> Option<String> {
@@ -165,7 +176,12 @@ async fn fetch_track_duration(client: &reqwest::Client, api_key: &str, video_id:
     }
 }
 
-async fn search_youtube_internal(client: &reqwest::Client, api_key: &str, query: &str) -> Result<Vec<YoutubeTrack>, String> {
+async fn search_youtube_internal(
+    client: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+    resolve_durations: bool,
+) -> Result<Vec<YoutubeTrack>, String> {
     let search_url = format!("https://music.youtube.com/youtubei/v1/search?key={}&prettyPrint=false", api_key);
 
     let payload = serde_json::json!({
@@ -305,6 +321,7 @@ async fn search_youtube_internal(client: &reqwest::Client, api_key: &str, query:
             cover_url,
             duration_raw,
             url,
+            recommendation_source: None,
         });
     }
 
@@ -326,7 +343,7 @@ async fn search_youtube_internal(client: &reqwest::Client, api_key: &str, query:
         }
     }
 
-    if !duration_tasks.is_empty() {
+    if resolve_durations && !duration_tasks.is_empty() {
         println!("[youtube] Resolving {} missing track durations concurrently...", duration_tasks.len());
         let results = futures::future::join_all(duration_tasks).await;
         for (i, dur) in results {
@@ -349,7 +366,7 @@ pub async fn search_youtube(query: String) -> Result<Vec<YoutubeTrack>, String> 
         .build()
         .map_err(|e| e.to_string())?;
 
-    search_youtube_internal(&client, &api_key, &query).await
+    search_youtube_internal(&client, &api_key, &query, true).await
 }
 
 fn is_one_hour_or_longer(duration_raw: &str) -> bool {
@@ -382,11 +399,14 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
             true,
         )
     } else {
-        let artist_queries: Vec<String> = top_artists
-            .iter()
-            .take(5)
-            .map(|artist| format!("{} songs", artist))
-            .collect();
+        let mut seen = std::collections::HashSet::new();
+        let mut artist_queries = Vec::new();
+        for artist in top_artists.iter().take(5) {
+            let q = format!("{} songs", artist);
+            if seen.insert(q.to_lowercase()) {
+                artist_queries.push(q);
+            }
+        }
         (artist_queries, false)
     };
 
@@ -400,7 +420,7 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
         let client = client.clone();
         let api_key = api_key.clone();
         tasks.push(async move {
-            search_youtube_internal(&client, &api_key, &query).await
+            search_youtube_internal(&client, &api_key, &query, false).await
         });
     }
 
@@ -436,6 +456,13 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
                         );
                         continue;
                     }
+                    if is_third_party_or_instrumental(&track.title, &track.artist) {
+                        println!(
+                            "[youtube] Filtering out recommended track '{}' by '{}' because it is instrumental or third-party",
+                            track.title, track.artist
+                        );
+                        continue;
+                    }
                     final_tracks.push(track);
                     if final_tracks.len() >= 15 {
                         break;
@@ -450,14 +477,757 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
         final_tracks.len()
     );
 
+    // Resolve durations for final selected 15 tracks concurrently!
+    let mut duration_tasks = Vec::new();
+    for (i, track) in final_tracks.iter().enumerate() {
+        if track.duration_raw == "0:00" {
+            let client = client.clone();
+            let api_key = api_key.to_string();
+            let video_id = track.id.clone();
+            duration_tasks.push(async move {
+                if let Some(dur) = fetch_track_duration(&client, &api_key, &video_id).await {
+                    (i, dur)
+                } else {
+                    (i, "0:00".to_string())
+                }
+            });
+        }
+    }
+
+    if !duration_tasks.is_empty() {
+        println!("[youtube] Resolving {} missing track durations for final recommendations concurrently...", duration_tasks.len());
+        let results = futures::future::join_all(duration_tasks).await;
+        for (i, dur) in results {
+            if dur != "0:00" {
+                final_tracks[i].duration_raw = dur;
+            }
+        }
+    }
+
     Ok(final_tracks)
+}
+
+fn find_playlist_panel_videos(val: &serde_json::Value, items: &mut Vec<serde_json::Value>) {
+    if let serde_json::Value::Object(obj) = val {
+        if let Some(renderer) = obj.get("playlistPanelVideoRenderer") {
+            items.push(renderer.clone());
+        } else {
+            for (_, v) in obj {
+                find_playlist_panel_videos(v, items);
+            }
+        }
+    } else if let serde_json::Value::Array(arr) = val {
+        for v in arr {
+            find_playlist_panel_videos(v, items);
+        }
+    }
+}
+
+pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
+    let title_lower = title.to_lowercase();
+    let artist_lower = artist.to_lowercase();
+
+    // 1. Direct title keyword contains
+    let title_keywords = [
+        "instrumental",
+        "karaoke",
+        "backing track",
+        "backing tracks",
+        "piano version",
+        "guitar version",
+        "synthesia",
+        "music box version",
+        "music box cover",
+        "tribute version",
+        "8-bit",
+        "8bit",
+        "midi",
+        "cgbspins",
+        "singalong",
+        "sing along",
+        "tutorials",
+        "piano tutorial",
+        "karaoke version",
+        "karaoke track",
+        "karaoke mix",
+        "instrumental version",
+        "instrumental cover",
+        "instrumental mix",
+        "instrumental edit",
+        "instrumental track",
+        "8-bit cover",
+        "8bit cover",
+        "lofi cover",
+        "lo-fi cover",
+        "orchestral version",
+        "orchestral cover",
+    ];
+
+    for &kw in &title_keywords {
+        if title_lower.contains(kw) {
+            return true;
+        }
+    }
+
+    // 2. Specific regex patterns for covers in title
+    let cover_regexes = [
+        r"\bcover\s+by\b",
+        r"\bcover\s+version\b",
+        r"[\(\[][^)]*\bcover\b[^)]*[\)\]]",
+        r"\s+-\s+cover\b",
+        r"\bcover\s+of\b",
+        r"\bacoustic\s+cover\b",
+        r"\bpiano\s+cover\b",
+        r"\bguitar\s+cover\b",
+        r"\bviolin\s+cover\b",
+        r"\bmetal\s+cover\b",
+        r"\bdrum\s+cover\b",
+        r"\bcell\s+cover\b",
+        r"\bflute\s+cover\b",
+        r"\bharp\s+cover\b",
+    ];
+
+    for pat in &cover_regexes {
+        if let Ok(re) = regex::Regex::new(pat) {
+            if re.is_match(&title_lower) {
+                return true;
+            }
+        }
+    }
+
+    // 3. Direct artist/channel keywords
+    let artist_keywords = [
+        "karaoke",
+        "instrumental",
+        "tribute",
+        "synthesia",
+        "music box",
+        "sing king",
+        "backing tracks",
+        "karaoke academy",
+        "karaoke tracks",
+        "backing track",
+    ];
+
+    for &kw in &artist_keywords {
+        if artist_lower.contains(kw) {
+            return true;
+        }
+    }
+
+    // 4. Specific regex patterns for artist/channel names
+    let artist_regexes = [
+        r"\bcovers\b",
+        r"\bcover\s+nation\b",
+        r"\bcover\s+channel\b",
+        r"\bcover\s+band\b",
+        r"\btribute\s+band\b",
+        r"\bpiano\s+tribute\b",
+        r"\btribute\s+orchestra\b",
+    ];
+
+    for pat in &artist_regexes {
+        if let Ok(re) = regex::Regex::new(pat) {
+            if re.is_match(&artist_lower) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn clean_title(title: &str) -> String {
+    let mut title_lower = title.to_lowercase();
+    if let Ok(re) = regex::Regex::new(r"[\(\[][^\)\]]+[\)\]]") {
+        title_lower = re.replace_all(&title_lower, "").into_owned();
+    }
+    if let Some(idx) = title_lower.find(" feat.") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" ft.") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" featuring") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" official audio") { title_lower.truncate(idx); }
+    if let Some(idx) = title_lower.find(" official video") { title_lower.truncate(idx); }
+    title_lower.trim().to_string()
+}
+
+fn is_semantic_noise(title: &str, seed_title: &str) -> bool {
+    let title_lower = title.to_lowercase();
+    let seed_lower = seed_title.to_lowercase();
+    let noise_words = ["instrumental", "karaoke", "backing track", "tribute", "cover", "acapella", "8d"];
+    for &word in &noise_words {
+        if title_lower.contains(word) && !seed_lower.contains(word) {
+            return true;
+        }
+    }
+    false
+}
+
+fn fuzzy_title_similarity(s1: &str, s2: &str) -> f64 {
+    let s1_clean = clean_title(s1);
+    let s2_clean = clean_title(s2);
+    if s1_clean == s2_clean {
+        return 1.0;
+    }
+    let s1_chars: Vec<char> = s1_clean.chars().collect();
+    let s2_chars: Vec<char> = s2_clean.chars().collect();
+    if s1_chars.len() < 2 || s2_chars.len() < 2 {
+        return if s1_clean == s2_clean { 1.0 } else { 0.0 };
+    }
+
+    let mut s1_bigrams = std::collections::HashSet::new();
+    for i in 0..s1_chars.len() - 1 {
+        s1_bigrams.insert((s1_chars[i], s1_chars[i+1]));
+    }
+
+    let mut s2_bigrams = std::collections::HashSet::new();
+    for i in 0..s2_chars.len() - 1 {
+        s2_bigrams.insert((s2_chars[i], s2_chars[i+1]));
+    }
+
+    let intersection = s1_bigrams.intersection(&s2_bigrams).count();
+    let total = s1_bigrams.len() + s2_bigrams.len();
+    if total == 0 {
+        return 0.0;
+    }
+    (2.0 * intersection as f64) / total as f64
+}
+
+#[tauri::command]
+pub async fn get_youtube_autoplay_recommendations(
+    video_id: String,
+    artist: String,
+    title: String,
+    top_artists: Vec<String>,
+    library_artists: Vec<String>,
+    discovery_level: String,
+) -> Result<Vec<YoutubeTrack>, String> {
+    let api_key = fetch_innertube_key().await;
+    println!("[youtube] Aideo Autoplay Engine v2: Resolving Watch Next Radio for '{}' by '{}' (Discovery Level: {})", title, artist, discovery_level);
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // --- CANDIDATE GENERATION SOURCE 1: YouTube Music Watch Next ---
+    let mut tracks = Vec::new();
+    let search_url = format!("https://music.youtube.com/youtubei/v1/next?key={}&prettyPrint=false", api_key);
+    let payload = serde_json::json!({
+        "context": {
+            "client": {
+                "clientName": "WEB_REMIX",
+                "clientVersion": "1.20240101.01.00",
+                "hl": "en",
+                "gl": "US"
+            }
+        },
+        "videoId": video_id
+    });
+
+    if let Ok(res) = client.post(&search_url)
+        .header("Content-Type", "application/json")
+        .header("Referer", "https://music.youtube.com/")
+        .json(&payload)
+        .send()
+        .await
+    {
+        if let Ok(json_res) = res.json::<serde_json::Value>().await {
+            let mut items = Vec::new();
+            find_playlist_panel_videos(&json_res, &mut items);
+
+            let mut seen_ids = std::collections::HashSet::new();
+            seen_ids.insert(video_id.clone());
+
+            for item in items {
+                let id = match item.get("videoId").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+
+                if seen_ids.contains(&id) {
+                    continue;
+                }
+
+                let track_title = item.get("title")
+                    .and_then(|t| t.get("runs"))
+                    .and_then(|r| r.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|first| first.get("text"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("Unknown Title")
+                    .to_string();
+
+                let track_artist = item.get("longBylineText")
+                    .and_then(|b| b.get("runs"))
+                    .and_then(|r| r.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|first| first.get("text"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("Unknown Artist")
+                    .to_string();
+
+                let thumbnail_url = item.get("thumbnail")
+                    .and_then(|t| t.get("thumbnails"))
+                    .and_then(|arr| arr.as_array())
+                    .and_then(|arr| arr.last())
+                    .and_then(|t| t.get("url"))
+                    .and_then(|u| u.as_str());
+
+                let cover_url = thumbnail_url.map(|url| {
+                    if let Some(pos) = url.find("=w") {
+                        format!("{}=w500-h500-l90-rj", &url[..pos])
+                    } else if let Some(pos) = url.find("=s") {
+                        format!("{}=w500-h500-l90-rj", &url[..pos])
+                    } else {
+                        url.to_string()
+                    }
+                });
+
+                let duration_raw = item.get("lengthText")
+                    .and_then(|l| l.get("runs"))
+                    .and_then(|r| r.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|first| first.get("text"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("0:00")
+                    .to_string();
+
+                let url = format!("https://www.youtube.com/watch?v={}", id);
+                seen_ids.insert(id.clone());
+
+                tracks.push(YoutubeTrack {
+                    id,
+                    title: track_title,
+                    artist: track_artist,
+                    cover_url,
+                    duration_raw,
+                    url,
+                    recommendation_source: None,
+                });
+            }
+        }
+    }
+
+    // --- CANDIDATE GENERATION SOURCE 2: Last.fm Collaborative similar tracks (Concurrent) ---
+    let mut lastfm_candidates = Vec::new();
+    if let Ok(sim_tracks) = crate::lastfm_api::get_similar_tracks(&artist, &title).await {
+        for t in sim_tracks {
+            let track_title = t.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            let track_artist = t.get("artist").and_then(|a| a.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
+            if !track_title.is_empty() && !track_artist.is_empty() {
+                lastfm_candidates.push((track_title, track_artist));
+            }
+        }
+    }
+
+    if lastfm_candidates.is_empty() {
+        if let Ok(sim_artists) = crate::lastfm_api::get_similar_artists(&artist).await {
+            for sim_art in sim_artists.iter().take(3) {
+                if let Ok(top_tracks) = crate::lastfm_api::get_artist_top_tracks(sim_art).await {
+                    for t in top_tracks {
+                        let track_title = t.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                        if !track_title.is_empty() {
+                            lastfm_candidates.push((track_title, sim_art.clone()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolve top 3 Last.fm candidates concurrently in parallel
+    if !lastfm_candidates.is_empty() {
+        let mut lastfm_futures = Vec::new();
+        for (t_title, t_artist) in lastfm_candidates.into_iter().take(3) {
+            let client_clone = client.clone();
+            let api_key_clone = api_key.clone();
+            lastfm_futures.push(async move {
+                let query = format!("{} {}", t_artist, t_title);
+                if let Ok(results) = search_youtube_internal(&client_clone, &api_key_clone, &query, false).await {
+                    if let Some(first) = results.into_iter().next() {
+                        return Some(first);
+                    }
+                }
+                None
+            });
+        }
+        
+        let resolved_lastfm: Vec<YoutubeTrack> = futures::future::join_all(lastfm_futures)
+            .await
+            .into_iter()
+            .flatten()
+            .collect();
+            
+        println!("[youtube] Successfully integrated {} collaborative candidates from Last.fm!", resolved_lastfm.len());
+        
+        for tr in resolved_lastfm {
+            if !tracks.iter().any(|t| t.id == tr.id) {
+                tracks.push(tr);
+            }
+        }
+    }
+
+    if tracks.is_empty() {
+        println!("[youtube] Autoplay endpoint returned no recommendations. Executing fallback search recommendations for artist: {}", artist);
+        let search_query = format!("{} similar songs recommendations", artist);
+        if let Ok(fallback_tracks) = search_youtube_internal(&client, &api_key, &search_query, false).await {
+            tracks = fallback_tracks;
+        }
+    }
+
+    // ── AIDEO AUTOPLAY ENGINE V2 FILTER PIPELINE ──
+    let _artist_lower = artist.to_lowercase();
+    let mut filtered_tracks = Vec::new();
+    let mut seen_titles = std::collections::HashSet::new();
+
+    for track in tracks {
+        // 0. Instrumental/Third-Party Filter
+        if is_third_party_or_instrumental(&track.title, &track.artist) {
+            println!("[autoplay-filter] Drop instrumental/third-party track: '{}' by '{}'", track.title, track.artist);
+            continue;
+        }
+
+        // 1. Semantic Noise Filter
+        if is_semantic_noise(&track.title, &title) {
+            println!("[autoplay-filter] Drop semantic noise: '{}' by '{}'", track.title, track.artist);
+            continue;
+        }
+
+        // 2. Fuzzy Title De-duplication (Similarity >70% against seed title)
+        let sim = fuzzy_title_similarity(&track.title, &title);
+        if sim > 0.70 {
+            println!("[autoplay-filter] Drop duplicate song: '{}' (Similarity: {:.2}%)", track.title, sim * 100.0);
+            continue;
+        }
+
+        // 3. Track Duration Filter (Drop >15 mins / 900s)
+        let parts: Vec<&str> = track.duration_raw.split(':').collect();
+        let is_too_long = if parts.len() >= 3 {
+            true // 1 hour or more
+        } else if parts.len() == 2 {
+            if let Ok(minutes) = parts[0].trim().parse::<u32>() {
+                minutes > 15
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if is_too_long {
+            println!("[autoplay-filter] Drop long-duration track: '{}' ({})", track.title, track.duration_raw);
+            continue;
+        }
+
+        // 4. De-duplicate clean titles inside the recommended list itself
+        let clean = clean_title(&track.title);
+        if seen_titles.contains(&clean) {
+            continue;
+        }
+        seen_titles.insert(clean);
+
+        filtered_tracks.push(track);
+    }
+
+    // ── TASTE-WEIGHTED SCORING PIPELINE ──
+    let mut scored_tracks: Vec<(YoutubeTrack, f64)> = Vec::new();
+
+    for track in filtered_tracks {
+        let mut score = 1.0;
+        let candidate_artist_lower = track.artist.to_lowercase();
+        
+        let is_top_artist = top_artists.iter().any(|ta| {
+            let ta_lower = ta.to_lowercase();
+            candidate_artist_lower.contains(&ta_lower) || ta_lower.contains(&candidate_artist_lower)
+        });
+        
+        let is_library_artist = library_artists.iter().any(|la| {
+            let la_lower = la.to_lowercase();
+            candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
+        });
+
+        match discovery_level.as_str() {
+            "familiarity" => {
+                if is_top_artist {
+                    score += 0.75;
+                } else if is_library_artist {
+                    score += 0.3;
+                } else {
+                    score -= 0.4;
+                }
+            }
+            "discovery" => {
+                if is_top_artist {
+                    score -= 0.5;
+                } else if is_library_artist {
+                    score += 0.55;
+                } else {
+                    score += 0.4;
+                }
+            }
+            _ => { // "balanced"
+                if is_top_artist {
+                    score += 0.25;
+                }
+                if is_library_artist && !is_top_artist {
+                    score += 0.35;
+                }
+            }
+        }
+
+        scored_tracks.push((track, score));
+    }
+
+    // Sort by Personalized Taste Score in descending order
+    scored_tracks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Curate queue with artist diversity constraints
+    let mut final_queue = Vec::new();
+    let mut artist_counts = std::collections::HashMap::new();
+
+    for (track, score) in scored_tracks {
+        if final_queue.len() >= 8 {
+            break;
+        }
+
+        let cand_artist = track.artist.clone();
+        let current_count = *artist_counts.get(&cand_artist).unwrap_or(&0);
+        let same_artist_limit = if discovery_level == "familiarity" { 4 } else { 2 };
+
+        if current_count < same_artist_limit {
+            artist_counts.insert(cand_artist, current_count + 1);
+            println!("[autoplay-scorer] Accepted '{}' by '{}' (Score: {:.2})", track.title, track.artist, score);
+            final_queue.push(track);
+        } else {
+            println!("[autoplay-scorer] Capped artist repetitions for '{}' by '{}'", track.title, track.artist);
+        }
+    }
+
+    // Resolve durations for final curated 8 tracks concurrently!
+    let mut duration_tasks = Vec::new();
+    for (i, track) in final_queue.iter().enumerate() {
+        if track.duration_raw == "0:00" {
+            let client = client.clone();
+            let api_key = api_key.to_string();
+            let video_id = track.id.clone();
+            duration_tasks.push(async move {
+                if let Some(dur) = fetch_track_duration(&client, &api_key, &video_id).await {
+                    (i, dur)
+                } else {
+                    (i, "0:00".to_string())
+                }
+            });
+        }
+    }
+
+    if !duration_tasks.is_empty() {
+        println!("[youtube] Resolving {} missing track durations for final autoplay queue concurrently...", duration_tasks.len());
+        let results = futures::future::join_all(duration_tasks).await;
+        for (i, dur) in results {
+            if dur != "0:00" {
+                final_queue[i].duration_raw = dur;
+            }
+        }
+    }
+
+    Ok(final_queue)
+}
+
+fn parse_ytdlp_progress(line: &str) -> Option<(f64, f64, f64)> {
+    if line.starts_with("[download]") {
+        if let Some(of_idx) = line.find("of") {
+            let percent_part = &line["[download]".len()..of_idx].trim();
+            let percent_clean = percent_part.replace("%", "");
+            if let Ok(percent) = percent_clean.parse::<f64>() {
+                let remaining = &line[of_idx + 2..].trim();
+                let size_part = if let Some(at_idx) = remaining.find("at") {
+                    &remaining[..at_idx].trim()
+                } else {
+                    remaining
+                };
+                
+                let is_mib = size_part.contains("MiB") || size_part.contains("mib");
+                let is_kb = size_part.contains("KiB") || size_part.contains("KB") || size_part.contains("kib") || size_part.contains("kb");
+                
+                let size_clean = size_part
+                    .replace("MiB", "")
+                    .replace("MB", "")
+                    .replace("mib", "")
+                    .replace("mb", "")
+                    .replace("KiB", "")
+                    .replace("KB", "")
+                    .replace("kib", "")
+                    .replace("kb", "")
+                    .trim()
+                    .to_string();
+                
+                if let Ok(total_size) = size_clean.parse::<f64>() {
+                    let total_mb = if is_mib {
+                        total_size * 1.04858
+                    } else if is_kb {
+                        total_size / 1024.0
+                    } else {
+                        total_size
+                    };
+                    
+                    let downloaded_mb = total_mb * (percent / 100.0);
+                    return Some((percent, downloaded_mb, total_mb));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn run_ytdlp_with_progress(
+    ytdlp_path: &std::path::Path,
+    args: &[String],
+    url: &str,
+    app_handle: &tauri::AppHandle,
+    music_dir: &std::path::Path,
+) -> Result<String, String> {
+    use std::io::{BufRead, BufReader};
+    use tauri::Emitter;
+
+    let mut cmd = std::process::Command::new(ytdlp_path);
+    cmd.args(args)
+       .arg(url)
+       .stdout(std::process::Stdio::piped())
+       .stderr(std::process::Stdio::piped());
+
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn yt-dlp: {}", e))?;
+    let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to open stderr")?;
+
+    // Drain stderr asynchronously to prevent subprocess deadlock from full OS pipe buffers
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                eprintln!("[yt-dlp-err] {}", l);
+            }
+        }
+    });
+
+    let reader = BufReader::new(stdout);
+    let mut final_path_str = String::new();
+    let mut last_emit_time = std::time::Instant::now();
+
+    for line in reader.lines() {
+        if let Ok(l) = line {
+            if let Some((percent, downloaded_mb, total_mb)) = parse_ytdlp_progress(&l) {
+                if last_emit_time.elapsed() >= std::time::Duration::from_millis(150) {
+                    let _ = app_handle.emit("ytdlp-download-progress", serde_json::json!({
+                        "url": url,
+                        "percent": percent,
+                        "downloaded_mb": downloaded_mb,
+                        "total_mb": total_mb
+                    }));
+                    last_emit_time = std::time::Instant::now();
+                }
+            }
+            
+            let trimmed = l.trim();
+            if !trimmed.is_empty() {
+                let trimmed_lower = trimmed.to_lowercase();
+                // Capture file path strings ending with audio extensions without verifying .exists() instantly
+                if (trimmed.contains(":\\") || trimmed.contains(":/") || trimmed.starts_with('/') || trimmed.contains("Aideo Downloads"))
+                    && (trimmed_lower.ends_with(".m4a") || trimmed_lower.ends_with(".mp3") || trimmed_lower.ends_with(".webm") || trimmed_lower.ends_with(".mp4") || trimmed_lower.ends_with(".flac")) 
+                {
+                    final_path_str = trimmed.to_string();
+                }
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| format!("Process wait failed: {}", e))?;
+    if status.success() {
+        // Validate and normalize the path since the process has exited completely
+        let normalized_path = if !final_path_str.is_empty() {
+            let p = std::path::Path::new(&final_path_str);
+            if p.exists() {
+                Some(final_path_str.clone())
+            } else {
+                let cleaned = final_path_str.replace("/", "\\").replace("\\\\", "\\");
+                let cleaned_p = std::path::Path::new(&cleaned);
+                if cleaned_p.exists() {
+                    Some(cleaned)
+                } else {
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        if let Some(valid_path) = normalized_path {
+            let _ = app_handle.emit("ytdlp-download-progress", serde_json::json!({
+                "url": url,
+                "percent": 100.0,
+                "downloaded_mb": 0.0,
+                "total_mb": 0.0
+            }));
+            Ok(valid_path)
+        } else {
+            // Fallback: search music_dir for the newest file created in the last 15 seconds
+            println!("[youtube] Path resolution failed. Initiating fallback directory scan...");
+            if let Ok(entries) = std::fs::read_dir(music_dir) {
+                let mut newest_file = None;
+                let mut newest_time = std::time::SystemTime::UNIX_EPOCH;
+                for entry in entries.flatten() {
+                    if let Ok(meta) = entry.metadata() {
+                        if meta.is_file() {
+                            if let Ok(created) = meta.created() {
+                                if created > newest_time {
+                                    newest_time = created;
+                                    newest_file = Some(entry.path());
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(path) = newest_file {
+                    if let Ok(elapsed) = std::time::SystemTime::now().duration_since(newest_time) {
+                        if elapsed.as_secs() < 15 {
+                            let path_str = path.to_string_lossy().to_string();
+                            println!("[youtube] Fallback matched newest file: {}", path_str);
+                            let _ = app_handle.emit("ytdlp-download-progress", serde_json::json!({
+                                "url": url,
+                                "percent": 100.0,
+                                "downloaded_mb": 0.0,
+                                "total_mb": 0.0
+                            }));
+                            return Ok(path_str);
+                        }
+                    }
+                }
+            }
+
+            Err(format!(
+                "yt-dlp completed successfully, but the downloaded file could not be resolved. Captured path was: '{}'",
+                final_path_str
+            ))
+        }
+    } else {
+        Err("yt-dlp command exited with error status".to_string())
+    }
 }
 
 use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[tauri::command]
-pub async fn download_track(url: String, quality: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn download_track(
+    url: String,
+    quality: String,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     println!("[youtube] Initiating robust invisible yt-dlp download for URL: {} at quality: {}", url, quality);
     
     // 1. Auto-Installer setup
@@ -489,9 +1259,14 @@ pub async fn download_track(url: String, quality: String, state: State<'_, AppSt
         
     std::fs::create_dir_all(&music_dir).map_err(|e| e.to_string())?;
     
-    // Build the output template to write directly to "Aideo Downloads" using yt-dlp's native naming template
-    let output_template = format!("{}/%(title)s.%(ext)s", music_dir.to_string_lossy());
+    // Build the output template to write directly to "Aideo Downloads" using native path joining for absolute backslash structure
+    let output_template = music_dir.join("%(title)s.%(ext)s").to_string_lossy().to_string();
     
+    // Check if ffmpeg.exe exists to pass --ffmpeg-location
+    let ffmpeg_path = aideo_data_dir.join("ffmpeg.exe");
+    let has_ffmpeg = ffmpeg_path.exists();
+    let ffmpeg_loc_str = aideo_data_dir.to_string_lossy().to_string();
+
     // Determine format string based on quality selection
     // Note: We prefer m4a to avoid needing ffmpeg for format conversion, ensuring smooth playback.
     // Format 141 is YouTube Music's high-fidelity 256kbps AAC stream, and Format 140 is standard 128kbps AAC.
@@ -504,36 +1279,24 @@ pub async fn download_track(url: String, quality: String, state: State<'_, AppSt
     println!("[youtube] Extracting audio stream (Format: {}) via invisible yt-dlp using template: {}", format_str, output_template);
     
     // Attempt 1: default client sequence without forcing client args (letting yt-dlp use its highly optimized self-updating sequence)
-    let output = std::process::Command::new(&ytdlp_path)
-        .arg("-f")
-        .arg(format_str)
-        .arg("--no-cache-dir")
-        .arg("--print")
-        .arg("after_move:filepath")
-        .arg("-o")
-        .arg(&output_template)
-        .arg(&url)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    match output {
-        Ok(out) if out.status.success() => {
-            let stdout_str = String::from_utf8_lossy(&out.stdout);
-            let final_path_str = stdout_str
-                .lines()
-                .map(|l| l.trim())
-                .filter(|l| !l.is_empty())
-                .last()
-                .unwrap_or("")
-                .to_string();
-                
-            if !final_path_str.is_empty() && std::path::Path::new(&final_path_str).exists() {
-                println!("[youtube] Download SUCCESS! Final file: {}", final_path_str);
-                crate::add_track_to_library(final_path_str.clone(), state)?;
-                return Ok(final_path_str);
-            }
-        }
-        _ => {}
+    let mut args_1 = vec![
+        "-f".to_string(),
+        format_str.to_string(),
+        "--no-cache-dir".to_string(),
+        "--print".to_string(),
+        "after_move:filepath".to_string(),
+        "-o".to_string(),
+        output_template.clone(),
+    ];
+    if has_ffmpeg {
+        args_1.push("--ffmpeg-location".to_string());
+        args_1.push(ffmpeg_loc_str.clone());
+    }
+    
+    if let Ok(final_path_str) = run_ytdlp_with_progress(&ytdlp_path, &args_1, &url, &app_handle, &music_dir) {
+        println!("[youtube] Download SUCCESS! Final file: {}", final_path_str);
+        crate::add_track_to_library(final_path_str.clone(), state)?;
+        return Ok(final_path_str);
     }
 
     // Attempt self-update of yt-dlp
@@ -544,84 +1307,436 @@ pub async fn download_track(url: String, quality: String, state: State<'_, AppSt
         .status();
 
     // Retry 1: updated yt-dlp with default adaptive arguments
-    let retry_1 = std::process::Command::new(&ytdlp_path)
-        .arg("-f")
-        .arg(format_str)
-        .arg("--no-cache-dir")
-        .arg("--print")
-        .arg("after_move:filepath")
-        .arg("-o")
-        .arg(&output_template)
-        .arg(&url)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    match retry_1 {
-        Ok(out) if out.status.success() => {
-            let stdout_str = String::from_utf8_lossy(&out.stdout);
-            let final_path_str = stdout_str
-                .lines()
-                .map(|l| l.trim())
-                .filter(|l| !l.is_empty())
-                .last()
-                .unwrap_or("")
-                .to_string();
-                
-            if !final_path_str.is_empty() && std::path::Path::new(&final_path_str).exists() {
-                println!("[youtube] Retry 1 SUCCESS! Final file: {}", final_path_str);
-                crate::add_track_to_library(final_path_str.clone(), state)?;
-                return Ok(final_path_str);
-            }
-        }
-        _ => {}
+    if let Ok(final_path_str) = run_ytdlp_with_progress(&ytdlp_path, &args_1, &url, &app_handle, &music_dir) {
+        println!("[youtube] Retry 1 SUCCESS! Final file: {}", final_path_str);
+        crate::add_track_to_library(final_path_str.clone(), state)?;
+        return Ok(final_path_str);
     }
 
     // Retry 2: with forced PO-Token / client bypass arguments (mweb & android are less rate-limited)
     println!("[youtube] Retry 1 failed. Attempting with forced mweb,android client parameters...");
-    let retry_2 = std::process::Command::new(&ytdlp_path)
-        .arg("-f")
-        .arg(format_str)
-        .arg("--no-cache-dir")
-        .arg("--extractor-args")
-        .arg("youtube:player-client=mweb,android")
-        .arg("--print")
-        .arg("after_move:filepath")
-        .arg("-o")
-        .arg(&output_template)
-        .arg(&url)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    let mut args_retry_2 = vec![
+        "-f".to_string(),
+        format_str.to_string(),
+        "--no-cache-dir".to_string(),
+        "--extractor-args".to_string(),
+        "youtube:player-client=mweb,android".to_string(),
+        "--print".to_string(),
+        "after_move:filepath".to_string(),
+        "-o".to_string(),
+        output_template.clone(),
+    ];
+    if has_ffmpeg {
+        args_retry_2.push("--ffmpeg-location".to_string());
+        args_retry_2.push(ffmpeg_loc_str.clone());
+    }
 
-    match retry_2 {
-        Ok(out) if out.status.success() => {
-            let stdout_str = String::from_utf8_lossy(&out.stdout);
-            let final_path_str = stdout_str
-                .lines()
-                .map(|l| l.trim())
-                .filter(|l| !l.is_empty())
-                .last()
-                .unwrap_or("")
-                .to_string();
-                
-            if !final_path_str.is_empty() && std::path::Path::new(&final_path_str).exists() {
-                println!("[youtube] Retry 2 SUCCESS! Final file: {}", final_path_str);
-                crate::add_track_to_library(final_path_str.clone(), state)?;
-                return Ok(final_path_str);
-            }
+    match run_ytdlp_with_progress(&ytdlp_path, &args_retry_2, &url, &app_handle, &music_dir) {
+        Ok(final_path_str) => {
+            println!("[youtube] Retry 2 SUCCESS! Final file: {}", final_path_str);
+            crate::add_track_to_library(final_path_str.clone(), state)?;
+            return Ok(final_path_str);
         }
-        Ok(out) => {
-            let err_msg = String::from_utf8_lossy(&out.stderr);
-            println!("[youtube] All yt-dlp attempts failed. Stderr: {}", err_msg);
+        Err(e) => {
+            println!("[youtube] All yt-dlp attempts failed. Error: {}", e);
             return Err(format!(
                 "YouTube rate-limited or blocked this request (HTTP 429 / PO-Token). Please use the Lucida or Squid web bypass options on the track cards to download manually in 1 click!",
             ));
         }
-        Err(e) => {
-            return Err(format!("Failed to execute updated yt-dlp: {}", e));
+    }
+}
+
+#[tauri::command]
+pub async fn check_and_download_ytdlp(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    use tauri::Emitter;
+    let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let aideo_dir = data_dir.join("Aideo");
+    let ytdlp_path = aideo_dir.join("yt-dlp.exe");
+
+    if ytdlp_path.exists() {
+        return Ok(true);
+    }
+
+    println!("[dependencies] yt-dlp.exe not found. Downloading asynchronously...");
+    let _ = app_handle.emit("ui-toast", serde_json::json!({
+        "message": "First-time setup: Downloading high-performance audio decoder in background...",
+        "type": "info"
+    }));
+
+    let response = reqwest::get("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe")
+        .await
+        .map_err(|e| format!("Failed to download yt-dlp: {}", e))?;
+
+    let bytes = response.bytes().await.map_err(|e| format!("Failed to read yt-dlp bytes: {}", e))?;
+
+    if !aideo_dir.exists() {
+        std::fs::create_dir_all(&aideo_dir).map_err(|e| format!("Failed to create Aideo directory: {}", e))?;
+    }
+
+    let mut file = std::fs::File::create(&ytdlp_path).map_err(|e| format!("Failed to create yt-dlp.exe: {}", e))?;
+    use std::io::Write;
+    file.write_all(&bytes).map_err(|e| format!("Failed to write yt-dlp.exe: {}", e))?;
+
+    println!("[dependencies] Successfully downloaded yt-dlp.exe!");
+    let _ = app_handle.emit("ui-toast", serde_json::json!({
+        "message": "Audio decoder setup complete! Ready for YouTube streaming.",
+        "type": "success"
+    }));
+
+    Ok(true)
+}
+
+fn safe_lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("[youtube] Mutex poisoned! Recovering...");
+            poisoned.into_inner()
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn get_personalized_discovery_hub(
+    seed_artists: Vec<String>,
+    top_artists: Vec<String>,
+    library_artists: Vec<String>,
+    discovery_level: String,
+    lastfm_connected: bool,
+    lastfm_top_artists: Vec<String>,
+    listenbrainz_connected: bool,
+    listenbrainz_recs: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<YoutubeTrack>, String> {
+    let api_key = fetch_innertube_key().await;
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 1. Formulate Queries
+    let mut loved_artists = Vec::new();
+    {
+        let conn = safe_lock(&state.db);
+        if let Ok(lib_tracks) = crate::db::get_all_tracks(&conn) {
+            for t in lib_tracks {
+                if t.loved.unwrap_or(0) == 1 {
+                    if let Some(artist) = t.artist {
+                        if artist != "Unknown Artist" && artist != "YouTube Audio" && !artist.is_empty() {
+                            loved_artists.push(artist);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut unique_loved = std::collections::HashSet::new();
+    let mut priority_loved_artists = Vec::new();
+    for artist in loved_artists {
+        if unique_loved.insert(artist.to_lowercase()) {
+            priority_loved_artists.push(artist);
         }
     }
 
-    Err("YouTube download failed. Google rate-limited this request. Please click Lucida or Squid on the track card to download lossless FLAC manually in 1 click!".to_string())
+    let mut offline_queries = Vec::new();
+    // Prioritize queries from loved artists first! They represent what the user loves most!
+    for artist in priority_loved_artists.iter().take(3) {
+        offline_queries.push((format!("{} songs", artist), "Based on your Favorites".to_string()));
+    }
+    for artist in seed_artists.iter().take(4) {
+        if !unique_loved.contains(&artist.to_lowercase()) {
+            offline_queries.push((format!("{} songs", artist), "YouTube Music Taste".to_string()));
+        }
+    }
+
+    let mut lfm_queries = Vec::new();
+    if lastfm_connected && !lastfm_top_artists.is_empty() {
+        let mut lfm_futures = Vec::new();
+        for artist in lastfm_top_artists.iter().take(3) {
+            lfm_futures.push(crate::lastfm_api::get_similar_artists(artist));
+        }
+        let results = futures::future::join_all(lfm_futures).await;
+        let mut seen_similar = std::collections::HashSet::new();
+        let mut similar_artists = Vec::new();
+        for res in results {
+            if let Ok(artists) = res {
+                for art in artists {
+                    if !seen_similar.contains(&art) {
+                        seen_similar.insert(art.clone());
+                        similar_artists.push(art);
+                    }
+                }
+            }
+        }
+        for artist in similar_artists.iter().take(4) {
+            lfm_queries.push(format!("{} songs", artist));
+        }
+    }
+
+    let mut lb_queries = Vec::new();
+    if listenbrainz_connected {
+        for query in listenbrainz_recs.iter().take(4) {
+            lb_queries.push(query.clone());
+        }
+    }
+
+    // 2. Perform concurrent searches in a single loop to unify future types
+    let mut queries = Vec::new();
+    let mut seen_queries = std::collections::HashSet::new();
+    
+    for (query, source) in offline_queries {
+        let q_lower = query.to_lowercase();
+        if seen_queries.insert(q_lower) {
+            queries.push((query, source));
+        }
+    }
+    for query in lfm_queries {
+        let q_lower = query.to_lowercase();
+        if seen_queries.insert(q_lower) {
+            queries.push((query, "Last.fm Similar Taste".to_string()));
+        }
+    }
+    for query in lb_queries {
+        let q_lower = query.to_lowercase();
+        if seen_queries.insert(q_lower) {
+            queries.push((query, "ListenBrainz Collaborative Rec".to_string()));
+        }
+    }
+
+    let mut search_tasks = Vec::new();
+    for (query, source) in queries {
+        let client_c = client.clone();
+        let api_key_c = api_key.clone();
+        search_tasks.push(async move {
+            (search_youtube_internal(&client_c, &api_key_c, &query, false).await, source)
+        });
+    }
+
+    let search_results = futures::future::join_all(search_tasks).await;
+
+    // 3. Synthesize and Interleave round-robin
+    let mut offline_tracks = Vec::new();
+    let mut lfm_tracks = Vec::new();
+    let mut lb_tracks = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+
+    for (res, source) in search_results {
+        if let Ok(tracks) = res {
+            for mut track in tracks {
+                track.recommendation_source = Some(source.clone());
+                if source == "YouTube Music Taste" {
+                    offline_tracks.push(track);
+                } else if source == "Last.fm Similar Taste" {
+                    lfm_tracks.push(track);
+                } else if source == "ListenBrainz Collaborative Rec" {
+                    lb_tracks.push(track);
+                }
+            }
+        }
+    }
+
+    let mut candidate_pool = Vec::new();
+    let max_len = offline_tracks.len().max(lfm_tracks.len()).max(lb_tracks.len());
+    for i in 0..max_len {
+        if i < lb_tracks.len() {
+            let t = &lb_tracks[i];
+            if !seen_ids.contains(&t.id) {
+                seen_ids.insert(t.id.clone());
+                candidate_pool.push(t.clone());
+            }
+        }
+        if i < lfm_tracks.len() {
+            let t = &lfm_tracks[i];
+            if !seen_ids.contains(&t.id) {
+                seen_ids.insert(t.id.clone());
+                candidate_pool.push(t.clone());
+            }
+        }
+        if i < offline_tracks.len() {
+            let t = &offline_tracks[i];
+            if !seen_ids.contains(&t.id) {
+                seen_ids.insert(t.id.clone());
+                candidate_pool.push(t.clone());
+            }
+        }
+    }
+
+    // 4. Fallback if candidate pool is thin
+    if candidate_pool.len() < 5 {
+        let fallbacks = vec![
+            "Lofi Chill beats".to_string(),
+            "Synthwave Retro".to_string(),
+            "Chill Vibes".to_string(),
+            "Acoustic Pop".to_string(),
+        ];
+        let mut fallback_tasks = Vec::new();
+        for query in fallbacks {
+            let client_c = client.clone();
+            let api_key_c = api_key.clone();
+            fallback_tasks.push(async move {
+                search_youtube_internal(&client_c, &api_key_c, &query, false).await
+            });
+        }
+        let fallback_results = futures::future::join_all(fallback_tasks).await;
+        for res in fallback_results {
+            if let Ok(tracks) = res {
+                for mut track in tracks {
+                    track.recommendation_source = Some("YouTube Music Chill".to_string());
+                    if !seen_ids.contains(&track.id) {
+                        seen_ids.insert(track.id.clone());
+                        candidate_pool.push(track);
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Exclude library tracks from DB
+    let mut library_titles = std::collections::HashSet::new();
+    {
+        let conn = safe_lock(&state.db);
+        if let Ok(lib_tracks) = crate::db::get_all_tracks(&conn) {
+            for t in lib_tracks {
+                if let Some(title) = t.title {
+                    library_titles.insert(title.to_lowercase().trim().to_string());
+                }
+            }
+        }
+    }
+
+    let mut filtered_pool = Vec::new();
+    for track in candidate_pool {
+        let clean_t = track.title.to_lowercase().trim().to_string();
+        if library_titles.contains(&clean_t) {
+            continue;
+        }
+
+        let parts: Vec<&str> = track.duration_raw.split(':').collect();
+        let is_too_long = if parts.len() >= 3 {
+            true
+        } else if parts.len() == 2 {
+            if let Ok(minutes) = parts[0].trim().parse::<u32>() {
+                minutes > 15
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if is_too_long {
+            continue;
+        }
+
+        filtered_pool.push(track);
+    }
+
+    // 6. Taste-Weighted Re-Ranking
+    let mut scored_tracks = Vec::new();
+    for track in filtered_pool {
+        let mut score = 1.0;
+        let candidate_artist_lower = track.artist.to_lowercase();
+        
+        let is_loved_artist = priority_loved_artists.iter().any(|la| {
+            let la_lower = la.to_lowercase();
+            candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
+        });
+
+        let is_top_artist = top_artists.iter().any(|ta| {
+            let ta_lower = ta.to_lowercase();
+            candidate_artist_lower.contains(&ta_lower) || ta_lower.contains(&candidate_artist_lower)
+        });
+        
+        let is_library_artist = library_artists.iter().any(|la| {
+            let la_lower = la.to_lowercase();
+            candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
+        });
+
+        if is_loved_artist {
+            score += 2.0;
+        }
+
+        match discovery_level.as_str() {
+            "familiarity" => {
+                if is_top_artist {
+                    score += 0.75;
+                } else if is_library_artist {
+                    score += 0.3;
+                } else {
+                    score -= 0.4;
+                }
+            }
+            "discovery" => {
+                if is_top_artist {
+                    score -= 0.5;
+                } else if is_library_artist {
+                    score += 0.55;
+                } else {
+                    score += 0.4;
+                }
+            }
+            _ => { // "balanced"
+                if is_top_artist {
+                    score += 0.25;
+                }
+                if is_library_artist && !is_top_artist {
+                    score += 0.35;
+                }
+            }
+        }
+        scored_tracks.push((track, score));
+    }
+
+    scored_tracks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // 7. Curate with artist diversity constraints
+    let mut final_queue = Vec::new();
+    let mut artist_counts = std::collections::HashMap::new();
+
+    for (track, score) in scored_tracks {
+        if final_queue.len() >= 15 {
+            break;
+        }
+
+        let cand_artist = track.artist.clone();
+        let current_count = *artist_counts.get(&cand_artist).unwrap_or(&0);
+        let same_artist_limit = if discovery_level == "familiarity" { 4 } else { 2 };
+
+        if current_count < same_artist_limit {
+            artist_counts.insert(cand_artist, current_count + 1);
+            println!("[discovery-hub] Accepted '{}' by '{}' (Score: {:.2})", track.title, track.artist, score);
+            final_queue.push(track);
+        }
+    }
+
+    // Resolve durations for final curated 15 tracks concurrently!
+    let mut duration_tasks = Vec::new();
+    for (i, track) in final_queue.iter().enumerate() {
+        if track.duration_raw == "0:00" {
+            let client = client.clone();
+            let api_key = api_key.to_string();
+            let video_id = track.id.clone();
+            duration_tasks.push(async move {
+                if let Some(dur) = fetch_track_duration(&client, &api_key, &video_id).await {
+                    (i, dur)
+                } else {
+                    (i, "0:00".to_string())
+                }
+            });
+        }
+    }
+
+    if !duration_tasks.is_empty() {
+        println!("[youtube] Resolving {} missing track durations for final discovery hub concurrently...", duration_tasks.len());
+        let results = futures::future::join_all(duration_tasks).await;
+        for (i, dur) in results {
+            if dur != "0:00" {
+                final_queue[i].duration_raw = dur;
+            }
+        }
+    }
+
+    Ok(final_queue)
 }
 
 #[cfg(test)]

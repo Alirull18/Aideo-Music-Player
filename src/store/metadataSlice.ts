@@ -32,6 +32,54 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     } catch (e) { console.error(e); }
   },
 
+  autoFetchLyricsOnline: async (track: any) => {
+    if (!track || !track.title) return;
+
+    // Ignore default fallback titles / artists to avoid garbage search results
+    const artist = track.artist === 'Unknown' || track.artist === 'Online Stream' || track.artist === '—' ? '' : track.artist;
+    const title = track.title;
+    if (!title || title.startsWith('http://') || title.startsWith('https://')) return;
+
+    // Clean title and artist to maximize online search match rates
+    let cleanTitle = title.replace(/\.(mp3|flac|m4a|wav|ogg|aac|wma)$/i, '');
+    cleanTitle = cleanTitle.replace(/\s*[([].*?(official|lyrics|video|audio|hq|hd|edit|remix|version).*?[\])]/gi, '').trim();
+    
+    let cleanArtist = artist.replace(/\s*-\s*topic$/i, '').trim();
+
+    if (!cleanTitle) return;
+
+    set({ lyricStatus: 'loading' });
+    try {
+      const query = `${cleanArtist} ${cleanTitle}`.trim();
+      const results: any[] = await invoke('search_lyrics_online', { query });
+
+      if (results && results.length > 0) {
+        // Find the best match: prefer synced lyrics from LRCLIB first, then others
+        let bestMatch = results.find(r => r.synced && r.raw_lrc);
+        if (!bestMatch) bestMatch = results[0];
+
+        if (bestMatch) {
+          let lrc = bestMatch.raw_lrc ?? '';
+          if (!lrc && bestMatch.source === 'NetEase' && bestMatch.content_id) {
+            lrc = await invoke<string>('get_netease_lrc', { id: bestMatch.content_id }).catch(() => '');
+          }
+          if (!lrc && bestMatch.source === 'QQMusic' && bestMatch.content_id) {
+            lrc = await invoke<string>('get_qqmusic_lrc', { mid: bestMatch.content_id }).catch(() => '');
+          }
+
+          if (lrc) {
+            await get().saveLyrics(track.path, lrc);
+            return;
+          }
+        }
+      }
+      set({ lyricStatus: 'not_found' });
+    } catch (e) {
+      console.error('Auto lyric fetch failed:', e);
+      set({ lyricStatus: 'not_found' });
+    }
+  },
+
   translateLyrics: async () => {
     const { lyrics, playback } = get();
     if (!playback.current_track || lyrics.length === 0) return;

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Search, Download, Loader2, Music, CheckCircle2, X } from 'lucide-react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,6 +22,21 @@ export function YoutubeSearchView() {
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const [searchMode, setSearchMode] = useState<'music' | 'video'>('music');
   const [pendingDownload, setPendingDownload] = useState<YoutubeTrack | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, { percent: number; downloaded_mb: number; total_mb: number }>>({});
+
+  useEffect(() => {
+    const sub = listen<any>('ytdlp-download-progress', (event) => {
+      const { url, percent, downloaded_mb, total_mb } = event.payload;
+      setDownloadProgress(prev => ({
+        ...prev,
+        [url]: { percent, downloaded_mb, total_mb }
+      }));
+    });
+
+    return () => {
+      sub.then(f => f());
+    };
+  }, []);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,7 +83,7 @@ export function YoutubeSearchView() {
   return (
     <div style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div className="section-header" style={{ padding: '40px 40px 20px', background: 'linear-gradient(to bottom, rgba(0,0,0,0.4), transparent)' }}>
-        <h1 style={{ fontSize: 42, fontWeight: 900, marginBottom: 8, background: 'linear-gradient(90deg, #fff, #a855f7)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <h1 style={{ fontSize: 42, fontWeight: 900, marginBottom: 8, color: 'white' }}>
           Discover Music
         </h1>
         <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>Search the globe and download high-fidelity streams directly to your library.</p>
@@ -161,8 +177,24 @@ export function YoutubeSearchView() {
                       <CheckCircle2 size={16} />
                     </div>
                   ) : downloadingId === track.id ? (
-                    <div style={{ color: 'var(--primary-bright)', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
-                      <Loader2 size={16} className="pulse" />
+                    <div style={{ color: '#10b981', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minWidth: 80 }}>
+                      <Loader2 size={12} className="pulse" style={{ marginBottom: 4 }} />
+                      {downloadProgress[track.url] ? (
+                        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>
+                            {Math.round(downloadProgress[track.url].percent)}%
+                          </span>
+                          {/* Horizontal Progress Bar */}
+                          <div style={{ width: '100%', height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${downloadProgress[track.url].percent}%`, background: '#10b981', transition: 'width 0.2s ease-out' }} />
+                          </div>
+                          <span style={{ fontSize: 8, fontWeight: 500, opacity: 0.6, textAlign: 'center' }}>
+                            {downloadProgress[track.url].total_mb > 0 ? `${downloadProgress[track.url].downloaded_mb.toFixed(1)}/${downloadProgress[track.url].total_mb.toFixed(1)} MB` : ''}
+                          </span>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 8, fontWeight: 600, opacity: 0.8 }}>Connecting...</span>
+                      )}
                     </div>
                   ) : (
                     <button 

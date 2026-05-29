@@ -101,7 +101,12 @@ pub async fn download_and_install(url: String, app_handle: tauri::AppHandle) -> 
     let ext = if is_msi { "msi" } else { "exe" };
     
     let mut temp_file_path = env::temp_dir();
-    temp_file_path.push(format!("aideo_installer.{}", ext));
+    // 🛡️ Prevent installer-level lockups by writing to a unique timestamped file
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    temp_file_path.push(format!("aideo_installer_{}.{}", timestamp, ext));
     
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
     let mut file = File::create(&temp_file_path).map_err(|e| e.to_string())?;
@@ -109,13 +114,14 @@ pub async fn download_and_install(url: String, app_handle: tauri::AppHandle) -> 
     
     let temp_str = temp_file_path.to_string_lossy().into_owned();
     if is_msi {
-        let cmd_str = format!("ping 127.0.0.1 -n 3 > nul && msiexec.exe /i \"{}\" /qb", temp_str);
+        // ⏳ Delay increased to ~5 seconds (-n 6) to ensure the parent app exits completely
+        let cmd_str = format!("ping 127.0.0.1 -n 6 > nul && msiexec.exe /i \"{}\" /qb", temp_str);
         Command::new("cmd.exe")
             .args(["/C", &cmd_str])
             .spawn()
             .map_err(|e| e.to_string())?;
     } else {
-        let cmd_str = format!("ping 127.0.0.1 -n 3 > nul && start \"\" \"{}\"", temp_str);
+        let cmd_str = format!("ping 127.0.0.1 -n 6 > nul && start \"\" \"{}\"", temp_str);
         Command::new("cmd.exe")
             .args(["/C", &cmd_str])
             .spawn()

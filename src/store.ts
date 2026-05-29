@@ -5,6 +5,8 @@ import { createPlaybackSlice } from './store/playbackSlice';
 import { createLibrarySlice } from './store/librarySlice';
 import { createMetadataSlice } from './store/metadataSlice';
 import { createLastfmSlice } from './store/lastfmSlice';
+import { createListenbrainzSlice } from './store/listenbrainzSlice';
+import { createCloudSlice } from './store/cloudSlice';
 
 // Export types for convenience so other files can still import from './store'
 export * from './store/types';
@@ -15,4 +17,7 @@ export const useStore = create<PlayerState>()((...a) => ({
   ...createLibrarySlice(...a),
   ...createMetadataSlice(...a),
   ...createLastfmSlice(...a),
+  ...createListenbrainzSlice(...a),
+  ...createCloudSlice(...a),
 }));
+

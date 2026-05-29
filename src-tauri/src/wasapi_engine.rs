@@ -29,6 +29,7 @@ pub fn start_exclusive_stream<F, E>(
     device_name: &str,
     sample_rate: u32,
     channels: u16,
+    timing_mode: &str,
     mut callback: F,
     mut on_error: E,
 ) -> Result<(WasapiStream, u16, bool), String>
@@ -39,6 +40,7 @@ where
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown);
     let dev_name = device_name.to_string();
+    let timing_str = timing_mode.to_string();
 
     let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(u16, bool), String>>(1);
 
@@ -123,8 +125,18 @@ where
             );
 
             if test_client.is_supported(&format, &ShareMode::Exclusive).is_ok() {
+                let is_polling = timing_str == "polling";
                 let (def_period, _) = test_client.get_device_period().unwrap_or((100000, 30000));
-                let mode = StreamMode::EventsExclusive { period_hns: def_period };
+                let mode = if is_polling {
+                    let target_period = def_period; 
+                    StreamMode::PollingExclusive { 
+                        buffer_duration_hns: target_period * 3, // Request 3 periods of buffer duration for safety margin
+                        period_hns: target_period 
+                    }
+                } else {
+                    StreamMode::EventsExclusive { period_hns: def_period }
+                };
+
                 if test_client.initialize_client(&format, &Direction::Render, &mode).is_ok() {
                     successful_client = Some(test_client);
                     negotiated_format = Some((format, bits, valid_bits, is_float));
@@ -143,12 +155,17 @@ where
 
         let client = successful_client.unwrap();
 
-        let event = match client.set_get_eventhandle() {
-            Ok(e) => e,
-            Err(_) => {
-                let _ = tx.send(Err("Failed to set event handle".to_string()));
-                return;
+        let is_polling = timing_str == "polling";
+        let event = if !is_polling {
+            match client.set_get_eventhandle() {
+                Ok(e) => Some(e),
+                Err(_) => {
+                    let _ = tx.send(Err("Failed to set event handle".to_string()));
+                    return;
+                }
             }
+        } else {
+            None
         };
 
         let render_client = match client.get_audiorenderclient() {
@@ -165,7 +182,11 @@ where
             return;
         }
 
-        let num_frames = buffer_size as usize;
+        let num_frames = if is_polling {
+            (buffer_size / 3) as usize
+        } else {
+            buffer_size as usize
+        };
         let num_samples = num_frames * channels as usize;
         let mut f32_data = vec![0.0f32; num_samples];
         
@@ -173,11 +194,22 @@ where
         let mut output_bytes = vec![0u8; num_samples * bytes_per_sample];
 
         // PRE-FILL FIRST BUFFER WITH SILENCE BEFORE STARTING STREAM
-        let _ = render_client.write_to_device(
-            num_frames,
-            &output_bytes,
-            None,
-        );
+        if is_polling {
+            // Pre-fill all 3 buffer periods with silence
+            for _ in 0..3 {
+                let _ = render_client.write_to_device(
+                    num_frames,
+                    &output_bytes,
+                    None,
+                );
+            }
+        } else {
+            let _ = render_client.write_to_device(
+                num_frames,
+                &output_bytes,
+                None,
+            );
+        }
 
         // Notify main thread of success FIRST
         if tx.send(Ok((valid_bits as u16, is_float))).is_err() {
@@ -185,9 +217,9 @@ where
             return;
         }
 
-        // Give the main thread a tiny head start (50ms) to fill the ringbuffer
-        // This completely eliminates the "startup underrun" stutter.
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Give the main thread a solid head start (300ms) to fill the ringbuffer
+        // This completely eliminates the "startup underrun" stutter on professional USB DACs.
+        std::thread::sleep(std::time::Duration::from_millis(300));
 
         if client.start_stream().is_err() {
             return;
@@ -197,11 +229,36 @@ where
         println!("[wasapi] Exclusive Mode STARTED: {}Hz {}ch [{}]", sample_rate, channels, format_desc);
 
         while !shutdown_clone.load(Ordering::Relaxed) {
-            if event.wait_for_event(2000).is_err() {
-                if !shutdown_clone.load(Ordering::Relaxed) {
-                    on_error("WASAPI exclusive stream timed out".to_string());
+            if is_polling {
+                // In Polling mode, sleep for half of the buffer period duration, then query padding
+                let sleep_ms = ((num_frames as f32 / sample_rate as f32) * 500.0) as u64;
+                std::thread::sleep(std::time::Duration::from_millis(std::cmp::max(sleep_ms, 2)));
+
+                let padding = match client.get_current_padding() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        if !shutdown_clone.load(Ordering::Relaxed) {
+                            on_error("WASAPI exclusive polling error".to_string());
+                        }
+                        break;
+                    }
+                };
+
+                let available_frames = buffer_size as u32 - padding;
+                if available_frames < num_frames as u32 {
+                    // Not enough space to write a full chunk yet, sleep and wait
+                    continue;
                 }
-                break;
+            } else {
+                // In Event-driven mode, wait for event handle signals
+                if let Some(ref ev) = event {
+                    if ev.wait_for_event(2000).is_err() {
+                        if !shutdown_clone.load(Ordering::Relaxed) {
+                            on_error("WASAPI exclusive stream timed out".to_string());
+                        }
+                        break;
+                    }
+                }
             }
             
             callback(&mut f32_data);
@@ -221,18 +278,31 @@ where
             } else if bits == 32 {
                 // 32-bit container: Int32 or Int24
                 // WASAPI expects 24-bit valid data to be left-justified in the 32-bit container.
-                // Multiplying by i32::MAX automatically aligns it to the most significant bits.
-                let multiplier = 2147483647.0; 
                 let mask = if valid_bits == 24 { !0xFF } else { !0 };
-                for (i, &sample) in f32_data.iter().enumerate() {
-                    let clamped = if sample > 1.0 { 1.0 } else if sample < -1.0 { -1.0 } else { sample };
-                    let quantized = ((clamped * multiplier) as i32) & mask;
-                    let bytes = quantized.to_ne_bytes();
-                    let offset = i * 4;
-                    output_bytes[offset] = bytes[0];
-                    output_bytes[offset + 1] = bytes[1];
-                    output_bytes[offset + 2] = bytes[2];
-                    output_bytes[offset + 3] = bytes[3];
+                if valid_bits == 24 {
+                    let multiplier = 8388607.0; // 2^23 - 1
+                    for (i, &sample) in f32_data.iter().enumerate() {
+                        let clamped = if sample > 1.0 { 1.0 } else if sample < -1.0 { -1.0 } else { sample };
+                        let quantized = (((clamped * multiplier) as i32) << 8) & mask;
+                        let bytes = quantized.to_ne_bytes();
+                        let offset = i * 4;
+                        output_bytes[offset] = bytes[0];
+                        output_bytes[offset + 1] = bytes[1];
+                        output_bytes[offset + 2] = bytes[2];
+                        output_bytes[offset + 3] = bytes[3];
+                    }
+                } else {
+                    let multiplier = 2147483647.0; 
+                    for (i, &sample) in f32_data.iter().enumerate() {
+                        let clamped = if sample > 1.0 { 1.0 } else if sample < -1.0 { -1.0 } else { sample };
+                        let quantized = ((clamped * multiplier) as i32) & mask;
+                        let bytes = quantized.to_ne_bytes();
+                        let offset = i * 4;
+                        output_bytes[offset] = bytes[0];
+                        output_bytes[offset + 1] = bytes[1];
+                        output_bytes[offset + 2] = bytes[2];
+                        output_bytes[offset + 3] = bytes[3];
+                    }
                 }
             } else if bits == 24 {
                 // 24-bit container: Int24 packed (3 bytes per sample)
@@ -294,6 +364,7 @@ pub fn start_exclusive_stream<F, E>(
     _device_name: &str,
     _sample_rate: u32,
     _channels: u16,
+    _timing_mode: &str,
     _callback: F,
     _on_error: E,
 ) -> Result<(WasapiStream, u16, bool), String>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from './store';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Radio, Check, Download, X } from 'lucide-react';
@@ -11,17 +11,19 @@ import { LibraryView } from './components/LibraryView';
 import { AideoView } from './components/AideoView';
 import { NowPlayingView } from './components/NowPlayingView';
 import { LastfmView } from './components/LastfmView';
+import { ListenbrainzView } from './components/ListenbrainzView';
 import { AideoSearchView } from './components/AideoSearchView';
 
-
-import { TidalView } from './components/TidalView';
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
-import { SettingsModal } from './components/SettingsModal';
+import { SettingsView } from './components/SettingsView';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
-import { ProAudioPanel } from './components/ProAudioPanel';
+import { AideoLabView } from './components/AideoLabView';
+import { OnboardingWizard } from './components/OnboardingWizard';
+import { FullscreenView } from './components/FullscreenView';
+import { CoverArtModal } from './components/CoverArtModal';
 
 // Global Error Logging to Backend Terminal
 if (typeof window !== 'undefined') {
@@ -35,16 +37,41 @@ if (typeof window !== 'undefined') {
 }
 
 export default function App() {
-  const { view, pollStatus, loadLibrary, lastScrobble, fetchPlaylists, playbackError, playbackSuccess, customPrompt, setCustomPrompt, setPlaybackError, setPlaybackSuccess, showProMode } = useStore();
+  const { 
+    view, 
+    pollStatus, 
+    loadLibrary, 
+    lastScrobble, 
+    fetchPlaylists, 
+    playbackError, 
+    playbackSuccess, 
+    customPrompt, 
+    setCustomPrompt, 
+    setPlaybackError, 
+    setPlaybackSuccess, 
+    lowSpecMode,
+    onboardingCompleted,
+    showOnboarding
+  } = useStore();
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
 
   useEffect(() => {
-    const { fetchDevices, initializeQueue } = useStore.getState();
+    const { fetchDevices, initializeQueue, loadSubsonicPassword } = useStore.getState();
     loadLibrary();
     fetchPlaylists();
     fetchDevices();
     initializeQueue();
+    loadSubsonicPassword();
+
+    // Synchronize Windows Keep Awake status with backend on startup
+    const initialKeepAwake = localStorage.getItem('aideo_keep_awake') === 'true';
+    if (initialKeepAwake) {
+      invoke('toggle_keep_awake', { enable: true }).catch(e => console.error("toggle_keep_awake error:", e));
+    }
+
+    // Async background setup for yt-dlp audio decoder
+    invoke('check_and_download_ytdlp').catch(e => console.error("ytdlp download error:", e));
 
     // Silent background check for updates
     invoke<any>('check_update').then(res => {
@@ -127,16 +154,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let unlisten: any;
+    let unlistenSuccess: any;
+    let unlistenError: any;
     listen<string>('playback-success', (event) => {
       setPlaybackSuccess(event.payload);
-    }).then(u => unlisten = u);
-    return () => { if (unlisten) unlisten(); };
-  }, [setPlaybackSuccess]);
+    }).then(u => unlistenSuccess = u);
+    listen<string>('playback-error', (event) => {
+      setPlaybackError(event.payload);
+    }).then(u => unlistenError = u);
+    return () => {
+      if (unlistenSuccess) unlistenSuccess();
+      if (unlistenError) unlistenError();
+    };
+  }, [setPlaybackSuccess, setPlaybackError]);
 
   return (
-    <div className="app">
-      <Sidebar />
+    <MotionConfig reducedMotion={lowSpecMode ? "always" : "user"}>
+      <div className={lowSpecMode ? "app low-spec" : "app"}>
+        <Sidebar />
       <main className="app-main">
         <AnimatePresence mode="wait">
           {view === 'aideo' && (
@@ -163,6 +198,12 @@ export default function App() {
               <LastfmView />
             </motion.div>
           )}
+          {view === 'listenbrainz' && (
+            <motion.div key="listenbrainz" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <ListenbrainzView />
+            </motion.div>
+          )}
 
           {view === 'aideo_search' && (
             <motion.div key="aideo_search" style={{ height: '100%' }}
@@ -171,10 +212,24 @@ export default function App() {
             </motion.div>
           )}
 
-          {view === 'tidal' && (
-            <motion.div key="tid" style={{ height: '100%' }}
+          {view === 'aideo_lab' && (
+            <motion.div key="aideo_lab" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <TidalView />
+              <AideoLabView />
+            </motion.div>
+          )}
+
+          {view === 'settings' && (
+            <motion.div key="settings" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <SettingsView />
+            </motion.div>
+          )}
+
+          {view === 'fullscreen' && (
+            <motion.div key="fullscreen" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <FullscreenView />
             </motion.div>
           )}
         </AnimatePresence>
@@ -184,8 +239,6 @@ export default function App() {
       <AnimatePresence>
         <QueueView key="queue" />
         <AudioControlCenter key="audio-cc" />
-        <SettingsModal key="settings" />
-        {showProMode && <ProAudioPanel key="pro-audio" />}
         {lastScrobble && (
           <motion.div
             key="scrobble-toast"
@@ -313,7 +366,27 @@ export default function App() {
             />
           )}
         </AnimatePresence>
+
+        <AnimatePresence>
+          {useStore(s => s.coverArtModalTrack) && <CoverArtModal />}
+        </AnimatePresence>
       </AnimatePresence>
-    </div>
+
+      <AnimatePresence>
+        {(showOnboarding || !onboardingCompleted) && (
+          <motion.div
+            key="onboarding-wizard"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{ zIndex: 99999 }}
+          >
+            <OnboardingWizard />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      </div>
+    </MotionConfig>
   );
 }

@@ -48,6 +48,7 @@ export function TidalView() {
   const [results, setResults] = useState<TidalTrack[]>([]);
   const [searching, setSearching] = useState(false);
   const [downloads, setDownloads] = useState<Record<string, 'downloading' | 'done' | 'error'>>({});
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, { percent: number; downloaded_mb: number; total_mb: number }>>({});
 
   useEffect(() => {
     invoke<boolean>('tidal_login_poll_status')
@@ -71,14 +72,24 @@ export function TidalView() {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Tidal pairing code expired', type: 'error' } }));
     }).then(u => subs.push(u));
 
-    listen<string>('tidal-download-complete', e => {
-      setDownloads(p => ({ ...p, [e.payload]: 'done' }));
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Downloaded: ${e.payload}`, type: 'success' } }));
+    listen<any>('tidal-download-complete', e => {
+      const { track_id, filename } = e.payload;
+      setDownloads(p => ({ ...p, [track_id]: 'done' }));
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Downloaded: ${filename}`, type: 'success' } }));
     }).then(u => subs.push(u));
 
-    listen<string>('tidal-download-error', e => {
-      setDownloads(p => ({ ...p, [e.payload]: 'error' }));
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Download failed: ${e.payload}`, type: 'error' } }));
+    listen<any>('tidal-download-error', e => {
+      const { track_id, filename } = e.payload;
+      setDownloads(p => ({ ...p, [track_id]: 'error' }));
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Download failed: ${filename}`, type: 'error' } }));
+    }).then(u => subs.push(u));
+
+    listen<any>('tidal-download-progress', e => {
+      const { track_id, percent, downloaded_mb, total_mb } = e.payload;
+      setDownloadProgress(p => ({
+        ...p,
+        [track_id]: { percent, downloaded_mb, total_mb }
+      }));
     }).then(u => subs.push(u));
 
     return () => subs.forEach(u => u());
@@ -141,21 +152,20 @@ export function TidalView() {
   };
 
   const handleDownload = async (track: TidalTrack) => {
-    const key = `${track.artist} - ${track.title}`;
-    if (downloads[key]) return;
-    setDownloads(p => ({ ...p, [key]: 'downloading' }));
+    if (downloads[track.id]) return;
+    setDownloads(p => ({ ...p, [track.id]: 'downloading' }));
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Downloading: ${track.title}...`, type: 'info' } }));
     try {
       await invoke('tidal_download', { 
         trackId: track.id, 
-        filename: key,
+        filename: `${track.artist} - ${track.title}`,
         title: track.title,
         artist: track.artist,
         album: track.album,
         duration: track.duration
       });
     } catch (err: any) {
-      setDownloads(p => ({ ...p, [key]: 'error' }));
+      setDownloads(p => ({ ...p, [track.id]: 'error' }));
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Download failed: ${err}`, type: 'error' } }));
     }
   };
@@ -172,7 +182,13 @@ export function TidalView() {
   if (!loggedIn) {
     return (
       <div style={{ height: '100%', overflowY: 'auto', padding: '48px 56px' }}>
-        <h1 style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1px', marginBottom: 8 }}>
+        <h1 style={{ 
+          fontSize: 44, 
+          fontWeight: 800, 
+          letterSpacing: '-1px', 
+          marginBottom: 8,
+          color: 'white'
+        }}>
           Tidal Lossless
         </h1>
         <p style={{ color: 'var(--text-dim)', fontSize: 14, marginBottom: 40 }}>
@@ -291,10 +307,17 @@ export function TidalView() {
       <div style={{ padding: '40px 56px 20px', flexShrink: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.4), transparent)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
-            <h1 style={{ fontSize: 42, fontWeight: 900, marginBottom: 6, letterSpacing: '-1px' }}>
-              Tidal Lossless
-              <span className="quality-tag high-res" style={{ marginLeft: 12, fontSize: 11, verticalAlign: 'middle' }}>FLAC</span>
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+              <h1 style={{ 
+                fontSize: 42, 
+                fontWeight: 900, 
+                letterSpacing: '-1px',
+                color: 'white'
+              }}>
+                Tidal Lossless
+              </h1>
+              <span className="quality-tag high-res" style={{ fontSize: 11 }}>FLAC</span>
+            </div>
             <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>Search and download CD-quality lossless tracks to your library.</p>
           </div>
           <button
@@ -391,8 +414,7 @@ export function TidalView() {
             </thead>
             <tbody>
               {results.map(track => {
-                const key = `${track.artist} - ${track.title}`;
-                const dlState = downloads[key];
+                const dlState = downloads[track.id];
                 const isHiRes = track.quality === 'HI_RES' || track.quality === 'HI_RES_LOSSLESS';
                 return (
                   <tr key={track.id} className="track-row">
@@ -425,8 +447,24 @@ export function TidalView() {
                           <Check size={15} style={{ color: '#10b981' }} />
                         </div>
                       ) : dlState === 'downloading' ? (
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
-                          <Loader2 size={15} className="pulse" style={{ color: 'var(--accent)' }} />
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minWidth: 100 }}>
+                          <Loader2 size={12} className="pulse" style={{ color: 'var(--accent)', marginBottom: 4 }} />
+                          {downloadProgress[track.id] ? (
+                            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <span style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>
+                                {Math.round(downloadProgress[track.id].percent)}%
+                              </span>
+                              {/* Horizontal Progress Bar */}
+                              <div style={{ width: '100%', height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${downloadProgress[track.id].percent}%`, background: 'var(--accent)', transition: 'width 0.2s ease-out' }} />
+                              </div>
+                              <span style={{ fontSize: 8, color: 'var(--text-dim)', fontWeight: 500, textAlign: 'center' }}>
+                                {downloadProgress[track.id].downloaded_mb.toFixed(1)}/{downloadProgress[track.id].total_mb.toFixed(1)} MB
+                              </span>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 600 }}>Connecting...</span>
+                          )}
                         </div>
                       ) : (
                         <button
