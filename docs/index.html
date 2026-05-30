@@ -3,21 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aideo | Studio-Grade Music Experience</title>
-    <meta name="description" content="A high-fidelity, audiophile-grade music player for Windows featuring a hardware-accelerated 5-band Parametric EQ, AutoEQ import, True Crossfeed, and an AI Discovery Hub.">
+    <title>Aideo | Premium Studio-Grade Music Player & DSP Console</title>
+    <meta name="description" content="A high-fidelity, audiophile-grade desktop music player for Windows. Features a real-time 5-band Parametric EQ, AutoEQ calibrations for 4,000+ headphones, Linkwitz crossfeed, Apple Music metadata queries, and secure obfuscated credentials.">
     <meta name="google-site-verification" content="google3e65b2bc4ddab573" />
+    <link rel="canonical" href="https://alirull18.github.io/Aideo-Music-Player/" />
     
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://alirull18.github.io/Aideo-Music-Player/">
-    <meta property="og:title" content="Aideo | Studio-Grade Music Experience">
+    <meta property="og:title" content="Aideo | Premium Studio-Grade Music Player & DSP Console">
     <meta property="og:description" content="Pristine Sound. Dynamic Soul. Calibrate your headphones with real-time AutoEQ and experience bit-perfect WASAPI direct transport.">
     <meta property="og:image" content="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155">
 
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:url" content="https://alirull18.github.io/Aideo-Music-Player/">
-    <meta property="twitter:title" content="Aideo | Studio-Grade Music Experience">
+    <meta property="twitter:title" content="Aideo | Premium Studio-Grade Music Player & DSP Console">
     <meta property="twitter:description" content="Calibrate your headphones with real-time AutoEQ and experience bit-perfect WASAPI direct transport.">
     <meta property="twitter:image" content="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155">
     
@@ -29,297 +30,442 @@
     
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="style.css">
-    <link rel="canonical" href="https://alirull18.github.io/Aideo-Music-Player/" />
 </head>
 <body>
-    <!-- Canvas for live background particle stream -->
-    <canvas id="ambient-particles" style="position: absolute; inset: 0; pointer-events: none; z-index: 1; opacity: 0.25;"></canvas>
+    <!-- Background Glow Aura -->
+    <div class="bg-glow"></div>
 
-    <!-- Retro Grid Lines and Spheres -->
-    <div class="grid-overlay"></div>
-    <div class="glow-sphere sphere-1"></div>
-    <div class="glow-sphere sphere-2"></div>
-    <div class="glow-sphere sphere-3"></div>
-
-    <!-- Navigation -->
+    <!-- Navigation Header -->
     <nav>
         <div class="logo">
             <img src="logo.png" alt="Aideo Logo" class="logo-img">
             <span>AIDEO</span>
         </div>
         <div class="nav-links">
-            <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn-nav" id="github-link"><i class="fab fa-github"></i> Repository</a>
+            <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn-nav" id="nav-github-link"><i class="fab fa-github"></i> Repository</a>
         </div>
     </nav>
 
-    <!-- Hero Section -->
-    <header class="hero">
-        <div class="release-badge">
-            <span class="pulse-dot"></span>
-            Version 0.7.0 Is Live &bull; Artwork Manager & Diagnostics
-        </div>
-        <h1>Pristine Sound.<br/><span class="gradient-text">Dynamic Soul.</span></h1>
-        <p class="tagline">An audiophile-grade desktop player for Windows. Unleash custom-tailored sound with a real-time **Biquad DSP engine**, integrated **AutoEQ indexing** for 4,000+ headphones, and a tokio-powered **YouTube Music AI Discovery Hub**.</p>
-        
-        <div class="cta-group">
-            <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary" id="download-btn">
-                <i class="fas fa-download"></i> Get Aideo for Windows
-            </a>
-            <a href="#dsp-playground" class="btn btn-secondary" id="explore-btn">
-                <i class="fas fa-sliders"></i> Test Interactive EQ
-            </a>
-        </div>
-
-        <!-- Main Product Mockup Frame -->
-        <div class="mockup-container">
-            <div class="premium-mockup">
-                <div class="window-chrome">
-                    <div class="window-controls">
-                        <span class="control-dot close"></span>
-                        <span class="control-dot minimize"></span>
-                        <span class="control-dot maximize"></span>
-                    </div>
-                    <div class="window-address">aideo://pro-audio-dsp-console</div>
-                    <div class="wasapi-badge"><i class="fas fa-headphones"></i> WASAPI EXCLUSIVE BIT-PERFECT</div>
+    <!-- Main Content wrapper -->
+    <main>
+        <!-- Hero Section: Split-Screen Layout -->
+        <header class="hero-split">
+            <div class="hero-info">
+                <div class="release-badge">
+                    <span class="pulse-dot"></span>
+                    Version 0.7.1 Is Live &bull; Stable Auto-Updates
                 </div>
-                <div class="mockup-image-wrapper">
-                    <img src="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155" alt="Aideo Music Player - Studio Console Layout">
-                </div>
-            </div>
-        </div>
-    </header>
-
-    <!-- INTERACTIVE SECTION: DSP PLAYGROUND -->
-    <section id="dsp-playground" class="playground-section">
-        <div class="section-heading">
-            <span class="eyebrow">Interactive Simulation</span>
-            <h2>Studio Parametric EQ & AutoEQ Importer</h2>
-            <p>Experience the core math of Aideo directly in your browser. Select a legendary headphone model to automatically download and calculate corrective biquad filters, or drag the interactive nodes manually to shape the curve.</p>
-        </div>
-
-        <div class="playground-grid">
-            <!-- Search & Presets Controller -->
-            <div class="playground-controls">
-                <h3><i class="fas fa-search"></i> 1. Choose Headphone Model</h3>
-                <p class="control-description">AutoEQ references raw target curves to correct frequency response flaws. Click a preset model to witness real-time correction calculations:</p>
+                <h1 id="hero-title">Pristine Sound.<br/><span class="gradient-text">Dynamic Soul.</span></h1>
+                <p class="tagline">An audiophile-grade desktop music player and DSP console for Windows. Unleash calibrated acoustic responses via a real-time **Biquad DSP engine**, integrated **AutoEQ indexing** for 4,000+ headphones, and a tokio-powered **YouTube Music AI Discovery Hub**.</p>
                 
-                <div class="headphone-search-box">
-                    <input type="text" id="headphone-input" placeholder="Type to search e.g., Sennheiser, Sony...">
-                    <div id="search-dropdown" class="search-dropdown-menu"></div>
-                </div>
-
-                <div class="quick-tags">
-                    <button class="tag-btn active" data-model="flat">Flat Response</button>
-                    <button class="tag-btn" data-model="sennheiser">Sennheiser HD 600</button>
-                    <button class="tag-btn" data-model="sony">Sony WH-1000XM4</button>
-                    <button class="tag-btn" data-model="airpods">AirPods Pro</button>
-                    <button class="tag-btn" data-model="beyerdynamic">DT 990 Pro</button>
-                </div>
-
-                <div class="preamp-card">
-                    <div class="preamp-header">
-                        <span>Pre-Amplifier Headroom</span>
-                        <span id="preamp-val" class="mono-font">-0.0 dB</span>
-                    </div>
-                    <div class="slider-wrapper">
-                        <input type="range" id="preamp-slider" min="-12" max="0" step="0.1" value="0">
-                    </div>
-                    <span class="protection-note"><i class="fas fa-shield-halved"></i> Gain protection active to avoid digital clipping.</span>
-                </div>
-
-                <div class="bands-dashboard">
-                    <h3><i class="fas fa-wave-square"></i> Active Filter Parametrics</h3>
-                    <div id="bands-list" class="bands-list"></div>
+                <div class="cta-group">
+                    <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary" id="download-btn-hero">
+                        <i class="fas fa-download"></i> Get Aideo for Windows
+                    </a>
+                    <a href="#dsp-playground" class="btn btn-secondary" id="explore-btn-hero">
+                        <i class="fas fa-sliders"></i> Test Interactive EQ
+                    </a>
                 </div>
             </div>
 
-            <!-- Graph Canvas & Curve Visualizer -->
-            <div class="playground-canvas-area">
-                <div class="graph-wrapper">
-                    <!-- Magnitude Response Graph -->
-                    <div class="eq-graph-container" id="eq-graph-container">
-                        <!-- Frequency gridlines -->
-                        <div class="grid-line" style="left: 10%;"><span>100Hz</span></div>
-                        <div class="grid-line" style="left: 50%;"><span>1kHz</span></div>
-                        <div class="grid-line" style="left: 90%;"><span>10kHz</span></div>
+            <!-- Right-aligned floating mockup console -->
+            <div class="hero-showcase">
+                <div class="tactile-mockup" id="app-dashboard-frame">
+                    <div class="window-chrome">
+                        <div class="window-controls">
+                            <span class="control-dot close"></span>
+                            <span class="control-dot minimize"></span>
+                            <span class="control-dot maximize"></span>
+                        </div>
+                        <div class="window-address">aideo://cinematic-player-hud</div>
+                        <div class="wasapi-badge"><i class="fas fa-headphones"></i> WASAPI EXCLUSIVE BIT-PERFECT</div>
+                    </div>
+                    
+                    <!-- Simulated Cinematic Player HUD -->
+                    <div class="cinematic-hud-preview">
+                        <!-- Playback album cover preview row -->
+                        <div class="hud-cover-row">
+                            <img src="https://github.com/user-attachments/assets/ed834062-d265-4b04-a772-4474494967c7" alt="Active album cover art">
+                            <div class="hud-cover-meta">
+                                <span class="hud-cover-title">Ambient Frequency Stream</span>
+                                <span class="hud-cover-artist">Aideo Dynamic Renderer</span>
+                            </div>
+                            <span class="badge-status" style="font-size: 0.62rem; padding: 2px 6px; background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.15); color: var(--gold);"><i class="fas fa-certificate"></i> DSD NATIVE</span>
+                        </div>
+                        
+                        <!-- Synchronized scrolling lyric streams -->
+                        <div class="hud-lyrics-stream">
+                            <div class="lyric-line">I am floating in bit-perfect spaces</div>
+                            <div class="lyric-line active">Unleashing pristine, jitter-free acoustics</div>
+                            <div class="lyric-line next">Where early reflections simulation begins</div>
+                        </div>
+                        
+                        <!-- Playback buttons & visualizer heights visual -->
+                        <div class="hud-playback-console">
+                            <div class="hud-controls-group">
+                                <button class="hud-btn" id="hud-prev-btn"><i class="fas fa-backward-step"></i></button>
+                                <button class="hud-btn play-btn" id="hud-play-btn"><i class="fas fa-play"></i></button>
+                                <button class="hud-btn" id="hud-next-btn"><i class="fas fa-forward-step"></i></button>
+                            </div>
+                            
+                            <div class="hud-telemetry-visualizer">
+                                <div class="hud-vbar"></div>
+                                <div class="hud-vbar"></div>
+                                <div class="hud-vbar"></div>
+                                <div class="hud-vbar"></div>
+                                <div class="hud-vbar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
 
-                        <div class="db-line" style="top: 16.6%;"><span>+10dB</span></div>
-                        <div class="db-line" style="top: 50%;"><span>0dB</span></div>
-                        <div class="db-line" style="top: 83.3%;"><span>-10dB</span></div>
+        <!-- CORE FEATURES SHOWCASE GRID (Mathematically Balanced Bento Grid) -->
+        <section class="features-overhaul" id="features-catalog">
+            <div class="section-heading">
+                <span class="eyebrow">Aideo Catalog</span>
+                <h2>Application Architecture & DSP Core</h2>
+                <p>Every single processing component in the Aideo pipeline is engineered for absolute performance, giving audiophiles the ultimate control panel for high-end external DAC hardware.</p>
+            </div>
 
-                        <!-- Graph SVG Curve -->
-                        <svg class="graph-svg" id="graph-svg" viewBox="0 0 800 300" preserveAspectRatio="none">
-                            <defs>
-                                <linearGradient id="curve-gradient" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"></stop>
-                                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.0"></stop>
-                                </linearGradient>
-                            </defs>
-                            <path id="graph-fill" d="M 0 150 C 200 150, 400 150, 800 150 L 800 300 L 0 300 Z" fill="url(#curve-gradient)"></path>
-                            <path id="graph-line" d="M 0 150 C 200 150, 400 150, 800 150" fill="none" stroke="var(--accent)" stroke-width="3" style="filter: drop-shadow(0 0 6px var(--accent-glow));"></path>
-                        </svg>
+            <!-- Bento Box Grid Matrix -->
+            <div class="bento-grid">
+                
+                <!-- Bento Block 1 (Wide 2-Col): Parametric EQ & AutoEQ -->
+                <div class="premium-feature-card bento-span-2" id="feature-eq">
+                    <div class="card-status-badge purple">Calibrated</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-sliders"></i></div>
+                        <h3>Pro Parametric EQ & AutoEQ Indexer</h3>
+                        <p>Bypasses rigid EQ preset structures to calibrate raw headphone output. Integrates directly with the official AutoEq index of over 4,000+ headphones (Sennheiser, Sony, AirPods, IEMs) to search your model and apply precise corrective frequency curves dynamically with built-in preamp headroom protection.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> High-performance 5 & 10 band filters with custom Q-factors</li>
+                        <li><i class="fas fa-check"></i> Automatic negative gain clipping headroom protection</li>
+                    </ul>
+                </div>
 
-                        <!-- Interactive Nodes -->
-                        <div class="eq-node" id="node-1" data-index="0" style="left: 15%; top: 50%;">1</div>
-                        <div class="eq-node" id="node-2" data-index="1" style="left: 30%; top: 50%;">2</div>
-                        <div class="eq-node" id="node-3" data-index="2" style="left: 50%; top: 50%;">3</div>
-                        <div class="eq-node" id="node-4" data-index="3" style="left: 70%; top: 50%;">4</div>
-                        <div class="eq-node" id="node-5" data-index="4" style="left: 85%; top: 50%;">5</div>
+                <!-- Bento Block 2 (Normal 1-Col): Apple Music Metadata uploads -->
+                <div class="premium-feature-card bento-span-1 highlight-green" id="feature-artwork">
+                    <div class="card-status-badge green">Metadata</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-image"></i></div>
+                        <h3>Cover Art Upload Center</h3>
+                        <p>Fully resolved artwork indexing featuring online metadata queries to fetch high-res 600x600px album covers. Supports local drag-and-drop file uploads, saving images next to tracks (`{filename}.jpg`) to fully prevent leakage in flat folders.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Keyless Apple Music Metadata API</li>
+                        <li><i class="fas fa-check"></i> Base64 drag-and-drop upload zone</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 3 (Wide 2-Col): Immersive Fullscreen HUD -->
+                <div class="premium-feature-card bento-span-2 highlight-cyan" id="feature-fullscreen">
+                    <div class="card-status-badge cyan">Immersive</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-expand"></i></div>
+                        <h3>Fullscreen Lyric HUD & Liquid Canvas</h3>
+                        <p>An elegant, cinematic visualizer dashboard displaying high-fidelity artwork overlays, dynamic center-aligned lyrics, and real-time playback control. The background reacts dynamically using Interactive Liquid visualizer shaders mapped to audio frequencies and dominant cover art colors.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Color-reactive ambient backdrop shaders</li>
+                        <li><i class="fas fa-check"></i> Keyboard shortcuts optimized for large monitors</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 4 (Normal 1-Col): Loved Songs database -->
+                <div class="premium-feature-card bento-span-1 highlight-green" id="feature-loved">
+                    <div class="card-status-badge green">Social</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-heart"></i></div>
+                        <h3>Loved Songs Sync</h3>
+                        <p>A native favoriting system mapped to a database flag inside Aideo's SQLite core. Instantly compiles a dedicated sidebar playlist for your loved songs on-the-fly, while syncing telemetry updates to external scrobbling networks like Last.fm.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> 1-click active track favoriting</li>
+                        <li><i class="fas fa-check"></i> Real-time scrobble synchronization</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 5 (Normal 1-Col): Secure XOR Vault -->
+                <div class="premium-feature-card bento-span-1" id="feature-security">
+                    <div class="card-status-badge purple">Hardened</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-key"></i></div>
+                        <h3>Secure XOR Obfuscator</h3>
+                        <p>Zero plaintext storage. We eliminated insecure localStorage footprints for cloud servers and passwords. Credentials are encrypted using a backend symmetric XOR-128 cipher stored in local native AppData, bound strictly to active Zustand memory states.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Obfuscated `subsonic_pass.enc`</li>
+                        <li><i class="fas fa-check"></i> Protection from local script readers</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 6 (Normal 1-Col): Calibration Wizard -->
+                <div class="premium-feature-card bento-span-1 highlight-cyan" id="feature-wizard">
+                    <div class="card-status-badge cyan">Tuning</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-magic"></i></div>
+                        <h3>Acoustic Setup Wizard</h3>
+                        <p>A premium boot walkthrough designed to configure your acoustic environment on startup. Guides you to select bit-perfect CPAL device transports, scan your folders, profile directories, and choose your preferred Hybrid Lossless Cloud system.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Multi-step acoustic diagnostics</li>
+                        <li><i class="fas fa-check"></i> Local vs Cloud hybrid modes</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 7 (Normal 1-Col): Plugins Manager -->
+                <div class="premium-feature-card bento-span-1 highlight-green" id="feature-plugins">
+                    <div class="card-status-badge green">Plugins</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-puzzle-piece"></i></div>
+                        <h3>Visual Plugins Manager</h3>
+                        <p>Bypasses manual developer setup steps. Aideo manages, inspects, and downloads optional external processing proxies (`yt-dlp` and `ffmpeg`) directly inside Settings. Backend stream proxies are updated on-the-fly at runtime.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Automated dependencies download</li>
+                        <li><i class="fas fa-check"></i> In-app status checking logs</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 8 (Normal 1-Col): SQLite database & playlists -->
+                <div class="premium-feature-card bento-span-1" id="feature-db">
+                    <div class="card-status-badge purple">Database</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-database"></i></div>
+                        <h3>Playlists & DB Migrations</h3>
+                        <p>Unified database mappings. By removing restrictive path foreign keys inside our SQLite schema, Aideo lets you mix online web streams, Tidal Lossless tracks, and local files in the same playlist. Schema migrations are run dynamically on startup.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Auto-run non-destructive migrations</li>
+                        <li><i class="fas fa-check"></i> Uniform music library structures</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 9 (Wide 2-Col): WASAPI Exclusive & DSD Gold-Badge -->
+                <div class="premium-feature-card bento-span-2 highlight-gold" id="feature-wasapi">
+                    <div class="card-status-badge gold">Native DSD</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-certificate"></i></div>
+                        <h3>WASAPI Exclusive Transport & Gold DSD Decoding</h3>
+                        <p>Supports direct native downsampling of DSF and DFF files (mapping to 88.2kHz/176.4kHz 24-bit PCM channels) displayed with custom metallic **DSD NATIVE gold badges**. Linkwitz headphone crossfeed (700Hz shadow lowpass corner filter with a 300µs acoustic delay) tames headphone listening fatigue. CPAL live loops hot-plug and restore playback onto new audio hardware switch devices dynamically.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Haas-effect soundstage width expansion</li>
+                        <li><i class="fas fa-check"></i> 250ms driver switch debouncing loops avoiding handle lockups</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- INTERACTIVE SECTION: DSP PLAYGROUND (Rack-Mount Processor Widget Layout) -->
+        <section id="dsp-playground" class="playground-section">
+            <div class="section-heading">
+                <span class="eyebrow">Interactive Simulation</span>
+                <h2>Studio Parametric EQ & AutoEQ Importer</h2>
+                <p>Experience the core math of Aideo directly in your browser. Select a legendary headphone model to automatically download and calculate corrective biquad filters, or drag the interactive nodes manually to shape the curve.</p>
+            </div>
+
+            <div class="playground-grid">
+                <!-- Search & Presets Controller -->
+                <div class="playground-controls">
+                    <h3><i class="fas fa-search"></i> 1. Choose Headphone Model</h3>
+                    <p class="control-description">AutoEQ references raw target curves to correct frequency response flaws. Click a preset model to witness real-time correction calculations:</p>
+                    
+                    <div class="headphone-search-box">
+                        <input type="text" id="headphone-input" placeholder="Type to search e.g., Sennheiser, Sony..." aria-label="Headphone Model Search">
+                        <div id="search-dropdown" class="search-dropdown-menu"></div>
+                    </div>
+
+                    <div class="quick-tags">
+                        <button class="tag-btn active" data-model="flat" id="preset-flat-btn">Flat Response</button>
+                        <button class="tag-btn" data-model="sennheiser" id="preset-senn-btn">Sennheiser HD 600</button>
+                        <button class="tag-btn" data-model="sony" id="preset-sony-btn">Sony WH-1000XM4</button>
+                        <button class="tag-btn" data-model="airpods" id="preset-pods-btn">AirPods Pro</button>
+                        <button class="tag-btn" data-model="beyerdynamic" id="preset-beyer-btn">DT 990 Pro</button>
+                    </div>
+
+                    <div class="preamp-card">
+                        <div class="preamp-header">
+                            <span>Pre-Amplifier Headroom</span>
+                            <span id="preamp-val" class="mono-font">-0.0 dB</span>
+                        </div>
+                        <div class="slider-wrapper">
+                            <input type="range" id="preamp-slider" min="-12" max="0" step="0.1" value="0" aria-label="Pre-Amplifier Headroom Slider">
+                        </div>
+                        <span class="protection-note"><i class="fas fa-shield-halved"></i> Gain protection active to avoid digital clipping.</span>
+                    </div>
+
+                    <div class="bands-dashboard">
+                        <h3><i class="fas fa-wave-square"></i> Active Filter Parametrics</h3>
+                        <div id="bands-list" class="bands-list"></div>
                     </div>
                 </div>
 
-                <div class="apo-importer-preview">
-                    <div class="importer-header">
-                        <span><i class="fas fa-terminal"></i> Parsed Equalizer APO Profile</span>
-                        <span class="status-pill green">Parsed</span>
+                <!-- Graph Canvas & Curve Visualizer -->
+                <div class="playground-canvas-area">
+                    <div class="graph-wrapper">
+                        <!-- Magnitude Response Graph -->
+                        <div class="eq-graph-container" id="eq-graph-container">
+                            <!-- Frequency gridlines -->
+                            <div class="grid-line" style="left: 10%;"><span>100Hz</span></div>
+                            <div class="grid-line" style="left: 50%;"><span>1kHz</span></div>
+                            <div class="grid-line" style="left: 90%;"><span>10kHz</span></div>
+
+                            <div class="db-line" style="top: 16.6%;"><span>+10dB</span></div>
+                            <div class="db-line" style="top: 50%;"><span>0dB</span></div>
+                            <div class="db-line" style="top: 83.3%;"><span>-10dB</span></div>
+
+                            <!-- Graph SVG Curve -->
+                            <svg class="graph-svg" id="graph-svg" viewBox="0 0 800 300" preserveAspectRatio="none">
+                                <defs>
+                                    <linearGradient id="curve-gradient" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"></stop>
+                                        <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.0"></stop>
+                                    </linearGradient>
+                                </defs>
+                                <path id="graph-fill" d="M 0 150 C 200 150, 400 150, 800 150 L 800 300 L 0 300 Z" fill="url(#curve-gradient)"></path>
+                                <path id="graph-line" d="M 0 150 C 200 150, 400 150, 800 150" fill="none" stroke="var(--accent)" stroke-width="3" style="filter: drop-shadow(0 0 6px var(--accent-glow));"></path>
+                            </svg>
+
+                            <!-- Interactive Nodes -->
+                            <div class="eq-node" id="node-1" data-index="0" style="left: 15%; top: 50%;">1</div>
+                            <div class="eq-node" id="node-2" data-index="1" style="left: 30%; top: 50%;">2</div>
+                            <div class="eq-node" id="node-3" data-index="2" style="left: 50%; top: 50%;">3</div>
+                            <div class="eq-node" id="node-4" data-index="3" style="left: 70%; top: 50%;">4</div>
+                            <div class="eq-node" id="node-5" data-index="4" style="left: 85%; top: 50%;">5</div>
+                        </div>
                     </div>
-                    <pre id="apo-code" class="mono-font">Preamp: -0.0 dB
+
+                    <div class="apo-importer-preview">
+                        <div class="importer-header">
+                            <span><i class="fas fa-terminal"></i> Parsed Equalizer APO Profile</span>
+                            <span class="status-pill green">Parsed</span>
+                        </div>
+                        <pre id="apo-code" class="mono-font">Preamp: -0.0 dB
 Filter 1: ON PK Fc 100 Hz Gain 0.0 dB Q 0.70
 Filter 2: ON PK Fc 300 Hz Gain 0.0 dB Q 0.70
 Filter 3: ON PK Fc 1000 Hz Gain 0.0 dB Q 0.70
 Filter 4: ON PK Fc 3000 Hz Gain 0.0 dB Q 0.70
 Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- CORE FEATURES BLOCKSHOWCASE -->
-    <section class="features-overhaul">
-        <div class="section-heading">
-            <span class="eyebrow">Studio Calibration</span>
-            <h2>Studio Architecture & DSP Topology</h2>
-            <p>Every processing component in the Aideo pipeline is designed with raw performance in mind, targeting high-end external DAC hardware directly.</p>
-        </div>
-
-        <div class="custom-features-grid">
-            <!-- Feature Card 1: Headphone Crossfeed -->
-            <div class="premium-feature-card">
-                <div class="card-icon"><i class="fas fa-random"></i></div>
-                <h3>True Headphone Crossfeed</h3>
-                <p>Simple stereo mixes are mapped strictly to left/right in headphones, inducing quick neurological fatigue. Aideo implements a **Linkwitz/Chu Moy algorithm** in Rust:</p>
-                <div class="crossfeed-simulator">
-                    <div class="crossfeed-head">
-                        <i class="fas fa-user-circle"></i>
-                        <div class="sound-wave left-wave active"></div>
-                        <div class="sound-wave right-wave active"></div>
-                        <div class="crossover-line left-cross active"></div>
-                        <div class="crossover-line right-cross active"></div>
                     </div>
-                    <div class="simulator-label">700Hz Shadow Lowpass &bull; 300µs Delay</div>
                 </div>
-                <ul class="feature-bullets">
-                    <li><i class="fas fa-check"></i> Simulates natural speaker-to-ear room shadowing</li>
-                    <li><i class="fas fa-check"></i> Prevents severe ear strain on early panning mixes</li>
-                </ul>
             </div>
+        </section>
 
-            <!-- Feature Card 2: YTM AI Discovery -->
-            <div class="premium-feature-card">
-                <div class="card-icon"><i class="fas fa-sparkles"></i></div>
-                <h3>YTM Search & Discovery Hub</h3>
-                <p>Stream high-fidelity online tracks directly into your audio pipeline with advanced smart discovery: we execute concurrent Tokio background queries, round-robin interleave results, and filter duplicates automatically.</p>
-                <div class="ytm-badge-wrapper">
-                    <div class="discover-preview-card">
-                        <img src="https://github.com/user-attachments/assets/ed834062-d265-4b04-a772-4474494967c7" alt="YTM cover artwork">
-                        <div class="discover-meta">
-                            <span class="track-title">Pristine Recommendation</span>
-                            <span class="track-artist">Tokio Interleaved Stream</span>
+        <!-- TECHNICAL SPECIFICATIONS DASHBOARD & SPEC TABLE -->
+        <section class="telemetry-section" id="technical-specs">
+            <div class="telemetry-wrapper">
+                <div class="spec-table-card" id="spec-table-container">
+                    <h3><i class="fas fa-list-check"></i> Technical Engine Blueprint</h3>
+                    <table class="premium-spec-table">
+                        <thead>
+                            <tr>
+                                <th>Operational Spec</th>
+                                <th>Subsystem Core</th>
+                                <th>Performance Metric</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="spec-param">Buffer Jitter Latency</td>
+                                <td class="spec-value">WASAPI Exclusive Poll-Thread</td>
+                                <td class="spec-perf">&lt; 0.3 ms</td>
+                            </tr>
+                            <tr>
+                                <td class="spec-param">Audio Engine Decoding</td>
+                                <td class="spec-value">Symphonia (Rust Native)</td>
+                                <td class="spec-perf">32-bit / 384kHz</td>
+                            </tr>
+                            <tr>
+                                <td class="spec-param">DSP CPU Utilization</td>
+                                <td class="spec-value">Biquad Filter Stack Matrix</td>
+                                <td class="spec-perf">&lt; 1.5% Overhead</td>
+                            </tr>
+                            <tr>
+                                <td class="spec-param">Driver Debounce Release</td>
+                                <td class="spec-value">CPAL Device Re-Connector</td>
+                                <td class="spec-perf">250 ms</td>
+                            </tr>
+                            <tr>
+                                <td class="spec-param">Obfuscation Vault</td>
+                                <td class="spec-value">Symmetric XOR-128 appdata</td>
+                                <td class="spec-perf">Bit-Wise Obfuscator</td>
+                            </tr>
+                            <tr>
+                                <td class="spec-param">Metadata Search Response</td>
+                                <td class="spec-value">Apple Music Search Rest API</td>
+                                <td class="spec-perf">600x600px High-Res</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="telemetry-text">
+                    <span class="eyebrow">Acoustic Precision</span>
+                    <h2>Sub-millisecond Audio Alignment</h2>
+                    <p>Aideo bypasses generic OS audio mixers completely. With pull-based hardware clock sync, lyric offsets are tracked down to the microsecond level to guarantee pristine alignment on high-bitrate monitors.</p>
+                    <div class="telemetry-stats">
+                        <div class="stat-box" id="stat-jitter">
+                            <span class="stat-number">0.3ms</span>
+                            <span class="stat-label">Buffer Jitter Variance</span>
                         </div>
-                        <span class="track-duration"><i class="fas fa-clock"></i> 3:45</span>
-                    </div>
-                </div>
-                <ul class="feature-bullets">
-                    <li><i class="fas fa-check"></i> 429 Scraping Bypass via BestAudio Stream proxy</li>
-                    <li><i class="fas fa-check"></i> refererPolicy bypass on 403 Forbidden covers</li>
-                </ul>
-            </div>
-
-            <!-- Feature Card 3: Driver safety Hot-Plug -->
-            <div class="premium-feature-card">
-                <div class="card-icon"><i class="fas fa-shield"></i></div>
-                <h3>WASAPI Device Recovery Loop</h3>
-                <p>Windows audio changes shouldn't crash your player. Aideo registers driver failure closures natively in the WASAPI engine, recovering instantly in under a second after hardware switches.</p>
-                
-                <div class="device-list-mockup">
-                    <div class="device-row active">
-                        <i class="fas fa-volume-high"></i>
-                        <span>Sennheiser HD 600 Direct</span>
-                        <span class="status-pill green">WASAPI Direct</span>
-                    </div>
-                    <div class="device-row">
-                        <i class="fas fa-speaker"></i>
-                        <span>Realtek Default Audio</span>
-                        <span class="status-pill gray">Backup</span>
-                    </div>
-                </div>
-                <ul class="feature-bullets">
-                    <li><i class="fas fa-check"></i> 250ms driver release cooldown avoids handles lockups</li>
-                    <li><i class="fas fa-check"></i> Active skipped transitions command debouncing</li>
-                </ul>
-            </div>
-        </div>
-    </section>
-
-    <!-- CORE METRICS & SPECTROGRAM -->
-    <section class="telemetry-section">
-        <div class="telemetry-wrapper">
-            <div class="telemetry-visual">
-                <h3>Real-Time Spectrogram</h3>
-                <div class="spectrum-bars-container" id="spectrum-bars-container">
-                    <!-- Bars are generated dynamically -->
-                </div>
-            </div>
-            <div class="telemetry-text">
-                <span class="eyebrow">Acoustic Precision</span>
-                <h2>Sub-millisecond Timing Alignment</h2>
-                <p>Aideo bypasses generic OS mixers completely. With pull-based hardware clock sync, lyric offsets are tracked down to the microsecond level to guarantee precise alignment on high-bitrate monitors.</p>
-                <div class="telemetry-stats">
-                    <div class="stat-box">
-                        <span class="stat-number">0.3ms</span>
-                        <span class="stat-label">Buffer Jitter Variance</span>
-                    </div>
-                    <div class="stat-box">
-                        <span class="stat-number">384kHz</span>
-                        <span class="stat-label">Upsample Capability</span>
-                    </div>
-                    <div class="stat-box">
-                        <span class="stat-number">&lt;1.5%</span>
-                        <span class="stat-label">CPU DSP Overhead</span>
+                        <div class="stat-box" id="stat-sample">
+                            <span class="stat-number">384kHz</span>
+                            <span class="stat-label">Upsample Capability</span>
+                        </div>
+                        <div class="stat-box" id="stat-cpu">
+                            <span class="stat-number">&lt;1.5%</span>
+                            <span class="stat-label">CPU DSP Overhead</span>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- THE DETAILED ROADMAP -->
-    <section class="roadmap-section">
-        <div class="section-heading">
-            <span class="eyebrow">Engineering Progress</span>
-            <h2>Project Architecture Timeline</h2>
-            <p>Our commitment to rolling out cutting-edge audio innovations for desktop environments.</p>
-        </div>
+        <!-- REAL-TIME DYNAMIC TELEMETRY SPECTROGRAM -->
+        <section class="telemetry-section" style="padding-top: 0;" id="realtime-spectrogram">
+            <div class="telemetry-wrapper" style="grid-template-columns: 1fr;">
+                <div class="telemetry-visual" id="spectrogram-card">
+                    <h3><i class="fas fa-chart-simple"></i> Real-Time Acoustic Spectrogram Visualizer</h3>
+                    <div class="spectrum-bars-container" id="spectrum-bars-container">
+                        <!-- Bars are generated dynamically -->
+                    </div>
+                </div>
+            </div>
+        </section>
 
-        <div class="timeline-container">
-            <div class="timeline-node done">
-                <span class="node-badge">v0.6.0</span>
-                <h3>Pro DSP & AutoEQ Importer</h3>
-                <p>Introduced the 5-band Parametric EQ, online headphone index, true crossfeed crosstalk shadowing, and Haas expansion soundstages.</p>
+        <!-- PROJECT TIMELINE ROADMAP -->
+        <section class="roadmap-section" id="roadmap">
+            <div class="section-heading">
+                <span class="eyebrow">Engineering Progress</span>
+                <h2>Project Architecture Timeline</h2>
+                <p>Our commitment to rolling out cutting-edge audio innovations for desktop environments.</p>
             </div>
-            <div class="timeline-node active">
-                <span class="node-badge glow">v0.7.0</span>
-                <h3>Cover Art & Diagnostic Center</h3>
-                <p>Overhauled the online artwork search via iTunes API, enabled non-leaking custom covers, and added multi-tier UI diagnostic toggles.</p>
-            </div>
-            <div class="timeline-node future">
-                <span class="node-badge">Next Core</span>
-                <h3>DSD & DSF Native Decoding</h3>
-                <p>Adding support for Direct Stream Digital direct transport using DSD-over-PCM (DoP) packetizing blocks.</p>
-            </div>
-        </div>
-    </section>
 
-    <!-- Footer -->
+            <div class="timeline-container">
+                <div class="timeline-node done" id="node-v6">
+                    <span class="node-badge">v0.6.0</span>
+                    <h3>Pro DSP & AutoEQ Importer</h3>
+                    <p>Introduced the 5-band Parametric EQ, online headphone index, true crossfeed crosstalk shadowing, and Haas expansion soundstages.</p>
+                </div>
+                <div class="timeline-node active" id="node-v7">
+                    <span class="node-badge glow">v0.7.1</span>
+                    <h3>Stable Auto-Updates & DSD</h3>
+                    <p>Resolved the Windows auto-update escaping bug, built manual backup browser installer dialogs, and integrated native DSD up/down-sampling.</p>
+                </div>
+                <div class="timeline-node future" id="node-vnext">
+                    <span class="node-badge">Next Core</span>
+                    <h3>ASIO Native Transport (DoP)</h3>
+                    <p>Adding native support for bit-stream Direct Stream Digital transport using Direct Stream Digital-over-PCM (DoP) drivers.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer section -->
     <footer>
         <div class="footer-grid">
             <div class="footer-brand">
@@ -330,12 +476,12 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
                 <p>An educational project dedicated to pure acoustics and performance.</p>
             </div>
             <div class="footer-stats">
-                <span class="badge-status"><i class="fas fa-check-circle"></i> ALL DSP BLOCKS STABLE &bull; WASAPI COMPLIANT</span>
+                <span class="badge-status" id="badge-wasapi-compliant"><i class="fas fa-check-circle"></i> ALL DSP BLOCKS STABLE &bull; WASAPI COMPLIANT</span>
             </div>
         </div>
         <div class="footer-bottom">
             <p>&copy; 2026 Aideo Music Player. Built with ❤️ by Alirul.</p>
-            <p class="sub-credit">This player is 100% AI-assisted (built with Antigravity), displaying how high-end coding accelerators speed up deep engineering projects.</p>
+            <p class="sub-credit" id="sub-credit-text">This player is 100% AI-assisted (built with Antigravity), displaying how high-end coding accelerators speed up deep engineering projects.</p>
         </div>
     </footer>
 
@@ -810,7 +956,7 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
                 height = Math.max(5, Math.min(100, height));
                 bar.style.height = `${height}%`;
             });
-            setTimeout(updateSpectrogram, 70);
+            requestAnimationFrame(updateSpectrogram);
         }
         updateSpectrogram();
 

@@ -138,13 +138,32 @@ export function AideoLabView() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Create an offscreen canvas for double-buffered self-copying.
+    // This avoids undefined behavior and frozen frames caused by drawing a canvas onto itself in modern WebViews (like WebView2 on Windows).
+    const offscreen = document.createElement('canvas');
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    const offscreenCtx = offscreen.getContext('2d');
+
     let animId: number;
     const render = () => {
       const w = canvas.width;
       const h = canvas.height;
 
-      // Subtle feedback scroll down (waterfall style)
-      ctx.drawImage(canvas, 0, 1, w, h - 1);
+      if (offscreenCtx) {
+        // Copy current main canvas state to the offscreen canvas
+        offscreenCtx.clearRect(0, 0, w, h);
+        offscreenCtx.drawImage(canvas, 0, 0);
+
+        // Clear main canvas
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw the offscreen canvas shifted down by 1 pixel back to the main canvas
+        ctx.drawImage(offscreen, 0, 1, w, h - 1);
+      } else {
+        // Fallback self-copy
+        ctx.drawImage(canvas, 0, 1, w, h - 1);
+      }
       
       // Clear top row
       ctx.fillStyle = 'rgba(9, 9, 14, 0.05)';

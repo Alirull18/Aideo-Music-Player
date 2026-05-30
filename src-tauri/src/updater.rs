@@ -113,17 +113,29 @@ pub async fn download_and_install(url: String, app_handle: tauri::AppHandle) -> 
     file.write_all(&bytes).map_err(|e| e.to_string())?;
     
     let temp_str = temp_file_path.to_string_lossy().into_owned();
-    if is_msi {
-        // ⏳ Delay increased to ~5 seconds (-n 6) to ensure the parent app exits completely
-        let cmd_str = format!("ping 127.0.0.1 -n 6 > nul && msiexec.exe /i \"{}\" /qb", temp_str);
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let cmd_str = if is_msi {
+            // ⏳ Delay increased to ~5 seconds (-n 6) to ensure the parent app exits completely
+            format!("ping 127.0.0.1 -n 6 > nul && msiexec.exe /i \"{}\" /qb", temp_str)
+        } else {
+            format!("ping 127.0.0.1 -n 6 > nul && start \"\" \"{}\"", temp_str)
+        };
+        
         Command::new("cmd.exe")
-            .args(["/C", &cmd_str])
+            .raw_arg(format!("/C {}", cmd_str))
             .spawn()
             .map_err(|e| e.to_string())?;
-    } else {
-        let cmd_str = format!("ping 127.0.0.1 -n 6 > nul && start \"\" \"{}\"", temp_str);
-        Command::new("cmd.exe")
-            .args(["/C", &cmd_str])
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let cmd_str = format!("sleep 5 && open \"{}\"", temp_str);
+        Command::new("sh")
+            .arg("-c")
+            .arg(&cmd_str)
             .spawn()
             .map_err(|e| e.to_string())?;
     }

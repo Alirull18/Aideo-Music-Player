@@ -1,7 +1,7 @@
 {
   "name": "aideo",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -28,6 +28,7 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.5.0",
+    "daisyui": "^5.5.20",
     "postcss": "^8.5.14",
     "tailwindcss": "^4.3.0",
     "typescript": "~5.8.3",

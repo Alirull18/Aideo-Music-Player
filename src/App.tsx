@@ -4,6 +4,7 @@ import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Radio, Check, Download, X } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
 
 import { Sidebar } from './components/Sidebar';
@@ -55,6 +56,7 @@ export default function App() {
   } = useStore();
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     const { fetchDevices, initializeQueue, loadSubsonicPassword } = useStore.getState();
@@ -307,50 +309,91 @@ export default function App() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ background: 'var(--accent)', borderRadius: '50%', padding: 8, display: 'flex' }}>
+                <div style={{ background: updateError ? '#ef4444' : 'var(--accent)', borderRadius: '50%', padding: 8, display: 'flex' }}>
                   <Download size={18} color="white" />
                 </div>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>Update Available</div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{updateError ? 'Update Failed' : 'Update Available'}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Version {updateInfo.version}</div>
                 </div>
               </div>
               <button 
                 className="modal-close" 
                 style={{ padding: 8, margin: -8, cursor: 'pointer' }} 
-                onClick={(e) => { e.stopPropagation(); setUpdateInfo(null); }}
+                onClick={(e) => { e.stopPropagation(); setUpdateInfo(null); setUpdateError(null); }}
               >
                 <X size={16} />
               </button>
             </div>
             
-            <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20, maxHeight: 60, overflowY: 'auto', lineHeight: 1.5 }}>
-              {updateInfo.body || 'A new version of Aideo is ready to install.'}
-            </div>
+            {updateError ? (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 13, color: '#f87171', marginBottom: 10, lineHeight: 1.4 }}>
+                  The automatic installation encountered an issue: {updateError}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                  Since you are running an older release (like v0.6.0), the built-in process launcher might have run into an escaping limitation. Please download and install the update manually.
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20, maxHeight: 60, overflowY: 'auto', lineHeight: 1.5 }}>
+                {updateInfo.body || 'A new version of Aideo is ready to install.'}
+              </div>
+            )}
 
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
-              disabled={isDownloadingUpdate}
-              onClick={async () => {
-                setIsDownloadingUpdate(true);
-                try {
-                  await invoke('download_and_install', { url: updateInfo.download_url });
-                } catch (e: any) {
-                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Update failed: ${e}`, type: 'error' } }));
-                  setIsDownloadingUpdate(false);
-                }
-              }}
-            >
-              {isDownloadingUpdate ? (
-                'Downloading & Installing...'
-              ) : (
-                <>
-                  <Download size={16} />
-                  Install Update Now
-                </>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {!updateError && (
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
+                  disabled={isDownloadingUpdate}
+                  onClick={async () => {
+                    setIsDownloadingUpdate(true);
+                    setUpdateError(null);
+                    try {
+                      await invoke('download_and_install', { url: updateInfo.download_url });
+                    } catch (e: any) {
+                      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Update failed: ${e}`, type: 'error' } }));
+                      setUpdateError(e.toString());
+                      setIsDownloadingUpdate(false);
+                    }
+                  }}
+                >
+                  {isDownloadingUpdate ? (
+                    'Downloading & Installing...'
+                  ) : (
+                    <>
+                      <Download size={16} />
+                      Install Update Now
+                    </>
+                  )}
+                </button>
               )}
-            </button>
+
+              <button
+                className={updateError ? "btn btn-primary" : "btn btn-secondary"}
+                style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
+                onClick={() => {
+                  openUrl('https://github.com/Alirull18/Aideo-Music-Player/releases/latest').catch(() => window.open('https://github.com/Alirull18/Aideo-Music-Player/releases/latest', '_blank'));
+                }}
+              >
+                <Download size={16} />
+                Download Manually from GitHub
+              </button>
+
+              {updateError && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ width: '100%', padding: '10px 0' }}
+                  onClick={() => {
+                    setUpdateInfo(null);
+                    setUpdateError(null);
+                  }}
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
           </motion.div>
         )}
 

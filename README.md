@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.7.0
+# 💎 Aideo Music Player v0.7.1
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -10,9 +10,13 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.7.0 (The Artwork Manager & Diagnostics Update)
+## 📢 What's New in v0.7.1 (The Auto-Updater & Manual Fallback Update)
 
-### 🎨 Advanced Cover Art Manager & Upload Center
+### 🚀 Auto-Updater & Process Launcher Hardening
+- **Windows Escaping Resolution**: Uses Windows-native `.raw_arg()` process-spawning logic to pass target commands directly to `cmd.exe /C`, resolving the folder path backslash/network-escaping bug that crashed the auto-updater under prior environments.
+- **Interactive Manual Fallback UI**: Dynamically transforms the updater dialog into an error fallback UI showing the direct exception trace and presenting manual browser download links if local installation routines are blocked.
+
+### 🎨 Advanced Cover Art Manager & Upload Center (from v0.7.0)
 - **iTunes High-Res Search Integration**: Keyless, high-fidelity online cover lookup resolving global and K-Pop artists (e.g. *IVE*, *ive iam*) instantly with 600x600px high-definition graphics.
 - **Track-Specific Naming**: Saves covers as `{track_filename}.jpg/png` alongside songs instead of a folder-wide generic `cover.jpg` file, fully preventing artwork leakages in flat folders.
 - **Generic Album Fallbacks**: Intelligently auto-resolves generic directory cover images (`cover.jpg`, `folder.png`, etc.) if no embedded tag images are present.
@@ -106,8 +110,8 @@ Stream high-fidelity online tracks directly into your audio pipeline with advanc
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.7.0 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.7.0_x64_en-US.msi`).
+1. **Download**: Get the latest v0.7.1 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.7.1_x64_en-US.msi`).
 3. **Launch**: Add your library directory and experience pristine, bit-perfect sound!
 
 ---
