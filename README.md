@@ -135,16 +135,7 @@ Stream high-fidelity online tracks directly into your audio pipeline with advanc
 
 ---
 
-## 📸 Screenshots
 
-<div align="center">
-  <p><b>Main Interface & Dynamic Themes</b></p>
-  <img src="https://github.com/user-attachments/assets/f94cd26a-b5fe-407e-b7fe-11810d108155" alt="Main Library View" width="80%"/>
-  <br/><br/>
-  <p><b>High-Fidelity Lyrics & Audio Engine</b></p>
-  <img src="https://github.com/user-attachments/assets/ed834062-d265-4b04-a772-4474494967c7" alt="Now Playing View" width="48%"/>
-  <img src="https://github.com/user-attachments/assets/552451ee-927c-4326-89e7-07f4ae33d668" alt="Audio Settings" width="48%"/>
-</div>
 
 ---
 
