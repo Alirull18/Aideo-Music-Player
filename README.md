@@ -10,6 +10,46 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
+## 📸 Screenshots & UI Showcase
+
+<div align="center">
+  <p align="center">
+    <strong>Immersive Fullscreen HUD & Ambient Liquid Art</strong>
+    <br />
+    <img src="https://placehold.co/800x450/09090b/fafafa?text=Aideo+Fullscreen+HUD+%26+Lyrics" alt="Aideo Fullscreen Mode" width="80%">
+  </p>
+  <br />
+  
+  <table width="100%">
+    <tr>
+      <td width="50%" align="center">
+        <strong>Aideo Lab: Pro DSP & EQ Graph</strong>
+        <br />
+        <img src="https://placehold.co/400x250/09090b/fafafa?text=Aideo+Lab+DSP+Console" alt="Aideo Lab DSP View" width="100%">
+      </td>
+      <td width="50%" align="center">
+        <strong>Pristine Library Dashboard</strong>
+        <br />
+        <img src="https://placehold.co/400x250/09090b/fafafa?text=Aideo+Library+Manager" alt="Aideo Library Dashboard" width="100%">
+      </td>
+    </tr>
+    <tr>
+      <td width="50%" align="center">
+        <strong>🧙 Hardware Latency Onboarding</strong>
+        <br />
+        <img src="https://placehold.co/400x250/09090b/fafafa?text=Setup+Onboarding+Wizard" alt="Aideo Setup Onboarding Wizard" width="100%">
+      </td>
+      <td width="50%" align="center">
+        <strong>🔌 Visual Plugins Installer</strong>
+        <br />
+        <img src="https://placehold.co/400x250/09090b/fafafa?text=Dynamic+Plugins+Manager" alt="Plugins Manager" width="100%">
+      </td>
+    </tr>
+  </table>
+</div>
+
+---
+
 ## 📢 What's New in v0.7.1 (The Auto-Updater & Manual Fallback Update)
 
 ### 🚀 Auto-Updater & Process Launcher Hardening
