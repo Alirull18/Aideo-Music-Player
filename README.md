@@ -16,7 +16,7 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
   <p align="center">
     <strong>Immersive Fullscreen HUD & Ambient Liquid Art</strong>
     <br />
-    <img src="https://placehold.co/800x450/09090b/fafafa?text=Aideo+Fullscreen+HUD+%26+Lyrics" alt="Aideo Fullscreen Mode" width="80%">
+    <img width="1918" height="1113" alt="Screenshot 2026-05-30 140713" src="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461" />
   </p>
   <br />
   
@@ -25,24 +25,24 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
       <td width="50%" align="center">
         <strong>Aideo Lab: Pro DSP & EQ Graph</strong>
         <br />
-        <img src="https://placehold.co/400x250/09090b/fafafa?text=Aideo+Lab+DSP+Console" alt="Aideo Lab DSP View" width="100%">
+        <img width="1918" height="1115" alt="Screenshot 2026-05-30 141042" src="https://github.com/user-attachments/assets/b1035ae9-7ae2-4d26-9fdd-810c5d82d02f" />
       </td>
       <td width="50%" align="center">
         <strong>Pristine Library Dashboard</strong>
         <br />
-        <img src="https://placehold.co/400x250/09090b/fafafa?text=Aideo+Library+Manager" alt="Aideo Library Dashboard" width="100%">
+        <img width="1918" height="1115" alt="Screenshot 2026-05-30 140809" src="https://github.com/user-attachments/assets/71f7328e-5f57-4783-8df5-47194fc8dd98" />
       </td>
     </tr>
     <tr>
       <td width="50%" align="center">
         <strong>🧙 Hardware Latency Onboarding</strong>
         <br />
-        <img src="https://placehold.co/400x250/09090b/fafafa?text=Setup+Onboarding+Wizard" alt="Aideo Setup Onboarding Wizard" width="100%">
+        <img width="1918" height="1116" alt="Screenshot 2026-05-30 140741" src="https://github.com/user-attachments/assets/cfc693d1-eda4-4ef7-87bc-0af18680f212" />
       </td>
       <td width="50%" align="center">
         <strong>🔌 Visual Plugins Installer</strong>
         <br />
-        <img src="https://placehold.co/400x250/09090b/fafafa?text=Dynamic+Plugins+Manager" alt="Plugins Manager" width="100%">
+        <img width="1918" height="1116" alt="Screenshot 2026-05-30 140741" src="https://github.com/user-attachments/assets/481b56df-9c79-4ad9-959c-3f1b0bfae71e" />
       </td>
     </tr>
   </table>
