@@ -143,8 +143,8 @@ export function SettingsView() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Theme & Appearance states
-  const [themeMode, setThemeMode] = useState<'dynamic' | 'preset'>(() => {
-    return (localStorage.getItem('aideo-theme-mode') as 'dynamic' | 'preset') || 'dynamic';
+  const [themeMode, setThemeMode] = useState<'dynamic' | 'preset' | 'windows'>(() => {
+    return (localStorage.getItem('aideo-theme-mode') as 'dynamic' | 'preset' | 'windows') || 'dynamic';
   });
   const [presetColor, setPresetColor] = useState(() => {
     return localStorage.getItem('aideo-preset-color') || '#8b5cf6';
@@ -259,6 +259,13 @@ export function SettingsView() {
       localStorage.setItem('aideo-preset-rgb', presetRgb);
       document.documentElement.style.setProperty('--dynamic-accent', presetColor);
       document.documentElement.style.setProperty('--accent-rgb', presetRgb);
+    } else if (themeMode === 'windows') {
+      invoke('get_windows_accent_color')
+        .then((color: any) => {
+          document.documentElement.style.setProperty('--dynamic-accent', color);
+          applyRgbFromHex(color);
+        })
+        .catch(err => console.error("Failed to get windows accent color:", err));
     } else {
       const storeAccent = useStore.getState().accentColor;
       document.documentElement.style.setProperty('--dynamic-accent', storeAccent);
@@ -346,6 +353,13 @@ export function SettingsView() {
               >
                 Static Preset
               </button>
+              <button 
+                className={`btn ${themeMode === 'windows' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '6px 12px' }}
+                onClick={() => setThemeMode('windows')}
+              >
+                Windows Accent
+              </button>
             </div>
           </div>
 
@@ -365,6 +379,20 @@ export function SettingsView() {
                 <div className="settings-chip-info">
                   <div className="settings-chip-name">System Dynamic</div>
                   <div className="settings-chip-desc">Flowing song accents</div>
+                </div>
+              </div>
+
+              {/* Windows Accent chip */}
+              <div 
+                className={`settings-theme-chip ${themeMode === 'windows' ? 'active' : ''}`}
+                onClick={() => setThemeMode('windows')}
+              >
+                <div className="settings-chip-color" style={{ background: 'linear-gradient(135deg, #2563eb, #3b82f6, #60a5fa)' }}>
+                  <Laptop size={12} color="white" />
+                </div>
+                <div className="settings-chip-info">
+                  <div className="settings-chip-name">Windows Accent</div>
+                  <div className="settings-chip-desc">Sync with OS Color</div>
                 </div>
               </div>
 
@@ -1934,6 +1962,53 @@ export function SettingsView() {
               }}
             >
               Launch Setup Wizard
+            </button>
+          </div>
+        </div>
+      )
+    },
+
+    {
+      id: 'cache-management',
+      title: 'Cache and Storage Management',
+      description: 'Clear temporary files, cached streaming audio files, and temporary url lookup parameters to reclaim local disk storage.',
+      keywords: 'cache clear clean delete temp storage cloud cache cloudcache youtube ytdlp temporary disk space usage size',
+      tab: 'system',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1, paddingRight: 24 }}>
+              <div className="settings-ctrl-title">Cache & Temp Storage Cleanup</div>
+              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
+                Aideo stores four types of caches locally:
+                <ul style={{ margin: '8px 0 0 16px', padding: 0, listStyleType: 'disc', color: 'var(--text-dim)', fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <li><strong>Cloud Audio Stream Cache:</strong> Local copies of streamed Subsonic, Jellyfin, YouTube, and Tidal tracks saved for offline access.</li>
+                  <li><strong>yt-dlp temporary cache:</strong> Temporary files created during background URL extractions.</li>
+                  <li><strong>Temporary Decrypted Audio:</strong> Piped stream buffers in the system temp directory.</li>
+                  <li><strong>In-Memory URL Resolves:</strong> Cached YouTube streaming URLs to avoid rate limits.</li>
+                </ul>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  await invoke('clear_application_cache');
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'All application caches deleted successfully!', type: 'success' } }));
+                } catch (e: any) {
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to clear cache: ${e}`, type: 'error' } }));
+                }
+              }}
+              className="settings-btn settings-btn-danger"
+              style={{
+                fontSize: 11,
+                padding: '8px 16px',
+                fontWeight: 700,
+                borderRadius: 8,
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              Clear Cache
             </button>
           </div>
         </div>

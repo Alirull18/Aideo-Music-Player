@@ -13,7 +13,7 @@ default-run = "aideo"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "tauri_app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["lib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -58,6 +58,9 @@ windows = { version = "0.52.0", features = [
     "Win32_System_Threading",
     "Win32_System_Power",
     "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Registry",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Media_KernelStreaming",
     "Win32_Media_Multimedia"

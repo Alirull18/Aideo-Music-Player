@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
 import { MessageSquare, Activity, Maximize2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
@@ -19,11 +20,27 @@ export function NowPlayingView() {
   const [showLyrics, setShowLyrics] = useState(true);
 
   useEffect(() => {
-    if (localStorage.getItem('aideo-theme-mode') === 'preset') {
+    const themeMode = localStorage.getItem('aideo-theme-mode');
+    if (themeMode === 'preset') {
       const pc = localStorage.getItem('aideo-preset-color') || '#8b5cf6';
       const pr = localStorage.getItem('aideo-preset-rgb') || '139, 92, 246';
       document.documentElement.style.setProperty('--dynamic-accent', pc);
       document.documentElement.style.setProperty('--accent-rgb', pr);
+      return;
+    } else if (themeMode === 'windows') {
+      invoke('get_windows_accent_color')
+        .then((color: any) => {
+          document.documentElement.style.setProperty('--dynamic-accent', color);
+          let r = 139, g = 92, b = 246;
+          if (color.startsWith('#')) {
+            const hex = color.replace('#', '');
+            r = parseInt(hex.substring(0, 2), 16);
+            g = parseInt(hex.substring(2, 4), 16);
+            b = parseInt(hex.substring(4, 6), 16);
+          }
+          document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`);
+        })
+        .catch((err: any) => console.error("Failed to fetch Windows accent color:", err));
       return;
     }
 

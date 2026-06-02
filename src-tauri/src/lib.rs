@@ -8,6 +8,7 @@ mod artwork;
 mod db;
 mod lyrics;
 mod player;
+mod taskbar;
 use crate::player::PlayerCommand;
 mod lastfm;
 pub mod lastfm_api;
@@ -749,6 +750,7 @@ fn update_media_metadata(
 #[tauri::command]
 fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<(), String> {
     let player = safe_lock(&state.player);
+    let app_handle = player.app_handle.clone();
     let pos_f64 = *safe_lock(&player.position_secs);
     let progress = Some(MediaPosition(std::time::Duration::from_secs_f64(pos_f64)));
     if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
@@ -760,6 +762,16 @@ fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<()
             })
             .ok();
     }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(main_window) = app_handle.get_webview_window("main") {
+            if let Ok(raw) = main_window.hwnd() {
+                taskbar::update_taskbar_playback_state(raw.0 as *mut std::ffi::c_void, playing);
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -982,6 +994,100 @@ fn log_error(msg: String) {
 }
 
 #[tauri::command]
+fn clear_application_cache() -> Result<(), String> {
+    // 1. Delete Cloud Stream Cache
+    if let Some(data_dir) = dirs::data_dir() {
+        let cache_dir = data_dir.join("Aideo").join("CloudCache");
+        if cache_dir.exists() {
+            let _ = std::fs::remove_dir_all(&cache_dir);
+        }
+        
+        // 2. Delete yt-dlp temporary cache
+        let ytdlp_cache = data_dir.join("Aideo").join("cache");
+        if ytdlp_cache.exists() {
+            let _ = std::fs::remove_dir_all(&ytdlp_cache);
+        }
+    }
+
+    // 3. Clear temporary decrypted cache files in temp_dir
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    if filename.starts_with("aideo_cache_") {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Clear in-memory YouTube URL cache
+    player::clear_youtube_url_cache();
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_windows_accent_color() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::core::w;
+        use windows::Win32::System::Registry::{
+            HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ, HKEY,
+        };
+
+        unsafe {
+            let mut hkey: HKEY = HKEY::default();
+            let subkey = w!("Software\\Microsoft\\Windows\\DWM");
+            let res = RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                subkey,
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+
+            if res.is_err() {
+                return Err("Failed to open registry key".to_string());
+            }
+
+            let mut value_data: u32 = 0;
+            let mut data_size: u32 = std::mem::size_of::<u32>() as u32;
+
+            let value_name = w!("ColorizationColor");
+            let res = RegQueryValueExW(
+                hkey,
+                value_name,
+                None,
+                None,
+                Some(&mut value_data as *mut u32 as *mut u8),
+                Some(&mut data_size),
+            );
+
+            let _ = RegCloseKey(hkey);
+
+            if res.is_err() {
+                return Err("Failed to query registry value".to_string());
+            }
+
+            // The value_data is in ARGB format: 0xAARRGGBB
+            let r = (value_data >> 16) & 0xFF;
+            let g = (value_data >> 8) & 0xFF;
+            let b = value_data & 0xFF;
+
+            Ok(format!("#{:02x}{:02x}{:02x}", r, g, b))
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Unsupported operating system".to_string())
+    }
+}
+
+#[tauri::command]
 fn toggle_keep_awake(enable: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     unsafe {
@@ -997,7 +1103,6 @@ fn toggle_keep_awake(enable: bool) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     dotenvy::dotenv().ok();
     tauri::Builder::default()
@@ -1102,6 +1207,8 @@ pub fn run() {
             cloud::cache_cloud_track,
             cloud::get_all_cached_cloud_hashes,
             cloud::get_url_hash,
+            get_windows_accent_color,
+            clear_application_cache,
         ])
         .setup(|app| {
             let tidal_state = std::sync::Arc::new(tidal::TidalState {
@@ -1200,6 +1307,11 @@ pub fn run() {
                 media_controls: Arc::new(Mutex::new(controls_opt)),
                 cached_devices: Arc::new(Mutex::new(Vec::new())),
             });
+
+            #[cfg(target_os = "windows")]
+            if let Some(hwnd_raw) = hwnd {
+                taskbar::initialize_taskbar_buttons(hwnd_raw, app.handle().clone());
+            }
 
             app.listen_any("deep-link", move |event| {
                 println!("Got deep link: {:?}", event.payload());

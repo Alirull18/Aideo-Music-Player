@@ -139,6 +139,12 @@ lazy_static::lazy_static! {
     static ref YOUTUBE_URL_CACHE: std::sync::Mutex<std::collections::HashMap<String, String>> = std::sync::Mutex::new(std::collections::HashMap::new());
 }
 
+pub fn clear_youtube_url_cache() {
+    if let Ok(mut cache) = YOUTUBE_URL_CACHE.lock() {
+        cache.clear();
+    }
+}
+
 fn resolve_youtube_url(url: &str) -> String {
     if !url.contains("youtube.com") && !url.contains("youtu.be") {
         return url.to_string();
@@ -159,11 +165,18 @@ fn resolve_youtube_url(url: &str) -> String {
     use std::os::windows::process::CommandExt;
     
     let mut cmd = std::process::Command::new(&ytdlp_path);
+    let cache_dir_str = aideo_dir.join("cache").to_string_lossy().to_string();
     cmd.args([
         "-g",
         "-f", "251/140/bestaudio/best",
-        "--no-cache-dir",
-        "--extractor-args", "youtube:player-client=mweb,android",
+        "--cache-dir", &cache_dir_str,
+        "--force-ipv4",
+        "--no-check-formats",
+        "--no-playlist",
+        "--no-check-certificate",
+        "--sleep-interval", "0",
+        "--max-sleep-interval", "0",
+        "--sleep-requests", "0",
         url
     ]);
     
@@ -243,6 +256,24 @@ fn resolve_playlist_url(url: &str) -> String {
     url.to_string()
 }
 
+fn detect_audio_extension(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"fLaC") {
+        "flac"
+    } else if bytes.starts_with(b"ID3") || (bytes.len() >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0) {
+        "mp3"
+    } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        "webm"
+    } else if bytes.starts_with(b"OggS") {
+        "ogg"
+    } else if bytes.starts_with(b"RIFF") && bytes.len() >= 12 && &bytes[8..12] == b"WAVE" {
+        "wav"
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        "m4a"
+    } else {
+        "mp3"
+    }
+}
+
 /// 🎵 Prepare the media source and decoder
 fn prepare_decoder(
     path: &str,
@@ -262,8 +293,9 @@ fn prepare_decoder(
             if cache_path.exists() {
                 if let Ok(encrypted_bytes) = std::fs::read(&cache_path) {
                     let decrypted_bytes = crate::cloud::xor_cipher(&encrypted_bytes);
+                    let ext = detect_audio_extension(&decrypted_bytes);
                     let temp_dir = std::env::temp_dir();
-                    let temp_path = temp_dir.join(format!("aideo_cache_{}.mp3", hash));
+                    let temp_path = temp_dir.join(format!("aideo_cache_{}.{}", hash, ext));
                     if std::fs::write(&temp_path, decrypted_bytes).is_ok() {
                         resolved_path = temp_path.to_string_lossy().to_string();
                         println!("[player] INTERCEPT: Playing cloud track from offline decrypted cache file!");
@@ -507,10 +539,17 @@ fn prepare_decoder(
 
         let mss = if use_piped_ytdlp {
             let mut ytdlp_cmd = std::process::Command::new(&ytdlp_path);
+            let cache_dir_str = aideo_dir.join("cache").to_string_lossy().to_string();
             ytdlp_cmd.args([
                 "-f", "251/140/bestaudio/best",
-                "--no-cache-dir",
-                "--extractor-args", "youtube:player-client=mweb,android",
+                "--cache-dir", &cache_dir_str,
+                "--force-ipv4",
+                "--no-check-formats",
+                "--no-playlist",
+                "--no-check-certificate",
+                "--sleep-interval", "0",
+                "--max-sleep-interval", "0",
+                "--sleep-requests", "0",
                 "-o", "-",
                 path
             ]);
@@ -1497,6 +1536,68 @@ fn play_file(
     let mut format = info.format;
     let mut decoder = info.decoder;
     let time_base = info.time_base;
+
+    let is_stream = path.starts_with("http://") || path.starts_with("https://");
+    if is_stream {
+        let hash = format!("{:x}", md5::compute(path.as_bytes()));
+        let mut already_cached = false;
+        if let Some(data_dir) = dirs::data_dir() {
+            let cache_path = data_dir.join("Aideo").join("CloudCache").join(format!("{}.cache", hash));
+            if cache_path.exists() {
+                already_cached = true;
+            }
+        }
+        if !already_cached {
+            let stream_url = path.to_string();
+            std::thread::spawn(move || {
+                println!("[player-bg-cache] Automatically caching stream in background: {}", stream_url);
+                let resolved_url = if stream_url.contains("youtube.com") || stream_url.contains("youtu.be") {
+                    resolve_youtube_url(&stream_url)
+                } else {
+                    resolve_playlist_url(&stream_url)
+                };
+
+                if (stream_url.contains("youtube.com") || stream_url.contains("youtu.be")) && !resolved_url.contains("googlevideo.com") {
+                    eprintln!("[player-bg-cache] Skipping download: direct stream URL resolved incorrectly or failed.");
+                    return;
+                }
+
+                let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
+                if let Some(data_dir) = dirs::data_dir() {
+                    let cache_dir = data_dir.join("Aideo").join("CloudCache");
+                    if std::fs::create_dir_all(&cache_dir).is_ok() {
+                        let cache_path = cache_dir.join(format!("{}.cache", hash));
+                        let temp_path = cache_dir.join(format!("{}.tmp", hash));
+                        if !cache_path.exists() {
+                            let client = reqwest::blocking::Client::new();
+                            let is_youtube_stream = resolved_url.contains("youtube.com") || resolved_url.contains("googlevideo.com") || resolved_url.contains("youtu.be");
+                            let mut req = client.get(&resolved_url);
+                            if is_youtube_stream {
+                                req = req.header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36")
+                                         .header("Referer", "https://www.google.com/");
+                            } else {
+                                req = req.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+                            }
+
+                            if let Ok(res) = req.send() {
+                                if res.status().is_success() {
+                                    if let Ok(bytes) = res.bytes() {
+                                        let encrypted = crate::cloud::xor_cipher(&bytes);
+                                        if std::fs::write(&temp_path, encrypted).is_ok() {
+                                            if std::fs::rename(&temp_path, &cache_path).is_ok() {
+                                                println!("[player-bg-cache] Stream successfully cached to disk!");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            let _ = std::fs::remove_file(&temp_path);
+                        }
+                    }
+                }
+            });
+        }
+    }
 
     let is_exclusive = *safe_lock(&exclusive_mode);
     let is_stream = path.starts_with("http://") || path.starts_with("https://");
