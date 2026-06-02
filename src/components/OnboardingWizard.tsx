@@ -4,9 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Sparkles, Headphones, HardDrive, Check, ArrowRight, ArrowLeft, 
   ShieldCheck, Radio, 
-  FolderOpen, Plus, Trash2, CheckSquare, Square
+  FolderOpen, Plus, Trash2, CheckSquare, Square,
+  DownloadCloud, AlertCircle, Loader2, CheckCircle2
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 export function OnboardingWizard() {
   const { 
@@ -37,6 +40,61 @@ export function OnboardingWizard() {
     listenbrainzScrobble: listenbrainzEnabled,
     youtubeMusic: true
   });
+
+  // Dependencies management state
+  interface DependencyStatus {
+    ytdlp_installed: boolean;
+    ffmpeg_installed: boolean;
+    ytdlp_size: number;
+    ffmpeg_size: number;
+  }
+  const [depStatus, setDepStatus] = useState<DependencyStatus | null>(null);
+  const [depDownloads, setDepDownloads] = useState<Record<string, { percent: number; downloaded: number; total: number; active: boolean }>>({});
+
+  const fetchDepStatus = async () => {
+    try {
+      const res = await invoke<DependencyStatus>('get_dependencies_status');
+      setDepStatus(res);
+    } catch (e) {
+      console.error("Failed to fetch dependency status:", e);
+    }
+  };
+
+  const handleInstallDep = async (id: 'ytdlp' | 'ffmpeg') => {
+    setDepDownloads(prev => ({
+      ...prev,
+      [id]: { percent: 0, downloaded: 0, total: 0, active: true }
+    }));
+    try {
+      await invoke('install_dependency', { depId: id });
+    } catch (e) {
+      console.error(e);
+      setDepDownloads(prev => ({
+        ...prev,
+        [id]: { percent: 0, downloaded: 0, total: 0, active: false }
+      }));
+    }
+    fetchDepStatus();
+  };
+
+  useEffect(() => {
+    fetchDepStatus();
+
+    const unlisten = listen<any>('dependency-download-progress', (event) => {
+      const { id, percent, downloaded, total } = event.payload;
+      setDepDownloads((prev: any) => ({
+        ...prev,
+        [id]: { percent, downloaded, total, active: percent < 100 }
+      }));
+      if (percent >= 100) {
+        setTimeout(fetchDepStatus, 1000);
+      }
+    });
+
+    return () => {
+      unlisten.then(f => f());
+    };
+  }, []);
 
   // Welcome Step Particle Backdrop
   const [dots, setDots] = useState<{ x: number; y: number; s: number; o: number }[]>([]);
@@ -310,7 +368,7 @@ export function OnboardingWizard() {
 
             <button 
               className="btn btn-primary"
-              onClick={() => setStep(2)}
+              onClick={() => setStep(selectedMode === 'hybrid' ? 2 : 3)}
               style={{
                 width: '100%',
                 padding: '12px 0',
@@ -329,10 +387,245 @@ export function OnboardingWizard() {
           </motion.div>
         )}
 
-        {/* Step 2: Checklist Preferences */}
+        {/* Step 2: Dependency Installer */}
         {step === 2 && (
           <motion.div 
             key="step2"
+            initial={{ opacity: 0, y: 30, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -30, scale: 0.96 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 170 }}
+            style={{
+              width: '90%',
+              maxWidth: 720,
+              background: 'rgba(15, 15, 23, 0.72)',
+              backdropFilter: 'blur(32px)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 24,
+              padding: 40,
+              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(255,255,255,0.1) inset',
+              display: 'flex',
+              flexDirection: 'column',
+              zIndex: 10
+            }}
+          >
+            <div style={{
+              background: `rgba(${rgbAccent}, 0.1)`,
+              border: `1.5px solid rgba(${rgbAccent}, 0.25)`,
+              borderRadius: '50%',
+              width: 52,
+              height: 52,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 20,
+              alignSelf: 'center'
+            }}>
+              <DownloadCloud size={20} style={{ color: `rgb(${rgbAccent})` }} />
+            </div>
+
+            <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, textAlign: 'center' }}>
+              Required Engines Calibration
+            </h2>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', textAlign: 'center', lineHeight: 1.5, maxWidth: 540, marginBottom: 28, alignSelf: 'center' }}>
+              Hybrid Mode blends local files with scrobblers and web searches. To stream high-fidelity audio from the cloud, Aideo uses local decoders. Let's download and set them up now.
+            </p>
+
+            {/* Dependency Cards */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 32, width: '100%' }}>
+              {/* Card 1: yt-dlp */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.015)',
+                border: '1px solid rgba(255, 255, 255, 0.04)',
+                borderRadius: 16,
+                padding: '20px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                transition: 'all 0.2s'
+              }}>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 10,
+                    background: depStatus?.ytdlp_installed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                    color: depStatus?.ytdlp_installed ? '#10b981' : '#ef4444',
+                    display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center'
+                  }}>
+                    {depStatus?.ytdlp_installed ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>YouTube Audio Resolver</h3>
+                    <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
+                      Handles direct lossless stream extraction. Size: {depStatus?.ytdlp_size ? `${(depStatus.ytdlp_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  {depStatus?.ytdlp_installed ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Check size={14} /> Ready
+                    </span>
+                  ) : depDownloads['ytdlp']?.active ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      <span style={{ fontSize: 11, color: `rgb(${rgbAccent})`, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Loader2 size={12} className="animate-spin" /> Downloading {depDownloads['ytdlp'].percent.toFixed(0)}%
+                      </span>
+                      <div style={{ width: 100, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ width: `${depDownloads['ytdlp'].percent}%`, height: '100%', background: `rgb(${rgbAccent})` }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => handleInstallDep('ytdlp')}
+                      style={{ padding: '6px 12px', fontSize: 11, borderRadius: 8 }}
+                    >
+                      Download
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Card 2: ffmpeg */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.015)',
+                border: '1px solid rgba(255, 255, 255, 0.04)',
+                borderRadius: 16,
+                padding: '20px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                transition: 'all 0.2s'
+              }}>
+                <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 10,
+                    background: depStatus?.ffmpeg_installed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                    color: depStatus?.ffmpeg_installed ? '#10b981' : '#ef4444',
+                    display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center'
+                  }}>
+                    {depStatus?.ffmpeg_installed ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>FFmpeg Transcoder</h3>
+                    <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
+                      Decodes and converts audio streams to premium lossless M4A format. Size: {depStatus?.ffmpeg_size ? `${(depStatus.ffmpeg_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  {depStatus?.ffmpeg_installed ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Check size={14} /> Ready
+                    </span>
+                  ) : depDownloads['ffmpeg']?.active ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      <span style={{ fontSize: 11, color: `rgb(${rgbAccent})`, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Loader2 size={12} className="animate-spin" /> Downloading {depDownloads['ffmpeg'].percent.toFixed(0)}%
+                      </span>
+                      <div style={{ width: 100, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ width: `${depDownloads['ffmpeg'].percent}%`, height: '100%', background: `rgb(${rgbAccent})` }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => handleInstallDep('ffmpeg')}
+                      style={{ padding: '6px 12px', fontSize: 11, borderRadius: 8 }}
+                    >
+                      Download
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Install All Button if both missing */}
+            {depStatus && (!depStatus.ytdlp_installed || !depStatus.ffmpeg_installed) && (
+              <button
+                className="btn btn-primary"
+                disabled={depDownloads['ytdlp']?.active || depDownloads['ffmpeg']?.active}
+                onClick={async () => {
+                  if (!depStatus.ytdlp_installed) handleInstallDep('ytdlp');
+                  if (!depStatus.ffmpeg_installed) handleInstallDep('ffmpeg');
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px 0',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  borderRadius: 12,
+                  marginBottom: 24,
+                  boxShadow: `0 8px 24px rgba(${rgbAccent}, 0.2)`
+                }}
+              >
+                <DownloadCloud size={16} /> 
+                {depDownloads['ytdlp']?.active || depDownloads['ffmpeg']?.active
+                  ? 'Downloading Core Engines...'
+                  : 'Install All Required Engines (Recommended)'}
+              </button>
+            )}
+
+            {/* Controls */}
+            <div style={{ display: 'flex', gap: 14, width: '100%', marginTop: 'auto' }}>
+              <button 
+                className="btn btn-secondary"
+                onClick={() => setStep(1)}
+                style={{
+                  flex: 0.3,
+                  padding: '12px 0',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  borderRadius: 12
+                }}
+              >
+                <ArrowLeft size={16} /> Back
+              </button>
+              
+              <button 
+                className="btn btn-primary"
+                disabled={!depStatus?.ytdlp_installed || !depStatus?.ffmpeg_installed}
+                onClick={() => setStep(3)}
+                style={{
+                  flex: 0.7,
+                  padding: '12px 0',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  borderRadius: 12,
+                  boxShadow: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed
+                    ? `0 8px 24px rgba(${rgbAccent}, 0.35)`
+                    : 'none',
+                  background: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed
+                    ? `linear-gradient(135deg, rgb(${rgbAccent}), rgba(${rgbAccent}, 0.75))`
+                    : 'rgba(255, 255, 255, 0.05)',
+                  cursor: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed ? 'pointer' : 'not-allowed',
+                  color: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed ? 'white' : 'rgba(255, 255, 255, 0.3)'
+                }}
+              >
+                Continue <ArrowRight size={16} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Step 3: Setup & Connection Parameters */}
+        {step === 3 && (
+          <motion.div 
+            key="step3"
             initial={{ opacity: 0, y: 30, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -30, scale: 0.96 }}
@@ -455,7 +748,7 @@ export function OnboardingWizard() {
             <div style={{ display: 'flex', gap: 14, width: '100%', marginTop: 'auto' }}>
               <button 
                 className="btn btn-secondary"
-                onClick={() => setStep(1)}
+                onClick={() => setStep(selectedMode === 'hybrid' ? 2 : 1)}
                 style={{
                   flex: 0.35,
                   padding: '12px 0',
@@ -472,7 +765,7 @@ export function OnboardingWizard() {
               </button>
               <button 
                 className="btn btn-primary"
-                onClick={() => setStep(3)}
+                onClick={() => setStep(4)}
                 style={{
                   flex: 0.65,
                   padding: '12px 0',
@@ -481,21 +774,22 @@ export function OnboardingWizard() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: 6,
+                  gap: 8,
                   borderRadius: 12,
-                  boxShadow: `0 8px 24px rgba(${rgbAccent}, 0.25)`
+                  boxShadow: `0 8px 24px rgba(${rgbAccent}, 0.35)`,
+                  background: `linear-gradient(135deg, rgb(${rgbAccent}), rgba(${rgbAccent}, 0.75))`
                 }}
               >
-                Next: Storage Scanning <ArrowRight size={16} />
+                Continue to Folders <ArrowRight size={16} />
               </button>
             </div>
           </motion.div>
         )}
 
-        {/* Step 3: Local Directory Setup & Finish */}
-        {step === 3 && (
+        {/* Step 4: Folder Selection */}
+        {step === 4 && (
           <motion.div 
-            key="step3"
+            key="step4"
             initial={{ opacity: 0, y: 30, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -30, scale: 0.96 }}
@@ -593,11 +887,10 @@ export function OnboardingWizard() {
               <Plus size={14} /> Add Local Music Folder
             </button>
 
-            {/* Controls */}
-            <div style={{ display: 'flex', gap: 14, width: '100%', marginTop: 'auto' }}>
+            <div style={{ display: 'flex', gap: 14, width: '100%' }}>
               <button 
                 className="btn btn-secondary"
-                onClick={() => setStep(2)}
+                onClick={() => setStep(3)}
                 style={{
                   flex: 0.3,
                   padding: '12px 0',

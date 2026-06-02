@@ -86,8 +86,9 @@ export function AideoView() {
     iconType: 'chill'
   });
 
-  const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [discoveryData, setDiscoveryData] = useState<any>(null);
   const [isLoadingRecs, setIsLoadingRecs] = useState(true);
+  const [activeDiscoveryTab, setActiveDiscoveryTab] = useState('recommendations');
   const isFetchingRef = useRef(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
@@ -225,7 +226,7 @@ export function AideoView() {
       }
 
       // 🚀 Invoke new high-performance parallel backend command!
-      const resolved = await invoke<any[]>('get_personalized_discovery_hub', {
+      const resolved = await invoke<any>('get_personalized_discovery_hub', {
         seedArtists: offlineSeedArtists,
         topArtists,
         libraryArtists,
@@ -236,7 +237,12 @@ export function AideoView() {
         listenbrainzRecs: lbTracks,
       });
 
-      setRecommendations(resolved);
+      setDiscoveryData(resolved);
+      if (!resolved.recommendations || resolved.recommendations.length === 0) {
+        if (resolved.global_charts && resolved.global_charts.length > 0) {
+          setActiveDiscoveryTab('charts');
+        }
+      }
     } catch (err) {
       console.error('Failed to load personalized discovery recommendations:', err);
     } finally {
@@ -412,6 +418,184 @@ export function AideoView() {
   // Calculate total play count summary
   const totalPlays = Object.values(playCounts).reduce((sum, count) => sum + count, 0);
 
+  const renderTrackCarousel = (tracksList: any[]) => {
+    if (!tracksList || tracksList.length === 0) return null;
+    return (
+      <div className="aideo-discovery-carousel">
+        {tracksList.map((track) => (
+          <motion.div 
+            key={track.id}
+            whileHover={{ scale: 1.02 }}
+            className="aideo-discovery-card"
+          >
+            <div className="discovery-cover-wrap">
+              {track.cover_url ? (
+                <img 
+                  src={track.cover_url} 
+                  alt="" 
+                  referrerPolicy="no-referrer"
+                  className="discovery-cover-img"
+                />
+              ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
+                  <Music size={40} color="var(--text-dim)" />
+                </div>
+              )}
+              <div className="discovery-overlay">
+                <div 
+                  className="discovery-play-circle"
+                  onClick={() => handleTogglePreview(track)}
+                  title={
+                    playback.current_track === track.url && playback.status === 'Playing'
+                      ? "Pause preview"
+                      : "Stream online preview"
+                  }
+                >
+                  {playback.current_track === track.url && playback.status === 'Playing' ? (
+                    <Pause size={22} fill="currentColor" />
+                  ) : (
+                    <Play size={22} fill="currentColor" style={{ marginLeft: 3 }} />
+                  )}
+                </div>
+              </div>
+              <span className="discovery-dur-badge">{track.duration_raw}</span>
+            </div>
+
+            <div className="discovery-meta">
+              <h4 className="discovery-title" title={track.title}>{track.title}</h4>
+              <p className="discovery-artist" title={track.artist}>{track.artist}</p>
+              {track.recommendation_source && (
+                <span style={{
+                  fontSize: 8,
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  marginTop: 4,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  background: track.recommendation_source.includes('ListenBrainz') 
+                    ? 'rgba(235, 116, 59, 0.12)' 
+                    : track.recommendation_source.includes('Last.fm')
+                      ? 'rgba(139, 92, 246, 0.12)'
+                      : (track.recommendation_source.includes('YouTube Music') || track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Favorites') || track.recommendation_source.includes('Trending'))
+                        ? 'rgba(239, 68, 68, 0.12)'
+                        : track.recommendation_source.includes('•') 
+                          ? 'rgba(16, 185, 129, 0.12)'
+                          : 'rgba(255, 255, 255, 0.04)',
+                  color: track.recommendation_source.includes('ListenBrainz')
+                    ? '#ff9e59'
+                    : track.recommendation_source.includes('Last.fm')
+                      ? '#a78bfa'
+                      : (track.recommendation_source.includes('YouTube Music') || track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Favorites') || track.recommendation_source.includes('Trending'))
+                        ? '#f87171'
+                        : track.recommendation_source.includes('•')
+                          ? '#34d399'
+                          : 'var(--text-dim)',
+                  border: track.recommendation_source.includes('ListenBrainz')
+                    ? '1px solid rgba(235, 116, 59, 0.2)'
+                    : track.recommendation_source.includes('Last.fm')
+                      ? '1px solid rgba(139, 92, 246, 0.2)'
+                      : (track.recommendation_source.includes('YouTube Music') || track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Favorites') || track.recommendation_source.includes('Trending'))
+                        ? '1px solid rgba(239, 68, 68, 0.2)'
+                        : track.recommendation_source.includes('•')
+                          ? '1px solid rgba(16, 185, 129, 0.2)'
+                          : '1px solid rgba(255, 255, 255, 0.06)',
+                  boxShadow: (track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Listening Now'))
+                    ? '0 0 10px rgba(139, 92, 246, 0.15)'
+                    : undefined
+                }}>
+                  {track.recommendation_source.includes('•') && (
+                    <span className="pulse" style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: '#10b981', marginRight: 5 }} />
+                  )}
+                  {track.recommendation_source}
+                </span>
+              )}
+            </div>
+
+            <div className="discovery-footer">
+              <div className="discovery-badge-row">
+                <button 
+                  onClick={() => handleOpenWebBypass(track, 'lucida')}
+                  className="discovery-action-btn lucida"
+                  title="Copy & search lossless FLAC on Lucida.to"
+                >
+                  {copiedId === `${track.id}-lucida` ? <Check size={10} /> : "Lucida"}
+                </button>
+                <button 
+                  onClick={() => handleOpenWebBypass(track, 'squid')}
+                  className="discovery-action-btn squid"
+                  title="Copy & search lossless FLAC on Squid.wtf"
+                >
+                  {copiedId === `${track.id}-squid` ? <Check size={10} /> : "Squid"}
+                </button>
+              </div>
+
+              {downloadedIds.has(track.id) ? (
+                <div className="discovery-download-btn downloaded" title="Added to Offline Library">
+                  <Check size={12} />
+                </div>
+              ) : downloadingIds.has(track.id) ? (
+                <div 
+                  className="discovery-download-btn downloading" 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 4, 
+                    width: 'auto', 
+                    padding: '0 8px', 
+                    borderRadius: 20,
+                    background: 'rgba(16, 185, 129, 0.1)',
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
+                    color: '#10b981',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {downloadProgress[track.url] && (
+                    <div 
+                      style={{ 
+                        position: 'absolute', 
+                        left: 0, 
+                        top: 0, 
+                        bottom: 0, 
+                        width: `${downloadProgress[track.url].percent}%`, 
+                        background: 'rgba(16, 185, 129, 0.18)', 
+                        zIndex: 0,
+                        transition: 'width 0.2s ease-out'
+                      }} 
+                    />
+                  )}
+                  <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Loader2 size={10} className="pulse" />
+                    {downloadProgress[track.url] ? (
+                      <span>
+                        {Math.round(downloadProgress[track.url].percent)}%
+                      </span>
+                    ) : (
+                      <span>Conn...</span>
+                    )}
+                  </span>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => handleDownloadTrack(track)}
+                  className="discovery-download-btn"
+                  title="Download high-fidelity stream offline"
+                >
+                  <Download size={12} />
+                </button>
+              )}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="aideo-home-wrap">
       {/* Background tint overlay */}
@@ -562,175 +746,78 @@ export function AideoView() {
             <Loader2 className="spin" size={28} style={{ marginBottom: 12, color: 'var(--accent)' }} />
             <span style={{ fontSize: 13, fontWeight: 500 }}>Curating recommendations based on your offline history...</span>
           </div>
-        ) : recommendations.length > 0 ? (
-          <div className="aideo-discovery-carousel">
-            {recommendations.map((track) => (
-              <motion.div 
-                key={track.id}
-                whileHover={{ scale: 1.02 }}
-                className="aideo-discovery-card"
-              >
-                <div className="discovery-cover-wrap">
-                  {track.cover_url ? (
-                    <img 
-                      src={track.cover_url} 
-                      alt="" 
-                      referrerPolicy="no-referrer"
-                      className="discovery-cover-img"
-                    />
-                  ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
-                      <Music size={40} color="var(--text-dim)" />
-                    </div>
-                  )}
-                  <div className="discovery-overlay">
-                    <div 
-                      className="discovery-play-circle"
-                      onClick={() => handleTogglePreview(track)}
-                      title={
-                        playback.current_track === track.url && playback.status === 'Playing'
-                          ? "Pause preview"
-                          : "Stream online preview"
-                      }
-                    >
-                      {playback.current_track === track.url && playback.status === 'Playing' ? (
-                        <Pause size={22} fill="currentColor" />
-                      ) : (
-                        <Play size={22} fill="currentColor" style={{ marginLeft: 3 }} />
-                      )}
-                    </div>
-                  </div>
-                  <span className="discovery-dur-badge">{track.duration_raw}</span>
-                </div>
+        ) : discoveryData ? (
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {/* Premium Tab Switched Bar */}
+            <div style={{ 
+              display: 'flex', 
+              gap: 8, 
+              padding: 4, 
+              background: 'rgba(255, 255, 255, 0.03)', 
+              border: '1px solid rgba(255, 255, 255, 0.06)', 
+              borderRadius: 12, 
+              marginBottom: 20,
+              width: 'fit-content'
+            }}>
+              {discoveryData.recommendations && discoveryData.recommendations.length > 0 && (
+                <button
+                  onClick={() => setActiveDiscoveryTab('recommendations')}
+                  className={`settings-tab-btn ${activeDiscoveryTab === 'recommendations' ? 'active' : ''}`}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    background: activeDiscoveryTab === 'recommendations' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                    border: 'none',
+                    color: activeDiscoveryTab === 'recommendations' ? 'var(--accent)' : 'var(--text-dim)',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <Sparkles size={12} />
+                  {tracks.length > 0 ? "Tailored Mix" : "Curated Seeds"}
+                </button>
+              )}
 
-                <div className="discovery-meta">
-                  <h4 className="discovery-title" title={track.title}>{track.title}</h4>
-                  <p className="discovery-artist" title={track.artist}>{track.artist}</p>
-                  {track.recommendation_source && (
-                    <span style={{
-                      fontSize: 8,
-                      fontWeight: 800,
-                      textTransform: 'uppercase',
-                      letterSpacing: 0.5,
-                      padding: '2px 6px',
-                      borderRadius: 4,
-                      marginTop: 4,
-                      display: 'inline-block',
-                      background: track.recommendation_source.includes('ListenBrainz') 
-                        ? 'rgba(235, 116, 59, 0.12)' 
-                        : track.recommendation_source.includes('Last.fm')
-                          ? 'rgba(139, 92, 246, 0.12)'
-                          : track.recommendation_source.includes('YouTube Music')
-                            ? 'rgba(239, 68, 68, 0.12)'
-                            : track.recommendation_source.includes('Based on your Favorites')
-                              ? 'rgba(239, 68, 68, 0.18)'
-                              : 'rgba(255, 255, 255, 0.04)',
-                      color: track.recommendation_source.includes('ListenBrainz')
-                        ? '#ff9e59'
-                        : track.recommendation_source.includes('Last.fm')
-                          ? '#a78bfa'
-                          : track.recommendation_source.includes('YouTube Music')
-                            ? '#f87171'
-                            : track.recommendation_source.includes('Based on your Favorites')
-                              ? '#ef4444'
-                              : 'var(--text-dim)',
-                      border: track.recommendation_source.includes('ListenBrainz')
-                        ? '1px solid rgba(235, 116, 59, 0.2)'
-                        : track.recommendation_source.includes('Last.fm')
-                          ? '1px solid rgba(139, 92, 246, 0.2)'
-                          : track.recommendation_source.includes('YouTube Music')
-                            ? '1px solid rgba(239, 68, 68, 0.2)'
-                            : track.recommendation_source.includes('Based on your Favorites')
-                              ? '1px solid rgba(239, 68, 68, 0.45)'
-                              : '1px solid rgba(255, 255, 255, 0.06)',
-                      boxShadow: track.recommendation_source.includes('Based on your Favorites')
-                        ? '0 0 12px rgba(239, 68, 68, 0.25)'
-                        : undefined
-                    }}>
-                      {track.recommendation_source}
-                    </span>
-                  )}
-                </div>
+              {discoveryData.global_charts && discoveryData.global_charts.length > 0 && (
+                <button
+                  onClick={() => setActiveDiscoveryTab('charts')}
+                  className={`settings-tab-btn ${activeDiscoveryTab === 'charts' ? 'active' : ''}`}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    background: activeDiscoveryTab === 'charts' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                    border: 'none',
+                    color: activeDiscoveryTab === 'charts' ? '#f87171' : 'var(--text-dim)',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <Compass size={12} />
+                  Worldwide Charts
+                </button>
+              )}
+            </div>
 
-                <div className="discovery-footer">
-                  <div className="discovery-badge-row">
-                    <button 
-                      onClick={() => handleOpenWebBypass(track, 'lucida')}
-                      className="discovery-action-btn lucida"
-                      title="Copy & search lossless FLAC on Lucida.to"
-                    >
-                      {copiedId === `${track.id}-lucida` ? <Check size={10} /> : "Lucida"}
-                    </button>
-                    <button 
-                      onClick={() => handleOpenWebBypass(track, 'squid')}
-                      className="discovery-action-btn squid"
-                      title="Copy & search lossless FLAC on Squid.wtf"
-                    >
-                      {copiedId === `${track.id}-squid` ? <Check size={10} /> : "Squid"}
-                    </button>
-                  </div>
-
-                  {downloadedIds.has(track.id) ? (
-                    <div className="discovery-download-btn downloaded" title="Added to Offline Library">
-                      <Check size={12} />
-                    </div>
-                  ) : downloadingIds.has(track.id) ? (
-                    <div 
-                      className="discovery-download-btn downloading" 
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: 4, 
-                        width: 'auto', 
-                        padding: '0 8px', 
-                        borderRadius: 20,
-                        background: 'rgba(16, 185, 129, 0.1)',
-                        border: '1px solid rgba(16, 185, 129, 0.2)',
-                        color: '#10b981',
-                        fontSize: 9,
-                        fontWeight: 700,
-                        position: 'relative',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      {/* Dynamic Background Progress Fill */}
-                      {downloadProgress[track.url] && (
-                        <div 
-                          style={{ 
-                            position: 'absolute', 
-                            left: 0, 
-                            top: 0, 
-                            bottom: 0, 
-                            width: `${downloadProgress[track.url].percent}%`, 
-                            background: 'rgba(16, 185, 129, 0.18)', 
-                            zIndex: 0,
-                            transition: 'width 0.2s ease-out'
-                          }} 
-                        />
-                      )}
-                      <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Loader2 size={10} className="pulse" />
-                        {downloadProgress[track.url] ? (
-                          <span>
-                            {Math.round(downloadProgress[track.url].percent)}%
-                          </span>
-                        ) : (
-                          <span>Conn...</span>
-                        )}
-                      </span>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={() => handleDownloadTrack(track)}
-                      className="discovery-download-btn"
-                      title="Download high-fidelity stream offline"
-                    >
-                      <Download size={12} />
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            ))}
+            {/* Shelf Content */}
+            <motion.div
+              key={activeDiscoveryTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              {activeDiscoveryTab === 'recommendations' && renderTrackCarousel(discoveryData.recommendations)}
+              {activeDiscoveryTab === 'charts' && renderTrackCarousel(discoveryData.global_charts)}
+            </motion.div>
           </div>
         ) : (
           <div className="aideo-empty-box">

@@ -24,16 +24,7 @@ pub enum ActiveStream {
     Wasapi(crate::wasapi_engine::WasapiStream),
 }
 
-/// 🛡️ Safe Lock Pattern: Handles mutex poisoning by recovering the inner data instead of panicking.
-fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            eprintln!("[player] CRITICAL: Mutex poisoned! Attempting recovery...");
-            poisoned.into_inner()
-        }
-    }
-}
+use crate::safe_lock;
 
 /// 📦 Grouped decoder state to simplify passing multiple arguments
 struct DecoderInfo {
@@ -43,6 +34,7 @@ struct DecoderInfo {
     pub time_base: Option<TimeBase>,
     pub file_rate: usize,
     pub file_ch: usize,
+    pub resolved_path: String,
 }
 
 /// 🎚️ Hardware Rate Switching & Config Selection
@@ -137,6 +129,168 @@ fn select_output_config(
 
 lazy_static::lazy_static! {
     static ref YOUTUBE_URL_CACHE: std::sync::Mutex<std::collections::HashMap<String, String>> = std::sync::Mutex::new(std::collections::HashMap::new());
+    static ref ACTIVE_DOWNLOADS: std::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>> = std::sync::Mutex::new(std::collections::HashMap::new());
+}
+
+struct GrowingFileReader {
+    file: std::fs::File,
+    complete: Arc<AtomicBool>,
+}
+
+impl std::io::Read for GrowingFileReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let start_wait = std::time::Instant::now();
+        loop {
+            match self.file.read(buf) {
+                Ok(0) => {
+                    if self.complete.load(Ordering::SeqCst) {
+                        return Ok(0);
+                    }
+                    if start_wait.elapsed() > std::time::Duration::from_secs(60) {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "GrowingFileReader: Download stalled for more than 60 seconds",
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                res => return res,
+            }
+        }
+    }
+}
+
+impl std::io::Seek for GrowingFileReader {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(pos)
+    }
+}
+
+impl symphonia::core::io::MediaSource for GrowingFileReader {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+    fn byte_len(&self) -> Option<u64> {
+        None
+    }
+}
+
+fn get_cache_paths(url: &str) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let hash = format!("{:x}", md5::compute(url.as_bytes()));
+    let data_dir = dirs::data_dir()?;
+    let cache_dir = data_dir.join("Aideo").join("CloudCache");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let cache_path = cache_dir.join(format!("{}.cache", hash));
+    let temp_path = cache_dir.join(format!("{}.tmp", hash));
+    Some((cache_path, temp_path))
+}
+
+struct DownloadGuard {
+    hash: String,
+    complete: Arc<AtomicBool>,
+}
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        self.complete.store(true, Ordering::SeqCst);
+        if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+            active.remove(&self.hash);
+        }
+    }
+}
+
+
+fn spawn_youtube_downloader(
+    url: String,
+    hash: String,
+    temp_path: std::path::PathBuf,
+    cache_path: std::path::PathBuf,
+    ffmpeg_path: String,
+) -> Arc<AtomicBool> {
+    let complete = Arc::new(AtomicBool::new(false));
+    let complete_clone = complete.clone();
+    
+    if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+        active.insert(hash.clone(), complete.clone());
+    }
+    
+    std::thread::spawn(move || {
+        let _guard = DownloadGuard {
+            hash: hash.clone(),
+            complete: complete_clone,
+        };
+        
+        println!("[player-bg] Starting YouTube background transcode: {} -> {:?}", url, temp_path);
+        
+        let mut cmd = std::process::Command::new(&ffmpeg_path);
+        
+        let is_youtube_stream = url.contains("youtube.com") || url.contains("googlevideo.com") || url.contains("youtu.be");
+        let ua = if is_youtube_stream {
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36".to_string()
+        } else {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36".to_string()
+        };
+
+        let mut args = Vec::new();
+        if is_youtube_stream {
+            args.push("-referer".to_string());
+            args.push("https://www.google.com/".to_string());
+        }
+        
+        args.extend([
+            "-user_agent".to_string(), ua,
+            "-reconnect".to_string(), "1".to_string(),
+            "-reconnect_at_eof".to_string(), "1".to_string(),
+            "-reconnect_streamed".to_string(), "1".to_string(),
+            "-reconnect_delay_max".to_string(), "4".to_string(),
+            "-rw_timeout".to_string(), "10000000".to_string(),
+            "-probesize".to_string(), "32768".to_string(),
+            "-analyzeduration".to_string(), "100000".to_string(),
+        ]);
+
+        if url.starts_with("https://") {
+            args.push("-tls_verify".to_string());
+            args.push("0".to_string());
+        }
+        
+        args.extend([
+            "-i".to_string(), url.clone(),
+            "-y".to_string(),
+            "-f".to_string(), "wav".to_string(),
+            "-acodec".to_string(), "pcm_s16le".to_string(),
+            "-ar".to_string(), "44100".to_string(),
+            "-ac".to_string(), "2".to_string(),
+            temp_path.to_string_lossy().to_string(),
+        ]);
+        
+        cmd.args(&args);
+        
+        #[cfg(target_os = "windows")]
+        use std::os::windows::process::CommandExt;
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        
+        let status = cmd.status();
+        match status {
+            Ok(s) if s.success() => {
+                println!("[player-bg] Transcode completed successfully for {}", hash);
+                // Encrypt the temp file to cache path
+                if let Ok(bytes) = std::fs::read(&temp_path) {
+                    let encrypted = crate::cloud::xor_cipher(&bytes);
+                    if std::fs::write(&cache_path, encrypted).is_ok() {
+                        println!("[player-bg] Encrypted cache written successfully: {:?}", cache_path);
+                        // Clean up temp file
+                        let _ = std::fs::remove_file(&temp_path);
+                    }
+                }
+            }
+            res => {
+                eprintln!("[player-bg] FFmpeg background transcode failed or was interrupted: {:?}", res);
+            }
+        }
+    });
+    
+    complete
 }
 
 pub fn clear_youtube_url_cache() {
@@ -278,34 +432,143 @@ fn detect_audio_extension(bytes: &[u8]) -> &'static str {
 fn prepare_decoder(
     path: &str,
     start_pos: f64,
-    _app_handle: &tauri::AppHandle,
+    app_handle: &tauri::AppHandle,
     ffmpeg_path: &str,
     current_process: &Arc<Mutex<Option<std::process::Child>>>,
     ffmpeg_transcode_quality: &str,
 ) -> Result<DecoderInfo, String> {
     let mut resolved_path = path.to_string();
     
-    // Transparently load cached cloud stream tracks if available
-    if path.starts_with("http://") || path.starts_with("https://") {
+    // Intercept YouTube watch URLs and route them to growing Cache file
+    let is_youtube_stream = path.contains("youtube.com") || path.contains("youtu.be") || path.contains("googlevideo.com");
+    if is_youtube_stream {
+        let data_dir = dirs::data_dir().ok_or("Could not locate AppData directory")?;
+        let aideo_dir = data_dir.join("Aideo");
+        let ytdlp_path = aideo_dir.join("yt-dlp.exe");
+        if !ytdlp_path.exists() {
+            return Err("The yt-dlp plugin is missing. Please install the yt-dlp plugin in Settings -> Plugins to play YouTube tracks!".to_string());
+        }
+
+        if let Some((cache_path, temp_path)) = get_cache_paths(path) {
+            let mut use_cache = false;
+            if cache_path.exists() {
+                if let Ok(encrypted_bytes) = std::fs::read(&cache_path) {
+                    let decrypted_bytes = crate::cloud::xor_cipher(&encrypted_bytes);
+                    let is_corrupted = decrypted_bytes.len() < 1024 || 
+                        (decrypted_bytes.len() > 10 && 
+                         (decrypted_bytes[0] == b'<' || 
+                          decrypted_bytes.starts_with(b"<!DOCTYPE") || 
+                          decrypted_bytes.starts_with(b"<!doctype") || 
+                          decrypted_bytes.starts_with(b"<html")));
+                          
+                    if is_corrupted {
+                        println!("[player] Warning: Cached file for '{}' is corrupted (HTML/invalid bytes). Deleting and forcing online stream fallback...", path);
+                        let _ = std::fs::remove_file(&cache_path);
+                    } else {
+                        let ext = "wav";
+                        let temp_dir = std::env::temp_dir();
+                        let hash = format!("{:x}", md5::compute(path.as_bytes()));
+                        let decrypted_temp_path = temp_dir.join(format!("aideo_cache_{}.{}", hash, ext));
+                        if std::fs::write(&decrypted_temp_path, decrypted_bytes).is_ok() {
+                            resolved_path = decrypted_temp_path.to_string_lossy().to_string();
+                            println!("[player] INTERCEPT: Playing YouTube track from offline decrypted cache file!");
+                            use_cache = true;
+                        }
+                    }
+                }
+            }
+            
+            if !use_cache {
+                let hash = format!("{:x}", md5::compute(path.as_bytes()));
+                let mut complete_flag = None;
+                {
+                    if let Ok(active) = ACTIVE_DOWNLOADS.lock() {
+                        if let Some(flag) = active.get(&hash) {
+                            complete_flag = Some(flag.clone());
+                        }
+                    }
+                }
+
+                if complete_flag.is_none() {
+                    let mut resolved_url = {
+                        let cache = safe_lock(&YOUTUBE_URL_CACHE);
+                        cache.get(path).cloned()
+                    };
+
+                    if resolved_url.is_none() {
+                        println!("[player] YouTube URL cache miss. Resolving direct stream URL first...");
+                        let direct = resolve_youtube_url(path);
+                        if direct != *path && direct.contains("googlevideo.com") {
+                            let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
+                            cache.insert(path.to_string(), direct.clone());
+                            resolved_url = Some(direct);
+                        } else {
+                            return Err("Failed to resolve YouTube stream URL. Please check your internet connection.".to_string());
+                        }
+                    }
+
+                    if let Some(direct) = resolved_url {
+                        println!("[player] Spawning background transcoder for YouTube stream...");
+                        spawn_youtube_downloader(
+                            direct,
+                            hash.clone(),
+                            temp_path.clone(),
+                            cache_path.clone(),
+                            ffmpeg_path.to_string(),
+                        );
+                    }
+                }
+
+                resolved_path = temp_path.to_string_lossy().to_string();
+
+                println!("[player] Buffering first 256KB of YouTube track to ensure stable probing...");
+                let start_time = std::time::Instant::now();
+                loop {
+                    let file_size = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
+                    if file_size >= 256 * 1024 {
+                        break;
+                    }
+                    if start_time.elapsed().as_secs() > 12 {
+                        return Err("Buffering timed out. Please check your internet connection and verify that the yt-dlp plugin is working.".to_string());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                println!("[player] Buffering complete ({} bytes). Handing over to Symphonia decoding...", std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0));
+            }
+        }
+    } else if path.starts_with("http://") || path.starts_with("https://") {
+        // Transparently load cached cloud stream tracks if available
         let hash = format!("{:x}", md5::compute(path.as_bytes()));
         if let Some(data_dir) = dirs::data_dir() {
             let cache_path = data_dir.join("Aideo").join("CloudCache").join(format!("{}.cache", hash));
             if cache_path.exists() {
                 if let Ok(encrypted_bytes) = std::fs::read(&cache_path) {
                     let decrypted_bytes = crate::cloud::xor_cipher(&encrypted_bytes);
-                    let ext = detect_audio_extension(&decrypted_bytes);
-                    let temp_dir = std::env::temp_dir();
-                    let temp_path = temp_dir.join(format!("aideo_cache_{}.{}", hash, ext));
-                    if std::fs::write(&temp_path, decrypted_bytes).is_ok() {
-                        resolved_path = temp_path.to_string_lossy().to_string();
-                        println!("[player] INTERCEPT: Playing cloud track from offline decrypted cache file!");
+                    let is_corrupted = decrypted_bytes.len() < 1024 || 
+                        (decrypted_bytes.len() > 10 && 
+                         (decrypted_bytes[0] == b'<' || 
+                          decrypted_bytes.starts_with(b"<!DOCTYPE") || 
+                          decrypted_bytes.starts_with(b"<!doctype") || 
+                          decrypted_bytes.starts_with(b"<html")));
+                          
+                    if is_corrupted {
+                        println!("[player] Warning: Cached cloud file for '{}' is corrupted (HTML/invalid bytes). Deleting cache...", path);
+                        let _ = std::fs::remove_file(&cache_path);
+                    } else {
+                        let ext = detect_audio_extension(&decrypted_bytes);
+                        let temp_dir = std::env::temp_dir();
+                        let temp_path = temp_dir.join(format!("aideo_cache_{}.{}", hash, ext));
+                        if std::fs::write(&temp_path, decrypted_bytes).is_ok() {
+                            resolved_path = temp_path.to_string_lossy().to_string();
+                            println!("[player] INTERCEPT: Playing cloud track from offline decrypted cache file!");
+                        }
                     }
                 }
             }
         }
     }
     
-    let path = &resolved_path;
+    let path = resolved_path.as_str();
 
     let is_stream = path.starts_with("http://") || path.starts_with("https://");
     let is_dsd = if !is_stream {
@@ -322,9 +585,32 @@ fn prepare_decoder(
 
     if !is_stream && !is_dsd {
         // Try native Symphonia probing and decoding first for maximum quality/bit-perfect local playback
-        let file_res = std::fs::File::open(path);
-        if let Ok(file) = file_res {
-            let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        let file_res: Result<Box<dyn symphonia::core::io::MediaSource>, _> = if path.contains(".tmp") {
+            let hash = std::path::Path::new(path).file_name().and_then(|s| s.to_str()).unwrap_or("").replace(".tmp", "");
+            let mut complete_flag = None;
+            {
+                if let Ok(active) = ACTIVE_DOWNLOADS.lock() {
+                    if let Some(flag) = active.get(&hash) {
+                        complete_flag = Some(flag.clone());
+                    }
+                }
+            }
+            if let Some(complete) = complete_flag {
+                if let Ok(file) = std::fs::File::open(path) {
+                    println!("[player] Opening GrowingFileReader for YouTube track: {}", path);
+                    Ok(Box::new(GrowingFileReader { file, complete }))
+                } else {
+                    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"))
+                }
+            } else {
+                std::fs::File::open(path).map(|f| Box::new(f) as Box<dyn symphonia::core::io::MediaSource>)
+            }
+        } else {
+            std::fs::File::open(path).map(|f| Box::new(f) as Box<dyn symphonia::core::io::MediaSource>)
+        };
+
+        if let Ok(media_source) = file_res {
+            let mss = MediaSourceStream::new(media_source, Default::default());
             let mut hint = Hint::new();
             if let Some(ext) = std::path::Path::new(path).extension() {
                 hint.with_extension(&ext.to_string_lossy());
@@ -357,6 +643,7 @@ fn prepare_decoder(
                         time_base: track.codec_params.time_base,
                         file_rate: rate,
                         file_ch: ch,
+                        resolved_path: resolved_path.clone(),
                     });
                 }
             }
@@ -614,7 +901,7 @@ fn prepare_decoder(
 
             match ffmpeg_cmd.spawn() {
                 Ok(mut child) => {
-                    let stderr = child.stderr.take().unwrap();
+                    let stderr = child.stderr.take().ok_or("Failed to open FFmpeg stderr")?;
                     thread::spawn(move || {
                         let reader = std::io::BufReader::new(stderr);
                         for line in reader.lines().filter_map(|l| l.ok()) {
@@ -625,7 +912,7 @@ fn prepare_decoder(
                         let _ = ytdlp_child.wait();
                         println!("[player] Piped yt-dlp process cleaned up successfully.");
                     });
-                    let stdout = child.stdout.take().unwrap();
+                    let stdout = child.stdout.take().ok_or("Failed to open FFmpeg stdout")?;
                     *safe_lock(current_process) = Some(child);
                     let source = symphonia::core::io::ReadOnlySource::new(stdout);
                     MediaSourceStream::new(Box::new(source), Default::default())
@@ -635,14 +922,14 @@ fn prepare_decoder(
         } else {
             match cmd.spawn() {
                 Ok(mut child) => {
-                    let stderr = child.stderr.take().unwrap();
+                    let stderr = child.stderr.take().ok_or("Failed to open FFmpeg stderr")?;
                     thread::spawn(move || {
                         let reader = std::io::BufReader::new(stderr);
                         for line in reader.lines().filter_map(|l| l.ok()) {
                             if line.contains("Error") { eprintln!("[ffmpeg-err] {}", line); }
                         }
                     });
-                    let stdout = child.stdout.take().unwrap();
+                    let stdout = child.stdout.take().ok_or("Failed to open FFmpeg stdout")?;
                     *safe_lock(current_process) = Some(child);
                     let source = symphonia::core::io::ReadOnlySource::new(stdout);
                     MediaSourceStream::new(Box::new(source), Default::default())
@@ -679,7 +966,7 @@ fn prepare_decoder(
         let ch = track.codec_params.channels.map(|c| c.count()).unwrap_or(2);
 
         if is_stream {
-            let _ = _app_handle.emit("playback-success", path.to_string());
+            let _ = app_handle.emit("playback-success", path.to_string());
         }
 
         Ok(DecoderInfo {
@@ -689,6 +976,7 @@ fn prepare_decoder(
             time_base: track.codec_params.time_base,
             file_rate: rate,
             file_ch: ch,
+            resolved_path: resolved_path.clone(),
         })
     } else {
         Err("Invalid state: neither native nor FFmpeg decoder path executed".to_string())
@@ -1146,6 +1434,23 @@ impl Player {
         let ca = Arc::clone(&cache);
         let ds = Arc::clone(&decode_shutdown);
 
+        // Cleanup orphaned .tmp files in CloudCache on startup
+        if let Some(data_dir) = dirs::data_dir() {
+            let cache_dir = data_dir.join("Aideo").join("CloudCache");
+            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Some(ext) = p.extension() {
+                            if ext == "tmp" {
+                                let _ = std::fs::remove_file(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let (fft_tx, fft_rx) = crossbeam_channel::bounded::<(Vec<f32>, f32)>(2);
         
         let analyzer_app = app_handle.clone();
@@ -1306,8 +1611,32 @@ fn background_decode(
     let mut track_id = 0;
 
     // 1. Try native Symphonia decoding first
-    if let Ok(file) = std::fs::File::open(&path) {
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let file_res: Result<Box<dyn symphonia::core::io::MediaSource>, _> = if path.contains(".tmp") {
+        let hash = std::path::Path::new(&path).file_name().and_then(|s| s.to_str()).unwrap_or("").replace(".tmp", "");
+        let mut complete_flag = None;
+        {
+            if let Ok(active) = ACTIVE_DOWNLOADS.lock() {
+                if let Some(flag) = active.get(&hash) {
+                    complete_flag = Some(flag.clone());
+                }
+            }
+        }
+        if let Some(complete) = complete_flag {
+            if let Ok(file) = std::fs::File::open(&path) {
+                println!("[player-bg] Opening GrowingFileReader in background_decode for: {}", path);
+                Ok(Box::new(GrowingFileReader { file, complete }))
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"))
+            }
+        } else {
+            std::fs::File::open(&path).map(|f| Box::new(f) as Box<dyn symphonia::core::io::MediaSource>)
+        }
+    } else {
+        std::fs::File::open(&path).map(|f| Box::new(f) as Box<dyn symphonia::core::io::MediaSource>)
+    };
+
+    if let Ok(media_source) = file_res {
+        let mss = MediaSourceStream::new(media_source, Default::default());
         let mut hint = Hint::new();
         if let Some(ext) = std::path::Path::new(&path).extension() {
             hint.with_extension(&ext.to_string_lossy());
@@ -1529,6 +1858,7 @@ fn play_file(
             return None;
         }
     };
+    let resolved_path = info.resolved_path.clone();
 
     let file_rate = info.file_rate;
     let file_ch = info.file_ch;
@@ -1537,7 +1867,7 @@ fn play_file(
     let mut decoder = info.decoder;
     let time_base = info.time_base;
 
-    let is_stream = path.starts_with("http://") || path.starts_with("https://");
+    let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
     if is_stream {
         let hash = format!("{:x}", md5::compute(path.as_bytes()));
         let mut already_cached = false;
@@ -1549,58 +1879,46 @@ fn play_file(
         }
         if !already_cached {
             let stream_url = path.to_string();
-            std::thread::spawn(move || {
-                println!("[player-bg-cache] Automatically caching stream in background: {}", stream_url);
-                let resolved_url = if stream_url.contains("youtube.com") || stream_url.contains("youtu.be") {
-                    resolve_youtube_url(&stream_url)
-                } else {
-                    resolve_playlist_url(&stream_url)
-                };
-
-                if (stream_url.contains("youtube.com") || stream_url.contains("youtu.be")) && !resolved_url.contains("googlevideo.com") {
-                    eprintln!("[player-bg-cache] Skipping download: direct stream URL resolved incorrectly or failed.");
-                    return;
-                }
-
-                let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
-                if let Some(data_dir) = dirs::data_dir() {
-                    let cache_dir = data_dir.join("Aideo").join("CloudCache");
-                    if std::fs::create_dir_all(&cache_dir).is_ok() {
-                        let cache_path = cache_dir.join(format!("{}.cache", hash));
-                        let temp_path = cache_dir.join(format!("{}.tmp", hash));
-                        if !cache_path.exists() {
-                            let client = reqwest::blocking::Client::new();
-                            let is_youtube_stream = resolved_url.contains("youtube.com") || resolved_url.contains("googlevideo.com") || resolved_url.contains("youtu.be");
-                            let mut req = client.get(&resolved_url);
-                            if is_youtube_stream {
-                                req = req.header("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36")
-                                         .header("Referer", "https://www.google.com/");
-                            } else {
+            let is_youtube = stream_url.contains("youtube.com") || stream_url.contains("youtu.be");
+            
+            if !is_youtube {
+                std::thread::spawn(move || {
+                    println!("[player-bg-cache] Automatically caching stream in background: {}", stream_url);
+                    let resolved_url = resolve_playlist_url(&stream_url);
+                    let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
+                    if let Some(data_dir) = dirs::data_dir() {
+                        let cache_dir = data_dir.join("Aideo").join("CloudCache");
+                        if std::fs::create_dir_all(&cache_dir).is_ok() {
+                            let cache_path = cache_dir.join(format!("{}.cache", hash));
+                            let temp_path = cache_dir.join(format!("{}.tmp", hash));
+                            if !cache_path.exists() {
+                                let client = reqwest::blocking::Client::new();
+                                let mut req = client.get(&resolved_url);
                                 req = req.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
-                            }
 
-                            if let Ok(res) = req.send() {
-                                if res.status().is_success() {
-                                    if let Ok(bytes) = res.bytes() {
-                                        let encrypted = crate::cloud::xor_cipher(&bytes);
-                                        if std::fs::write(&temp_path, encrypted).is_ok() {
-                                            if std::fs::rename(&temp_path, &cache_path).is_ok() {
-                                                println!("[player-bg-cache] Stream successfully cached to disk!");
+                                if let Ok(res) = req.send() {
+                                    if res.status().is_success() {
+                                        if let Ok(bytes) = res.bytes() {
+                                            let encrypted = crate::cloud::xor_cipher(&bytes);
+                                            if std::fs::write(&temp_path, encrypted).is_ok() {
+                                                if std::fs::rename(&temp_path, &cache_path).is_ok() {
+                                                    println!("[player-bg-cache] Stream successfully cached to disk!");
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                let _ = std::fs::remove_file(&temp_path);
                             }
-                            let _ = std::fs::remove_file(&temp_path);
                         }
                     }
-                }
-            });
+                });
+            }
         }
     }
 
     let is_exclusive = *safe_lock(&exclusive_mode);
-    let is_stream = path.starts_with("http://") || path.starts_with("https://");
+    let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
 
     // 1b. Safety RAM cache check: Bypass cache for large files (>150MB or >15 minutes duration)
     let duration_secs = format.tracks().first().and_then(|t| {
@@ -1610,16 +1928,20 @@ fn play_file(
     }).unwrap_or(0.0);
 
     let is_too_large = if !is_stream {
-        let file_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        let too_large = file_bytes > 150 * 1024 * 1024 || duration_secs > 900.0;
-        if too_large {
-            println!("[player] Track is too large ({}MB / {}s). Bypassing RAM cache to prevent massive memory usage.", file_bytes / (1024 * 1024), duration_secs.round());
-            let _ = app_handle.emit("ui-toast", serde_json::json!({
-                "message": "Large file detected: Streaming directly from disk to save RAM.",
-                "type": "info"
-            }));
+        if resolved_path.contains(".tmp") {
+            false
+        } else {
+            let file_bytes = std::fs::metadata(&resolved_path).map(|m| m.len()).unwrap_or(0);
+            let too_large = file_bytes > 150 * 1024 * 1024 || duration_secs > 900.0;
+            if too_large {
+                println!("[player] Track is too large ({}MB / {}s). Bypassing RAM cache to prevent massive memory usage.", file_bytes / (1024 * 1024), duration_secs.round());
+                let _ = app_handle.emit("ui-toast", serde_json::json!({
+                    "message": "Large file detected: Streaming directly from disk to save RAM.",
+                    "type": "info"
+                }));
+            }
+            too_large
         }
-        too_large
     } else {
         false
     };
@@ -1723,10 +2045,11 @@ fn play_file(
             }));
         }
         
-        match dev.or_else(|| host.default_output_device()) {
+        match dev.or_else(|| host.default_output_device()).or_else(|| cpal::default_host().default_output_device()) {
             Some(d) => d,
             None => {
-                cpal::default_host().default_output_device().expect("No audio device available at all")
+                let _ = app_handle.emit("playback-error", "No audio output device detected. Please connect headphones or speakers.");
+                return None;
             }
         }
     };
@@ -2320,7 +2643,7 @@ fn play_file(
     let last_oversampling = current_dsp.resampler_oversampling;
     let last_ffmpeg_quality = current_dsp.ffmpeg_transcode_quality.clone();
     let last_exclusive_timing = current_dsp.exclusive_mode_timing.clone();
-    let is_stream = path.starts_with("http://") || path.starts_with("https://");
+    let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
 
     // RAM BUFFER CURSOR
     let mut ram_cursor = (start_pos * file_rate as f64) as usize;

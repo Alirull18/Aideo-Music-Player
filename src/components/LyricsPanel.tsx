@@ -279,17 +279,19 @@ export function LyricsPanel() {
                       <div className="modal-item-sub">{r.artist} · {r.source}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 8px' }}
-                        onClick={() => pickResult(r, 'lyrics')}>
-                        🎵 Lyrics
-                      </button>
+                      {r.source !== 'iTunes' && (
+                        <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 8px' }}
+                          onClick={() => pickResult(r, 'lyrics')}>
+                          🎵 Lyrics
+                        </button>
+                      )}
                       {r.cover_url && (
                         <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 8px' }}
                           onClick={() => pickResult(r, 'art')}>
                           ✨ Art
                         </button>
                       )}
-                      {r.cover_url && (
+                      {r.source !== 'iTunes' && r.cover_url && (
                         <button className="btn btn-primary" style={{ fontSize: 10, padding: '4px 8px' }}
                           onClick={() => pickResult(r, 'both')}>
                           Both

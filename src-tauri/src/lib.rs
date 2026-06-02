@@ -24,7 +24,7 @@ pub mod dependencies;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
-fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
@@ -1030,6 +1030,24 @@ fn clear_application_cache() -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_cache_folder() -> Result<(), String> {
+    let data_dir = dirs::data_dir().ok_or("Could not locate AppData directory")?;
+    let cache_dir = data_dir.join("Aideo").join("CloudCache");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("explorer")
+            .arg(&cache_dir)
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn();
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
 fn get_windows_accent_color() -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
@@ -1209,6 +1227,7 @@ pub fn run() {
             cloud::get_url_hash,
             get_windows_accent_color,
             clear_application_cache,
+            open_cache_folder,
         ])
         .setup(|app| {
             let tidal_state = std::sync::Arc::new(tidal::TidalState {
@@ -1216,8 +1235,8 @@ pub fn run() {
                 logged_in: std::sync::Mutex::new(false),
             });
             if let Some(sess) = tidal::TidalState::load_cached_session(&app.handle()) {
-                *tidal_state.session.lock().unwrap() = Some(sess);
-                *tidal_state.logged_in.lock().unwrap() = true;
+                *safe_lock(&tidal_state.session) = Some(sess);
+                *safe_lock(&tidal_state.logged_in) = true;
             }
             app.manage(tidal_state);
 

@@ -54,9 +54,14 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
       const results: any[] = await invoke('search_lyrics_online', { query });
 
       if (results && results.length > 0) {
+        // Exclude iTunes results since they do not contain lyrics
+        const lyricResults = results.filter(r => r.source !== 'iTunes');
+
         // Find the best match: prefer synced lyrics from LRCLIB first, then others
-        let bestMatch = results.find(r => r.synced && r.raw_lrc);
-        if (!bestMatch) bestMatch = results[0];
+        let bestMatch = lyricResults.find(r => r.synced && r.raw_lrc);
+        if (!bestMatch) bestMatch = lyricResults.find(r => r.source === 'LRCLIB' && r.raw_lrc);
+        if (!bestMatch) bestMatch = lyricResults.find(r => r.source === 'NetEase' || r.source === 'QQMusic');
+        if (!bestMatch) bestMatch = lyricResults[0];
 
         if (bestMatch) {
           let lrc = bestMatch.raw_lrc ?? '';

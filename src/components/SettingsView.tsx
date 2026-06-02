@@ -1989,27 +1989,49 @@ export function SettingsView() {
                 </ul>
               </div>
             </div>
-            <button
-              onClick={async () => {
-                try {
-                  await invoke('clear_application_cache');
-                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'All application caches deleted successfully!', type: 'success' } }));
-                } catch (e: any) {
-                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to clear cache: ${e}`, type: 'error' } }));
-                }
-              }}
-              className="settings-btn settings-btn-danger"
-              style={{
-                fontSize: 11,
-                padding: '8px 16px',
-                fontWeight: 700,
-                borderRadius: 8,
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              Clear Cache
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={async () => {
+                  try {
+                    await invoke('open_cache_folder');
+                  } catch (e: any) {
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to open cache folder: ${e}`, type: 'error' } }));
+                  }
+                }}
+                className="settings-btn"
+                style={{
+                  fontSize: 11,
+                  padding: '8px 16px',
+                  fontWeight: 700,
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Open Cache Folder
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await invoke('clear_application_cache');
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'All application caches deleted successfully!', type: 'success' } }));
+                  } catch (e: any) {
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to clear cache: ${e}`, type: 'error' } }));
+                  }
+                }}
+                className="settings-btn settings-btn-danger"
+                style={{
+                  fontSize: 11,
+                  padding: '8px 16px',
+                  fontWeight: 700,
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Clear Cache
+              </button>
+            </div>
           </div>
         </div>
       )
