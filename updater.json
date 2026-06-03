@@ -1,11 +1,11 @@
 {
-  "version": "0.7.2",
-  "notes": "💎 AIDEO v0.7.2: Discovery Hub Caching & Global Charts Seekability. Implements global Zustand state caching for the Discovery Hub to prevent redundant loads and make view switching instantaneous. Resolves missing durations for Global Charts to enable seekability.",
-  "pub_date": "2026-06-03T01:50:00Z",
+  "version": "0.7.5",
+  "notes": "💎 AIDEO v0.7.5: Discovery Hub Caching & Global Charts Seekability. Implements global Zustand state caching for the Discovery Hub to prevent redundant loads and make view switching instantaneous. Resolves missing durations for Global Charts to enable seekability.",
+  "pub_date": "2026-06-03T10:15:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUOGxKNlE5aVY1M2Q3bVFiR21vazhJOVhwMjVHcVpmSytmWWpOV0w4a0J1ZDRpemV1Q1lCSlE3aS9SQUs3YWJGQzJKU0R3QWhHUW10Y2xtV01EWHQwMGovVlc0VWdLeEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5MTYyOTE0CWZpbGU6QWlkZW9fMC41LjBfeDY0X2VuLVVTLm1zaQpzcExKOUFScFdtTE55VDZoYUlEOUIzckFlcXV1L2dLcFgyakx2NGpiLzVRNThvSWs4S29wR1NrTVpDdVRaOE9IUFlnS2M0V3NZcjFiRTZjTmZEOGFEdz09Cg==",
-      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.7.2/Aideo_0.7.2_x64_en-US.msi"
+      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.7.5/Aideo_0.7.5_x64_en-US.msi"
     }
   }
 }
