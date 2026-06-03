@@ -618,23 +618,20 @@ fn get_lyrics(path: String) -> Result<Vec<lyrics::LyricLine>, String> {
 async fn get_cover_art(path: String) -> Result<Option<String>, String> {
     if path.starts_with("http://") || path.starts_with("https://") {
         let client = reqwest::Client::new();
-        match client.get(&path).send().await {
-            Ok(res) => {
-                let status = res.status();
-                if status.is_success() {
-                    let mime = res.headers()
-                        .get(reqwest::header::CONTENT_TYPE)
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("image/jpeg")
-                        .to_string();
-                    if let Ok(bytes) = res.bytes().await {
-                        use base64::Engine;
-                        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                        return Ok(Some(format!("data:{};base64,{}", mime, encoded)));
-                    }
+        if let Ok(res) = client.get(&path).send().await {
+            let status = res.status();
+            if status.is_success() {
+                let mime = res.headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("image/jpeg")
+                    .to_string();
+                if let Ok(bytes) = res.bytes().await {
+                    use base64::Engine;
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    return Ok(Some(format!("data:{};base64,{}", mime, encoded)));
                 }
             }
-            Err(_) => {}
         }
         return Ok(None);
     }
@@ -767,7 +764,7 @@ fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<()
     {
         if let Some(main_window) = app_handle.get_webview_window("main") {
             if let Ok(raw) = main_window.hwnd() {
-                taskbar::update_taskbar_playback_state(raw.0 as *mut std::ffi::c_void, playing);
+                taskbar::update_taskbar_playback_state(raw.0, playing);
             }
         }
     }
@@ -1234,7 +1231,7 @@ pub fn run() {
                 session: std::sync::Mutex::new(None),
                 logged_in: std::sync::Mutex::new(false),
             });
-            if let Some(sess) = tidal::TidalState::load_cached_session(&app.handle()) {
+            if let Some(sess) = tidal::TidalState::load_cached_session(app.handle()) {
                 *safe_lock(&tidal_state.session) = Some(sess);
                 *safe_lock(&tidal_state.logged_in) = true;
             }
@@ -1293,7 +1290,7 @@ pub fn run() {
                 #[cfg(target_os = "windows")]
                 {
                     let raw = main_window.hwnd().expect("Failed to get HWND");
-                    Some(raw.0 as *mut std::ffi::c_void)
+                    Some(raw.0)
                 }
                 #[cfg(not(target_os = "windows"))]
                 { None }

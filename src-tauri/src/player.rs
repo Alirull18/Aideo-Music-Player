@@ -75,24 +75,28 @@ fn select_output_config(
             
             // Priority 2a: High-Res Integer (I32/I24)
             for c in &supported_configs {
-                if c.channels() as usize == file_ch && (c.sample_format() == cpal::SampleFormat::I32 || c.sample_format() == cpal::SampleFormat::I24) {
-                    if c.min_sample_rate() <= (file_rate as u32) && c.max_sample_rate() >= (file_rate as u32) {
-                        let cfg = c.with_sample_rate(file_rate as u32).config();
-                        println!("AUDIOPHILE: Native Integer Match ({:?}): {}Hz", c.sample_format(), file_rate);
-                        configs.push((cfg, c.sample_format()));
-                    }
+                if c.channels() as usize == file_ch
+                    && (c.sample_format() == cpal::SampleFormat::I32 || c.sample_format() == cpal::SampleFormat::I24)
+                    && c.min_sample_rate() <= (file_rate as u32)
+                    && c.max_sample_rate() >= (file_rate as u32)
+                {
+                    let cfg = c.with_sample_rate(file_rate as u32).config();
+                    println!("AUDIOPHILE: Native Integer Match ({:?}): {}Hz", c.sample_format(), file_rate);
+                    configs.push((cfg, c.sample_format()));
                 }
             }
             
             // Priority 2b: I16
             if configs.is_empty() {
                 for c in &supported_configs {
-                    if c.channels() as usize == file_ch && c.sample_format() == cpal::SampleFormat::I16 {
-                        if c.min_sample_rate() <= (file_rate as u32) && c.max_sample_rate() >= (file_rate as u32) {
-                            let cfg = c.with_sample_rate(file_rate as u32).config();
-                            println!("AUDIOPHILE: Native I16 Match: {}Hz", file_rate);
-                            configs.push((cfg, c.sample_format()));
-                        }
+                    if c.channels() as usize == file_ch
+                        && c.sample_format() == cpal::SampleFormat::I16
+                        && c.min_sample_rate() <= (file_rate as u32)
+                        && c.max_sample_rate() >= (file_rate as u32)
+                    {
+                        let cfg = c.with_sample_rate(file_rate as u32).config();
+                        println!("AUDIOPHILE: Native I16 Match: {}Hz", file_rate);
+                        configs.push((cfg, c.sample_format()));
                     }
                 }
             }
@@ -100,12 +104,14 @@ fn select_output_config(
             // Priority 2c: F32
             if configs.is_empty() {
                 for c in &supported_configs {
-                    if c.channels() as usize == file_ch && c.sample_format() == cpal::SampleFormat::F32 {
-                        if c.min_sample_rate() <= (file_rate as u32) && c.max_sample_rate() >= (file_rate as u32) {
-                            let cfg = c.with_sample_rate(file_rate as u32).config();
-                            println!("AUDIOPHILE: Native Float Match: {}Hz", file_rate);
-                            configs.push((cfg, c.sample_format()));
-                        }
+                    if c.channels() as usize == file_ch
+                        && c.sample_format() == cpal::SampleFormat::F32
+                        && c.min_sample_rate() <= (file_rate as u32)
+                        && c.max_sample_rate() >= (file_rate as u32)
+                    {
+                        let cfg = c.with_sample_rate(file_rate as u32).config();
+                        println!("AUDIOPHILE: Native Float Match: {}Hz", file_rate);
+                        configs.push((cfg, c.sample_format()));
                     }
                 }
             }
@@ -800,7 +806,7 @@ fn prepare_decoder(
         let (codec, rate) = match ffmpeg_transcode_quality {
             "hires" => ("pcm_s24le", if is_dsd { "176400" } else { "96000" }),
             "studio" => ("pcm_s24le", if is_dsd { "88200" } else { "48000" }),
-            _ => ("pcm_s16le", if is_dsd { "44100" } else { "44100" }),
+            _ => ("pcm_s16le", "44100"),
         };
 
         args.extend([
@@ -859,7 +865,7 @@ fn prepare_decoder(
             // Spawn stderr reader for yt-dlp to aid in debugging
             thread::spawn(move || {
                 let reader = std::io::BufReader::new(ytdlp_stderr);
-                for line in reader.lines().filter_map(|l| l.ok()) {
+                for line in reader.lines().map_while(Result::ok) {
                     eprintln!("[yt-dlp-err] {}", line);
                 }
             });
@@ -904,7 +910,7 @@ fn prepare_decoder(
                     let stderr = child.stderr.take().ok_or("Failed to open FFmpeg stderr")?;
                     thread::spawn(move || {
                         let reader = std::io::BufReader::new(stderr);
-                        for line in reader.lines().filter_map(|l| l.ok()) {
+                        for line in reader.lines().map_while(Result::ok) {
                             if line.contains("Error") { eprintln!("[ffmpeg-err] {}", line); }
                         }
                         // Kill yt-dlp when ffmpeg exits to prevent orphan processes
@@ -925,7 +931,7 @@ fn prepare_decoder(
                     let stderr = child.stderr.take().ok_or("Failed to open FFmpeg stderr")?;
                     thread::spawn(move || {
                         let reader = std::io::BufReader::new(stderr);
-                        for line in reader.lines().filter_map(|l| l.ok()) {
+                        for line in reader.lines().map_while(Result::ok) {
                             if line.contains("Error") { eprintln!("[ffmpeg-err] {}", line); }
                         }
                     });
@@ -1281,8 +1287,8 @@ fn analyzer_loop(rx: Receiver<(Vec<f32>, f32)>, app_handle: tauri::AppHandle) {
 
     // Hann window
     let mut window = vec![0.0; 2048];
-    for i in 0..2048 {
-        window[i] = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 2047.0).cos());
+    for (i, val) in window.iter_mut().enumerate() {
+        *val = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 2047.0).cos());
     }
 
     while let Ok((samples, sample_rate)) = rx.recv() {
@@ -1324,7 +1330,7 @@ fn analyzer_loop(rx: Receiver<(Vec<f32>, f32)>, app_handle: tauri::AppHandle) {
         let min_freq = 20.0f32;
         let max_freq = 20000.0f32;
         
-        for band in 0..num_bands {
+        for (band, val) in bands.iter_mut().enumerate() {
             let start_freq = min_freq * (max_freq / min_freq).powf(band as f32 / num_bands as f32);
             let end_freq = min_freq * (max_freq / min_freq).powf((band + 1) as f32 / num_bands as f32);
             
@@ -1336,12 +1342,12 @@ fn analyzer_loop(rx: Receiver<(Vec<f32>, f32)>, app_handle: tauri::AppHandle) {
             
             let mut sum = 0.0;
             let mut count = 0;
-            for bin in start_bin..=end_bin {
-                sum += magnitudes[bin];
+            for &mag in magnitudes.iter().take(end_bin + 1).skip(start_bin) {
+                sum += mag;
                 count += 1;
             }
             if count > 0 {
-                bands[band] = sum / count as f32;
+                *val = sum / count as f32;
             }
         }
         
@@ -1580,7 +1586,7 @@ fn player_loop(
 
 /// Soft limiter — prevents digital clipping on heavy boosts
 fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>>) {
-    if let Some(mut child) = safe_lock(&current_process).take() {
+    if let Some(mut child) = safe_lock(current_process).take() {
         let _ = child.kill();
         let _ = child.wait(); // reap zombie process immediately
     }
@@ -1773,7 +1779,7 @@ fn background_decode(
 
         if let Ok(decoded) = decoder.decode(&packet) {
             let n_frames = decoded_frames(&decoded);
-            for ch in 0..file_ch {
+            for (ch, buf) in local_buffers.iter_mut().enumerate().take(file_ch) {
                 let src: Vec<f32> = match &decoded {
                     AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
                     AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| s as f32 / i16::MAX as f32).collect(),
@@ -1783,14 +1789,14 @@ fn background_decode(
                     AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
                     _ => vec![0.0; n_frames],
                 };
-                local_buffers[ch].extend(src);
+                buf.extend(src);
             }
             
             packet_count += 1;
             if packet_count >= 64 {
                 let mut lock = safe_lock(&samples);
                 for ch in 0..file_ch {
-                    lock[ch].extend(local_buffers[ch].drain(..));
+                    lock[ch].append(&mut local_buffers[ch]);
                 }
                 packet_count = 0;
             }
@@ -1800,7 +1806,7 @@ fn background_decode(
     if packet_count > 0 {
         let mut lock = safe_lock(&samples);
         for ch in 0..file_ch {
-            lock[ch].extend(local_buffers[ch].drain(..));
+            lock[ch].append(&mut local_buffers[ch]);
         }
     }
 
@@ -1900,10 +1906,10 @@ fn play_file(
                                     if res.status().is_success() {
                                         if let Ok(bytes) = res.bytes() {
                                             let encrypted = crate::cloud::xor_cipher(&bytes);
-                                            if std::fs::write(&temp_path, encrypted).is_ok() {
-                                                if std::fs::rename(&temp_path, &cache_path).is_ok() {
-                                                    println!("[player-bg-cache] Stream successfully cached to disk!");
-                                                }
+                                            if std::fs::write(&temp_path, encrypted).is_ok()
+                                                && std::fs::rename(&temp_path, &cache_path).is_ok()
+                                            {
+                                                println!("[player-bg-cache] Stream successfully cached to disk!");
                                             }
                                         }
                                     }
@@ -2229,7 +2235,7 @@ fn play_file(
                                 let idx = f * ch_count + ch;
                                 if idx < n {
                                     let s = data[idx] * current_gain;
-                                    data[idx] = if s > 1.0 { 1.0 } else if s < -1.0 { -1.0 } else { s };
+                                    data[idx] = s.clamp(-1.0, 1.0);
                                 } else {
                                     data[idx] = 0.0;
                                 }
@@ -2286,7 +2292,7 @@ fn play_file(
                                 let idx = f * ch_count + ch;
                                 if idx < n {
                                     let s = buf[idx] * current_gain;
-                                    let clamped = if s > 1.0 { 1.0 } else if s < -1.0 { -1.0 } else { s };
+                                    let clamped = s.clamp(-1.0, 1.0);
                                     data[idx] = (clamped * i16::MAX as f32) as i16;
                                 } else {
                                     data[idx] = 0;
@@ -2344,7 +2350,7 @@ fn play_file(
                                 let idx = f * ch_count + ch;
                                 if idx < n {
                                     let s = buf[idx] * current_gain;
-                                    let clamped = if s > 1.0 { 1.0 } else if s < -1.0 { -1.0 } else { s };
+                                    let clamped = s.clamp(-1.0, 1.0);
                                     data[idx] = (clamped * i32::MAX as f32) as i32;
                                 } else {
                                     data[idx] = 0;
@@ -2367,7 +2373,7 @@ fn play_file(
 
         if let Ok(s) = stream_res {
             // Pre-fill ringbuffer with 200ms of silence to guarantee absolute startup stability and shield from DPC latency spikes
-            let silence = vec![0.0f32; (rate * channels / 5) as usize];
+            let silence = vec![0.0f32; rate * channels / 5];
             let _ = prod.push_slice(&silence);
 
             let _ = s.play();
@@ -2657,12 +2663,10 @@ fn play_file(
                 Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
                 Ok(PlayerCommand::Seek(secs)) => {
                     if let Some(samples_arc) = &decoded_samples {
-                        let lock = safe_lock(&samples_arc);
+                        let lock = safe_lock(samples_arc);
                         ram_cursor = (secs * file_rate as f64) as usize;
-                        if ram_cursor >= lock[0].len() { 
-                            if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
-                                ram_cursor = lock[0].len().saturating_sub(1); 
-                            }
+                        if ram_cursor >= lock[0].len() && is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
+                            ram_cursor = lock[0].len().saturating_sub(1); 
                         }
                         *safe_lock(&position_secs) = secs;
                         flush_signal.store(true, Ordering::SeqCst);
@@ -2730,7 +2734,7 @@ fn play_file(
         if pending[0].len() < chunk_size * 4 {
             if let Some(samples_arc) = &decoded_samples {
                 // READ FROM RAM (Possibly still loading)
-                let lock = safe_lock(&samples_arc);
+                let lock = safe_lock(samples_arc);
                 if ram_cursor < lock[0].len() {
                     let to_read = (lock[0].len() - ram_cursor).min(chunk_size * 8);
                     for ch in 0..file_ch {
@@ -2767,7 +2771,7 @@ fn play_file(
                     if let Ok(decoded) = decoder.decode(&packet) {
                         let frames = decoded_frames(&decoded);
                         ram_cursor += frames;
-                        for ch in 0..file_ch {
+                        for (ch, buf) in pending.iter_mut().enumerate().take(file_ch) {
                             let src: Vec<f32> = match &decoded {
                                  AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
                                  AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| s as f32 / i16::MAX as f32).collect(),
@@ -2777,7 +2781,7 @@ fn play_file(
                                  AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
                                  _ => vec![0.0; decoded_frames(&decoded)],
                              };
-                            pending[ch].extend(src);
+                            buf.extend(src);
                         }
                     }
                 }
@@ -2842,9 +2846,9 @@ fn play_file(
             
             let mut chunk_planar = vec![vec![0.0; chunk_size]; file_ch];
             for ch in 0..file_ch {
-                for i in 0..chunk_size {
+                for val in chunk_planar[ch].iter_mut().take(chunk_size) {
                     if let Some(s) = pending[ch].pop_front() {
-                        chunk_planar[ch][i] = s;
+                        *val = s;
                     }
                 }
             }
@@ -2905,8 +2909,8 @@ fn play_file(
                             let delayed_r = crossfeed_delay_r.read_delayed(delay_samples);
 
                             let feed_gain = 10.0f32.powf(current_dsp.crossfeed_level / 20.0);
-                            l = l + delayed_r * feed_gain;
-                            r = r + delayed_l * feed_gain;
+                            l += delayed_r * feed_gain;
+                            r += delayed_l * feed_gain;
                         }
 
                         // 4. Haas Spatializer & Reflections soundstage
@@ -3001,9 +3005,9 @@ fn play_file(
                         processed[1][i] = soft_limit(r * final_gain);
                     }
                 } else {
-                    for ch in 0..use_ch {
-                        for i in 0..processed[ch].len() {
-                            let mut sample = processed[ch][i];
+                    for (ch, channel_buf) in processed.iter_mut().enumerate().take(use_ch) {
+                        for val in channel_buf.iter_mut() {
+                            let mut sample = *val;
                             if current_dsp.enabled && current_dsp.subsonic_enabled {
                                 if ch == 0 {
                                     sample = subsonic_l.process(sample);
@@ -3011,7 +3015,7 @@ fn play_file(
                                     sample = subsonic_r.process(sample);
                                 }
                             }
-                            processed[ch][i] = soft_limit(sample * final_gain);
+                            *val = soft_limit(sample * final_gain);
                         }
                     }
                 }
@@ -3113,12 +3117,12 @@ fn play_file(
                     }
                     Ok(PlayerCommand::Seek(secs)) => {
                         if let Some(samples_arc) = &decoded_samples {
-                            let lock = safe_lock(&samples_arc);
+                            let lock = safe_lock(samples_arc);
                             ram_cursor = (secs * file_rate as f64) as usize;
-                            if ram_cursor >= lock[0].len() { 
-                                if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
-                                    ram_cursor = lock[0].len().saturating_sub(1); 
-                                }
+                            if ram_cursor >= lock[0].len()
+                                && is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true)
+                            {
+                                ram_cursor = lock[0].len().saturating_sub(1); 
                             }
                             *safe_lock(&position_secs) = secs;
                             flush_signal.store(true, Ordering::SeqCst);
@@ -3170,7 +3174,7 @@ fn play_file(
                     Err(_) => {}
                 }
             }
-            if running && interleaved.len() > 0 {
+            if running && !interleaved.is_empty() {
                 prod.push_slice(&interleaved);
             }
         }
@@ -3188,7 +3192,7 @@ fn play_file(
 
     // 5. WAIT FOR BUFFER TO DRAIN ENTIRELY
     // This prevents cutting off the last second of audio when the ringbuffer is full at EOF.
-    while running && prod.len() > 0 {
+    while running && !prod.is_empty() {
         std::thread::sleep(std::time::Duration::from_millis(20));
 
         // Keep updating position so UI timer completes

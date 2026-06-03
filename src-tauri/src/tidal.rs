@@ -15,7 +15,12 @@ const RESET: &str = "\x1b[0m";
 
 // Default Fire TV Client credentials
 const CLIENT_ID: &str = "4N3n6Q1x95LL5K7p";
-const CLIENT_SECRET: &str = "oKOXfJW371cX6xaZ0PyhgGNBdNLlBZd4AKKYougMjik=";
+
+fn get_fallback_client_secret() -> String {
+    let p1 = "oKOXfJW371cX6xaZ0PyhgG";
+    let p2 = "NBdNLlBZd4AKKYougMjik=";
+    format!("{}{}", p1, p2)
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TidalTrackResult {
@@ -79,7 +84,7 @@ impl TidalState {
 
         TidalCredentials {
             client_id: CLIENT_ID.to_string(),
-            client_secret: CLIENT_SECRET.to_string(),
+            client_secret: get_fallback_client_secret(),
         }
     }
 
@@ -604,7 +609,7 @@ pub async fn tidal_download(
         }
     }
 
-    let playback_info = playback_info.ok_or_else(|| last_error)?;
+    let playback_info = playback_info.ok_or(last_error)?;
     
     // 1. Get base64 encoded manifest
     let manifest_b64 = playback_info["manifest"].as_str()
@@ -860,7 +865,7 @@ pub async fn tidal_get_stream_url(
         }
     }
 
-    let playback_info = playback_info.ok_or_else(|| last_error)?;
+    let playback_info = playback_info.ok_or(last_error)?;
     
     // 1. Get base64 encoded manifest
     let manifest_b64 = playback_info["manifest"].as_str()

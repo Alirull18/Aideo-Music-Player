@@ -82,9 +82,8 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
     let mut artist = None;
     let mut album = None;
 
-    if id3_offset > 0 {
-        if file.seek(SeekFrom::Start(id3_offset)).is_ok() {
-            let mut id3_header = [0u8; 10];
+    if id3_offset > 0 && file.seek(SeekFrom::Start(id3_offset)).is_ok() {
+        let mut id3_header = [0u8; 10];
             if file.read_exact(&mut id3_header).is_ok() && &id3_header[0..3] == b"ID3" {
                 let id3_size = ((id3_header[6] as usize) << 21) |
                                ((id3_header[7] as usize) << 14) |
@@ -159,7 +158,6 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                 }
             }
         }
-    }
 
     let final_title = title.or_else(|| {
         path.file_stem().map(|s| s.to_string_lossy().into_owned())

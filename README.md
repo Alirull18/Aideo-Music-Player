@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.7.1
+# 💎 Aideo Music Player v0.7.2
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -49,6 +49,15 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 </div>
 
 ---
+
+## 📢 What's New in v0.7.2 (The Discovery Hub Caching & Global Charts Seekability)
+
+### 🧠 Discovery Hub State Caching
+- **Instant Tab Switching**: Caches the personalized recommendations and state of the Discovery Hub in the global Zustand store, completely removing redundant network reloads when switching between views.
+- **Persistent Recommendations**: Keeps your recommendations identical on tab switches unless you explicitly click "Refresh Recommendations".
+
+### 🎵 Global Charts Seekability
+- **Concurrently Resolved Durations**: Resolves missing track durations for the global discovery charts shelf concurrently via the YouTube player API before returning them to the UI, enabling the seek bar and removing the "live stream" tag.
 
 ## 📢 What's New in v0.7.1 (The Auto-Updater & Manual Fallback Update)
 
@@ -141,8 +150,8 @@ Stream high-fidelity online tracks directly into your audio pipeline with advanc
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.7.1 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.7.1_x64_en-US.msi`).
+1. **Download**: Get the latest v0.7.2 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.7.2_x64_en-US.msi`).
 3. **Launch**: Add your library directory and experience pristine, bit-perfect sound!
 
 ---

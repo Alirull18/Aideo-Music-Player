@@ -275,6 +275,14 @@ export interface PlayerState {
   developerNotifications: boolean;
   toggleNotificationsEnabled: () => void;
   toggleDeveloperNotifications: () => void;
+
+  // Discovery Hub State
+  discoveryData: any;
+  isLoadingRecs: boolean;
+  activeDiscoveryTab: string;
+  setDiscoveryData: (data: any) => void;
+  setIsLoadingRecs: (loading: boolean) => void;
+  setActiveDiscoveryTab: (tab: string) => void;
 }
 
 function rgbToHsl(r: number, g: number, b: number) {

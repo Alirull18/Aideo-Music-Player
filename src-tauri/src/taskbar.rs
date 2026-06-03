@@ -109,7 +109,7 @@ unsafe fn get_original_wndproc_from_prop(hwnd: HWND) -> Option<WNDPROC> {
     if prop.is_invalid() {
         None
     } else {
-        Some(std::mem::transmute(prop.0))
+        Some(std::mem::transmute::<isize, WNDPROC>(prop.0))
     }
 }
 

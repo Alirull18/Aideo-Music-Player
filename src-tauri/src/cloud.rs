@@ -373,7 +373,7 @@ pub async fn subsonic_get_library(
         }
     }
     
-    results.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    results.sort_by_key(|a| a.title.to_lowercase());
     Ok(results)
 }
 
@@ -435,7 +435,7 @@ pub fn get_all_cached_cloud_hashes() -> Result<Vec<String>, String> {
     if let Ok(entries) = std::fs::read_dir(cache_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "cache") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "cache") {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     hashes.push(stem.to_string());
                 }

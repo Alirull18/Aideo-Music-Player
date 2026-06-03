@@ -18,6 +18,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showOnboarding: localStorage.getItem('aideo-onboarding-completed') !== 'true',
   notificationsEnabled: localStorage.getItem('aideo-notifications-enabled') !== 'false',
   developerNotifications: localStorage.getItem('aideo-developer-notifications') === 'true',
+  discoveryData: null,
+  isLoadingRecs: true,
+  activeDiscoveryTab: 'recommendations',
   customPrompt: {
     open: false,
     title: '',
@@ -45,6 +48,10 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   },
 
   setView: (view: any) => set({ view }),
+
+  setDiscoveryData: (discoveryData: any) => set({ discoveryData }),
+  setIsLoadingRecs: (isLoadingRecs: boolean) => set({ isLoadingRecs }),
+  setActiveDiscoveryTab: (activeDiscoveryTab: string) => set({ activeDiscoveryTab }),
 
   toggleNotificationsEnabled: () => {
     const next = !get().notificationsEnabled;

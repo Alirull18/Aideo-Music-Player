@@ -77,7 +77,13 @@ export function AideoView() {
     pauseTrack,
     resumeTrack,
     generateSmartMix,
-    showSmartMixWidget
+    showSmartMixWidget,
+    discoveryData,
+    setDiscoveryData,
+    isLoadingRecs,
+    setIsLoadingRecs,
+    activeDiscoveryTab,
+    setActiveDiscoveryTab
   } = useStore();
   const [greeting, setGreeting] = useState('Good morning');
   const [timeMix, setTimeMix] = useState({
@@ -85,10 +91,6 @@ export function AideoView() {
     description: 'A relaxing selection designed for peaceful environments',
     iconType: 'chill'
   });
-
-  const [discoveryData, setDiscoveryData] = useState<any>(null);
-  const [isLoadingRecs, setIsLoadingRecs] = useState(true);
-  const [activeDiscoveryTab, setActiveDiscoveryTab] = useState('recommendations');
   const isFetchingRef = useRef(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
@@ -253,8 +255,19 @@ export function AideoView() {
 
   // Load recommendations when library is loaded
   useEffect(() => {
-    fetchRecommendations();
-  }, [tracks.length]);
+    if (!discoveryData) {
+      if (tracks.length > 0) {
+        fetchRecommendations();
+      } else {
+        const timer = setTimeout(() => {
+          if (!discoveryData) {
+            fetchRecommendations();
+          }
+        }, 1000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [tracks.length, discoveryData]);
 
   const handleDownloadTrack = async (track: any) => {
     if (downloadingIds.has(track.id) || downloadedIds.has(track.id)) return;

@@ -244,7 +244,7 @@ where
                     }
                 };
 
-                let available_frames = buffer_size as u32 - padding;
+                let available_frames = buffer_size - padding;
                 if available_frames < num_frames as u32 {
                     // Not enough space to write a full chunk yet, sleep and wait
                     continue;
@@ -266,7 +266,7 @@ where
             // Quantize and format conversion
             if is_float {
                 for sample in f32_data.iter_mut() {
-                    *sample = if *sample > 1.0 { 1.0 } else if *sample < -1.0 { -1.0 } else { *sample };
+                    *sample = (*sample).clamp(-1.0, 1.0);
                 }
                 let byte_slice = unsafe {
                     std::slice::from_raw_parts(
@@ -282,7 +282,7 @@ where
                 if valid_bits == 24 {
                     let multiplier = 8388607.0; // 2^23 - 1
                     for (i, &sample) in f32_data.iter().enumerate() {
-                        let clamped = if sample > 1.0 { 1.0 } else if sample < -1.0 { -1.0 } else { sample };
+                        let clamped = sample.clamp(-1.0, 1.0);
                         let quantized = (((clamped * multiplier) as i32) << 8) & mask;
                         let bytes = quantized.to_ne_bytes();
                         let offset = i * 4;
@@ -294,7 +294,7 @@ where
                 } else {
                     let multiplier = 2147483647.0; 
                     for (i, &sample) in f32_data.iter().enumerate() {
-                        let clamped = if sample > 1.0 { 1.0 } else if sample < -1.0 { -1.0 } else { sample };
+                        let clamped = sample.clamp(-1.0, 1.0);
                         let quantized = ((clamped * multiplier) as i32) & mask;
                         let bytes = quantized.to_ne_bytes();
                         let offset = i * 4;
@@ -308,7 +308,7 @@ where
                 // 24-bit container: Int24 packed (3 bytes per sample)
                 let multiplier = 8388607.0; // 2^23 - 1
                 for (i, &sample) in f32_data.iter().enumerate() {
-                    let clamped = if sample > 1.0 { 1.0 } else if sample < -1.0 { -1.0 } else { sample };
+                    let clamped = sample.clamp(-1.0, 1.0);
                     let quantized = (clamped * multiplier) as i32;
                     let bytes = quantized.to_ne_bytes();
                     let offset = i * 3;
@@ -321,7 +321,7 @@ where
                 // 16-bit container: Int16
                 let multiplier = 32767.0; // i16::MAX
                 for (i, &sample) in f32_data.iter().enumerate() {
-                    let clamped = if sample > 1.0 { 1.0 } else if sample < -1.0 { -1.0 } else { sample };
+                    let clamped = sample.clamp(-1.0, 1.0);
                     let quantized = (clamped * multiplier) as i16;
                     let bytes = quantized.to_ne_bytes();
                     let offset = i * 2;

@@ -30,7 +30,7 @@ fn is_newer(remote: &str, local: &str) -> bool {
     let parse = |v: &str| -> (u32, u32, u32) {
         let clean = v.trim_start_matches('v').split('-').next().unwrap_or(v);
         let parts: Vec<&str> = clean.split('.').collect();
-        let major = parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
+        let major = parts.first().unwrap_or(&"0").parse().unwrap_or(0);
         let minor = parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
         let patch = parts.get(2).unwrap_or(&"0").parse().unwrap_or(0);
         (major, minor, patch)
