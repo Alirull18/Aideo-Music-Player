@@ -48,12 +48,12 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
       <td width="50%" align="center">
         <strong>🌐 YTM AI Discovery Hub</strong>
         <br />
-        <img width="100"  alt="Screenshot 2026-06-04 133027" src="https://github.com/user-attachments/assets/0f7f7e51-3ed0-424e-8afe-067b8974faf8" />
+        <img width="100%"  alt="Screenshot 2026-06-04 133027" src="https://github.com/user-attachments/assets/0f7f7e51-3ed0-424e-8afe-067b8974faf8" />
       </td>
       <td width="50%" align="center">
         <strong>💎 Aideo Main Player View</strong>
         <br />
-        <img width="100" alt="Screenshot 2026-06-04 133152" src="https://github.com/user-attachments/assets/c92ca717-a53b-421c-a571-b77570c00f7f" />
+        <img width="100%" alt="Screenshot 2026-06-04 133152" src="https://github.com/user-attachments/assets/c92ca717-a53b-421c-a571-b77570c00f7f" />
       </td>
     </tr>
   </table>
