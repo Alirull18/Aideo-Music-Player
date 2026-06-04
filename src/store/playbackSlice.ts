@@ -438,13 +438,16 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   playStream: async (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }) => {
     try {
       const streamName = metadata?.title || getStreamName(url);
+      const isYoutube = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('googlevideo.com');
+      const formatStr = isYoutube ? 'YouTube Direct' : 'URL';
+      
       const virtualTrack: Track = {
         id: -9999,
         path: url,
         title: streamName,
         artist: metadata?.artist || 'Online Stream',
         duration: metadata?.duration || null,
-        format: 'URL',
+        format: formatStr,
         lyric_offset: 0,
         cover_url: metadata?.cover_url || null
       };
@@ -598,9 +601,35 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   clearQueue: async () => {
     try {
+      const currentTrack = get().currentTrack;
+      const isOnline = currentTrack && (
+        currentTrack.path.startsWith('http://') || 
+        currentTrack.path.startsWith('https://') || 
+        currentTrack.format === 'Tidal FLAC'
+      );
+      const isAutoplayEnabled = get().autoplayEnabled;
+      
+      const currentQueue = get().queue;
+      const clearedPaths = currentQueue.map(t => t.path);
+      if (clearedPaths.length > 0) {
+        const existingCleared = get().recentlyClearedAutoplayPaths || [];
+        const newCleared = Array.from(new Set([...existingCleared, ...clearedPaths])).slice(-100);
+        set({ recentlyClearedAutoplayPaths: newCleared });
+      }
+
       await invoke('clear_queue');
       set({ queue: [] });
       localStorage.setItem('aideo_queue', JSON.stringify([]));
+
+      if (isAutoplayEnabled && currentTrack && isOnline) {
+        await get().stopTrack();
+        await get().triggerAutoplayRadio(currentTrack, true);
+        
+        const newQueue = get().queue;
+        if (newQueue.length > 0) {
+          await get().playFromQueue(0);
+        }
+      }
     } catch (e) { console.error(e); }
   },
 

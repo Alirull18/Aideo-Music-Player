@@ -1,9 +1,20 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
-import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2 } from 'lucide-react';
+import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2, Heart } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { fmt, baseName, getStreamName } from '../utils';
+
+const isRadioStream = (track: any): boolean => {
+  if (!track) return false;
+  const path = track.path || '';
+  const format = track.format || '';
+  const isUrlFormat = format.toUpperCase() === 'URL';
+  const isOnline = path.startsWith('http://') || path.startsWith('https://');
+  const isYTMOrTidalOrCloud = format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN' || path.includes('youtube.com') || path.includes('youtu.be') || path.includes('api.tidal.com');
+  
+  return (isUrlFormat || isOnline) && !isYTMOrTidalOrCloud && (!track.duration || track.duration <= 0);
+};
 
 export function PlayerBar() {
   const {
@@ -11,7 +22,7 @@ export function PlayerBar() {
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
     dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
-    autoplayEnabled, toggleAutoplay
+    autoplayEnabled, toggleAutoplay, toggleLoveTrack
   } = useStore();
 
   const activeLyric = useMemo(() => {
@@ -105,6 +116,38 @@ export function PlayerBar() {
             )}
           </div>
         </div>
+        {/* Heart/Like Button */}
+        {current && !isRadioStream(current) && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleLoveTrack(current.path);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: current.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.35)',
+              cursor: 'pointer',
+              padding: 8,
+              marginLeft: 4,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.2)';
+              if (current.loved !== 1) e.currentTarget.style.color = '#ef4444';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1.0)';
+              if (current.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.35)';
+            }}
+            title={current.loved === 1 ? "Remove from Loved Streams" : "Add to Loved Streams"}
+          >
+            <Heart size={16} fill={current.loved === 1 ? '#ef4444' : 'transparent'} />
+          </button>
+        )}
       </div>
 
       {/* CENTER */}

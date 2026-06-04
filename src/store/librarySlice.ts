@@ -6,6 +6,10 @@ import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, onlineTrack
 
 let isTransitioning = false;
 
+const isStreamTrack = (path: string, format?: string | null): boolean => {
+  return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
+};
+
 const fetchTrackMetadataAndLyrics = async (
   track: Track,
   set: any,
@@ -91,7 +95,34 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   currentHistoryId: null,
   autoplayEnabled: localStorage.getItem('aideo_autoplay') !== 'false',
   autoplayDiscoveryLevel: (localStorage.getItem('aideo_autoplay_discovery_level') as 'familiarity' | 'balanced' | 'discovery') || 'balanced',
-  playHistory: JSON.parse(localStorage.getItem('aideo_play_history') || '[]'),
+  recentlyClearedAutoplayPaths: [],
+  cacheSizeLimit: (() => {
+    const val = localStorage.getItem('aideo_cache_size_limit');
+    return val ? Number(val) : 5.0;
+  })(),
+  playHistory: (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('aideo_play_history') || '[]');
+      return raw.map((item: any) => {
+        if (typeof item === 'string') {
+          const isOnline = item.startsWith('http://') || item.startsWith('https://');
+          const meta = isOnline ? parseStreamMetadata(item) : { title: baseName(item), artist: '—', album: '' };
+          return {
+            id: -9999,
+            path: item,
+            title: meta.title,
+            artist: meta.artist,
+            duration: null,
+            format: isOnline ? 'URL' : 'MP3/FLAC',
+            lyric_offset: 0
+          } as Track;
+        }
+        return item;
+      });
+    } catch (e) {
+      return [];
+    }
+  })(),
   playCounts: JSON.parse(localStorage.getItem('aideo_play_counts') || '{}'),
   scanDirs: JSON.parse(localStorage.getItem('aideo_scan_dirs') || '[]'),
   scanStatus: '',
@@ -148,7 +179,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error('loadLibrary:', e); }
   },
 
-  recordPlaybackTransition: async (newTrack: Track | null) => {
+  recordPlaybackTransition: async (newTrack: Track | null, playbackSource?: string) => {
     const prevHistoryId = get().currentHistoryId;
     const prevTrack = get().currentTrack;
     const currentPos = get().playback.position_secs;
@@ -173,6 +204,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           album: null,
           duration: newTrack.duration || null,
           format: newTrack.format || null,
+          genre: null,
+          playbackSource: playbackSource || null,
         });
         set({ currentHistoryId: id });
       } catch (e) {
@@ -181,12 +214,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   },
 
-  playTrack: async (track: Track, isHistory?: boolean, forceResetAutoplay = true) => {
+  playTrack: async (track: Track, isHistory?: boolean, forceResetAutoplay = true, playbackSource?: string) => {
     if (!track) return;
     try {
-      await get().recordPlaybackTransition(track);
+      await get().recordPlaybackTransition(track, playbackSource);
       const index = get().tracks.findIndex(t => pathsEqual(t.path, track.path));
-      const prevTrack = get().playback.current_track;
+      const prevTrack = get().currentTrack;
       const history = prevTrack && !isHistory ? [...get().playHistory, prevTrack].slice(-50) : get().playHistory;
       localStorage.setItem('aideo_play_history', JSON.stringify(history));
 
@@ -272,8 +305,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     isTransitioning = true;
     try {
       const state = get();
-      const index = state.tracks.findIndex(t => pathsEqual(t.path, path));
-      let track = index !== -1 ? state.tracks[index] : null;
+      const isCurrentOnline = path.startsWith('http://') || path.startsWith('https://');
+      const activeTracks = isCurrentOnline
+        ? state.tracks.filter(t => isStreamTrack(t.path, t.format))
+        : state.tracks.filter(t => !isStreamTrack(t.path, t.format));
+      const index = activeTracks.findIndex(t => pathsEqual(t.path, path));
+      let track = index !== -1 ? activeTracks[index] : null;
 
       // Check active queue for metadata if it is an online track
       if (!track) {
@@ -300,8 +337,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         };
       }
 
-      const prevTrackStr = state.playback.current_track;
-      const history = prevTrackStr ? [...state.playHistory, prevTrackStr].slice(-50) : state.playHistory;
+      const prevTrack = state.currentTrack;
+      const history = prevTrack ? [...state.playHistory, prevTrack].slice(-50) : state.playHistory;
       localStorage.setItem('aideo_play_history', JSON.stringify(history));
 
       const counts = { ...state.playCounts };
@@ -342,24 +379,24 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       const newState = get();
       await newState.fetchQueue();
-      if (newState.queue.length === 0 && newState.tracks.length > 0) {
+      if (newState.queue.length === 0 && activeTracks.length > 0) {
         if (newState.repeat === 'one' && track) {
           // Repeat One: re-queue the same track
           try { await invoke('add_to_queue', { path: track.path }); } catch (e) { }
         } else if (newState.repeat === 'none') {
           // Repeat None: don't queue past the last track
           const nextIndex = newState.shuffle
-            ? Math.floor(Math.random() * newState.tracks.length)
-            : newState.currentTrackIndex + 1;
-          if (nextIndex < newState.tracks.length) {
-            try { await invoke('add_to_queue', { path: newState.tracks[nextIndex].path }); } catch (e) { }
+            ? Math.floor(Math.random() * activeTracks.length)
+            : index + 1;
+          if (nextIndex < activeTracks.length) {
+            try { await invoke('add_to_queue', { path: activeTracks[nextIndex].path }); } catch (e) { }
           }
         } else {
           // Repeat All: wrap around
           const nextIndex = newState.shuffle
-            ? Math.floor(Math.random() * newState.tracks.length)
-            : (newState.currentTrackIndex + 1) % newState.tracks.length;
-          try { await invoke('add_to_queue', { path: newState.tracks[nextIndex].path }); } catch (e) { }
+            ? Math.floor(Math.random() * activeTracks.length)
+            : (index + 1) % activeTracks.length;
+          try { await invoke('add_to_queue', { path: activeTracks[nextIndex].path }); } catch (e) { }
         }
       }
     } finally {
@@ -457,7 +494,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           }
 
           // Filter out previously played tracks
-          const playedSet = new Set(get().playHistory);
+          const playedSet = new Set(get().playHistory.map(t => t.path));
           let finalRecommended = recommendedTracks.filter(t => !playedSet.has(t.path));
           if (finalRecommended.length === 0) {
             finalRecommended = recommendedTracks;
@@ -485,71 +522,58 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
     }
 
-    if (tracks.length === 0) return;
+    const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC';
+    const activeTracks = isCurrentOnline
+      ? tracks.filter(t => isStreamTrack(t.path, t.format))
+      : tracks.filter(t => !isStreamTrack(t.path, t.format));
+
+    if (activeTracks.length === 0) return;
+
+    const currentActiveIdx = activeTracks.findIndex(t => pathsEqual(t.path, currentTrack?.path || ''));
 
     if (shuffle) {
-      const nextIndex = Math.floor(Math.random() * tracks.length);
-      await playTrack(tracks[nextIndex]);
+      const nextIndex = Math.floor(Math.random() * activeTracks.length);
+      await playTrack(activeTracks[nextIndex]);
       return;
     }
 
-    const nextIndex = currentTrackIndex + 1;
+    const nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) + 1;
 
     // Repeat None: stop at end of library
-    if (repeat === 'none' && nextIndex >= tracks.length) {
+    if (repeat === 'none' && nextIndex >= activeTracks.length) {
+      const { stopTrack } = get();
+      await stopTrack();
       return;
     }
 
     // Repeat All: wrap around
-    await playTrack(tracks[nextIndex % tracks.length]);
+    await playTrack(activeTracks[nextIndex % activeTracks.length]);
   },
 
   playPrev: async () => {
     const state = get();
-    const { tracks, currentTrackIndex, playHistory, queue, currentTrack } = state;
+    const { playHistory, tracks, currentTrackIndex, currentTrack } = state;
     
     // If we have history, pop the last track and play it
     if (playHistory.length > 0) {
       const newHistory = [...playHistory];
-      const lastPath = newHistory.pop()!;
+      const lastTrack = newHistory.pop()!;
 
-      // Search local library first
-      let t = tracks.find(x => pathsEqual(x.path, lastPath)) || null;
-
-      // Then check the active queue (for cloud/stream tracks)
-      if (!t) t = queue.find(x => pathsEqual(x.path, lastPath)) || null;
-
-      // Then check the current track itself
-      if (!t && currentTrack && pathsEqual(currentTrack.path, lastPath)) t = currentTrack;
-
-      // Then check the online track metadata cache
-      if (!t && onlineTrackCache.has(lastPath)) t = onlineTrackCache.get(lastPath)!;
-
-      // Fallback: dynamically reconstruct the online track
-      if (!t && (lastPath.startsWith('http://') || lastPath.startsWith('https://'))) {
-        const meta = parseStreamMetadata(lastPath);
-        t = {
-          id: -9999,
-          path: lastPath,
-          title: meta.title,
-          artist: meta.artist,
-          duration: null,
-          format: 'URL',
-          lyric_offset: 0
-        };
-      }
-
-      if (t) {
-        set({ playHistory: newHistory });
-        await get().playTrack(t, true);
-        return;
-      }
+      set({ playHistory: newHistory });
+      await get().playTrack(lastTrack, true);
+      return;
     }
     
-    // Fallback: sequential previous from local library
-    if (tracks.length === 0) return;
-    const prevIndex = (currentTrackIndex - 1 + tracks.length) % tracks.length;
-    await get().playTrack(tracks[prevIndex]);
+    // Fallback: sequential previous from active library
+    const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://');
+    const activeTracks = isCurrentOnline
+      ? tracks.filter(t => isStreamTrack(t.path, t.format))
+      : tracks.filter(t => !isStreamTrack(t.path, t.format));
+
+    if (activeTracks.length === 0) return;
+    const currentActiveIdx = activeTracks.findIndex(t => pathsEqual(t.path, currentTrack?.path || ''));
+    const prevIndex = ((currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) - 1 + activeTracks.length) % activeTracks.length;
+    await get().playTrack(activeTracks[prevIndex]);
   },
 
   toggleShuffle: () => set(s => ({ shuffle: !s.shuffle })),
@@ -675,7 +699,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const manualQueue = currentQueue.filter(t => !t.is_autoplay);
       const existingAutoplay = forceReset ? [] : currentQueue.filter(t => t.is_autoplay);
 
-      const playedSet = new Set(get().playHistory);
+      const playedSet = new Set(get().playHistory.map(t => t.path));
       const currentTrackPath = track.path;
       const existingPaths = new Set([
         currentTrackPath,
@@ -683,7 +707,18 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         ...existingAutoplay.map(t => t.path)
       ]);
 
-      let finalRecommended = recommendedTracks.filter(t => !playedSet.has(t.path) && !existingPaths.has(t.path));
+      const clearedSet = new Set(get().recentlyClearedAutoplayPaths || []);
+      let finalRecommended = recommendedTracks.filter(t => 
+        !playedSet.has(t.path) && 
+        !existingPaths.has(t.path) && 
+        !clearedSet.has(t.path)
+      );
+      if (finalRecommended.length === 0) {
+        finalRecommended = recommendedTracks.filter(t => 
+          !existingPaths.has(t.path) && 
+          !clearedSet.has(t.path)
+        );
+      }
       if (finalRecommended.length === 0) {
         finalRecommended = recommendedTracks.filter(t => !existingPaths.has(t.path));
       }
@@ -790,26 +825,28 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error(e); }
   },
 
-  toggleLoveTrack: async (path: string) => {
+  toggleLoveTrack: async (path: string, metadata?: Partial<Track>) => {
     try {
-      const track = get().tracks.find(t => t.path === path) || (get().currentTrack?.path === path ? get().currentTrack : null);
+      const track = get().tracks.find(t => t.path === path)
+        || (get().currentTrack?.path === path ? get().currentTrack : null)
+        || (metadata ? { path, ...metadata } as Track : null);
+
       if (!track) return;
       const isLovedNow = track.loved === 1 ? 0 : 1;
-      
-      await invoke('toggle_love_track', { path, loved: isLovedNow === 1 });
-      
-      const updatedTracks = get().tracks.map(t => {
-        if (t.path === path) {
-          return { ...t, loved: isLovedNow };
-        }
-        return t;
+
+      await invoke('toggle_love_track', {
+        path,
+        loved: isLovedNow === 1,
+        title: track.title || null,
+        artist: track.artist || null,
+        album: track.album || null,
+        duration: track.duration || null,
+        format: track.format || null,
+        coverUrl: track.cover_url || null
       });
-      set({ tracks: updatedTracks });
-      
-      const current = get().currentTrack;
-      if (current && current.path === path) {
-        set({ currentTrack: { ...current, loved: isLovedNow } });
-      }
+
+      // Reload the library from SQLite to pick up the newly inserted/updated track
+      await get().loadLibrary();
 
       const updatedQueue = get().queue.map(q => {
         if (q.path === path) {
@@ -1101,5 +1138,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       else mixName = 'Chill & Unwind Mix';
     }
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Playing ${mixName}!`, type: 'success' } }));
+  },
+  setCacheSizeLimit: (limit: number) => {
+    set({ cacheSizeLimit: limit });
+    localStorage.setItem('aideo_cache_size_limit', String(limit));
+    invoke('prune_cache_to_limit', { limitGb: limit }).catch((e) => {
+      console.error('Failed to prune cache to limit:', e);
+    });
   },
 });

@@ -25,19 +25,29 @@ import { AideoLabView } from './components/AideoLabView';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { FullscreenView } from './components/FullscreenView';
 import { CoverArtModal } from './components/CoverArtModal';
+import { BrowserCallbackLanding } from './components/BrowserCallbackLanding';
+import { OauthChildCallback } from './components/OauthChildCallback';
 
 // Global Error Logging to Backend Terminal
 if (typeof window !== 'undefined') {
   window.onerror = (msg, _url, line, col, error) => {
-    invoke('log_error', { msg: `[JS Error] ${msg} at line ${line}:${col} - ${error?.stack || 'No stack'}` });
+    if ((window as any).__TAURI_INTERNALS__) {
+      invoke('log_error', { msg: `[JS Error] ${msg} at line ${line}:${col} - ${error?.stack || 'No stack'}` });
+    } else {
+      console.error(`[JS Error] ${msg} at line ${line}:${col}`, error);
+    }
     return false;
   };
   window.onunhandledrejection = (event) => {
-    invoke('log_error', { msg: `[Unhandled Rejection] ${event.reason}` });
+    if ((window as any).__TAURI_INTERNALS__) {
+      invoke('log_error', { msg: `[Unhandled Rejection] ${event.reason}` });
+    } else {
+      console.error(`[Unhandled Rejection]`, event.reason);
+    }
   };
 }
 
-export default function App() {
+function AideoApp() {
   const { 
     view, 
     pollStatus, 
@@ -85,8 +95,24 @@ export default function App() {
     const onUpdate = (e: any) => setUpdateInfo(e.detail);
     window.addEventListener('update-available', onUpdate);
 
+    let unlistenOAuth: any;
+    listen<any>('oauth-success', (event) => {
+      const session = event.payload;
+      if (session) {
+        useStore.setState({ 
+          session, 
+          user: session.user ?? null,
+          authLoading: false
+        });
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: 'Signed in successfully!', type: 'success' } 
+        }));
+      }
+    }).then(u => unlistenOAuth = u);
+
     return () => {
       window.removeEventListener('update-available', onUpdate);
+      if (unlistenOAuth) unlistenOAuth();
     };
   }, [loadLibrary, fetchPlaylists]);
 
@@ -104,6 +130,11 @@ export default function App() {
     listen('track-ended', () => {
       useStore.getState().playNext();
     }).then(f => unlistenEnded = f);
+
+    let unlistenLibraryUpdated: (() => void) | undefined;
+    listen('library-updated', () => {
+      useStore.getState().loadLibrary();
+    }).then(f => unlistenLibraryUpdated = f);
 
 
 
@@ -146,6 +177,7 @@ export default function App() {
       clearInterval(id);
       window.removeEventListener('keydown', handleKeyDown);
       if (unlistenEnded) unlistenEnded();
+      if (unlistenLibraryUpdated) unlistenLibraryUpdated();
 
       if (unlistenPlay) unlistenPlay();
       if (unlistenPause) unlistenPause();
@@ -182,8 +214,8 @@ export default function App() {
               <AideoView />
             </motion.div>
           )}
-          {view === 'library' && (
-            <motion.div key="lib" style={{ height: '100%' }}
+          {(view === 'library' || view === 'loved_streams') && (
+            <motion.div key={view} style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <LibraryView />
             </motion.div>
@@ -432,4 +464,29 @@ export default function App() {
       </div>
     </MotionConfig>
   );
+}
+
+export default function App() {
+  const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ !== undefined;
+  const [isOauthChild, setIsOauthChild] = useState(false);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      const win = getCurrentWindow();
+      if (win.label === 'supabase-login') {
+        setIsOauthChild(true);
+      }
+    }).catch(() => {});
+  }, [isTauri]);
+
+  if (!isTauri) {
+    return <BrowserCallbackLanding />;
+  }
+
+  if (isOauthChild) {
+    return <OauthChildCallback />;
+  }
+
+  return <AideoApp />;
 }

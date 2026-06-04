@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw } from 'lucide-react';
+import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 
 // Format track duration
@@ -21,6 +21,17 @@ function baseName(p: string | null) {
 // Artwork caching
 const coverArtCache = new Map<string, string | null>();
 const pendingArtRequests = new Map<string, Promise<any>>();
+
+// Helper to get premium CSS class for recommendation source badges
+function getBadgeClass(source: string) {
+  const src = source.toLowerCase();
+  if (src.includes('listenbrainz')) return 'badge-listenbrainz';
+  if (src.includes('last.fm')) return 'badge-lastfm';
+  if (src.includes('favorites') || src.includes('favourite')) return 'badge-favorites';
+  if (src.includes('youtube') || src.includes('trending') || src.includes('global')) return 'badge-youtube';
+  if (src.includes('•') || src.includes('recently played') || src.includes('recent') || src.includes('γçó') || src.includes('gçó')) return 'badge-recent';
+  return 'badge-default';
+}
 
 const TrackCardThumbnail = memo(({ path, coverUrl }: { path: string, coverUrl?: string | null }) => {
   const isCloud = path.startsWith('http://') || path.startsWith('https://') || (coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://')));
@@ -91,6 +102,7 @@ export function AideoView() {
     description: 'A relaxing selection designed for peaceful environments',
     iconType: 'chill'
   });
+  const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
   const isFetchingRef = useRef(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
@@ -100,6 +112,7 @@ export function AideoView() {
   const [activeMood, setActiveMood] = useState('Chill');
   const [activeSource, setActiveSource] = useState('Library History');
   const [generatingMix, setGeneratingMix] = useState(false);
+  const [visibleRecsCount, setVisibleRecsCount] = useState(15);
 
   const handleGenerateSmartMix = async () => {
     setGeneratingMix(true);
@@ -130,6 +143,7 @@ export function AideoView() {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setIsLoadingRecs(true);
+    setVisibleRecsCount(15);
     try {
       // 1. Fetch freshest state directly from store to prevent React closure/stale-state bugs
       let currentStore = useStore.getState();
@@ -411,8 +425,6 @@ export function AideoView() {
   // Compute "Recently Played" Track Objects
   const recentTracks = [...playHistory]
     .reverse()
-    .map(path => tracks.find(t => t.path === path))
-    .filter((t): t is typeof tracks[0] => !!t)
     // Show unique recent tracks, maintaining order (most recent first)
     .filter((t, index, self) => self.findIndex(st => st.path === t.path) === index)
     .slice(0, 15);
@@ -431,180 +443,252 @@ export function AideoView() {
   // Calculate total play count summary
   const totalPlays = Object.values(playCounts).reduce((sum, count) => sum + count, 0);
 
+
+
   const renderTrackCarousel = (tracksList: any[]) => {
     if (!tracksList || tracksList.length === 0) return null;
+    const isGrid = discoveryViewMode === 'grid';
+    
     return (
-      <div className="aideo-discovery-carousel">
-        {tracksList.map((track) => (
-          <motion.div 
-            key={track.id}
-            whileHover={{ scale: 1.02 }}
-            className="aideo-discovery-card"
-          >
-            <div className="discovery-cover-wrap">
-              {track.cover_url ? (
-                <img 
-                  src={track.cover_url} 
-                  alt="" 
-                  referrerPolicy="no-referrer"
-                  className="discovery-cover-img"
-                />
-              ) : (
-                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
-                  <Music size={40} color="var(--text-dim)" />
-                </div>
-              )}
-              <div className="discovery-overlay">
-                <div 
-                  className="discovery-play-circle"
-                  onClick={() => handleTogglePreview(track)}
-                  title={
-                    playback.current_track === track.url && playback.status === 'Playing'
-                      ? "Pause preview"
-                      : "Stream online preview"
-                  }
-                >
-                  {playback.current_track === track.url && playback.status === 'Playing' ? (
-                    <Pause size={22} fill="currentColor" />
-                  ) : (
-                    <Play size={22} fill="currentColor" style={{ marginLeft: 3 }} />
-                  )}
-                </div>
-              </div>
-              <span className="discovery-dur-badge">{track.duration_raw}</span>
-            </div>
-
-            <div className="discovery-meta">
-              <h4 className="discovery-title" title={track.title}>{track.title}</h4>
-              <p className="discovery-artist" title={track.artist}>{track.artist}</p>
-              {track.recommendation_source && (
-                <span style={{
-                  fontSize: 8,
-                  fontWeight: 800,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.5,
-                  padding: '2px 6px',
-                  borderRadius: 4,
-                  marginTop: 4,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  background: track.recommendation_source.includes('ListenBrainz') 
-                    ? 'rgba(235, 116, 59, 0.12)' 
-                    : track.recommendation_source.includes('Last.fm')
-                      ? 'rgba(139, 92, 246, 0.12)'
-                      : (track.recommendation_source.includes('YouTube Music') || track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Favorites') || track.recommendation_source.includes('Trending'))
-                        ? 'rgba(239, 68, 68, 0.12)'
-                        : track.recommendation_source.includes('•') 
-                          ? 'rgba(16, 185, 129, 0.12)'
-                          : 'rgba(255, 255, 255, 0.04)',
-                  color: track.recommendation_source.includes('ListenBrainz')
-                    ? '#ff9e59'
-                    : track.recommendation_source.includes('Last.fm')
-                      ? '#a78bfa'
-                      : (track.recommendation_source.includes('YouTube Music') || track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Favorites') || track.recommendation_source.includes('Trending'))
-                        ? '#f87171'
-                        : track.recommendation_source.includes('•')
-                          ? '#34d399'
-                          : 'var(--text-dim)',
-                  border: track.recommendation_source.includes('ListenBrainz')
-                    ? '1px solid rgba(235, 116, 59, 0.2)'
-                    : track.recommendation_source.includes('Last.fm')
-                      ? '1px solid rgba(139, 92, 246, 0.2)'
-                      : (track.recommendation_source.includes('YouTube Music') || track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Favorites') || track.recommendation_source.includes('Trending'))
-                        ? '1px solid rgba(239, 68, 68, 0.2)'
-                        : track.recommendation_source.includes('•')
-                          ? '1px solid rgba(16, 185, 129, 0.2)'
-                          : '1px solid rgba(255, 255, 255, 0.06)',
-                  boxShadow: (track.recommendation_source.includes('Based on your Favorites') || track.recommendation_source.includes('Listening Now'))
-                    ? '0 0 10px rgba(139, 92, 246, 0.15)'
-                    : undefined
-                }}>
-                  {track.recommendation_source.includes('•') && (
-                    <span className="pulse" style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: '#10b981', marginRight: 5 }} />
-                  )}
-                  {track.recommendation_source}
-                </span>
-              )}
-            </div>
-
-            <div className="discovery-footer">
-              <div className="discovery-badge-row">
-                <button 
-                  onClick={() => handleOpenWebBypass(track, 'lucida')}
-                  className="discovery-action-btn lucida"
-                  title="Copy & search lossless FLAC on Lucida.to"
-                >
-                  {copiedId === `${track.id}-lucida` ? <Check size={10} /> : "Lucida"}
-                </button>
-                <button 
-                  onClick={() => handleOpenWebBypass(track, 'squid')}
-                  className="discovery-action-btn squid"
-                  title="Copy & search lossless FLAC on Squid.wtf"
-                >
-                  {copiedId === `${track.id}-squid` ? <Check size={10} /> : "Squid"}
-                </button>
-              </div>
-
-              {downloadedIds.has(track.id) ? (
-                <div className="discovery-download-btn downloaded" title="Added to Offline Library">
-                  <Check size={12} />
-                </div>
-              ) : downloadingIds.has(track.id) ? (
-                <div 
-                  className="discovery-download-btn downloading" 
-                  style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: 4, 
-                    width: 'auto', 
-                    padding: '0 8px', 
-                    borderRadius: 20,
-                    background: 'rgba(16, 185, 129, 0.1)',
-                    border: '1px solid rgba(16, 185, 129, 0.2)',
-                    color: '#10b981',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    position: 'relative',
-                    overflow: 'hidden'
-                  }}
-                >
-                  {downloadProgress[track.url] && (
-                    <div 
-                      style={{ 
-                        position: 'absolute', 
-                        left: 0, 
-                        top: 0, 
-                        bottom: 0, 
-                        width: `${downloadProgress[track.url].percent}%`, 
-                        background: 'rgba(16, 185, 129, 0.18)', 
-                        zIndex: 0,
-                        transition: 'width 0.2s ease-out'
-                      }} 
+      <div className={isGrid ? "aideo-discovery-grid-layout" : "aideo-discovery-grid"}>
+        {tracksList.map((track) => {
+          if (isGrid) {
+            return (
+              <div key={track.id} className="aideo-discovery-grid-card">
+                <div className="discovery-grid-cover-wrap">
+                  {track.cover_url ? (
+                    <img 
+                      src={track.cover_url} 
+                      alt="" 
+                      referrerPolicy="no-referrer"
+                      className="discovery-grid-cover-img"
+                      loading="lazy"
                     />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
+                      <Music size={24} color="var(--text-dim)" />
+                    </div>
                   )}
-                  <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Loader2 size={10} className="pulse" />
-                    {downloadProgress[track.url] ? (
-                      <span>
-                        {Math.round(downloadProgress[track.url].percent)}%
-                      </span>
-                    ) : (
-                      <span>Conn...</span>
-                    )}
-                  </span>
+                  <div className="discovery-grid-overlay">
+                    <div 
+                      className="discovery-grid-play-circle"
+                      onClick={() => handleTogglePreview(track)}
+                      title={
+                        playback.current_track === track.url && playback.status === 'Playing'
+                          ? "Pause preview"
+                          : "Stream online preview"
+                      }
+                    >
+                      {playback.current_track === track.url && playback.status === 'Playing' ? (
+                        <Pause size={14} fill="currentColor" />
+                      ) : (
+                        <Play size={14} fill="currentColor" style={{ marginLeft: 1 }} />
+                      )}
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <button 
-                  onClick={() => handleDownloadTrack(track)}
-                  className="discovery-download-btn"
-                  title="Download high-fidelity stream offline"
-                >
-                  <Download size={12} />
-                </button>
-              )}
-            </div>
-          </motion.div>
-        ))}
+
+                <div className="discovery-grid-meta">
+                  <h4 className="discovery-grid-title" title={track.title}>{track.title}</h4>
+                  <p className="discovery-grid-artist" title={track.artist}>{track.artist}</p>
+                  {track.recommendation_source && (
+                    <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`} style={{ fontSize: '7.5px', padding: '2px 6px' }}>
+                      {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
+                        <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 3 }} />
+                      )}
+                      {track.recommendation_source}
+                    </span>
+                  )}
+                </div>
+
+                <div className="discovery-grid-footer">
+                  <span className="discovery-grid-dur-badge">{track.duration_raw}</span>
+                  <div className="discovery-grid-badge-row">
+                    <button 
+                      onClick={() => handleOpenWebBypass(track, 'lucida')}
+                      className="discovery-grid-action-btn lucida"
+                      title="Copy & search FLAC on Lucida"
+                    >
+                      {copiedId === `${track.id}-lucida` ? <Check size={10} /> : "L"}
+                    </button>
+                    <button 
+                      onClick={() => handleOpenWebBypass(track, 'squid')}
+                      className="discovery-grid-action-btn squid"
+                      title="Copy & search FLAC on Squid"
+                    >
+                      {copiedId === `${track.id}-squid` ? <Check size={10} /> : "S"}
+                    </button>
+                  </div>
+
+                  {downloadedIds.has(track.id) ? (
+                    <div className="discovery-grid-download-btn downloaded" title="Added to Offline Library">
+                      <Check size={10} />
+                    </div>
+                  ) : downloadingIds.has(track.id) ? (
+                    <div 
+                      className="discovery-grid-download-btn downloading" 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        width: 20, 
+                        height: 20,
+                        borderRadius: 6,
+                        background: 'rgba(16, 185, 129, 0.1)',
+                        border: '1px solid rgba(16, 185, 129, 0.2)',
+                        color: '#10b981',
+                        position: 'relative',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      <Loader2 size={8} className="pulse" />
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => handleDownloadTrack(track)}
+                      className="discovery-grid-download-btn"
+                      title="Download stream offline"
+                    >
+                      <Download size={10} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          } else {
+            return (
+              <div 
+                key={track.id}
+                className="aideo-discovery-list-item"
+              >
+                <div className="discovery-cover-wrap">
+                  {track.cover_url ? (
+                    <img 
+                      src={track.cover_url} 
+                      alt="" 
+                      referrerPolicy="no-referrer"
+                      className="discovery-cover-img"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
+                      <Music size={24} color="var(--text-dim)" />
+                    </div>
+                  )}
+                  <div className="discovery-overlay">
+                    <div 
+                      className="discovery-play-circle"
+                      onClick={() => handleTogglePreview(track)}
+                      title={
+                        playback.current_track === track.url && playback.status === 'Playing'
+                          ? "Pause preview"
+                          : "Stream online preview"
+                      }
+                    >
+                      {playback.current_track === track.url && playback.status === 'Playing' ? (
+                        <Pause size={14} fill="currentColor" />
+                      ) : (
+                        <Play size={14} fill="currentColor" style={{ marginLeft: 1 }} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="discovery-meta">
+                  <h4 className="discovery-title" title={track.title}>{track.title}</h4>
+                  <p className="discovery-artist" title={track.artist}>{track.artist}</p>
+                  {track.recommendation_source && (
+                    <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
+                      {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
+                        <span className="pulse" style={{ display: 'inline-block', width: 4, height: 4, borderRadius: '50%', background: '#10b981', marginRight: 4 }} />
+                      )}
+                      {track.recommendation_source}
+                    </span>
+                  )}
+                </div>
+
+                <div className="discovery-footer">
+                  <span className="discovery-dur-badge">{track.duration_raw}</span>
+                  <div className="discovery-badge-row">
+                    <button 
+                      onClick={() => handleOpenWebBypass(track, 'lucida')}
+                      className="discovery-action-btn lucida"
+                      title="Copy & search lossless FLAC on Lucida.to"
+                    >
+                      {copiedId === `${track.id}-lucida` ? <Check size={10} /> : "Lucida"}
+                    </button>
+                    <button 
+                      onClick={() => handleOpenWebBypass(track, 'squid')}
+                      className="discovery-action-btn squid"
+                      title="Copy & search lossless FLAC on Squid.wtf"
+                    >
+                      {copiedId === `${track.id}-squid` ? <Check size={10} /> : "Squid"}
+                    </button>
+                  </div>
+
+                  {downloadedIds.has(track.id) ? (
+                    <div className="discovery-download-btn downloaded" title="Added to Offline Library">
+                      <Check size={12} />
+                    </div>
+                  ) : downloadingIds.has(track.id) ? (
+                    <div 
+                      className="discovery-download-btn downloading" 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 4, 
+                        width: 'auto', 
+                        padding: '0 6px', 
+                        borderRadius: 6,
+                        background: 'rgba(16, 185, 129, 0.1)',
+                        border: '1px solid rgba(16, 185, 129, 0.2)',
+                        color: '#10b981',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        position: 'relative',
+                        overflow: 'hidden',
+                        height: 24
+                      }}
+                    >
+                      {downloadProgress[track.url] && (
+                        <div 
+                          style={{ 
+                            position: 'absolute', 
+                            left: 0, 
+                            top: 0, 
+                            bottom: 0, 
+                            width: `${downloadProgress[track.url].percent}%`, 
+                            background: 'rgba(16, 185, 129, 0.18)', 
+                            zIndex: 0,
+                            transition: 'width 0.2s ease-out'
+                          }} 
+                        />
+                      )}
+                      <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Loader2 size={8} className="pulse" />
+                        {downloadProgress[track.url] ? (
+                          <span>
+                            {Math.round(downloadProgress[track.url].percent)}%
+                          </span>
+                        ) : (
+                          <span>...</span>
+                        )}
+                      </span>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => handleDownloadTrack(track)}
+                      className="discovery-download-btn"
+                      title="Download high-fidelity stream offline"
+                    >
+                      <Download size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          }
+        })}
       </div>
     );
   };
@@ -645,14 +729,13 @@ export function AideoView() {
         <div className="aideo-mix-grid">
           {/* Card: My Supermix */}
           <motion.div 
-            whileHover={{ y: -6, scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => playDynamicMix('supermix')}
             className="aideo-mix-card supermix"
           >
-            <div className="mix-gradient-bg sm" />
             <div className="mix-card-content">
-              <div className="mix-card-icon-wrap">
-                <Sparkles size={24} className="pulse" />
+              <div className="mix-card-icon-wrap sm">
+                <Sparkles size={22} className="pulse" />
               </div>
               <div className="mix-card-text">
                 <h3>My Supermix</h3>
@@ -666,14 +749,13 @@ export function AideoView() {
 
           {/* Card: Aideo Recap */}
           <motion.div 
-            whileHover={{ y: -6, scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => playDynamicMix('recap')}
             className="aideo-mix-card recap"
           >
-            <div className="mix-gradient-bg rc" />
             <div className="mix-card-content">
-              <div className="mix-card-icon-wrap">
-                <History size={24} />
+              <div className="mix-card-icon-wrap rc">
+                <History size={22} />
               </div>
               <div className="mix-card-text">
                 <h3>Aideo Recap Mix</h3>
@@ -687,14 +769,13 @@ export function AideoView() {
 
           {/* Card: Discovery Mix */}
           <motion.div 
-            whileHover={{ y: -6, scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => playDynamicMix('discovery')}
             className="aideo-mix-card discovery"
           >
-            <div className="mix-gradient-bg dc" />
             <div className="mix-card-content">
-              <div className="mix-card-icon-wrap">
-                <Compass size={24} />
+              <div className="mix-card-icon-wrap dc">
+                <Compass size={22} />
               </div>
               <div className="mix-card-text">
                 <h3>Discovery Mix</h3>
@@ -708,19 +789,18 @@ export function AideoView() {
 
           {/* Card: Dynamic Time-of-Day Mix */}
           <motion.div 
-            whileHover={{ y: -6, scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={() => playDynamicMix('chill')}
             className="aideo-mix-card chill"
           >
-            <div className="mix-gradient-bg ch" />
             <div className="mix-card-content">
-              <div className="mix-card-icon-wrap">
+              <div className="mix-card-icon-wrap ch">
                 {timeMix.iconType === 'sunrise' ? (
-                  <Sunrise size={24} className="pulse" />
+                  <Sunrise size={22} className="pulse" />
                 ) : timeMix.iconType === 'focus' ? (
-                  <Coffee size={24} />
+                  <Coffee size={22} />
                 ) : (
-                  <Moon size={24} />
+                  <Moon size={22} />
                 )}
               </div>
               <div className="mix-card-text">
@@ -735,6 +815,8 @@ export function AideoView() {
         </div>
       </section>
 
+
+
       {/* Section: Aideo Discovery Hub */}
       <section className="aideo-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -742,16 +824,28 @@ export function AideoView() {
             <h2 className="aideo-sec-title" style={{ margin: 0 }}>Discovery Hub</h2>
             <span style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 20, background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent)', border: '1px solid rgba(139, 92, 246, 0.2)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Tailored for You</span>
           </div>
-          <button 
-            onClick={fetchRecommendations} 
-            disabled={isLoadingRecs}
-            style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-            onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-            onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
-          >
-            <RefreshCw size={12} className={isLoadingRecs ? "spin" : ""} />
-            Refresh Recommendations
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <button 
+              onClick={() => setDiscoveryViewMode(prev => prev === 'list' ? 'grid' : 'list')}
+              style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+              title={discoveryViewMode === 'list' ? "Switch to Grid view" : "Switch to List view"}
+            >
+              {discoveryViewMode === 'list' ? <LayoutGrid size={12} /> : <List size={12} />}
+              {discoveryViewMode === 'list' ? "Grid View" : "List View"}
+            </button>
+            <button 
+              onClick={fetchRecommendations} 
+              disabled={isLoadingRecs}
+              style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+            >
+              <RefreshCw size={12} className={isLoadingRecs ? "spin" : ""} />
+              Refresh Recommendations
+            </button>
+          </div>
         </div>
 
         {isLoadingRecs ? (
@@ -828,7 +922,42 @@ export function AideoView() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }}
             >
-              {activeDiscoveryTab === 'recommendations' && renderTrackCarousel(discoveryData.recommendations)}
+              {activeDiscoveryTab === 'recommendations' && (
+                <>
+                  {renderTrackCarousel(discoveryData.recommendations.slice(0, visibleRecsCount))}
+                  {discoveryData.recommendations.length > visibleRecsCount && (
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                      <button
+                        onClick={() => setVisibleRecsCount(prev => prev + 15)}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          color: '#fff',
+                          padding: '10px 24px',
+                          borderRadius: 20,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                          e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                        }}
+                      >
+                        Load More Recommendations
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
               {activeDiscoveryTab === 'charts' && renderTrackCarousel(discoveryData.global_charts)}
             </motion.div>
           </div>

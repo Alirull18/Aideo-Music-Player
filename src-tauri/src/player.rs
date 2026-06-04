@@ -1888,6 +1888,7 @@ fn play_file(
             let is_youtube = stream_url.contains("youtube.com") || stream_url.contains("youtu.be");
             
             if !is_youtube {
+                let app = app_handle.clone();
                 std::thread::spawn(move || {
                     println!("[player-bg-cache] Automatically caching stream in background: {}", stream_url);
                     let resolved_url = resolve_playlist_url(&stream_url);
@@ -1898,9 +1899,10 @@ fn play_file(
                             let cache_path = cache_dir.join(format!("{}.cache", hash));
                             let temp_path = cache_dir.join(format!("{}.tmp", hash));
                             if !cache_path.exists() {
+                                const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
                                 let client = reqwest::blocking::Client::new();
                                 let mut req = client.get(&resolved_url);
-                                req = req.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+                                req = req.header("User-Agent", USER_AGENT);
 
                                 if let Ok(res) = req.send() {
                                     if res.status().is_success() {
@@ -1910,6 +1912,7 @@ fn play_file(
                                                 && std::fs::rename(&temp_path, &cache_path).is_ok()
                                             {
                                                 println!("[player-bg-cache] Stream successfully cached to disk!");
+                                                let _ = crate::cloud::prune_cache_to_limit_internal(&app);
                                             }
                                         }
                                     }

@@ -532,6 +532,7 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
                     .map(|s| s.to_uppercase()),
                 lyric_offset: 0,
                 loved: Some(0),
+                cover_url: None,
             }
         }
     };
@@ -780,6 +781,8 @@ fn log_playback_start(
     album: Option<String>,
     duration: Option<f64>,
     format: Option<String>,
+    genre: Option<String>,
+    playback_source: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<i64, String> {
     let conn = safe_lock(&state.db);
@@ -789,9 +792,9 @@ fn log_playback_start(
         .unwrap_or(0);
     
     conn.execute(
-        "INSERT INTO playback_history (track_path, title, artist, album, duration, format, timestamp, duration_played, skipped)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0.0, 0)",
-        rusqlite::params![path, title, artist, album, duration, format, now],
+        "INSERT INTO playback_history (track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, synced, genre, playback_source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0.0, 0, 0, ?8, ?9)",
+        rusqlite::params![path, title, artist, album, duration, format, now, genre, playback_source],
     ).map_err(|e| e.to_string())?;
     
     let id = conn.last_insert_rowid();
@@ -815,6 +818,69 @@ fn log_playback_end(
         rusqlite::params![duration_played, skipped_val, history_id],
     ).map_err(|e| e.to_string())?;
     
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlaybackHistoryRow {
+    pub id: i64,
+    pub track_path: String,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<f64>,
+    pub format: Option<String>,
+    pub timestamp: i64,
+    pub duration_played: f64,
+    pub skipped: i64,
+    pub genre: Option<String>,
+    pub playback_source: Option<String>,
+}
+
+#[tauri::command]
+fn get_unsynced_history(state: State<'_, AppState>) -> Result<Vec<PlaybackHistoryRow>, String> {
+    let conn = safe_lock(&state.db);
+    let mut stmt = conn.prepare(
+        "SELECT id, track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, genre, playback_source 
+         FROM playback_history 
+         WHERE synced = 0"
+    ).map_err(|e| e.to_string())?;
+    
+    let rows = stmt.query_map([], |row| {
+        Ok(PlaybackHistoryRow {
+            id: row.get(0)?,
+            track_path: row.get(1)?,
+            title: row.get(2)?,
+            artist: row.get(3)?,
+            album: row.get(4)?,
+            duration: row.get(5)?,
+            format: row.get(6)?,
+            timestamp: row.get(7)?,
+            duration_played: row.get(8)?,
+            skipped: row.get(9)?,
+            genre: row.get(10)?,
+            playback_source: row.get(11)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut results = Vec::new();
+    for r in rows {
+        if let Ok(row) = r {
+            results.push(row);
+        }
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+fn mark_history_synced(ids: Vec<i64>, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = safe_lock(&state.db);
+    for id in ids {
+        let _ = conn.execute(
+            "UPDATE playback_history SET synced = 1 WHERE id = ?1",
+            rusqlite::params![id],
+        );
+    }
     Ok(())
 }
 
@@ -964,9 +1030,29 @@ fn update_track_offset(path: String, offset: i32, state: State<'_, AppState>) ->
 }
 
 #[tauri::command]
-fn toggle_love_track(path: String, loved: bool, state: State<'_, AppState>) -> Result<(), String> {
+fn toggle_love_track(
+    path: String,
+    loved: bool,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: Option<f64>,
+    format: Option<String>,
+    cover_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let conn = safe_lock(&state.db);
-    db::toggle_love_track(&conn, &path, loved).map_err(|e| e.to_string())?;
+    db::toggle_love_track(
+        &conn,
+        &path,
+        loved,
+        title.as_deref(),
+        artist.as_deref(),
+        album.as_deref(),
+        duration,
+        format.as_deref(),
+        cover_url.as_deref(),
+    ).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1188,6 +1274,8 @@ pub fn run() {
             delete_track,
             log_playback_start,
             log_playback_end,
+            get_unsynced_history,
+            mark_history_synced,
             youtube::search_youtube,
             youtube::download_track,
             youtube::get_aideo_recommendations,
@@ -1220,6 +1308,7 @@ pub fn run() {
             cloud::jellyfin_search,
             cloud::jellyfin_get_library,
             cloud::cache_cloud_track,
+            cloud::prune_cache_to_limit,
             cloud::get_all_cached_cloud_hashes,
             cloud::get_url_hash,
             get_windows_accent_color,
@@ -1266,6 +1355,72 @@ pub fn run() {
                     db::init_db(":memory:").expect("Failed to initialize in-memory database fallback")
                 }
             };
+
+            // Spawn background task to heal cover art for YouTube/online tracks with high-res square thumbnails
+            let app_handle_clone = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri::Manager;
+                let state = app_handle_clone.state::<AppState>();
+                let tracks_to_heal = {
+                    let conn = crate::safe_lock(&state.db);
+                    let mut stmt = match conn.prepare(
+                        "SELECT path, title, artist 
+                         FROM tracks 
+                         WHERE (cover_url IS NULL OR cover_url LIKE '%ytimg.com%') 
+                           AND (path LIKE 'http%' OR format = 'YouTube Direct')"
+                    ) {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+                    let rows = stmt.query_map([], |row| {
+                        let path: String = row.get(0)?;
+                        let title: Option<String> = row.get(1)?;
+                        let artist: Option<String> = row.get(2)?;
+                        Ok((path, title, artist))
+                    });
+                    match rows {
+                        Ok(r) => r.filter_map(|x| x.ok()).collect::<Vec<_>>(),
+                        Err(_) => return,
+                    }
+                };
+
+                if !tracks_to_heal.is_empty() {
+                    println!("[system] Found {} online tracks with missing or low-res cover art. Healing in the background...", tracks_to_heal.len());
+                    let api_key = crate::youtube::fetch_innertube_key().await;
+                    let client = reqwest::Client::builder()
+                        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .connect_timeout(std::time::Duration::from_secs(10))
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build()
+                        .unwrap_or_default();
+
+                    for (path, title_opt, artist_opt) in tracks_to_heal {
+                        let title = title_opt.unwrap_or_default();
+                        let artist = artist_opt.unwrap_or_default();
+                        if title.is_empty() {
+                            continue;
+                        }
+                        let query = format!("{} {}", title, artist);
+                        if let Ok(results) = crate::youtube::search_youtube_internal(&client, &api_key, &query, false).await {
+                            if let Some(matched_track) = results.first() {
+                                if let Some(ref cover) = matched_track.cover_url {
+                                    let conn = crate::safe_lock(&state.db);
+                                    let _ = conn.execute(
+                                        "UPDATE tracks SET cover_url = ?1 WHERE path = ?2",
+                                        rusqlite::params![cover, path]
+                                    );
+                                    println!("[system] Successfully healed cover art for '{}' by '{}' with high-res square URL.", title, artist);
+                                    
+                                    // Proactively notify the frontend to reload the library so changes reflect immediately!
+                                    let _ = app_handle_clone.emit("library-updated", ());
+                                }
+                            }
+                        }
+                        // Small sleep to avoid throttling
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    }
+                }
+            });
 
             #[cfg(target_os = "windows")]
             {

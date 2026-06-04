@@ -12,6 +12,7 @@ pub struct Track {
     pub format: Option<String>,
     pub lyric_offset: i32,
     pub loved: Option<i32>,
+    pub cover_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -47,6 +48,9 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 
     // Migration: Add loved column if it doesn't exist
     let _ = conn.execute("ALTER TABLE tracks ADD COLUMN loved INTEGER DEFAULT 0", []);
+
+    // Migration: Add cover_url column if it doesn't exist
+    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN cover_url TEXT", []);
 
     // Create playlist tables
     conn.execute(
@@ -122,10 +126,130 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             format TEXT,
             timestamp INTEGER NOT NULL,
             duration_played REAL DEFAULT 0.0,
-            skipped INTEGER DEFAULT 0
+            skipped INTEGER DEFAULT 0,
+            synced INTEGER DEFAULT 0,
+            genre TEXT,
+            playback_source TEXT
         )",
         [],
     )?;
+
+    // Migration: Add synced, genre, and playback_source columns if they don't exist
+    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN synced INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN genre TEXT", []);
+    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN playback_source TEXT", []);
+
+    // Migration: Recover missing playlist tracks
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT DISTINCT pt.track_path 
+         FROM playlist_tracks pt 
+         LEFT JOIN tracks t ON pt.track_path = t.path 
+         WHERE t.path IS NULL"
+    ) {
+        if let Ok(missing_paths) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            let missing_paths: Vec<String> = missing_paths.filter_map(|r| r.ok()).collect();
+            
+            let favorite_playlist_id: Option<i32> = conn.query_row(
+                "SELECT id FROM playlists WHERE name = 'Favorite Songs'",
+                [],
+                |row| row.get(0),
+            ).ok();
+
+            for path in missing_paths {
+                let is_favorite = if let Some(fav_id) = favorite_playlist_id {
+                    let count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
+                        rusqlite::params![fav_id, path],
+                        |row| row.get(0),
+                    ).unwrap_or(0);
+                    count > 0
+                } else {
+                    false
+                };
+
+                let loved_val = if is_favorite { 1 } else { 0 };
+
+                let metadata: Option<(Option<String>, Option<String>, Option<String>, Option<f64>, Option<String>)> = conn.query_row(
+                    "SELECT title, artist, album, duration, format 
+                     FROM playback_history 
+                     WHERE track_path = ?1 
+                     ORDER BY timestamp DESC 
+                     LIMIT 1",
+                    rusqlite::params![path],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+                ).ok();
+
+                let (title, artist, album, duration, format) = match metadata {
+                    Some(meta) => meta,
+                    None => {
+                        let format_str = if path.contains("tidal.com") || path.contains("api.tidal.com") {
+                            "Tidal FLAC".to_string()
+                        } else if path.starts_with("http") {
+                            "YouTube Direct".to_string()
+                        } else {
+                            "MP3/FLAC".to_string()
+                        };
+                        (None, None, None, None, Some(format_str))
+                    }
+                };
+
+                let mut cover_url: Option<String> = None;
+                if path.starts_with("http") {
+                    if let Some(pos) = path.find("v=") {
+                        let start = pos + 2;
+                        let end = path[start..].find('&').map(|idx| start + idx).unwrap_or(path.len());
+                        let id = &path[start..end];
+                        if id.len() == 11 {
+                            cover_url = Some(format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", id));
+                        }
+                    } else if path.contains("youtu.be/") {
+                        if let Some(pos) = path.rfind('/') {
+                            let id = &path[pos+1..];
+                            if id.len() == 11 {
+                                cover_url = Some(format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", id));
+                            }
+                        }
+                    }
+                }
+
+                let _ = conn.execute(
+                    "INSERT INTO tracks (path, title, artist, album, duration, format, loved, cover_url) 
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    rusqlite::params![path, title, artist, album, duration, format, loved_val, cover_url],
+                );
+            }
+        }
+    }
+
+    // Fix any existing YouTube tracks that have NULL cover_url
+    if let Ok(mut stmt) = conn.prepare("SELECT path FROM tracks WHERE cover_url IS NULL AND (path LIKE '%youtube.com%' OR path LIKE '%youtu.be%')") {
+        if let Ok(paths_to_fix) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for path_res in paths_to_fix {
+                if let Ok(path) = path_res {
+                    let mut video_id = None;
+                    if let Some(pos) = path.find("v=") {
+                        let start = pos + 2;
+                        let end = path[start..].find('&').map(|idx| start + idx).unwrap_or(path.len());
+                        let id = &path[start..end];
+                        if id.len() == 11 {
+                            video_id = Some(id.to_string());
+                        }
+                    } else if path.contains("youtu.be/") {
+                        if let Some(pos) = path.rfind('/') {
+                            let id = &path[pos+1..];
+                            if id.len() == 11 {
+                                video_id = Some(id.to_string());
+                            }
+                        }
+                    }
+                    if let Some(id) = video_id {
+                        let cover_url = format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", id);
+                        let _ = conn.execute("UPDATE tracks SET cover_url = ?1 WHERE path = ?2", rusqlite::params![cover_url, path]);
+                    }
+                }
+            }
+        }
+    }
 
     Ok(conn)
 }
@@ -134,11 +258,12 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
     let tx = conn.transaction()?;
     for track in tracks {
         tx.execute(
-            "INSERT OR REPLACE INTO tracks (id, path, title, artist, album, duration, format, lyric_offset, loved)
+            "INSERT OR REPLACE INTO tracks (id, path, title, artist, album, duration, format, lyric_offset, loved, cover_url)
              VALUES (
                  (SELECT id FROM tracks WHERE path = :path),
                  :path, :title, :artist, :album, :duration, :format, :lyric_offset,
-                 COALESCE((SELECT loved FROM tracks WHERE path = :path), 0)
+                 COALESCE((SELECT loved FROM tracks WHERE path = :path), 0),
+                 :cover_url
              )",
             rusqlite::named_params! {
                 ":path": &track.path,
@@ -148,6 +273,7 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                 ":duration": &track.duration,
                 ":format": &track.format,
                 ":lyric_offset": &track.lyric_offset,
+                ":cover_url": &track.cover_url,
             },
         )?;
     }
@@ -172,7 +298,7 @@ pub fn update_track_offset(conn: &Connection, path: &str, offset: i32) -> Result
 }
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved FROM tracks")?;
+    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, cover_url FROM tracks")?;
     let track_iter = stmt.query_map([], |row| {
         Ok(Track {
             id: row.get(0)?,
@@ -184,6 +310,7 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             format: row.get(6)?,
             lyric_offset: row.get(7).unwrap_or(0),
             loved: Some(row.get(8).unwrap_or(0)),
+            cover_url: row.get(9).ok(),
         })
     })?;
 
@@ -243,7 +370,7 @@ pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &st
 
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved 
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.cover_url 
          FROM tracks t 
          JOIN playlist_tracks pt ON t.path = pt.track_path 
          WHERE pt.playlist_id = ?1 
@@ -260,6 +387,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
             format: row.get(6)?,
             lyric_offset: row.get(7).unwrap_or(0),
             loved: Some(row.get(8).unwrap_or(0)),
+            cover_url: row.get(9).ok(),
         })
     })?;
 
@@ -275,12 +403,37 @@ pub fn delete_track(conn: &Connection, path: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn toggle_love_track(conn: &Connection, path: &str, loved: bool) -> Result<()> {
+pub fn toggle_love_track(
+    conn: &Connection,
+    path: &str,
+    loved: bool,
+    title: Option<&str>,
+    artist: Option<&str>,
+    album: Option<&str>,
+    duration: Option<f64>,
+    format: Option<&str>,
+    cover_url: Option<&str>,
+) -> Result<()> {
     let loved_int = if loved { 1 } else { 0 };
-    conn.execute(
-        "UPDATE tracks SET loved = ?1 WHERE path = ?2",
-        rusqlite::params![loved_int, path],
-    )?;
+
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tracks WHERE path = ?1)",
+        rusqlite::params![path],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if !exists && loved {
+        conn.execute(
+            "INSERT INTO tracks (path, title, artist, album, duration, format, loved, cover_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![path, title, artist, album, duration, format, loved_int, cover_url],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE tracks SET loved = ?1 WHERE path = ?2",
+            rusqlite::params![loved_int, path],
+        )?;
+    }
 
     let playlist_name = "Favorite Songs";
     

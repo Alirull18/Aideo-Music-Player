@@ -147,10 +147,20 @@ export function AideoSearchView() {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Lossless Cloud pairing code expired', type: 'error' } }));
     }));
 
+    const handleTriggerSearch = (e: any) => {
+      const { query: searchQ, provider } = e.detail || {};
+      if (searchQ) {
+        setSearchTab(provider || 'youtube');
+        triggerInstantSearch(searchQ, provider || 'youtube');
+      }
+    };
+    window.addEventListener('ui-trigger-search', handleTriggerSearch);
+
     return () => {
       subs.forEach(subPromise => {
         subPromise.then(unsub => unsub());
       });
+      window.removeEventListener('ui-trigger-search', handleTriggerSearch);
     };
   }, []);
 

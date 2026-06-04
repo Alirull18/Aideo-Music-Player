@@ -5,6 +5,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { MoreVertical, RefreshCw, Activity, Loader2, Heart, DownloadCloud, Check } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 
+const isStreamTrack = (path: string, format?: string | null) => {
+  return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
+};
+
+
 interface CloudTrack {
   id: string;
   title: string;
@@ -475,7 +480,7 @@ const CloudTrackRow = memo(({
 
 export function LibraryView() {
   const { 
-    tracks, playback, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
+    view, tracks, playback, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
     matchMetadata, addToQueue, playNextInQueue, playlists, addToPlaylist,
     subsonicUrl, subsonicUser, subsonicConnected, subsonicPass,
     jellyfinUrl, jellyfinConnected, toggleLoveTrack, cacheCloudTrack, cachedCloudHashes, fetchCachedCloudHashes,
@@ -698,7 +703,16 @@ export function LibraryView() {
     }
   }, [editModalFor]);
 
-  const filteredTracks = tracks.filter((t: any) => {
+  const isLovedStreamsView = view === 'loved_streams';
+
+  const sourceTracks = isLovedStreamsView
+    ? tracks.filter((t: any) => isStreamTrack(t.path, t.format) && t.loved === 1)
+    : (currentPlaylist 
+        ? tracks 
+        : tracks.filter((t: any) => !isStreamTrack(t.path, t.format))
+      );
+
+  const filteredTracks = sourceTracks.filter((t: any) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (t.title?.toLowerCase().includes(q) || t.artist?.toLowerCase().includes(q) || t.path.toLowerCase().includes(q));
@@ -758,7 +772,7 @@ export function LibraryView() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24 }}>
         <div>
           <h1 className="library-title" style={{ marginBottom: 4 }}>
-            {currentPlaylist ? currentPlaylist.name : 'Music Library'}
+            {currentPlaylist ? currentPlaylist.name : (isLovedStreamsView ? 'Loved Streams' : 'Music Library')}
           </h1>
           <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>
             {isCloudTab ? (
@@ -766,8 +780,8 @@ export function LibraryView() {
                 ? `${subsonicTracks.length} cloud tracks loaded`
                 : `${jellyfinTracks.length} cloud tracks loaded`
             ) : (
-              searchQuery ? `${filteredTracks.length} / ${tracks.length}` : tracks.length
-            )} {!isCloudTab && (tracks.length === 1 && !searchQuery ? 'track' : 'tracks')}
+              searchQuery ? `${filteredTracks.length} / ${sourceTracks.length}` : sourceTracks.length
+            )} {!isCloudTab && (sourceTracks.length === 1 && !searchQuery ? 'track' : 'tracks')}
           </div>
         </div>
 
@@ -815,12 +829,31 @@ export function LibraryView() {
             <button 
               className="btn btn-secondary"
               onClick={() => {
-                if (isCloudTab) {
+                if (isLovedStreamsView) {
+                  if (sourceTracks.length === 0) return;
+                  const shuffled = [...sourceTracks];
+                  for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                  }
+                  const firstTrack = shuffled[0];
+                  const restTracks = shuffled.slice(1);
+                  useStore.setState({ shuffle: true, queue: restTracks });
+
+                  invoke('clear_queue').then(() => {
+                    if (restTracks.length > 0) {
+                      invoke('add_to_queue_bulk', { paths: restTracks.map(t => t.path) });
+                    }
+                  });
+
+                  playTrack(firstTrack);
+                  setView('nowplaying');
+                } else if (isCloudTab) {
                   handlePlayAllCloud(true);
                 } else {
                   useStore.setState({ shuffle: true, queue: [] });
-                  const randomIdx = Math.floor(Math.random() * tracks.length);
-                  playTrack(tracks[randomIdx]);
+                  const randomIdx = Math.floor(Math.random() * sourceTracks.length);
+                  playTrack(sourceTracks[randomIdx]);
                   setView('nowplaying');
                 }
               }}
@@ -831,11 +864,25 @@ export function LibraryView() {
             <button 
               className="btn btn-primary"
               onClick={() => {
-                if (isCloudTab) {
+                if (isLovedStreamsView) {
+                  if (sourceTracks.length === 0) return;
+                  const firstTrack = sourceTracks[0];
+                  const restTracks = sourceTracks.slice(1);
+                  useStore.setState({ shuffle: false, queue: restTracks });
+
+                  invoke('clear_queue').then(() => {
+                    if (restTracks.length > 0) {
+                      invoke('add_to_queue_bulk', { paths: restTracks.map(t => t.path) });
+                    }
+                  });
+
+                  playTrack(firstTrack);
+                  setView('nowplaying');
+                } else if (isCloudTab) {
                   handlePlayAllCloud(false);
                 } else {
                   useStore.setState({ shuffle: false, queue: [] });
-                  playTrack(tracks[0]);
+                  playTrack(sourceTracks[0]);
                   setView('nowplaying');
                 }
               }}
@@ -857,7 +904,7 @@ export function LibraryView() {
       </div>
 
       {/* Multi-Sector Tab Selector */}
-      {!currentPlaylist && (subsonicConnected || jellyfinConnected) && (
+      {!currentPlaylist && !isLovedStreamsView && (subsonicConnected || jellyfinConnected) && (
         <div style={{ 
           display: 'flex', 
           gap: 8, 
@@ -931,18 +978,23 @@ export function LibraryView() {
       {/* Local Table rendering */}
       {activeSector === 'local' && (
         <>
-          {tracks.length === 0 && (
+          {sourceTracks.length === 0 && (
             <p style={{ color: 'var(--text-dim)' }}>
-              {currentPlaylist ? "This playlist is empty." : "No tracks yet. Select a folder and press \"Scan Library\"."}
+              {currentPlaylist 
+                ? "This playlist is empty." 
+                : (isLovedStreamsView 
+                    ? "No loved streams yet. Click the Heart icon on online streams to add them here." 
+                    : "No tracks yet. Select a folder and press \"Scan Library\"."
+                  )}
             </p>
           )}
-          {tracks.length > 0 && !libraryReady && (
+          {sourceTracks.length > 0 && !libraryReady && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 16, color: 'var(--text-dim)' }}>
               <Loader2 className="spin" size={32} style={{ color: 'var(--accent)' }} />
               <span style={{ fontSize: 13, fontWeight: 500 }}>Loading your library...</span>
             </div>
           )}
-          {tracks.length > 0 && libraryReady && (
+          {sourceTracks.length > 0 && libraryReady && (
             <table className="track-table">
               <thead>
                 <tr>

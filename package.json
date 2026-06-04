@@ -1,7 +1,7 @@
 {
   "name": "aideo",
   "private": true,
-  "version": "0.7.5",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "@supabase/supabase-js": "^2.48.0",
     "framer-motion": "^12.38.0",
     "kpop": "^0.1.2",
     "lucide-react": "^1.14.0",

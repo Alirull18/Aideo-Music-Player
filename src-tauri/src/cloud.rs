@@ -386,7 +386,7 @@ pub fn xor_cipher(data: &[u8]) -> Vec<u8> {
 }
 
 #[tauri::command]
-pub async fn cache_cloud_track(stream_url: String) -> Result<bool, String> {
+pub async fn cache_cloud_track(app_handle: tauri::AppHandle, stream_url: String) -> Result<bool, String> {
     let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
     let Some(data_dir) = dirs::data_dir() else {
         return Err("Failed to resolve data directory".to_string());
@@ -417,6 +417,8 @@ pub async fn cache_cloud_track(stream_url: String) -> Result<bool, String> {
     
     // Save to disk
     std::fs::write(&cache_path, encrypted_bytes).map_err(|e| format!("Failed to save cache file: {}", e))?;
+    
+    let _ = prune_cache_to_limit_internal(&app_handle);
     
     Ok(true)
 }
@@ -589,6 +591,90 @@ pub async fn get_subsonic_password(app_handle: tauri::AppHandle) -> Result<Strin
         }
     }
     Ok(String::new())
+}
+
+pub fn prune_cache_to_limit_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    let limit_gb = if let Ok(app_data) = app_handle.path().app_data_dir() {
+        let limit_file = app_data.join("cache_limit_gb.txt");
+        if limit_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(limit_file) {
+                content.trim().parse::<f64>().unwrap_or(5.0)
+            } else {
+                5.0
+            }
+        } else {
+            5.0
+        }
+    } else {
+        5.0
+    };
+
+    let Some(data_dir) = dirs::data_dir() else {
+        return Err("Failed to resolve data directory".to_string());
+    };
+    let cache_dir = data_dir.join("Aideo").join("CloudCache");
+    if !cache_dir.exists() {
+        return Ok(());
+    }
+
+    let limit_bytes = (limit_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+
+    let mut files = Vec::new();
+    let mut total_size = 0u64;
+
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let is_cache_or_tmp = path.extension()
+                    .map(|ext| ext == "cache" || ext == "tmp")
+                    .unwrap_or(false);
+
+                if is_cache_or_tmp {
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        let size = metadata.len();
+                        let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        total_size += size;
+                        files.push((path, size, modified));
+                    }
+                }
+            }
+        }
+    }
+
+    if total_size > limit_bytes {
+        files.sort_by_key(|f| f.2);
+
+        println!(
+            "[cache-manager] Cache size ({} MB) exceeds limit ({} MB). Pruning oldest files...",
+            total_size / (1024 * 1024),
+            limit_bytes / (1024 * 1024)
+        );
+
+        for (path, size, _) in files {
+            if total_size <= limit_bytes {
+                break;
+            }
+            if std::fs::remove_file(&path).is_ok() {
+                total_size = total_size.saturating_sub(size);
+                println!("[cache-manager] Pruned cache file: {:?}", path.file_name().unwrap_or_default());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn prune_cache_to_limit(app_handle: tauri::AppHandle, limit_gb: f64) -> Result<(), String> {
+    use tauri::Manager;
+    if let Ok(app_data) = app_handle.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&app_data);
+        let limit_file = app_data.join("cache_limit_gb.txt");
+        let _ = std::fs::write(limit_file, limit_gb.to_string());
+    }
+    prune_cache_to_limit_internal(&app_handle)
 }
 
 

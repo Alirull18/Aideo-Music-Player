@@ -104,14 +104,14 @@ export interface CustomPromptState {
 }
 
 export interface PlayerState {
-  view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen';
+  view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams';
   tracks: Track[];
   queue: Track[];
   currentTrackIndex: number;
   currentTrack: Track | null;
   shuffle: boolean;
   repeat: 'none' | 'all' | 'one';
-  playHistory: string[];
+  playHistory: Track[];
   playCounts: Record<string, number>;
   playback: PlaybackState;
   lyrics: LyricLine[];
@@ -145,6 +145,7 @@ export interface PlayerState {
   currentHistoryId: number | null;
   autoplayEnabled: boolean;
   autoplayDiscoveryLevel: 'familiarity' | 'balanced' | 'discovery';
+  recentlyClearedAutoplayPaths: string[];
   appMode: 'local' | 'hybrid';
   onboardingCompleted: boolean;
   showOnboarding: boolean;
@@ -154,7 +155,7 @@ export interface PlayerState {
   setCoverArtModalTrack: (track: Track | null) => void;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen') => void;
+  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams') => void;
   setAppMode: (mode: 'local' | 'hybrid') => void;
   setOnboardingCompleted: (completed: boolean) => void;
   setShowOnboarding: (show: boolean) => void;
@@ -183,8 +184,8 @@ export interface PlayerState {
   setShowRomaji: (val: boolean) => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
-  recordPlaybackTransition: (newTrack: Track | null) => Promise<void>;
-  playTrack: (track: Track, isHistory?: boolean, forceResetAutoplay?: boolean) => Promise<void>;
+  recordPlaybackTransition: (newTrack: Track | null, playbackSource?: string) => Promise<void>;
+  playTrack: (track: Track, isHistory?: boolean, forceResetAutoplay?: boolean, playbackSource?: string) => Promise<void>;
   playDynamicMix: (mixType: 'supermix' | 'recap' | 'discovery' | 'chill') => Promise<void>;
   addToQueue: (track: Track) => Promise<void>;
   playNextInQueue: (track: Track) => Promise<void>;
@@ -228,7 +229,7 @@ export interface PlayerState {
   addToPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
   removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
   loadPlaylistTracks: (playlistId: number) => Promise<void>;
-  toggleLoveTrack: (path: string) => Promise<void>;
+  toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
   cachedCloudHashes: string[];
   fetchCachedCloudHashes: () => Promise<void>;
   cacheCloudTrack: (streamUrl: string) => Promise<void>;
@@ -283,6 +284,29 @@ export interface PlayerState {
   setDiscoveryData: (data: any) => void;
   setIsLoadingRecs: (loading: boolean) => void;
   setActiveDiscoveryTab: (tab: string) => void;
+  cacheSizeLimit: number;
+  setCacheSizeLimit: (limit: number) => void;
+
+  // Auth & Cloud Sync State
+  supabaseUrl: string;
+  supabaseKey: string;
+  user: any | null;
+  session: any | null;
+  authLoading: boolean;
+  syncing: boolean;
+  setSupabaseCredentials: (url: string, key: string) => void;
+  signIn: (email: string, pass: string) => Promise<boolean>;
+  signUp: (email: string, pass: string) => Promise<boolean>;
+  signOut: () => Promise<void>;
+  checkSession: () => Promise<void>;
+  signInWithOAuth: (provider: 'google' | 'github') => Promise<void>;
+  syncToCloud: () => Promise<void>;
+  syncFromCloud: (options?: {
+    likedTracks?: boolean;
+    playlists?: boolean;
+    settings?: boolean;
+    playCounts?: boolean;
+  }) => Promise<void>;
 }
 
 function rgbToHsl(r: number, g: number, b: number) {

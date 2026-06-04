@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, DownloadCloud, Activity } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, DownloadCloud, Activity, Heart } from 'lucide-react';
 
 export function Sidebar() {
   const { 
@@ -22,7 +22,7 @@ export function Sidebar() {
   } = useStore();
 
   useEffect(() => {
-    if (appMode === 'local' && (view === 'aideo' || view === 'aideo_search')) {
+    if (appMode === 'local' && (view === 'aideo' || view === 'aideo_search' || view === 'loved_streams')) {
       setView('library');
     }
   }, [appMode, view, setView]);
@@ -70,6 +70,11 @@ export function Sidebar() {
       <div className={`nav-item ${view === 'library' && !currentPlaylist ? 'active' : ''}`} onClick={goLibrary}>
         <Library size={18} /> Library
       </div>
+      {appMode === 'hybrid' && (
+        <div className={`nav-item ${view === 'loved_streams' ? 'active' : ''}`} onClick={() => { useStore.setState({ currentPlaylist: null }); loadLibrary(); setView('loved_streams'); }}>
+          <Heart size={18} /> Loved Streams
+        </div>
+      )}
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
         <Headphones size={18} /> Now Playing
       </div>
