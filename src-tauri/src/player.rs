@@ -152,10 +152,10 @@ impl std::io::Read for GrowingFileReader {
                     if self.complete.load(Ordering::SeqCst) {
                         return Ok(0);
                     }
-                    if start_wait.elapsed() > std::time::Duration::from_secs(60) {
+                    if start_wait.elapsed() > std::time::Duration::from_secs(120) {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::TimedOut,
-                            "GrowingFileReader: Download stalled for more than 60 seconds",
+                            "GrowingFileReader: Download stalled for more than 120 seconds",
                         ));
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));

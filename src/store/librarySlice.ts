@@ -147,6 +147,22 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     if (dirs.length === 0) { set({ scanStatus: 'Add a folder first' }); return; }
     set({ scanStatus: 'Scanning...' });
     try {
+      const existence: boolean[] = await invoke('check_files_exist', { paths: dirs });
+      const missingDirs: string[] = [];
+      dirs.forEach((dir, idx) => {
+        if (!existence[idx]) {
+          missingDirs.push(dir);
+        }
+      });
+
+      if (missingDirs.length > 0) {
+        missingDirs.forEach(dir => {
+          window.dispatchEvent(new CustomEvent('ui-toast', { 
+            detail: { message: `Folder not found: ${dir}. Please re-add it.`, type: 'warning' } 
+          }));
+        });
+      }
+
       const count: number = await invoke('scan_and_save', { dirs });
       await get().loadLibrary();
       set({ scanStatus: `Found ${count} tracks` });
@@ -161,7 +177,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       // Synchronize currently playing track tags instantly
       const current = get().currentTrack;
       if (current) {
-        const updatedTrack = tracks.find(t => t.path === current.path);
+        const updatedTrack = tracks.find(t => pathsEqual(t.path, current.path));
         if (updatedTrack) {
           set({ currentTrack: updatedTrack });
         }
@@ -171,7 +187,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const currentQueue = get().queue;
       if (currentQueue.length > 0) {
         const updatedQueue = currentQueue.map(q => {
-          const matched = tracks.find(t => t.path === q.path);
+          const matched = tracks.find(t => pathsEqual(t.path, q.path));
           return matched ? { ...q, title: matched.title, artist: matched.artist, album: matched.album } : q;
         });
         set({ queue: updatedQueue });
@@ -216,6 +232,15 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
   playTrack: async (track: Track, isHistory?: boolean, forceResetAutoplay = true, playbackSource?: string) => {
     if (!track) return;
+    
+    const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
+    if (isOnline && typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
+      }));
+      return;
+    }
+
     try {
       await get().recordPlaybackTransition(track, playbackSource);
       const index = get().tracks.findIndex(t => pathsEqual(t.path, track.path));
@@ -258,6 +283,23 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       await invoke('play_track', { path: finalPath });
       get().triggerAutoplayRadio(track, forceResetAutoplay);
+
+      // Filter out autoplay recommendations from the queue if autoplay is disabled or if playing a local track
+      const isTrackOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
+      if (!get().autoplayEnabled || !isTrackOnline) {
+        const currentQueue = get().queue;
+        const filtered = currentQueue.filter(t => !t.is_autoplay);
+        if (filtered.length !== currentQueue.length) {
+          set({ queue: filtered });
+          localStorage.setItem('aideo_queue', JSON.stringify(filtered));
+          invoke('clear_queue').then(() => {
+            if (filtered.length > 0) {
+              const paths = filtered.map(t => t.path);
+              invoke('add_to_queue_bulk', { paths }).catch(console.error);
+            }
+          }).catch(console.error);
+        }
+      }
 
       // 🚀 Background Pre-resolve the very next track in the queue for seamless transition
       setTimeout(() => {
@@ -764,10 +806,27 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   },
 
-  toggleAutoplay: () => {
+  toggleAutoplay: async () => {
     const next = !get().autoplayEnabled;
     localStorage.setItem('aideo_autoplay', String(next));
     set({ autoplayEnabled: next });
+
+    if (!next) {
+      const currentQueue = get().queue;
+      const filtered = currentQueue.filter(t => !t.is_autoplay);
+      set({ queue: filtered });
+      localStorage.setItem('aideo_queue', JSON.stringify(filtered));
+
+      try {
+        await invoke('clear_queue');
+        if (filtered.length > 0) {
+          const paths = filtered.map(t => t.path);
+          await invoke('add_to_queue_bulk', { paths });
+        }
+      } catch (err) {
+        console.error('Failed to sync backend queue after disabling autoplay:', err);
+      }
+    }
   },
 
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => {

@@ -50,7 +50,7 @@ pub struct SearchResult {
     pub synced: bool,
     pub content_id: Option<String>,
     pub raw_lrc: Option<String>,
-    pub cover_url: Option<String>,
+    pub duration: Option<f64>,
 }
 
 // ── Translation command ─────────────────────────────────────────────────────
@@ -90,40 +90,6 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
     let client = reqwest::Client::new();
     let encoded_query = urlencoding::encode(&query);
 
-    // iTunes search for high-fidelity cover arts (extremely reliable for global / K-Pop releases)
-    let itunes_url = format!(
-        "https://itunes.apple.com/search?term={}&entity=song&limit=10",
-        encoded_query
-    );
-    if let Ok(res) = client.get(&itunes_url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .send().await {
-        if let Ok(data) = res.json::<serde_json::Value>().await {
-            if let Some(list) = data["results"].as_array() {
-                for item in list {
-                    let cover_url = item["artworkUrl100"].as_str().map(|url| {
-                        url.replace("100x100bb.jpg", "600x600bb.jpg")
-                           .replace("100x100bb.png", "600x600bb.png")
-                           .replace("100x100", "600x600")
-                    });
-                    let track_id = item["trackId"].as_i64()
-                        .map(|i| i.to_string())
-                        .unwrap_or_else(|| item["trackId"].to_string());
-                    results.push(SearchResult {
-                        id: track_id.clone(),
-                        title: item["trackName"].as_str().unwrap_or("").to_string(),
-                        artist: item["artistName"].as_str().unwrap_or("").to_string(),
-                        source: "iTunes".to_string(),
-                        synced: false,
-                        content_id: Some(track_id),
-                        raw_lrc: None,
-                        cover_url,
-                    });
-                }
-            }
-        }
-    }
-
     let lrc_url = format!("https://lrclib.net/api/search?q={}", encoded_query);
     if let Ok(res) = client.get(&lrc_url).send().await {
         if let Ok(data) = res.json::<serde_json::Value>().await {
@@ -140,7 +106,7 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
                             .as_str()
                             .or(item["plainLyrics"].as_str())
                             .map(|s| s.to_string()),
-                        cover_url: None,
+                        duration: item["duration"].as_f64(),
                     });
                 }
             }
@@ -175,10 +141,8 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
                         synced: true,
                         content_id: Some(ne_id),
                         raw_lrc: None,
-                        cover_url: item["al"]["picUrl"]
-                            .as_str()
-                            .or_else(|| item["album"]["picUrl"].as_str())
-                            .map(|s| s.to_string()),
+                        duration: item["duration"].as_f64().map(|ms| ms / 1000.0)
+                            .or_else(|| item["dt"].as_f64().map(|ms| ms / 1000.0)),
                     });
                 }
             }
@@ -206,12 +170,8 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
                         synced: true,
                         content_id: Some(item["songmid"].as_str().unwrap_or("").to_string()),
                         raw_lrc: None,
-                        cover_url: item["albummid"].as_str().map(|mid| {
-                            format!(
-                                "https://y.gtimg.cn/music/photo_new/T002R300x300M000{}.jpg",
-                                mid
-                            )
-                        }),
+                        duration: item["interval"].as_f64()
+                            .or_else(|| item["duration"].as_f64()),
                     });
                 }
             }
@@ -1059,6 +1019,10 @@ fn toggle_love_track(
 #[tauri::command]
 fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let player = safe_lock(&state.player);
+    let is_asio = safe_lock(&player.target_device)
+        .as_deref()
+        .map(|d| d.starts_with("[ASIO]"))
+        .unwrap_or(false);
     Ok(serde_json::json!({
         "status": *safe_lock(&player.status),
         "current_track": *safe_lock(&player.current_track),
@@ -1068,6 +1032,7 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "bit_perfect": *safe_lock(&player.bit_perfect),
         "dev_rate": *safe_lock(&player.current_dev_rate),
         "dsp": *safe_lock(&player.dsp_state),
+        "driver_type": if is_asio { "ASIO" } else { "WASAPI" },
     }))
 }
 
@@ -1128,6 +1093,11 @@ fn open_cache_folder() -> Result<(), String> {
     }
     
     Ok(())
+}
+
+#[tauri::command]
+fn check_files_exist(paths: Vec<String>) -> Vec<bool> {
+    paths.into_iter().map(|p| std::path::Path::new(&p).exists()).collect()
 }
 
 #[tauri::command]
@@ -1314,6 +1284,7 @@ pub fn run() {
             get_windows_accent_color,
             clear_application_cache,
             open_cache_folder,
+            check_files_exist,
         ])
         .setup(|app| {
             let tidal_state = std::sync::Arc::new(tidal::TidalState {
@@ -1436,6 +1407,19 @@ pub fn run() {
                     Err(e) => {
                         println!("[system] ASIO host FAILED: {}", e);
                     }
+                }
+
+                // Detect if Windows Audio Service is missing/disabled (common on Atlas OS)
+                let has_audio_devices = cpal::default_host()
+                    .output_devices()
+                    .map(|mut d| d.next().is_some())
+                    .unwrap_or(false);
+                if !has_audio_devices {
+                    eprintln!("[system] WARNING: No audio output devices detected! Windows Audio Service may be disabled.");
+                    let _ = app.emit("ui-toast", serde_json::json!({
+                        "message": "⚠️ No audio devices detected. If you're on Atlas OS or a debloated Windows, please enable the Windows Audio Service (AudioSrv) and restart.",
+                        "type": "warning"
+                    }));
                 }
             }
 

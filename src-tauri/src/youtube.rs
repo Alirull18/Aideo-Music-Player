@@ -2508,8 +2508,8 @@ mod tests {
             }
         }
         
-        let path = std::path::Path::new("c:\\Users\\Alirul\\Aideo-Music-Player\\scratch\\roar_items.json");
-        std::fs::write(path, serde_json::to_string_pretty(&matches).unwrap()).unwrap();
+        let path = std::env::temp_dir().join("roar_items_test.json");
+        std::fs::write(&path, serde_json::to_string_pretty(&matches).unwrap()).unwrap();
         println!("SAVED {} MATCHES TO SCRATCH FILE", matches.len());
     }
 

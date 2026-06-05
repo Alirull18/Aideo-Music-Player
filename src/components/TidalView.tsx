@@ -137,6 +137,12 @@ export function TidalView() {
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim() || !loggedIn) return;
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Please check your internet connection.', type: 'warning' } }));
+      return;
+    }
+
     setSearching(true);
     setErrorMsg(null);
     try {
@@ -153,6 +159,12 @@ export function TidalView() {
 
   const handleDownload = async (track: TidalTrack) => {
     if (downloads[track.id]) return;
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Cannot download tracks.', type: 'warning' } }));
+      return;
+    }
+
     setDownloads(p => ({ ...p, [track.id]: 'downloading' }));
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Downloading: ${track.title}...`, type: 'info' } }));
     try {

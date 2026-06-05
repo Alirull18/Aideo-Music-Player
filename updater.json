@@ -1,11 +1,11 @@
 {
-  "version": "0.8.0",
-  "notes": "💎 AIDEO v0.8.0: Supabase Sync, Play Logs & Fullscreen Fixes. Implements bidirectional Supabase cloud synchronization for library tracks, playlists, configurations, and history. Introduces Spotify-Wrapped play logs, email callback landing redirections, simplified OAuth-first logins, native OS fullscreen capabilities, and autoplay recommendation regeneration upon queue clearing.",
-  "pub_date": "2026-06-04T12:59:00Z",
+  "version": "0.8.1",
+  "notes": "💎 AIDEO v0.8.1: Portability updates for Atlas OS, dependency download fallback fixes, and general reliability enhancements.",
+  "pub_date": "2026-06-05T01:54:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUOGxKNlE5aVY1M2Q3bVFiR21vazhJOVhwMjVHcVpmSytmWWpOV0w4a0J1ZDRpemV1Q1lCSlE3aS9SQUs3YWJGQzJKU0R3QWhHUW10Y2xtV01EWHQwMGovVlc0VWdLeEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5MTYyOTE0CWZpbGU6QWlkZW9fMC41LjBfeDY0X2VuLVVTLm1zaQpzcExKOUFScFdtTE55VDZoYUlEOUIzckFlcXV1L2dLcFgyakx2NGpiLzVRNThvSWs4S29wR1NrTVpDdVRaOE9IUFlnS2M0V3NZcjFiRTZjTmZEOGFEdz09Cg==",
-      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.8.0/Aideo_0.8.0_x64_en-US.msi"
+      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.8.1/Aideo_0.8.1_x64_en-US.msi"
     }
   }
 }

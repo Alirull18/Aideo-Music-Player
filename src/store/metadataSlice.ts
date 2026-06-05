@@ -36,15 +36,40 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (!track || !track.title) return;
 
     // Ignore default fallback titles / artists to avoid garbage search results
-    const artist = track.artist === 'Unknown' || track.artist === 'Online Stream' || track.artist === '—' ? '' : track.artist;
-    const title = track.title;
+    let artist = track.artist === 'Unknown' || track.artist === 'Online Stream' || track.artist === '—' ? '' : track.artist;
+    let title = track.title;
     if (!title || title.startsWith('http://') || title.startsWith('https://')) return;
 
-    // Clean title and artist to maximize online search match rates
-    let cleanTitle = title.replace(/\.(mp3|flac|m4a|wav|ogg|aac|wma)$/i, '');
-    cleanTitle = cleanTitle.replace(/\s*[([].*?(official|lyrics|video|audio|hq|hd|edit|remix|version).*?[\])]/gi, '').trim();
-    
-    let cleanArtist = artist.replace(/\s*-\s*topic$/i, '').trim();
+    // Remove file extension if present
+    title = title.replace(/\.(mp3|flac|m4a|wav|ogg|aac|wma)$/i, '');
+
+    // Step 1: Pre-clean leading square brackets and parentheses (common channel names / tags)
+    title = title.replace(/^(\s*[\[\(].*?[\]\)]\s*)+/g, '').trim();
+
+    // Step 2: If artist is empty/generic, try to split title by hyphen to infer artist and title
+    if (!artist) {
+      const hyphenMatch = title.match(/\s*[-—~:]\s*/);
+      if (hyphenMatch) {
+        const parts = title.split(/\s*[-—~:]\s*/);
+        artist = parts[0].trim();
+        title = parts.slice(1).join(' - ').trim();
+      }
+    }
+
+    // Step 3: Clean up common video/channel suffixes and bracketed tags from artist and title
+    const cleanTags = (s: string) => {
+      return s
+        // Remove brackets containing video production keywords
+        .replace(/\s*[([].*?(official|lyrics|video|audio|hq|hd|edit|remix|version|distribution|cover|stage|live|choreo|studio|performance|show|sub|eng|rom|han|fancam|karaoke|instrumental|inst|ver|clip|mv|m\/v).*?[\])]/gi, '')
+        // Remove trailing "from ... studio" structures
+        .replace(/\s+from\s+.*studio$/i, '')
+        // Remove trailing keywords at the end of the string
+        .replace(/\s+(official|lyrics|video|mv|lrc|distribution|cover|stage|live|choreo|performance|show|sub|raw|hd|hq)$/i, '')
+        .trim();
+    };
+
+    let cleanTitle = cleanTags(title);
+    let cleanArtist = cleanTags(artist).replace(/\s*-\s*topic$/i, '').trim();
 
     if (!cleanTitle) return;
 
@@ -57,11 +82,45 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         // Exclude iTunes results since they do not contain lyrics
         const lyricResults = results.filter(r => r.source !== 'iTunes');
 
-        // Find the best match: prefer synced lyrics from LRCLIB first, then others
-        let bestMatch = lyricResults.find(r => r.synced && r.raw_lrc);
-        if (!bestMatch) bestMatch = lyricResults.find(r => r.source === 'LRCLIB' && r.raw_lrc);
-        if (!bestMatch) bestMatch = lyricResults.find(r => r.source === 'NetEase' || r.source === 'QQMusic');
-        if (!bestMatch) bestMatch = lyricResults[0];
+        // Score and rank results based on title and artist matching
+        const scoredResults = lyricResults.map(r => {
+          const clean = (s: string) => s.toLowerCase()
+            .replace(/[()\[\]\-\s_]+/g, '')
+            .replace(/[^\p{L}\p{N}]/gu, '');
+
+          const pTitle = clean(cleanTitle);
+          const rTitle = clean(r.title);
+
+          let titleScore = 0;
+          if (pTitle === rTitle) {
+            titleScore = 1.0;
+          } else if (pTitle.includes(rTitle) || rTitle.includes(pTitle)) {
+            titleScore = 0.7;
+          }
+
+          const pArtist = cleanArtist.toLowerCase().trim();
+          const rArtist = r.artist.toLowerCase().trim();
+          let artistScore = 0;
+          if (pArtist && rArtist) {
+            if (pArtist === rArtist || rArtist.includes(pArtist) || pArtist.includes(rArtist)) {
+              artistScore = 1.0;
+            }
+          }
+
+          const syncBonus = r.synced && r.raw_lrc ? 0.3 : 0.0;
+          const totalScore = (titleScore * 0.7) + (artistScore * 0.3) + syncBonus;
+
+          return { result: r, score: totalScore, titleScore };
+        });
+
+        // Filter out results that do not match the title at all
+        const validMatches = scoredResults.filter(sr => sr.titleScore > 0);
+
+        let bestMatch = null;
+        if (validMatches.length > 0) {
+          validMatches.sort((a, b) => b.score - a.score);
+          bestMatch = validMatches[0].result;
+        }
 
         if (bestMatch) {
           let lrc = bestMatch.raw_lrc ?? '';
@@ -74,6 +133,17 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
 
           if (lrc) {
             await get().saveLyrics(track.path, lrc);
+
+            if (track.duration && bestMatch.duration) {
+              const diffSec = track.duration - bestMatch.duration;
+              if (diffSec > 2 && diffSec < 120) {
+                const calculatedMs = Math.round(diffSec * 10) * 100;
+                get().adjustLyricOffset(calculatedMs);
+                window.dispatchEvent(new CustomEvent('ui-toast', { 
+                  detail: { message: `✨ Sync: Adjusted lyric offset by +${(calculatedMs/1000).toFixed(1)}s to match video length`, type: 'info' } 
+                }));
+              }
+            }
             return;
           }
         }

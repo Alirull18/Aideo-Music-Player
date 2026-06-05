@@ -5,10 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, X } from 'lucide-react';
 import { fmt, baseName } from '../utils';
 
-interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; cover_url?: string; }
+interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; duration?: number; }
 
 export function LyricsPanel() {
-  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, applyOnlineCover, setCustomPrompt } = useStore();
+  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, setCustomPrompt } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [lyricMode, setLyricMode] = useState<'lrc' | 'text'>(() => {
     return (localStorage.getItem('aideo-lyric-mode') as 'lrc' | 'text') || 'lrc';
@@ -76,31 +76,36 @@ export function LyricsPanel() {
     } finally { setSearching(false); }
   };
 
-  const pickResult = async (r: SearchResult, mode: 'lyrics' | 'art' | 'both') => {
+  const pickResult = async (r: SearchResult) => {
     setSearching(true);
     try {
       if (!playback.current_track) return;
 
-      if (mode === 'lyrics' || mode === 'both') {
-        let lrc = r.raw_lrc ?? '';
-        if (!lrc && r.source === 'NetEase' && r.content_id)
-          lrc = await invoke<string>('get_netease_lrc', { id: r.content_id }).catch(() => '');
-        if (!lrc && r.source === 'QQMusic' && r.content_id)
-          lrc = await invoke<string>('get_qqmusic_lrc', { mid: r.content_id }).catch(() => '');
+      let lrc = r.raw_lrc ?? '';
+      if (!lrc && r.source === 'NetEase' && r.content_id)
+        lrc = await invoke<string>('get_netease_lrc', { id: r.content_id }).catch(() => '');
+      if (!lrc && r.source === 'QQMusic' && r.content_id)
+        lrc = await invoke<string>('get_qqmusic_lrc', { mid: r.content_id }).catch(() => '');
 
-        if (lrc) {
-          await saveLyrics(playback.current_track, lrc);
+      if (lrc) {
+        await saveLyrics(playback.current_track, lrc);
+
+        if (currentTrack && currentTrack.duration && r.duration) {
+          const diffSec = currentTrack.duration - r.duration;
+          if (diffSec > 2 && diffSec < 120) {
+            const calculatedMs = Math.round(diffSec * 10) * 100;
+            adjustLyricOffset(calculatedMs);
+            window.dispatchEvent(new CustomEvent('ui-toast', { 
+              detail: { message: `✨ Sync: Adjusted lyric offset by +${(calculatedMs/1000).toFixed(1)}s to match video length`, type: 'info' } 
+            }));
+          }
         }
-      }
-
-      if ((mode === 'art' || mode === 'both') && r.cover_url) {
-        await applyOnlineCover(playback.current_track, r.cover_url);
       }
 
       setShowFinder(false);
     } catch (e) { 
       console.error(e); 
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to download lyric/art: ${e}`, type: 'error' } }));
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to download lyric: ${e}`, type: 'error' } }));
     } finally { setSearching(false); }
   };
 
@@ -272,31 +277,30 @@ export function LyricsPanel() {
                 {searching && results.length === 0 && <div className="modal-empty">Searching…</div>}
                 {!searching && results.length === 0 && <div className="modal-empty">No results found.</div>}
                 {results.map((r, i) => (
-                  <div key={i} className="modal-item" style={{ display: 'flex', alignItems: 'center', cursor: 'default' }}>
-                    {r.cover_url && <img src={r.cover_url} alt="cover" referrerPolicy="no-referrer" style={{ width: 36, height: 36, borderRadius: 4, marginRight: 12, objectFit: 'cover' }} />}
+                  <div key={i} className="modal-item" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '12px 16px', borderRadius: 8, transition: 'background 0.2s' }}
+                    onClick={() => pickResult(r)}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="modal-item-title">{r.title}</div>
-                      <div className="modal-item-sub">{r.artist} · {r.source}</div>
+                      <div className="modal-item-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span>{r.title}</span>
+                        {r.duration && currentTrack?.duration && Math.abs(currentTrack.duration - r.duration) <= 2 && (
+                          <span style={{ padding: '1px 5px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', borderRadius: 4, fontSize: 9, fontWeight: 700 }}>Matches Duration</span>
+                        )}
+                        {r.duration && currentTrack?.duration && currentTrack.duration > r.duration + 2 && currentTrack.duration < r.duration + 120 && (
+                          <span style={{ padding: '1px 5px', background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4', borderRadius: 4, fontSize: 9, fontWeight: 700 }}>Suggests +{(currentTrack.duration - r.duration).toFixed(1)}s offset</span>
+                        )}
+                      </div>
+                      <div className="modal-item-sub">
+                        {r.artist} · {r.source}
+                        {r.duration ? ` · ${fmt(r.duration)}` : ''}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      {r.source !== 'iTunes' && (
-                        <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 8px' }}
-                          onClick={() => pickResult(r, 'lyrics')}>
-                          🎵 Lyrics
-                        </button>
-                      )}
-                      {r.cover_url && (
-                        <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 8px' }}
-                          onClick={() => pickResult(r, 'art')}>
-                          ✨ Art
-                        </button>
-                      )}
-                      {r.source !== 'iTunes' && r.cover_url && (
-                        <button className="btn btn-primary" style={{ fontSize: 10, padding: '4px 8px' }}
-                          onClick={() => pickResult(r, 'both')}>
-                          Both
-                        </button>
-                      )}
+                    <div>
+                      <button className="btn btn-primary" style={{ fontSize: 10, padding: '6px 12px' }}
+                        onClick={(e) => { e.stopPropagation(); pickResult(r); }}>
+                        🎵 Select
+                      </button>
                     </div>
                   </div>
                 ))}

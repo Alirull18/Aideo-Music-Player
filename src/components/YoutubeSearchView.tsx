@@ -42,6 +42,11 @@ export function YoutubeSearchView() {
     e.preventDefault();
     if (!query.trim()) return;
 
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Please check your internet connection.', type: 'warning' } }));
+      return;
+    }
+
     setIsSearching(true);
     try {
       const finalQuery = query.trim();
@@ -62,6 +67,13 @@ export function YoutubeSearchView() {
 
   const confirmDownload = async (quality: string) => {
     if (!pendingDownload) return;
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Cannot download tracks.', type: 'warning' } }));
+      setPendingDownload(null);
+      return;
+    }
+
     const track = pendingDownload;
     setPendingDownload(null);
     setDownloadingId(track.id);

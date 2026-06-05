@@ -8,7 +8,7 @@ let dspThrottleTimeout: any = null;
 let lastDspInvokeTime = 0;
 let pendingDspState: any = null;
 
-const THROTTLE_MS = 16; // 60Hz update rate for ultra-low latency, real-time feel
+const THROTTLE_MS = 50; // 20Hz update rate — imperceptibly fast for DSP but prevents IPC flooding on slower machines
 
 const performDspInvoke = async (dsp: any) => {
   try {
@@ -181,10 +181,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // is still processing previous skip commands and lagging behind the UI.
       if (prevTrack && newTrack && !pathsEqual(newTrack, prevTrack)) {
         const timeSinceSkip = Date.now() - (get().playback.last_skip_time || 0);
-        if (timeSinceSkip < 2000) {
+        if (timeSinceSkip < 800) {
           return;
         }
-        // If it's been more than 2 seconds since the last skip, this must be a natural track transition (e.g. backend reached EOF and played next in queue)
+        // If it's been more than 800ms since the last skip, this must be a natural track transition (e.g. backend reached EOF and played next in queue)
         await get().handleTrackTransition(newTrack);
         return;
       }
@@ -436,6 +436,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   playStream: async (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
+      }));
+      return;
+    }
     try {
       const streamName = metadata?.title || getStreamName(url);
       const isYoutube = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('googlevideo.com');
@@ -653,10 +659,36 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (saved) {
         const parsed: Track[] = JSON.parse(saved);
         if (parsed.length > 0) {
+          const localTracks = parsed.filter(t => !t.path.startsWith('http://') && !t.path.startsWith('https://') && t.format !== 'Tidal FLAC');
+          let validTracks = parsed;
+          
+          const isAutoplayEnabled = localStorage.getItem('aideo_autoplay') !== 'false';
+          if (!isAutoplayEnabled) {
+            validTracks = validTracks.filter(t => !t.is_autoplay);
+          }
+          
+          if (localTracks.length > 0) {
+            const localPaths = localTracks.map(t => t.path);
+            const existence: boolean[] = await invoke('check_files_exist', { paths: localPaths });
+            const missingPaths = new Set<string>();
+            localPaths.forEach((p, idx) => {
+              if (!existence[idx]) {
+                missingPaths.add(p);
+              }
+            });
+            
+            if (missingPaths.size > 0) {
+              validTracks = parsed.filter(t => !missingPaths.has(t.path));
+            }
+          }
+          
           await invoke('clear_queue');
-          const paths = parsed.map(t => t.path);
-          await invoke('add_to_queue_bulk', { paths });
-          set({ queue: parsed });
+          if (validTracks.length > 0) {
+            const paths = validTracks.map(t => t.path);
+            await invoke('add_to_queue_bulk', { paths });
+          }
+          set({ queue: validTracks });
+          localStorage.setItem('aideo_queue', JSON.stringify(validTracks));
         }
       }
     } catch (e) { console.error("Failed to initialize queue:", e); }

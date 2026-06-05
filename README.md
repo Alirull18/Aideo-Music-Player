@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.8.0
+# 💎 Aideo Music Player v0.8.1
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,7 +61,7 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.8.0 (The Supabase Cloud Sync & Wrapped Play Logging)
+## 📢 What's New in v0.8.1 (Atlas OS Portability & Hotfixes)
 
 
 
@@ -87,8 +87,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.8.0 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.8.0_x64_en-US.msi`).
+1. **Download**: Get the latest v0.8.1 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.8.1_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---

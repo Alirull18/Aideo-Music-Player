@@ -124,7 +124,8 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                 let _ = std::fs::remove_dir_all(&temp_extract_dir);
             }
 
-            let status = std::process::Command::new("powershell")
+            // Try PowerShell first (standard Windows)
+            let ps_ok = std::process::Command::new("powershell")
                 .arg("-Command")
                 .arg(format!(
                     "Expand-Archive -Path '{}' -DestinationPath '{}' -Force; Get-ChildItem -Path '{}' -Filter 'ffmpeg.exe' -Recurse | Move-Item -Destination '{}' -Force",
@@ -133,13 +134,36 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                     temp_extract_dir.to_string_lossy(),
                     aideo_dir.to_string_lossy()
                 ))
-                .status();
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+
+            // Fallback: tar.exe is built into Windows 10 1803+ and is NOT stripped by Atlas OS
+            if !ps_ok {
+                println!("[dependencies] PowerShell unavailable or failed. Falling back to tar.exe...");
+                let _ = std::fs::create_dir_all(&temp_extract_dir);
+                let tar_ok = std::process::Command::new("tar")
+                    .args(["-xf", &zip_dest.to_string_lossy(), "-C", &temp_extract_dir.to_string_lossy()])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+
+                if tar_ok {
+                    // Walk the extracted directory to find ffmpeg.exe and move it
+                    if let Some(entry) = walkdir::WalkDir::new(&temp_extract_dir).into_iter()
+                        .filter_map(|e| e.ok())
+                        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("ffmpeg.exe"))
+                    {
+                        let _ = std::fs::copy(entry.path(), aideo_dir.join("ffmpeg.exe"));
+                    }
+                }
+            }
 
             let _ = std::fs::remove_file(&zip_dest);
             let _ = std::fs::remove_dir_all(&temp_extract_dir);
 
-            if status.is_err() || !status.unwrap().success() {
-                return Err("Failed to extract FFmpeg binaries.".to_string());
+            if !aideo_dir.join("ffmpeg.exe").exists() {
+                return Err("Failed to extract FFmpeg binaries. Both PowerShell and tar extraction failed.".to_string());
             }
 
             let _ = app_handle.emit("ui-toast", serde_json::json!({

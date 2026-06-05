@@ -89,11 +89,11 @@ fn update_presence_internal(details: &str, state: &str, is_playing: bool) -> Res
             act = act.buttons(vec![
                 activity::Button::new(
                     "Listen with Aideo",
-                    "https://github.com/Alirul18/Aideo-Music-Player",
+                    "https://github.com/Alirull18/Aideo-Music-Player",
                 ),
                 activity::Button::new(
                     "Download App",
-                    "https://github.com/Alirul18/Aideo-Music-Player/releases",
+                    "https://github.com/Alirull18/Aideo-Music-Player/releases",
                 ),
             ]);
         }

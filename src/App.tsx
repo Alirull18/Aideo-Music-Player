@@ -92,26 +92,26 @@ function AideoApp() {
       }
     }).catch(e => console.error("Update check failed:", e));
 
-    const onUpdate = (e: any) => setUpdateInfo(e.detail);
-    window.addEventListener('update-available', onUpdate);
-
-    let unlistenOAuth: any;
-    listen<any>('oauth-success', (event) => {
-      const session = event.payload;
-      if (session) {
-        useStore.setState({ 
-          session, 
-          user: session.user ?? null,
-          authLoading: false
-        });
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: 'Signed in successfully!', type: 'success' } 
-        }));
-      }
-    }).then(u => unlistenOAuth = u);
+    // Fix #7: Use async IIFE to ensure unlisten is assigned before cleanup runs
+    let unlistenOAuth: (() => void) | undefined;
+    const setupOAuthListener = async () => {
+      unlistenOAuth = await listen<any>('oauth-success', (event) => {
+        const session = event.payload;
+        if (session) {
+          useStore.setState({ 
+            session, 
+            user: session.user ?? null,
+            authLoading: false
+          });
+          window.dispatchEvent(new CustomEvent('ui-toast', { 
+            detail: { message: 'Signed in successfully!', type: 'success' } 
+          }));
+        }
+      });
+    };
+    setupOAuthListener();
 
     return () => {
-      window.removeEventListener('update-available', onUpdate);
       if (unlistenOAuth) unlistenOAuth();
     };
   }, [loadLibrary, fetchPlaylists]);

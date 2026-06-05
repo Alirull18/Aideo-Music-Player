@@ -371,15 +371,21 @@ pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &st
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
         "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.cover_url 
-         FROM tracks t 
-         JOIN playlist_tracks pt ON t.path = pt.track_path 
+         FROM playlist_tracks pt
+         LEFT JOIN tracks t ON t.path = pt.track_path 
          WHERE pt.playlist_id = ?1 
          ORDER BY pt.position ASC"
     )?;
     let track_iter = stmt.query_map(params![playlist_id], |row| {
+        // With LEFT JOIN, t.* fields can be NULL if the track was orphaned
+        let path_opt: Option<String> = row.get(1)?;
+        let path = match path_opt {
+            Some(p) => p,
+            None => return Err(rusqlite::Error::QueryReturnedNoRows), // skip fully NULL rows
+        };
         Ok(Track {
-            id: row.get(0)?,
-            path: row.get(1)?,
+            id: row.get(0).unwrap_or(0),
+            path,
             title: row.get(2)?,
             artist: row.get(3)?,
             album: row.get(4)?,
@@ -393,7 +399,9 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
 
     let mut tracks = Vec::new();
     for track in track_iter {
-        tracks.push(track?);
+        if let Ok(t) = track {
+            tracks.push(t);
+        }
     }
     Ok(tracks)
 }

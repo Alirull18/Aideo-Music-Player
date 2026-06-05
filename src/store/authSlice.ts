@@ -112,7 +112,7 @@ export const createAuthSlice: StateCreator<PlayerState, [], [], any> = (set, get
         const { error } = await client.auth.signInWithOAuth({
           provider,
           options: {
-            redirectTo: 'http://localhost:1420'
+            redirectTo: window.location.origin
           }
         });
         if (error) {
@@ -125,7 +125,7 @@ export const createAuthSlice: StateCreator<PlayerState, [], [], any> = (set, get
       const { data, error } = await client.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: 'http://localhost:1420',
+          redirectTo: window.location.origin,
           skipBrowserRedirect: true
         }
       });

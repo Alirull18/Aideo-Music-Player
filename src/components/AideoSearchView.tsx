@@ -217,42 +217,51 @@ export function AideoSearchView() {
       } catch (e) {
         console.error('Failed to pause track:', e);
       }
-    } else if (isPaused) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Resuming preview: ${track.title}...`, type: 'info' } 
-      }));
-      try {
-        await resumeTrack();
-      } catch (e) {
-        console.error('Failed to resume track:', e);
-      }
     } else {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Streaming preview: ${track.title}...`, type: 'info' } 
-      }));
-      try {
-        const parsedSeconds = (() => {
-          const parts = (track.duration_raw || '').split(':').map(Number);
-          if (parts.length === 2) return parts[0] * 60 + parts[1];
-          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-          return 0;
-        })();
-        await playStream(track.url, {
-          title: track.title,
-          artist: track.artist,
-          cover_url: track.cover_url,
-          duration: parsedSeconds
-        });
-        
-        // Update OS media metadata specifically for this stream with its title and artist info
-        invoke('update_media_metadata', {
-          title: track.title,
-          artist: track.artist,
-          coverUrl: track.cover_url || null,
-          duration: parsedSeconds,
-        }).catch(() => {});
-      } catch (e) {
-        console.error('Failed to stream track preview:', e);
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
+        }));
+        return;
+      }
+
+      if (isPaused) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Resuming preview: ${track.title}...`, type: 'info' } 
+        }));
+        try {
+          await resumeTrack();
+        } catch (e) {
+          console.error('Failed to resume track:', e);
+        }
+      } else {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Streaming preview: ${track.title}...`, type: 'info' } 
+        }));
+        try {
+          const parsedSeconds = (() => {
+            const parts = (track.duration_raw || '').split(':').map(Number);
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            return 0;
+          })();
+          await playStream(track.url, {
+            title: track.title,
+            artist: track.artist,
+            cover_url: track.cover_url,
+            duration: parsedSeconds
+          });
+          
+          // Update OS media metadata specifically for this stream with its title and artist info
+          invoke('update_media_metadata', {
+            title: track.title,
+            artist: track.artist,
+            coverUrl: track.cover_url || null,
+            duration: parsedSeconds,
+          }).catch(() => {});
+        } catch (e) {
+          console.error('Failed to stream track preview:', e);
+        }
       }
     }
   };
@@ -270,61 +279,75 @@ export function AideoSearchView() {
       } catch (e) {
         console.error('Failed to pause track:', e);
       }
-    } else if (isPaused) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Resuming preview: ${track.title}...`, type: 'info' } 
-      }));
-      try {
-        await resumeTrack();
-      } catch (e) {
-        console.error('Failed to resume track:', e);
-      }
     } else {
-      setLoadingTidalPreviewId(track.id);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Acquiring direct secure FLAC stream for ${track.title}...`, type: 'info' } 
-      }));
-      try {
-        const cdnUrl = await invoke<string>('tidal_get_stream_url', { trackId: track.id });
-        
-        await playStream(cdnUrl, {
-          title: track.title,
-          artist: track.artist,
-          cover_url: track.cover_url || null,
-          duration: track.duration
-        });
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
+        }));
+        return;
+      }
 
-        useStore.setState({
-          currentTrack: {
-            id: -20000 - Number(track.id),
-            path: cdnUrl,
+      if (isPaused) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Resuming preview: ${track.title}...`, type: 'info' } 
+        }));
+        try {
+          await resumeTrack();
+        } catch (e) {
+          console.error('Failed to resume track:', e);
+        }
+      } else {
+        setLoadingTidalPreviewId(track.id);
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Acquiring direct secure FLAC stream for ${track.title}...`, type: 'info' } 
+        }));
+        try {
+          const cdnUrl = await invoke<string>('tidal_get_stream_url', { trackId: track.id });
+          
+          await playStream(cdnUrl, {
             title: track.title,
             artist: track.artist,
+            cover_url: track.cover_url || null,
+            duration: track.duration
+          });
+
+          useStore.setState({
+            currentTrack: {
+              id: -20000 - Number(track.id),
+              path: cdnUrl,
+              title: track.title,
+              artist: track.artist,
+              duration: track.duration,
+              format: 'Tidal FLAC',
+              lyric_offset: 0,
+              cover_url: track.cover_url || null
+            }
+          });
+          
+          invoke('update_media_metadata', {
+            title: track.title,
+            artist: track.artist,
+            coverUrl: track.cover_url || null,
             duration: track.duration,
-            format: 'Tidal FLAC',
-            lyric_offset: 0,
-            cover_url: track.cover_url || null
-          }
-        });
-        
-        invoke('update_media_metadata', {
-          title: track.title,
-          artist: track.artist,
-          coverUrl: track.cover_url || null,
-          duration: track.duration,
-        }).catch(() => {});
-      } catch (e) {
-        console.error('Failed to acquire Tidal stream:', e);
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Tidal stream error: ${e}`, type: 'error' } 
-        }));
-      } finally {
-        setLoadingTidalPreviewId(null);
+          }).catch(() => {});
+        } catch (e) {
+          console.error('Failed to acquire Tidal stream:', e);
+          window.dispatchEvent(new CustomEvent('ui-toast', { 
+            detail: { message: `Tidal stream error: ${e}`, type: 'error' } 
+          }));
+        } finally {
+          setLoadingTidalPreviewId(null);
+        }
       }
     }
   };
 
   const triggerInstantSearch = async (q: string, tab: 'youtube' | 'tidal') => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Please check your internet connection.', type: 'warning' } }));
+      return;
+    }
+
     setQuery(q);
     setIsSearching(true);
     try {
@@ -377,6 +400,11 @@ export function AideoSearchView() {
     e.preventDefault();
     if (!query.trim()) return;
 
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Please check your internet connection.', type: 'warning' } }));
+      return;
+    }
+
     setIsSearching(true);
 
     try {
@@ -405,6 +433,11 @@ export function AideoSearchView() {
   const handleDownloadYoutube = async (track: YoutubeTrack) => {
     if (downloadingIds.has(track.id) || downloadedIds.has(track.id)) return;
     
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Cannot download tracks.', type: 'warning' } }));
+      return;
+    }
+
     setDownloadingIds(prev => {
       const next = new Set(prev);
       next.add(track.id);
@@ -442,6 +475,11 @@ export function AideoSearchView() {
   const handleDownloadTidal = async (track: TidalTrack) => {
     if (downloadingIds.has(track.id) || downloadedIds.has(track.id)) return;
     
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'You are offline. Cannot download tracks.', type: 'warning' } }));
+      return;
+    }
+
     setDownloadingIds(prev => {
       const next = new Set(prev);
       next.add(track.id);
@@ -721,6 +759,13 @@ export function AideoSearchView() {
                     const videoId = match[1];
                     const directPlayUrl = `https://www.youtube.com/watch?v=${videoId}`;
                     
+                    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                      window.dispatchEvent(new CustomEvent('ui-toast', { 
+                        detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
+                      }));
+                      return;
+                    }
+
                     window.dispatchEvent(new CustomEvent('ui-toast', { 
                       detail: { message: `Streaming direct YouTube link: ${videoId}...`, type: 'success' } 
                     }));

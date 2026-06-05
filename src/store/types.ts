@@ -200,7 +200,7 @@ export interface PlayerState {
   playPrev: () => Promise<void>;
   toggleShuffle: () => void;
   toggleRepeat: () => void;
-  toggleAutoplay: () => void;
+  toggleAutoplay: () => Promise<void>;
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => void;
   triggerAutoplayRadio: (track: Track, forceReset?: boolean) => Promise<void>;
   pauseTrack: () => Promise<void>;
