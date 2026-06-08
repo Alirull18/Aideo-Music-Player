@@ -45,6 +45,23 @@ export function pathsEqual(p1: string | null | undefined, p2: string | null | un
 
 export function parseStreamMetadata(url: string | null) {
   if (!url) return { title: 'Unknown Stream', artist: 'Online Stream', album: '' };
+  
+  let lookupUrl = url;
+  if (resolvedPathMap.has(url)) {
+    lookupUrl = resolvedPathMap.get(url)!;
+  }
+  
+  if (onlineTrackCache.has(lookupUrl)) {
+    const cached = onlineTrackCache.get(lookupUrl);
+    if (cached) {
+      return {
+        title: cached.title || 'Unknown Stream',
+        artist: cached.artist || 'Online Stream',
+        album: cached.album || ''
+      };
+    }
+  }
+
   try {
     const u = new URL(url);
     const title = u.searchParams.get('title');
@@ -56,6 +73,15 @@ export function parseStreamMetadata(url: string | null) {
         title,
         artist: artist || 'Online Stream',
         album: album || ''
+      };
+    }
+
+    const isYoutube = u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be') || u.hostname.includes('googlevideo.com');
+    if (isYoutube) {
+      return {
+        title: 'YouTube Audio',
+        artist: 'YouTube Music',
+        album: ''
       };
     }
   } catch {}

@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { motion } from 'framer-motion';
 import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2, Heart } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
+import { CastSelector } from './CastSelector';
 import { fmt, baseName, getStreamName } from '../utils';
 
 const isRadioStream = (track: any): boolean => {
@@ -226,6 +227,7 @@ export function PlayerBar() {
         <button className={`pb-btn ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView(view === 'aideo_lab' ? 'nowplaying' : 'aideo_lab')} title="Aideo Lab DSP Laboratory">
           <Activity size={18} />
         </button>
+        <CastSelector />
         <button className="pb-btn" onClick={toggleControlCenter} title="Audio Engine Settings">
           <SlidersHorizontal size={18} />
         </button>

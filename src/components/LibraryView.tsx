@@ -501,6 +501,12 @@ export function LibraryView() {
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [visibleLocalCount, setVisibleLocalCount] = useState(150);
+
+  // Reset local pagination count when search filters or sectors change
+  useEffect(() => {
+    setVisibleLocalCount(150);
+  }, [searchQuery, view, currentPlaylist, activeSector]);
   
   // Deferred rendering for large libraries to prevent initial load jank
   const [libraryReady, setLibraryReady] = useState(tracks.length < 200);
@@ -758,8 +764,13 @@ export function LibraryView() {
       className="library-wrap" 
       onClick={() => setMenuOpenFor(null)}
       onScroll={(e) => {
-        if (activeSector === 'local') return;
         const target = e.currentTarget;
+        if (activeSector === 'local') {
+          if (target.scrollHeight - target.scrollTop - target.clientHeight < 250) {
+            setVisibleLocalCount(prev => Math.min(prev + 150, filteredTracks.length));
+          }
+          return;
+        }
         if (target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
           if (activeSector === 'subsonic') {
             loadMoreSubsonic();
@@ -1008,7 +1019,7 @@ export function LibraryView() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTracks.map((t: any, i: number) => {
+                {filteredTracks.slice(0, visibleLocalCount).map((t: any, i: number) => {
                   const active = playback.current_track === t.path;
                   const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
 

@@ -1,6 +1,6 @@
 [package]
 name = "aideo"
-version = "0.8.2"
+version = "0.8.3"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
@@ -67,3 +67,4 @@ windows = { version = "0.52.0", features = [
 wasapi = "0.23.0"
 librqbit = "8.1.1"
 regex = "1.10.3"
+oxicast = "0.0.1"

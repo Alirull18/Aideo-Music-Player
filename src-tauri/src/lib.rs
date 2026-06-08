@@ -21,6 +21,7 @@ pub mod tidal;
 pub mod updater;
 pub mod cloud;
 pub mod dependencies;
+pub mod chromecast;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -888,11 +889,11 @@ fn mark_history_synced(ids: Vec<i64>, state: State<'_, AppState>) -> Result<(), 
 }
 
 #[tauri::command]
-fn play_track(path: String, state: State<'_, AppState>) -> Result<(), String> {
+fn play_track(path: String, start_pos: Option<f64>, state: State<'_, AppState>) -> Result<(), String> {
     let player = safe_lock(&state.player);
     player
         .cmd_tx
-        .send(player::PlayerCommand::Play(path, 0.0))
+        .send(player::PlayerCommand::Play(path, start_pos.unwrap_or(0.0)))
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1201,17 +1202,14 @@ fn get_windows_accent_color() -> Result<String, String> {
     }
 }
 
+static KEEP_AWAKE_TX: std::sync::OnceLock<std::sync::mpsc::Sender<bool>> = std::sync::OnceLock::new();
+
 #[tauri::command]
 fn toggle_keep_awake(enable: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    unsafe {
-        use windows::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
-        if enable {
-            let _ = SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
-            println!("[system] Power Management: Keep Awake ENABLED");
-        } else {
-            let _ = SetThreadExecutionState(ES_CONTINUOUS);
-            println!("[system] Power Management: Keep Awake DISABLED");
+    {
+        if let Some(tx) = KEEP_AWAKE_TX.get() {
+            let _ = tx.send(enable);
         }
     }
     Ok(())
@@ -1329,8 +1327,34 @@ pub fn run() {
             clear_application_cache,
             open_cache_folder,
             check_files_exist,
+            chromecast::chromecast_discover,
+            chromecast::chromecast_connect,
+            chromecast::chromecast_disconnect,
+            chromecast::chromecast_play,
+            chromecast::chromecast_control,
+            chromecast::chromecast_get_status,
         ])
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            {
+                let (tx, rx) = std::sync::mpsc::channel::<bool>();
+                let _ = KEEP_AWAKE_TX.set(tx);
+                std::thread::spawn(move || {
+                    while let Ok(enable) = rx.recv() {
+                        unsafe {
+                            use windows::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED, ES_DISPLAY_REQUIRED};
+                            if enable {
+                                let _ = SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+                                println!("[system] Persistent Keep Awake ENABLED");
+                            } else {
+                                let _ = SetThreadExecutionState(ES_CONTINUOUS);
+                                println!("[system] Persistent Keep Awake DISABLED");
+                            }
+                        }
+                    }
+                });
+            }
+
             let tidal_state = std::sync::Arc::new(tidal::TidalState {
                 session: std::sync::Mutex::new(None),
                 logged_in: std::sync::Mutex::new(false),

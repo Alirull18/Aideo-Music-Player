@@ -7,6 +7,7 @@ let isPolling = false;
 let dspThrottleTimeout: any = null;
 let lastDspInvokeTime = 0;
 let pendingDspState: any = null;
+let chromecastTickCount = 0;
 
 const THROTTLE_MS = 50; // 20Hz update rate — imperceptibly fast for DSP but prevents IPC flooding on slower machines
 
@@ -56,12 +57,21 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     spatial_wet: 0.15,
     subsonic_enabled: false,
     night_mode_enabled: false,
-    r128_enabled: false
+    r128_enabled: false,
+    aideo_filter_enabled: localStorage.getItem('aideo_filter_enabled') === 'true',
+    aideo_filter_room_size: Number(localStorage.getItem('aideo_filter_room_size') || 0.85),
+    aideo_filter_bass_thump: Number(localStorage.getItem('aideo_filter_bass_thump') || 6.0),
+    aideo_filter_dampening: Number(localStorage.getItem('aideo_filter_dampening') || 0.5)
   },
   devices: [],
   currentDevice: null,
   showQueue: false,
   queue: [],
+
+  chromecast_devices: [],
+  chromecast_active_device: null,
+  chromecast_scanning: false,
+  chromecast_connected: false,
 
   updateDiscordPresence: () => {
     const { playback, tracks, discordEnabled } = get();
@@ -85,8 +95,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   pauseTrack: async () => {
     try {
-      await invoke('pause_track');
-      await invoke('update_media_playback', { playing: false });
+      if (get().chromecast_connected) {
+        await invoke('chromecast_control', { action: 'pause' });
+      } else {
+        await invoke('pause_track');
+        await invoke('update_media_playback', { playing: false });
+      }
       set(s => ({ playback: { ...s.playback, status: 'Paused' } }));
       get().updateDiscordPresence();
     } catch (e) { console.error(e); }
@@ -108,8 +122,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           }
         }
       }
-      await invoke('resume_track');
-      await invoke('update_media_playback', { playing: true });
+      if (state.chromecast_connected) {
+        await invoke('chromecast_control', { action: 'resume' });
+      } else {
+        await invoke('resume_track');
+        await invoke('update_media_playback', { playing: true });
+      }
       set(s => ({ playback: { ...s.playback, status: 'Playing' } }));
       get().updateDiscordPresence();
     } catch (e) { console.error(e); }
@@ -119,7 +137,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       await get().recordPlaybackTransition(null);
       const current = get().playback.current_track;
-      await invoke('stop_track');
+      if (get().chromecast_connected) {
+        await invoke('chromecast_control', { action: 'stop' });
+      } else {
+        await invoke('stop_track');
+      }
       
       set({
         currentTrack: null,
@@ -145,11 +167,80 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   seek: async (secs: number) => {
-    set(s => ({ playback: { ...s.playback, position_secs: secs } }));
-    try { await invoke('seek_track', { secs }); } catch (e) { console.error(e); }
+    const now = Date.now();
+    set(s => ({ playback: { ...s.playback, position_secs: secs, last_seek_time: now } }));
+    try {
+      if (get().chromecast_connected) {
+        await invoke('chromecast_control', { action: 'seek', value: secs });
+      } else {
+        await invoke('seek_track', { secs });
+      }
+    } catch (e) { console.error(e); }
   },
 
   pollStatus: async () => {
+    if (get().chromecast_connected) {
+      chromecastTickCount++;
+      const currentStatus = get().playback.status;
+      
+      // Eager local estimation for smooth progress bar updates
+      if (currentStatus === 'Playing') {
+        const currentTrack = get().currentTrack;
+        const dur = currentTrack?.duration || 0;
+        set(s => {
+          let nextPos = s.playback.position_secs + 0.2;
+          if (dur > 0 && nextPos >= dur) {
+            nextPos = dur;
+          }
+          return {
+            playback: {
+              ...s.playback,
+              position_secs: nextPos
+            }
+          };
+        });
+      }
+
+      // Query actual Chromecast device status every 5 ticks (1 second) to correct drift
+      if (chromecastTickCount >= 5) {
+        chromecastTickCount = 0;
+        const lastSeekTime = get().playback.last_seek_time || 0;
+        const lastSkipTime = get().playback.last_skip_time || 0;
+        const now = Date.now();
+        
+        // If we recently seeked or skipped (within the last 2 seconds), don't overwrite position with stale Chromecast status
+        const isTransitioning = (now - lastSeekTime < 2000) || (now - lastSkipTime < 2500);
+
+        try {
+          const status: any = await invoke('chromecast_get_status');
+          if (status) {
+            set(s => {
+              const nextStatus = status.status;
+              const nextPos = isTransitioning ? s.playback.position_secs : status.position_secs;
+              
+              // If the song finished naturally, transition to next track
+              if (nextStatus === 'Stopped' && s.playback.status === 'Playing' && !isTransitioning) {
+                setTimeout(() => {
+                  get().playNext();
+                }, 100);
+              }
+              
+              return {
+                playback: {
+                  ...s.playback,
+                  status: nextStatus,
+                  position_secs: nextPos,
+                  volume: status.volume,
+                }
+              };
+            });
+          }
+        } catch (e) {
+          console.error('Failed to get Chromecast status:', e);
+        }
+      }
+      return;
+    }
     if (isPolling) return;
     isPolling = true;
     try {
@@ -274,7 +365,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       'eq_parametric_bands', 'crossfeed_enabled', 'crossfeed_level', 
       'crossfeed_corner', 'spatial_enabled', 'spatial_haas_delay', 
       'spatial_wet', 'subsonic_enabled', 'night_mode_enabled', 
-      'r128_enabled', 'width', 'upsample_rate', 'dither'
+      'r128_enabled', 'width', 'upsample_rate', 'dither',
+      'aideo_filter_enabled', 'aideo_filter_room_size', 'aideo_filter_bass_thump', 
+      'aideo_filter_dampening'
     ];
     const isActivatingDSP = dspKeys.some(key => {
       if (key === 'upsample_rate') {
@@ -347,6 +440,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_resampler_oversampling', String(full.resampler_oversampling));
     localStorage.setItem('aideo_ffmpeg_transcode_quality', full.ffmpeg_transcode_quality);
     localStorage.setItem('aideo_exclusive_timing', full.exclusive_mode_timing);
+    localStorage.setItem('aideo_filter_enabled', String(full.aideo_filter_enabled));
+    localStorage.setItem('aideo_filter_room_size', String(full.aideo_filter_room_size));
+    localStorage.setItem('aideo_filter_bass_thump', String(full.aideo_filter_bass_thump));
+    localStorage.setItem('aideo_filter_dampening', String(full.aideo_filter_dampening));
 
     // 1. Update React Zustand state instantly for fluid 60fps UI
     set({ dsp: full });
@@ -493,7 +590,35 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         }
       }
 
-      await invoke('play_track', { path: url });
+      if (get().chromecast_connected) {
+        try {
+          await invoke('chromecast_play', {
+            path: url,
+            title: streamName,
+            artist: metadata?.artist || 'Online Stream',
+            contentType: 'audio/mpeg',
+            coverUrl: metadata?.cover_url || null,
+            duration: metadata?.duration || null
+          });
+        } catch (e) {
+          console.error('Chromecast playStream error:', e);
+          set(s => ({
+            playback: {
+              ...s.playback,
+              status: 'Stopped',
+              current_track: null,
+              position_secs: 0
+            },
+            currentTrack: null
+          }));
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: { message: `Casting failed: ${e}`, type: 'error' }
+          }));
+          return;
+        }
+      } else {
+        await invoke('play_track', { path: url, startPos: 0.0 });
+      }
       get().triggerAutoplayRadio(virtualTrack, true).catch(console.error);
 
       // Trigger high-fidelity lyric lookup for stream/preview
@@ -739,5 +864,92 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ lowSpecMode: next });
     localStorage.setItem('aideo_low_spec', String(next));
     get().setDSP({ low_spec_mode: next });
+  },
+
+  discoverCastDevices: async () => {
+    set({ chromecast_scanning: true });
+    try {
+      const devices = await invoke<any[]>('chromecast_discover');
+      set({ chromecast_devices: devices, chromecast_scanning: false });
+    } catch (e) {
+      console.error('Failed to discover Chromecast devices:', e);
+      set({ chromecast_scanning: false });
+    }
+  },
+
+  connectCastDevice: async (device: { name: string; ip: string; port: number }) => {
+    try {
+      if (get().chromecast_connected) {
+        await get().disconnectCastDevice();
+      }
+      
+      // Capture currently playing track and position before connecting and stopping local
+      const activeTrack = get().currentTrack;
+      const startPos = get().playback.position_secs;
+      
+      await invoke('chromecast_connect', { ip: device.ip, port: device.port });
+      
+      await invoke('stop_track').catch(() => {});
+      
+      set({
+        chromecast_active_device: device.ip,
+        chromecast_connected: true,
+      });
+
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Connected to ${device.name}`, type: 'success' } 
+      }));
+      
+      // Seamlessly transfer playback if a song was active
+      if (activeTrack) {
+        await get().playTrack(activeTrack, true, false, undefined, startPos);
+      } else {
+        set({
+          playback: {
+            ...get().playback,
+            status: 'Stopped',
+            current_track: null,
+            position_secs: 0,
+          },
+          currentTrack: null,
+          coverArt: null,
+        });
+      }
+    } catch (e) {
+      console.error('Failed to connect to Chromecast:', e);
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: 'Failed to connect to Chromecast', type: 'error' } 
+      }));
+    }
+  },
+
+  disconnectCastDevice: async () => {
+    try {
+      // Capture currently playing track, status, and position before disconnecting
+      const activeTrack = get().currentTrack;
+      const currentPos = get().playback.position_secs;
+      const wasPlaying = get().playback.status === 'Playing';
+
+      if (get().chromecast_connected) {
+        await invoke('chromecast_disconnect');
+      }
+      set({
+        chromecast_active_device: null,
+        chromecast_connected: false,
+      });
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: 'Disconnected from Chromecast', type: 'info' } 
+      }));
+
+      // Seamlessly transfer playback back to local player
+      if (activeTrack) {
+        await get().playTrack(activeTrack, true, false, undefined, currentPos);
+        if (!wasPlaying) {
+          await get().pauseTrack();
+        }
+      }
+    } catch (e) {
+      console.error('Failed to disconnect from Chromecast:', e);
+    }
   },
 });

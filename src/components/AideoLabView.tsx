@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
 import { 
   Sliders, Activity, Loader2, Search, 
-  Compass, Headphones, Power
+  Compass, Headphones, Power, Sparkles
 } from 'lucide-react';
 
 const GRAPHIC_FREQS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -93,7 +93,7 @@ export function AideoLabView() {
   const { 
     dsp, setDSP, accentColor, lowSpecMode
   } = useStore();
-  const [activeTab, setActiveTab] = useState<'eq' | 'spatial' | 'dynamics'>('eq');
+  const [activeTab, setActiveTab] = useState<'eq' | 'spatial' | 'dynamics' | 'aideo_filter'>('eq');
   
   // AutoEQ States
   const [dbSearchQuery, setDbSearchQuery] = useState('');
@@ -655,7 +655,8 @@ export function AideoLabView() {
             {[
               { id: 'eq', label: 'EQ & Calibration', icon: Sliders },
               { id: 'spatial', label: 'Spatial Stage', icon: Compass },
-              { id: 'dynamics', label: 'Dynamics & XY', icon: Activity }
+              { id: 'dynamics', label: 'Dynamics & XY', icon: Activity },
+              { id: 'aideo_filter', label: 'Aideo Filter', icon: Sparkles }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -1393,6 +1394,151 @@ export function AideoLabView() {
           )}
 
 
+          {activeTab === 'aideo_filter' && (
+            <motion.div
+              key="aideo-filter-tab"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 24 }}
+            >
+              {/* Aideo Filter Panel */}
+              <div className="settings-ctrl-card" style={{ padding: 28, position: 'relative' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <div>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Sparkles size={18} style={{ color: 'var(--accent)' }} />
+                      Aideo Filter: Live Arena Sound Simulator
+                    </h3>
+                    <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>
+                      Calibrate acoustic parameters to simulate physical room reflections, wide line-array speakers, and deep subwoofer vibrations.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                      onClick={() => {
+                        setDSP({
+                          aideo_filter_enabled: false,
+                          aideo_filter_room_size: 0.85,
+                          aideo_filter_bass_thump: 6.0,
+                          aideo_filter_dampening: 0.5
+                        });
+                        window.dispatchEvent(new CustomEvent('ui-toast', { 
+                          detail: { message: 'Aideo Filter settings restored to defaults.', type: 'success' } 
+                        }));
+                      }}
+                      className="settings-btn settings-btn-danger"
+                      style={{ fontSize: 11, padding: '6px 12px' }}
+                    >
+                      Reset Filter
+                    </button>
+                    <button
+                      onClick={() => setDSP({ aideo_filter_enabled: !dsp.aideo_filter_enabled, enabled: !dsp.aideo_filter_enabled ? true : dsp.enabled })}
+                      className="settings-btn"
+                      style={{
+                        fontSize: 11,
+                        padding: '6px 12px',
+                        background: dsp.aideo_filter_enabled ? 'rgba(139, 92, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                        color: dsp.aideo_filter_enabled ? '#a78bfa' : '#f87171',
+                        border: 'none',
+                        fontWeight: 700
+                      }}
+                    >
+                      Filter: {dsp.aideo_filter_enabled ? 'ACTIVE' : 'BYPASSED'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Settings sliders */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 12 }}>
+                  {/* 1. Room Size / Arena Scale */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Arena Scale & Reflection Delay</span>
+                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                          Controls the physical size of the room and the delay times of early wall reflections.
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
+                        {Math.round((dsp.aideo_filter_room_size - 0.5) / 0.45 * 100)}% ({dsp.aideo_filter_room_size.toFixed(2)})
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="0.5" max="0.95" step="0.01"
+                      value={dsp.aideo_filter_room_size}
+                      disabled={!dsp.aideo_filter_enabled}
+                      onChange={e => setDSP({ aideo_filter_room_size: parseFloat(e.target.value) })}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.aideo_filter_enabled ? 'pointer' : 'default', opacity: dsp.aideo_filter_enabled ? 1 : 0.5 }}
+                    />
+                  </div>
+
+                  {/* 2. Bass Thump / Subwoofer Intensity */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Subwoofer Intensity (Chest Thump)</span>
+                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                          Boosts sub-bass frequencies around 55Hz to simulate the chest-vibrating impact of stadium subwoofers.
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
+                        +{dsp.aideo_filter_bass_thump.toFixed(1)} dB
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="0.0" max="12.0" step="0.5"
+                      value={dsp.aideo_filter_bass_thump}
+                      disabled={!dsp.aideo_filter_enabled}
+                      onChange={e => setDSP({ aideo_filter_bass_thump: parseFloat(e.target.value) })}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.aideo_filter_enabled ? 'pointer' : 'default', opacity: dsp.aideo_filter_enabled ? 1 : 0.5 }}
+                    />
+                  </div>
+
+                  {/* 3. Reverb Dampening / Crowd Density */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Acoustic Absorption & Crowd Dampening</span>
+                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                          Simulates how packed the stadium is. Higher values model more absorption (warmer sound, shorter decay).
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
+                        {Math.round((dsp.aideo_filter_dampening - 0.1) / 0.8 * 100)}% ({dsp.aideo_filter_dampening.toFixed(2)})
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="0.1" max="0.9" step="0.01"
+                      value={dsp.aideo_filter_dampening}
+                      disabled={!dsp.aideo_filter_enabled}
+                      onChange={e => setDSP({ aideo_filter_dampening: parseFloat(e.target.value) })}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.aideo_filter_enabled ? 'pointer' : 'default', opacity: dsp.aideo_filter_enabled ? 1 : 0.5 }}
+                    />
+                  </div>
+                </div>
+
+                {/* Real-time notice */}
+                <div style={{
+                  marginTop: 24,
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  padding: '12px 18px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(255,255,255,0.04)',
+                  fontSize: 11,
+                  color: 'var(--text-dim)',
+                  lineHeight: 1.4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}>
+                  <span style={{ color: 'var(--accent)', fontWeight: 700 }}>💡 Real-time Notice:</span>
+                  <span>Adjustments will apply on the next track play, or automatically within a second on seek or track skip.</span>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
     </div>

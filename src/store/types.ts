@@ -75,6 +75,12 @@ export interface DSPState {
   subsonic_enabled: boolean;
   night_mode_enabled: boolean;
   r128_enabled: boolean;
+
+  // Aideo Filter
+  aideo_filter_enabled: boolean;
+  aideo_filter_room_size: number;
+  aideo_filter_bass_thump: number;
+  aideo_filter_dampening: number;
 }
 
 
@@ -90,6 +96,7 @@ export interface PlaybackState {
   dev_rate: number;
   driver_type: 'WASAPI' | 'ASIO';
   last_skip_time?: number;
+  last_seek_time?: number;
   last_played_track?: string | null;
   last_poll_time?: number;
 }
@@ -150,6 +157,12 @@ export interface PlayerState {
   onboardingCompleted: boolean;
   showOnboarding: boolean;
 
+  // Chromecast State
+  chromecast_devices: { name: string; ip: string; port: number }[];
+  chromecast_active_device: string | null;
+  chromecast_scanning: boolean;
+  chromecast_connected: boolean;
+
   // actions
   setCustomPrompt: (prompt: Partial<CustomPromptState>) => void;
   setCoverArtModalTrack: (track: Track | null) => void;
@@ -187,7 +200,7 @@ export interface PlayerState {
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
   recordPlaybackTransition: (newTrack: Track | null, playbackSource?: string) => Promise<void>;
-  playTrack: (track: Track, isHistory?: boolean, forceResetAutoplay?: boolean, playbackSource?: string) => Promise<void>;
+  playTrack: (track: Track, isHistory?: boolean, forceResetAutoplay?: boolean, playbackSource?: string, startPos?: number) => Promise<void>;
   playDynamicMix: (mixType: 'supermix' | 'recap' | 'discovery' | 'chill') => Promise<void>;
   addToQueue: (track: Track) => Promise<void>;
   playNextInQueue: (track: Track) => Promise<void>;
@@ -310,6 +323,11 @@ export interface PlayerState {
     settings?: boolean;
     playCounts?: boolean;
   }) => Promise<void>;
+
+  // Chromecast Actions
+  discoverCastDevices: () => Promise<void>;
+  connectCastDevice: (device: { name: string; ip: string; port: number }) => Promise<void>;
+  disconnectCastDevice: () => Promise<void>;
 }
 
 function rgbToHsl(r: number, g: number, b: number) {

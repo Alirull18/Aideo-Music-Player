@@ -117,6 +117,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
             lyric_offset: 0
           } as Track;
         }
+        if (item && typeof item === 'object') {
+          if (item.title === 'Watch (youtube.com)') {
+            item.title = 'YouTube Audio';
+            item.artist = 'YouTube Music';
+          }
+        }
         return item;
       });
     } catch (e) {
@@ -230,7 +236,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   },
 
-  playTrack: async (track: Track, isHistory?: boolean, forceResetAutoplay = true, playbackSource?: string) => {
+  playTrack: async (track: Track, isHistory?: boolean, forceResetAutoplay = true, playbackSource?: string, startPos?: number) => {
     if (!track) return;
     
     const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
@@ -268,7 +274,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         coverArt: track.cover_url || null,
         accentColor: '#8b5cf6',
         scrobbledCurrent: false,
-        playback: { ...get().playback, current_track: track.path, status: 'Playing', position_secs: 0, last_skip_time: Date.now() },
+        playback: { ...get().playback, current_track: track.path, status: 'Playing', position_secs: startPos || 0, last_skip_time: Date.now() },
       });
 
       let finalPath = track.path;
@@ -281,7 +287,45 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         }
       }
 
-      await invoke('play_track', { path: finalPath });
+      if (get().chromecast_connected) {
+        const title = track.title || 'Unknown Track';
+        const artist = track.artist || 'Unknown Artist';
+        const ext = finalPath.split('.').pop()?.split('?')[0].toLowerCase();
+        let mime = 'audio/mpeg';
+        if (ext === 'flac') mime = 'audio/flac';
+        else if (ext === 'm4a' || ext === 'mp4') mime = 'audio/mp4';
+        else if (ext === 'wav') mime = 'audio/wav';
+        else if (ext === 'ogg') mime = 'audio/ogg';
+        
+        try {
+          await invoke('chromecast_play', {
+            path: finalPath,
+            title,
+            artist,
+            contentType: mime,
+            coverUrl: track.cover_url || null,
+            duration: track.duration || null,
+            startTime: startPos || 0.0
+          });
+        } catch (e) {
+          console.error('Chromecast playTrack error:', e);
+          set(s => ({
+            playback: {
+              ...s.playback,
+              status: 'Stopped',
+              current_track: null,
+              position_secs: 0
+            },
+            currentTrack: null
+          }));
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: { message: `Casting failed: ${e}`, type: 'error' }
+          }));
+          return;
+        }
+      } else {
+        await invoke('play_track', { path: finalPath, startPos: startPos || 0.0 });
+      }
       get().triggerAutoplayRadio(track, forceResetAutoplay);
 
       // Filter out autoplay recommendations from the queue if autoplay is disabled or if playing a local track

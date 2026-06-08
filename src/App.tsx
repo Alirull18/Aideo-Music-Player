@@ -246,19 +246,15 @@ function AideoApp() {
       <div className={`${lowSpecMode ? "app low-spec" : "app"} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <Sidebar />
       <main className="app-main">
+        {/* Keep the core heavy AideoView and LibraryView mounted to ensure buttery-smooth instant transitions */}
+        <div style={{ display: view === 'aideo' ? 'block' : 'none', height: '100%', width: '100%' }}>
+          <AideoView />
+        </div>
+        <div style={{ display: (view === 'library' || view === 'loved_streams') ? 'block' : 'none', height: '100%', width: '100%' }}>
+          <LibraryView />
+        </div>
+
         <AnimatePresence mode="wait">
-          {view === 'aideo' && (
-            <motion.div key="aideo" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <AideoView />
-            </motion.div>
-          )}
-          {(view === 'library' || view === 'loved_streams') && (
-            <motion.div key={view} style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <LibraryView />
-            </motion.div>
-          )}
           {view === 'nowplaying' && (
             <motion.div key="np" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

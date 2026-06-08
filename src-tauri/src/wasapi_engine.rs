@@ -30,6 +30,7 @@ pub fn start_exclusive_stream<F, E>(
     sample_rate: u32,
     channels: u16,
     timing_mode: &str,
+    dither_enabled: bool,
     mut callback: F,
     mut on_error: E,
 ) -> Result<(WasapiStream, u16, bool), String>
@@ -47,7 +48,15 @@ where
     let handle = thread::spawn(move || {
         let _ = initialize_mta();
 
-        // ELEVATE THREAD TO REAL-TIME PRO AUDIO PRIORITY
+        // ELEVATE THREAD TO REAL-TIME PRO AUDIO PRIORITY WITH MMCSS
+        let mut task_index = 0u32;
+        let mmcss_handle = unsafe {
+            windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
+                windows::core::w!("Pro Audio"),
+                &mut task_index,
+            )
+        };
+
         unsafe {
             let _ = windows::Win32::System::Threading::SetThreadPriority(
                 windows::Win32::System::Threading::GetCurrentThread(),
@@ -283,7 +292,14 @@ where
                     let multiplier = 8388607.0; // 2^23 - 1
                     for (i, &sample) in f32_data.iter().enumerate() {
                         let clamped = sample.clamp(-1.0, 1.0);
-                        let quantized = (((clamped * multiplier) as i32) << 8) & mask;
+                        let val = if dither_enabled {
+                            let r1 = rand::random::<f32>() - 0.5;
+                            let r2 = rand::random::<f32>() - 0.5;
+                            clamped * multiplier + r1 + r2
+                        } else {
+                            clamped * multiplier
+                        };
+                        let quantized = ((val.clamp(-multiplier, multiplier).round() as i32) << 8) & mask;
                         let bytes = quantized.to_ne_bytes();
                         let offset = i * 4;
                         output_bytes[offset] = bytes[0];
@@ -295,7 +311,14 @@ where
                     let multiplier = 2147483647.0; 
                     for (i, &sample) in f32_data.iter().enumerate() {
                         let clamped = sample.clamp(-1.0, 1.0);
-                        let quantized = ((clamped * multiplier) as i32) & mask;
+                        let val = if dither_enabled {
+                            let r1 = rand::random::<f32>() - 0.5;
+                            let r2 = rand::random::<f32>() - 0.5;
+                            clamped * multiplier + r1 + r2
+                        } else {
+                            clamped * multiplier
+                        };
+                        let quantized = (val.clamp(-multiplier, multiplier).round() as i32) & mask;
                         let bytes = quantized.to_ne_bytes();
                         let offset = i * 4;
                         output_bytes[offset] = bytes[0];
@@ -309,7 +332,14 @@ where
                 let multiplier = 8388607.0; // 2^23 - 1
                 for (i, &sample) in f32_data.iter().enumerate() {
                     let clamped = sample.clamp(-1.0, 1.0);
-                    let quantized = (clamped * multiplier) as i32;
+                    let val = if dither_enabled {
+                        let r1 = rand::random::<f32>() - 0.5;
+                        let r2 = rand::random::<f32>() - 0.5;
+                        clamped * multiplier + r1 + r2
+                    } else {
+                        clamped * multiplier
+                    };
+                    let quantized = val.clamp(-multiplier, multiplier).round() as i32;
                     let bytes = quantized.to_ne_bytes();
                     let offset = i * 3;
                     // Write the lowest 3 bytes (little-endian)
@@ -322,7 +352,14 @@ where
                 let multiplier = 32767.0; // i16::MAX
                 for (i, &sample) in f32_data.iter().enumerate() {
                     let clamped = sample.clamp(-1.0, 1.0);
-                    let quantized = (clamped * multiplier) as i16;
+                    let val = if dither_enabled {
+                        let r1 = rand::random::<f32>() - 0.5;
+                        let r2 = rand::random::<f32>() - 0.5;
+                        clamped * multiplier + r1 + r2
+                    } else {
+                        clamped * multiplier
+                    };
+                    let quantized = val.clamp(-multiplier, multiplier).round() as i16;
                     let bytes = quantized.to_ne_bytes();
                     let offset = i * 2;
                     output_bytes[offset] = bytes[0];
@@ -343,6 +380,11 @@ where
         }
 
         let _ = client.stop_stream();
+        if let Ok(h) = mmcss_handle {
+            unsafe {
+                let _ = windows::Win32::System::Threading::AvRevertMmThreadCharacteristics(h);
+            }
+        }
     });
 
     match rx.recv() {
@@ -365,6 +407,7 @@ pub fn start_exclusive_stream<F, E>(
     _sample_rate: u32,
     _channels: u16,
     _timing_mode: &str,
+    _dither_enabled: bool,
     _callback: F,
     _on_error: E,
 ) -> Result<(WasapiStream, u16, bool), String>

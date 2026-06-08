@@ -305,9 +305,18 @@ pub fn clear_youtube_url_cache() {
     }
 }
 
-fn resolve_youtube_url(url: &str) -> String {
+pub fn resolve_youtube_url(url: &str) -> String {
     if !url.contains("youtube.com") && !url.contains("youtu.be") {
         return url.to_string();
+    }
+    
+    // Check cache first
+    {
+        let cache = safe_lock(&YOUTUBE_URL_CACHE);
+        if let Some(cached) = cache.get(url) {
+            println!("[player] Using cached direct stream URL for YouTube video.");
+            return cached.clone();
+        }
     }
     
     println!("[player] YouTube URL detected. Attempting to extract direct stream URL via yt-dlp...");
@@ -350,6 +359,9 @@ fn resolve_youtube_url(url: &str) -> String {
                 let direct_url = stdout_str.trim().to_string();
                 if direct_url.starts_with("http") {
                     println!("[player] Successfully extracted YouTube direct stream URL!");
+                    // Store in cache
+                    let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
+                    cache.insert(url.to_string(), direct_url.clone());
                     return direct_url;
                 }
             } else {
@@ -442,6 +454,7 @@ fn prepare_decoder(
     ffmpeg_path: &str,
     current_process: &Arc<Mutex<Option<std::process::Child>>>,
     ffmpeg_transcode_quality: &str,
+    dsp_state: &DSPState,
 ) -> Result<DecoderInfo, String> {
     let mut resolved_path = path.to_string();
     
@@ -587,7 +600,7 @@ fn prepare_decoder(
     } else {
         false
     };
-    let mut use_ffmpeg = is_stream || is_dsd;
+    let mut use_ffmpeg = is_stream || is_dsd || dsp_state.aideo_filter_enabled;
 
     if !is_stream && !is_dsd {
         // Try native Symphonia probing and decoding first for maximum quality/bit-perfect local playback
@@ -803,6 +816,18 @@ fn prepare_decoder(
             args.push(start_pos.to_string());
         }
         
+        if dsp_state.aideo_filter_enabled {
+            let delay1 = (dsp_state.aideo_filter_room_size * 50.0).round() as u32;
+            let delay2 = (dsp_state.aideo_filter_room_size * 80.0).round() as u32;
+            let lowshelf_db = dsp_state.aideo_filter_bass_thump * 0.7; // add warmth
+            let af_filter = format!(
+                "aecho=0.8:0.88:{}|{}:0.4|0.3, extrastereo=m=1.6, lowshelf=f=120:g={:.1}, equalizer=f=55:width_type=h:w=30:g={:.1}, freeverb=roomsize={:.2}:damp={:.2}:wet=0.35:dry=0.75, highshelf=f=10000:g=-5:t=1",
+                delay1, delay2, lowshelf_db, dsp_state.aideo_filter_bass_thump, dsp_state.aideo_filter_room_size, dsp_state.aideo_filter_dampening
+            );
+            args.push("-af".to_string());
+            args.push(af_filter);
+        }
+        
         let (codec, rate) = match ffmpeg_transcode_quality {
             "hires" => ("pcm_s24le", if is_dsd { "176400" } else { "96000" }),
             "studio" => ("pcm_s24le", if is_dsd { "88200" } else { "48000" }),
@@ -881,6 +906,18 @@ fn prepare_decoder(
             if start_pos > 0.0 {
                 args.push("-ss".to_string());
                 args.push(start_pos.to_string());
+            }
+            
+            if dsp_state.aideo_filter_enabled {
+                let delay1 = (dsp_state.aideo_filter_room_size * 50.0).round() as u32;
+                let delay2 = (dsp_state.aideo_filter_room_size * 80.0).round() as u32;
+                let lowshelf_db = dsp_state.aideo_filter_bass_thump * 0.7; // add warmth
+                let af_filter = format!(
+                    "aecho=0.8:0.88:{}|{}:0.4|0.3, extrastereo=m=1.6, lowshelf=f=120:g={:.1}, equalizer=f=55:width_type=h:w=30:g={:.1}, freeverb=roomsize={:.2}:damp={:.2}:wet=0.35:dry=0.75, highshelf=f=10000:g=-5:t=1",
+                    delay1, delay2, lowshelf_db, dsp_state.aideo_filter_bass_thump, dsp_state.aideo_filter_room_size, dsp_state.aideo_filter_dampening
+                );
+                args.push("-af".to_string());
+                args.push(af_filter);
             }
 
             let (codec, rate) = match ffmpeg_transcode_quality {
@@ -1046,6 +1083,12 @@ pub struct DSPState {
     pub subsonic_enabled: bool,
     pub night_mode_enabled: bool,
     pub r128_enabled: bool,
+
+    // Aideo Filter
+    pub aideo_filter_enabled: bool,
+    pub aideo_filter_room_size: f32,
+    pub aideo_filter_bass_thump: f32,
+    pub aideo_filter_dampening: f32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1413,6 +1456,12 @@ impl Player {
             subsonic_enabled: false,
             night_mode_enabled: false,
             r128_enabled: false,
+
+            // Aideo Filter
+            aideo_filter_enabled: false,
+            aideo_filter_room_size: 0.85,
+            aideo_filter_bass_thump: 6.0,
+            aideo_filter_dampening: 0.5,
         }));
         let target_device = Arc::new(Mutex::new(None::<String>));
         let queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -1855,8 +1904,9 @@ fn play_file(
     
     let resolved_path = path.to_string();
 
-    let transcode_quality = safe_lock(&dsp_state).ffmpeg_transcode_quality.clone();
-    let info = match prepare_decoder(&resolved_path, start_pos, app_handle, ffmpeg_path, &current_process, &transcode_quality) {
+    let dsp_now = safe_lock(&dsp_state).clone();
+    let transcode_quality = dsp_now.ffmpeg_transcode_quality.clone();
+    let info = match prepare_decoder(&resolved_path, start_pos, app_handle, ffmpeg_path, &current_process, &transcode_quality, &dsp_now) {
         Ok(i) => i,
         Err(e) => {
             kill_current_process(&current_process); // Ensure dead process is reaped immediately
@@ -2065,9 +2115,9 @@ fn play_file(
 
     let device_display_name = target.clone().unwrap_or_else(|| "Default Device".to_string());
     
-    let (upsample_target, exclusive_timing) = {
+    let (upsample_target, exclusive_timing, dither_enabled) = {
         let d = safe_lock(&dsp_state);
-        (d.upsample_rate, d.exclusive_mode_timing.clone())
+        (d.upsample_rate, d.exclusive_mode_timing.clone(), d.dither)
     };
     let configs_to_try = select_output_config(
         &device,
@@ -2119,6 +2169,7 @@ fn play_file(
                 rate,
                 channels,
                 &exclusive_timing,
+                dither_enabled,
                 move |data: &mut [f32]| {
                     let paused = paused_cb.load(Ordering::Relaxed);
                     let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
@@ -2208,6 +2259,21 @@ fn play_file(
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [f32], _| {
+                        thread_local! {
+                            static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+                        }
+                        MMCSS_INITIALIZED.with(|initialized| {
+                            if !initialized.get() {
+                                let mut task_index = 0u32;
+                                unsafe {
+                                    let _ = windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
+                                        windows::core::w!("Pro Audio"),
+                                        &mut task_index,
+                                    );
+                                }
+                                initialized.set(true);
+                            }
+                        });
                         let paused = paused_cb.load(Ordering::Relaxed);
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };
@@ -2264,6 +2330,21 @@ fn play_file(
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [i16], _| {
+                        thread_local! {
+                            static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+                        }
+                        MMCSS_INITIALIZED.with(|initialized| {
+                            if !initialized.get() {
+                                let mut task_index = 0u32;
+                                unsafe {
+                                    let _ = windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
+                                        windows::core::w!("Pro Audio"),
+                                        &mut task_index,
+                                    );
+                                }
+                                initialized.set(true);
+                            }
+                        });
                         let paused = paused_cb.load(Ordering::Relaxed);
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };
@@ -2296,7 +2377,15 @@ fn play_file(
                                 if idx < n {
                                     let s = buf[idx] * current_gain;
                                     let clamped = s.clamp(-1.0, 1.0);
-                                    data[idx] = (clamped * i16::MAX as f32) as i16;
+                                    let multiplier = 32767.0; // i16::MAX
+                                    let val = if dither_enabled {
+                                        let r1 = rand::random::<f32>() - 0.5;
+                                        let r2 = rand::random::<f32>() - 0.5;
+                                        clamped * multiplier + r1 + r2
+                                    } else {
+                                        clamped * multiplier
+                                    };
+                                    data[idx] = val.clamp(-multiplier, multiplier).round() as i16;
                                 } else {
                                     data[idx] = 0;
                                 }
@@ -2322,6 +2411,21 @@ fn play_file(
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [i32], _| {
+                        thread_local! {
+                            static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+                        }
+                        MMCSS_INITIALIZED.with(|initialized| {
+                            if !initialized.get() {
+                                let mut task_index = 0u32;
+                                unsafe {
+                                    let _ = windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
+                                        windows::core::w!("Pro Audio"),
+                                        &mut task_index,
+                                    );
+                                }
+                                initialized.set(true);
+                            }
+                        });
                         let paused = paused_cb.load(Ordering::Relaxed);
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };
@@ -2354,7 +2458,15 @@ fn play_file(
                                 if idx < n {
                                     let s = buf[idx] * current_gain;
                                     let clamped = s.clamp(-1.0, 1.0);
-                                    data[idx] = (clamped * i32::MAX as f32) as i32;
+                                    let multiplier = 2147483647.0; // i32::MAX
+                                    let val = if dither_enabled {
+                                        let r1 = rand::random::<f32>() - 0.5;
+                                        let r2 = rand::random::<f32>() - 0.5;
+                                        clamped * multiplier + r1 + r2
+                                    } else {
+                                        clamped * multiplier
+                                    };
+                                    data[idx] = val.clamp(-multiplier, multiplier).round() as i32;
                                 } else {
                                     data[idx] = 0;
                                 }
@@ -2438,6 +2550,21 @@ fn play_file(
                         let mut current_gain = 0.0f32;
                         let ch_count = cfg.channels as usize;
                         dev.build_output_stream(&cfg, move |d: &mut [f32], _| {
+                            thread_local! {
+                                static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+                            }
+                            MMCSS_INITIALIZED.with(|initialized| {
+                                if !initialized.get() {
+                                    let mut task_index = 0u32;
+                                    unsafe {
+                                        let _ = windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
+                                            windows::core::w!("Pro Audio"),
+                                            &mut task_index,
+                                        );
+                                    }
+                                    initialized.set(true);
+                                }
+                            });
                             let paused = paused_cb.load(Ordering::Relaxed);
                             let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                             let target_gain = if paused { 0.0 } else { vol };
@@ -2488,6 +2615,21 @@ fn play_file(
                         let mut current_gain = 0.0f32;
                         let ch_count = cfg.channels as usize;
                         dev.build_output_stream(&cfg, move |d: &mut [i16], _| {
+                            thread_local! {
+                                static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+                            }
+                            MMCSS_INITIALIZED.with(|initialized| {
+                                if !initialized.get() {
+                                    let mut task_index = 0u32;
+                                    unsafe {
+                                        let _ = windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
+                                            windows::core::w!("Pro Audio"),
+                                            &mut task_index,
+                                        );
+                                    }
+                                    initialized.set(true);
+                                }
+                            });
                             let paused = paused_cb.load(Ordering::Relaxed);
                             let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                             let target_gain = if paused { 0.0 } else { vol };
@@ -2518,7 +2660,16 @@ fn play_file(
                                 for ch in 0..ch_count {
                                     let idx = f * ch_count + ch;
                                     if idx < n {
-                                        d[idx] = (buf[idx] * current_gain * i16::MAX as f32) as i16;
+                                        let clamped = (buf[idx] * current_gain).clamp(-1.0, 1.0);
+                                        let multiplier = 32767.0; // i16::MAX
+                                        let val = if dither_enabled {
+                                            let r1 = rand::random::<f32>() - 0.5;
+                                            let r2 = rand::random::<f32>() - 0.5;
+                                            clamped * multiplier + r1 + r2
+                                        } else {
+                                            clamped * multiplier
+                                        };
+                                        d[idx] = val.clamp(-multiplier, multiplier).round() as i16;
                                     } else {
                                         d[idx] = 0;
                                     }
@@ -2652,6 +2803,10 @@ fn play_file(
     let last_oversampling = current_dsp.resampler_oversampling;
     let last_ffmpeg_quality = current_dsp.ffmpeg_transcode_quality.clone();
     let last_exclusive_timing = current_dsp.exclusive_mode_timing.clone();
+    let last_aideo_filter_enabled = current_dsp.aideo_filter_enabled;
+    let last_aideo_filter_room_size = current_dsp.aideo_filter_room_size;
+    let last_aideo_filter_bass_thump = current_dsp.aideo_filter_bass_thump;
+    let last_aideo_filter_dampening = current_dsp.aideo_filter_dampening;
     let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
 
     // RAM BUFFER CURSOR
@@ -2721,6 +2876,10 @@ fn play_file(
             || dsp_now.resampler_oversampling != last_oversampling
             || dsp_now.ffmpeg_transcode_quality != last_ffmpeg_quality
             || dsp_now.exclusive_mode_timing != last_exclusive_timing
+            || dsp_now.aideo_filter_enabled != last_aideo_filter_enabled
+            || dsp_now.aideo_filter_room_size != last_aideo_filter_room_size
+            || dsp_now.aideo_filter_bass_thump != last_aideo_filter_bass_thump
+            || dsp_now.aideo_filter_dampening != last_aideo_filter_dampening
         {
             println!("[player] Hardware/DSP/Parameters change detected. Restarting stream...");
             let current_pos = *safe_lock(&position_secs);
