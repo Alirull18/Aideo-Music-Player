@@ -1,6 +1,7 @@
 import { StateCreator } from 'zustand';
 import { PlayerState, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { cleanSearchQuery } from '../utils';
 
 export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   lyrics: [],
@@ -24,6 +25,17 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
   },
 
+  setLyricOffset: (ms: number) => {
+    set({ lyricOffset: ms });
+    const path = get().playback.current_track;
+    if (path) {
+      invoke('update_track_offset', { path, offset: ms }).catch(() => { });
+      set(s => ({
+        tracks: s.tracks.map(t => t.path === path ? { ...t, lyric_offset: ms } : t)
+      }));
+    }
+  },
+
   saveLyrics: async (path: string, lrc: string) => {
     try {
       await invoke('save_lyrics_file', { path, content: lrc });
@@ -35,41 +47,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
   autoFetchLyricsOnline: async (track: any) => {
     if (!track || !track.title) return;
 
-    // Ignore default fallback titles / artists to avoid garbage search results
-    let artist = track.artist === 'Unknown' || track.artist === 'Online Stream' || track.artist === '—' ? '' : track.artist;
-    let title = track.title;
-    if (!title || title.startsWith('http://') || title.startsWith('https://')) return;
-
-    // Remove file extension if present
-    title = title.replace(/\.(mp3|flac|m4a|wav|ogg|aac|wma)$/i, '');
-
-    // Step 1: Pre-clean leading square brackets and parentheses (common channel names / tags)
-    title = title.replace(/^(\s*[\[\(].*?[\]\)]\s*)+/g, '').trim();
-
-    // Step 2: If artist is empty/generic, try to split title by hyphen to infer artist and title
-    if (!artist) {
-      const hyphenMatch = title.match(/\s*[-—~:]\s*/);
-      if (hyphenMatch) {
-        const parts = title.split(/\s*[-—~:]\s*/);
-        artist = parts[0].trim();
-        title = parts.slice(1).join(' - ').trim();
-      }
-    }
-
-    // Step 3: Clean up common video/channel suffixes and bracketed tags from artist and title
-    const cleanTags = (s: string) => {
-      return s
-        // Remove brackets containing video production keywords
-        .replace(/\s*[([].*?(official|lyrics|video|audio|hq|hd|edit|remix|version|distribution|cover|stage|live|choreo|studio|performance|show|sub|eng|rom|han|fancam|karaoke|instrumental|inst|ver|clip|mv|m\/v).*?[\])]/gi, '')
-        // Remove trailing "from ... studio" structures
-        .replace(/\s+from\s+.*studio$/i, '')
-        // Remove trailing keywords at the end of the string
-        .replace(/\s+(official|lyrics|video|mv|lrc|distribution|cover|stage|live|choreo|performance|show|sub|raw|hd|hq)$/i, '')
-        .trim();
-    };
-
-    let cleanTitle = cleanTags(title);
-    let cleanArtist = cleanTags(artist).replace(/\s*-\s*topic$/i, '').trim();
+    const { artist: cleanArtist, title: cleanTitle } = cleanSearchQuery(track.artist, track.title);
 
     if (!cleanTitle) return;
 
@@ -82,24 +60,28 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         // Exclude iTunes results since they do not contain lyrics
         const lyricResults = results.filter(r => r.source !== 'iTunes');
 
-        // Score and rank results based on title and artist matching
+        // Score and rank results based on title, artist and duration matching (identical to LyricsPanel.tsx)
+        const targetTitle = cleanTitle || track.title || '';
+        const targetArtist = cleanArtist || track.artist || '';
+        const targetDuration = track.duration;
+
         const scoredResults = lyricResults.map(r => {
           const clean = (s: string) => s.toLowerCase()
             .replace(/[()\[\]\-\s_]+/g, '')
             .replace(/[^\p{L}\p{N}]/gu, '');
 
-          const pTitle = clean(cleanTitle);
+          const pTitle = clean(targetTitle);
           const rTitle = clean(r.title);
 
           let titleScore = 0;
           if (pTitle === rTitle) {
             titleScore = 1.0;
           } else if (pTitle.includes(rTitle) || rTitle.includes(pTitle)) {
-            titleScore = 0.7;
+            titleScore = 0.6;
           }
 
-          const pArtist = cleanArtist.toLowerCase().trim();
-          const rArtist = r.artist.toLowerCase().trim();
+          const pArtist = clean(targetArtist);
+          const rArtist = clean(r.artist);
           let artistScore = 0;
           if (pArtist && rArtist) {
             if (pArtist === rArtist || rArtist.includes(pArtist) || pArtist.includes(rArtist)) {
@@ -107,10 +89,22 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             }
           }
 
-          const syncBonus = r.synced && r.raw_lrc ? 0.3 : 0.0;
-          const totalScore = (titleScore * 0.7) + (artistScore * 0.3) + syncBonus;
+          let durationBonus = 0;
+          if (targetDuration && r.duration) {
+            const diff = Math.abs(targetDuration - r.duration);
+            if (diff <= 3) {
+              durationBonus = 0.5;
+            } else if (diff <= 15) {
+              durationBonus = 0.2;
+            } else if (diff > 60) {
+              durationBonus = -0.3;
+            }
+          }
 
-          return { result: r, score: totalScore, titleScore };
+          const syncBonus = r.raw_lrc || r.source !== 'iTunes' ? 0.2 : 0.0;
+          const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus;
+
+          return { result: r, score, titleScore };
         });
 
         // Filter out results that do not match the title at all

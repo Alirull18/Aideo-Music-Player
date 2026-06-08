@@ -172,6 +172,8 @@ export interface PlayerState {
   toggleDiscord: () => void;
   lowSpecMode: boolean;
   toggleLowSpecMode: () => void;
+  sidebarCollapsed: boolean;
+  toggleSidebarCollapsed: () => void;
   sidebarLastfmVisible: boolean;
   sidebarListenbrainzVisible: boolean;
   toggleSidebarLastfmVisible: () => void;
@@ -218,6 +220,7 @@ export interface PlayerState {
   fetchDevices: () => Promise<void>;
   setAudioDevice: (name: string) => Promise<void>;
   adjustLyricOffset: (ms: number) => void;
+  setLyricOffset: (ms: number) => void;
   saveLyrics: (path: string, lrc: string) => Promise<void>;
   autoFetchLyricsOnline: (track: Track) => Promise<void>;
   translateLyrics: () => Promise<void>;

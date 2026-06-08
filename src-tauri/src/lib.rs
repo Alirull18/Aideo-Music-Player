@@ -83,6 +83,49 @@ async fn translate_lyric_line(text: String) -> Result<(String, String), String> 
     Ok((translation, transliteration))
 }
 
+#[tauri::command]
+async fn open_oauth_window(app_handle: tauri::AppHandle, url: String, provider: String) -> Result<(), String> {
+    let title = format!("Sign in with {}", if provider == "google" { "Google" } else { "GitHub" });
+    
+    if let Some(existing_win) = app_handle.get_webview_window("supabase-login") {
+        let _ = existing_win.close();
+    }
+
+    let parsed_url = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
+    
+    let app_handle_clone = app_handle.clone();
+    let _login_win = tauri::WebviewWindowBuilder::new(
+        &app_handle,
+        "supabase-login",
+        tauri::WebviewUrl::External(parsed_url),
+    )
+    .title(title)
+    .inner_size(500.0, 650.0)
+    .resizable(true)
+    .on_navigation(move |nav_url| {
+        let nav_str = nav_url.to_string();
+        let is_callback = nav_str.contains("localhost:1420") || nav_str.contains("alirull18.github.io");
+        
+        if is_callback && (nav_str.contains("access_token=") || nav_str.contains("code=")) {
+            let _ = app_handle_clone.emit("oauth-callback-url", nav_str.clone());
+            
+            let app_handle_inner = app_handle_clone.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+                if let Some(w) = app_handle_inner.get_webview_window("supabase-login") {
+                    let _ = w.close();
+                }
+            });
+            return false; 
+        }
+        true
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 // ── Online Search commands ──────────────────────────────────────────────────
 #[tauri::command]
 async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String> {
@@ -1184,6 +1227,7 @@ pub fn run() {
             let _ = app.emit("deep-link", argv);
         }))
         .invoke_handler(tauri::generate_handler![
+            open_oauth_window,
             log_error,
             scan_and_save,
             get_library,

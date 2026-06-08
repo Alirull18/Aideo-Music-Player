@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, DownloadCloud, Activity, Heart } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, DownloadCloud, Activity, Heart, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export function Sidebar() {
   const { 
@@ -18,7 +18,9 @@ export function Sidebar() {
     listenbrainzToken,
     sidebarLastfmVisible,
     sidebarListenbrainzVisible,
-    appMode
+    appMode,
+    sidebarCollapsed,
+    toggleSidebarCollapsed
   } = useStore();
 
   useEffect(() => {
@@ -49,102 +51,119 @@ export function Sidebar() {
 
   return (
     <aside className="app-sidebar">
-      <div className="sidebar-logo">
-        <span className="sidebar-logo-name">Aideo</span>
+      <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'space-between', padding: sidebarCollapsed ? '0' : '0 10px', marginBottom: 36, width: '100%' }}>
+        {!sidebarCollapsed && <span className="sidebar-logo-name">Aideo</span>}
+        <button 
+          className="sidebar-toggle-btn" 
+          onClick={toggleSidebarCollapsed}
+          title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+        >
+          {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+        </button>
       </div>
 
       {/* Navigation */}
       {appMode === 'hybrid' && (
-        <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')}>
-          <Sparkles size={18} /> Aideo
+        <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')} title={sidebarCollapsed ? "Aideo" : undefined}>
+          <Sparkles size={18} />
+          {!sidebarCollapsed && <span>Aideo</span>}
         </div>
       )}
       {appMode === 'hybrid' && (
-        <div className={`nav-item ${view === 'aideo_search' ? 'active' : ''}`} onClick={() => setView('aideo_search')}>
-          <DownloadCloud size={18} /> Aideo Search
+        <div className={`nav-item ${view === 'aideo_search' ? 'active' : ''}`} onClick={() => setView('aideo_search')} title={sidebarCollapsed ? "Aideo Search" : undefined}>
+          <DownloadCloud size={18} />
+          {!sidebarCollapsed && <span>Aideo Search</span>}
         </div>
       )}
-      <div className={`nav-item ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView('aideo_lab')}>
-        <Activity size={18} /> Aideo Lab
+      <div className={`nav-item ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView('aideo_lab')} title={sidebarCollapsed ? "Aideo Lab" : undefined}>
+        <Activity size={18} />
+        {!sidebarCollapsed && <span>Aideo Lab</span>}
       </div>
-      <div className={`nav-item ${view === 'library' && !currentPlaylist ? 'active' : ''}`} onClick={goLibrary}>
-        <Library size={18} /> Library
+      <div className={`nav-item ${view === 'library' && !currentPlaylist ? 'active' : ''}`} onClick={goLibrary} title={sidebarCollapsed ? "Library" : undefined}>
+        <Library size={18} />
+        {!sidebarCollapsed && <span>Library</span>}
       </div>
       {appMode === 'hybrid' && (
-        <div className={`nav-item ${view === 'loved_streams' ? 'active' : ''}`} onClick={() => { useStore.setState({ currentPlaylist: null }); loadLibrary(); setView('loved_streams'); }}>
-          <Heart size={18} /> Loved Streams
+        <div className={`nav-item ${view === 'loved_streams' ? 'active' : ''}`} onClick={() => { useStore.setState({ currentPlaylist: null }); loadLibrary(); setView('loved_streams'); }} title={sidebarCollapsed ? "Loved Streams" : undefined}>
+          <Heart size={18} />
+          {!sidebarCollapsed && <span>Loved Streams</span>}
         </div>
       )}
-      <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')}>
-        <Headphones size={18} /> Now Playing
+      <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')} title={sidebarCollapsed ? "Now Playing" : undefined}>
+        <Headphones size={18} />
+        {!sidebarCollapsed && <span>Now Playing</span>}
       </div>
       {lastfmSessionKey && sidebarLastfmVisible && (
-        <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')}>
-          <Radio size={18} /> Last.fm Stats
+        <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')} title={sidebarCollapsed ? "Last.fm Stats" : undefined}>
+          <Radio size={18} />
+          {!sidebarCollapsed && <span>Last.fm Stats</span>}
         </div>
       )}
       {listenbrainzToken && sidebarListenbrainzVisible && (
-        <div className={`nav-item ${view === 'listenbrainz' ? 'active' : ''}`} onClick={() => setView('listenbrainz')}>
-          <Radio size={18} style={{ color: 'rgba(235, 116, 59, 0.95)' }} /> ListenBrainz
+        <div className={`nav-item ${view === 'listenbrainz' ? 'active' : ''}`} onClick={() => setView('listenbrainz')} title={sidebarCollapsed ? "ListenBrainz" : undefined}>
+          <Radio size={18} style={{ color: 'rgba(235, 116, 59, 0.95)' }} />
+          {!sidebarCollapsed && <span>ListenBrainz</span>}
         </div>
       )}
 
       {/* Playlists */}
-      <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1 }}>Playlists</span>
-          <button className="icon-btn" onClick={() => setCreating(!creating)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}>
-            <Plus size={14} />
-          </button>
-        </div>
+      {!sidebarCollapsed && (
+        <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1 }}>Playlists</span>
+            <button className="icon-btn" onClick={() => setCreating(!creating)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}>
+              <Plus size={14} />
+            </button>
+          </div>
 
-        {creating && (
-          <form onSubmit={handleCreate} style={{ marginBottom: 12 }}>
-            <input
-              autoFocus
-              type="text"
-              placeholder="Playlist Name..."
-              value={newPName}
-              onChange={e => setNewPName(e.target.value)}
-              onBlur={() => setCreating(false)}
-              style={{ width: '100%', padding: '6px 12px', fontSize: 12, borderRadius: 6, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white', outline: 'none' }}
-            />
-          </form>
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {playlists.map(p => (
-            <div
-              key={p.id}
-              className={`nav-item ${currentPlaylist?.id === p.id && view === 'library' ? 'active' : ''}`}
-              style={{ padding: '6px 12px', fontSize: 13 }}
-              onClick={() => goPlaylist(p.id)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: 12, overflow: 'hidden' }}>
-                <ListMusic size={16} />
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
-              </div>
-              {currentPlaylist?.id === p.id && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); deletePlaylist(p.id); }}
-                  style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                  title="Delete Playlist"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </div>
-          ))}
-          {playlists.length === 0 && !creating && (
-            <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '8px 0', fontStyle: 'italic' }}>
-              No playlists yet.
-            </div>
+          {creating && (
+            <form onSubmit={handleCreate} style={{ marginBottom: 12 }}>
+              <input
+                autoFocus
+                type="text"
+                placeholder="Playlist Name..."
+                value={newPName}
+                onChange={e => setNewPName(e.target.value)}
+                onBlur={() => setCreating(false)}
+                style={{ width: '100%', padding: '6px 12px', fontSize: 12, borderRadius: 6, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', color: 'white', outline: 'none' }}
+              />
+            </form>
           )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {playlists.map((p: any) => (
+              <div
+                key={p.id}
+                className={`nav-item ${currentPlaylist?.id === p.id && view === 'library' ? 'active' : ''}`}
+                style={{ padding: '6px 12px', fontSize: 13 }}
+                onClick={() => goPlaylist(p.id)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: 12, overflow: 'hidden' }}>
+                  <ListMusic size={16} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                </div>
+                {currentPlaylist?.id === p.id && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deletePlaylist(p.id); }}
+                    style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    title="Delete Playlist"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {playlists.length === 0 && !creating && (
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '8px 0', fontStyle: 'italic' }}>
+                No playlists yet.
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Online Tools */}
-      {appMode === 'hybrid' && (
+      {!sidebarCollapsed && appMode === 'hybrid' && (
         <div className="sidebar-section" style={{ marginTop: 24, paddingLeft: 16, paddingRight: 16 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 8 }}>Online Tools</span>
           <div className="nav-item" style={{ padding: '6px 12px', fontSize: 13 }} onClick={() => {
@@ -153,7 +172,7 @@ export function Sidebar() {
               title: 'Stream Radio / URL',
               placeholder: 'Enter http:// or https:// stream URL...',
               actionLabel: 'Play Stream',
-              onSubmit: async (url) => {
+              onSubmit: async (url: string) => {
                 if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
                   useStore.getState().playStream(url);
                 } else {
@@ -168,8 +187,9 @@ export function Sidebar() {
       )}
 
       {/* Settings */}
-      <div style={{ marginTop: 'auto' }} className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
-        <Settings size={18} /> Settings
+      <div style={{ marginTop: 'auto' }} className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')} title={sidebarCollapsed ? "Settings" : undefined}>
+        <Settings size={18} />
+        {!sidebarCollapsed && <span>Settings</span>}
       </div>
     </aside>
   );

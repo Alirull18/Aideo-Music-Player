@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.8.1
+# 💎 Aideo Music Player v0.8.2
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,17 +61,12 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.8.1 (Atlas OS Portability & Hotfixes)
+## 📢 What's New in v0.8.2 (Autoplay Filters, OAuth Intercept & Re-ranking)
 
-
-
-* **☁️ Supabase Cloud Synchronization & Settings Restore**: Bidirectional database sync for library tracks, playlists, configurations, and settings. Restoring supports granular imports (e.g. Liked Songs, Playlists, Player configurations, Scrobble stats).
-* **📊 Wrapped Play Logging**: Detailed play telemetry logging (`play_logs` schema) tracking duration listened, timestamp, and format, ready for year-end Wrapped.
-* **🔑 OAuth-First Logins**: Redesigned login flow prioritizing 1-click Google and GitHub integrations.
-* **🧠 Discovery Hub State Caching**: Caches recommendations state in the Zustand store to make tab switching instantaneous.
-* **🎵 Global Charts Seekability**: Concurrently resolves missing durations for global discovery charts to enable seek bar tracking.
-* **📺 Native OS Fullscreen Fixes**: Configured Tauri capability permissions to allow standard window resizing and fullscreen commands.
-* **⚡ Autoplay Recommendation Regeneration**: Clearing the queue stops the active stream, saves cleared tracks to a blacklist to avoid repeats, fetches a fresh list of recommendations, and plays the first one.
+* **📺 Generalized Autoplay Filters**: Excludes non-music titles (like "STUDIO CHOOM" and show formats) from autoplay recommendations, expanding support across multiple genres.
+* **🔑 OAuth Production Interceptor**: Implemented Rust-based Webview redirection capture to bypass Google/GitHub production OAuth restrictions on tauri.localhost.
+* **🎵 Smart Lyric Re-ranking**: Integrates duration-matching score bonuses and title match verification to place the best lyrics on top.
+* **☁️ Supabase Cloud Synchronization**: Fixed custom credential loading to enable consistent cloud settings sync.
 
 ---
 
@@ -87,8 +82,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.8.1 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.8.1_x64_en-US.msi`).
+1. **Download**: Get the latest v0.8.2 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.8.2_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---

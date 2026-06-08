@@ -62,7 +62,8 @@ function AideoApp() {
     setPlaybackSuccess, 
     lowSpecMode,
     onboardingCompleted,
-    showOnboarding
+    showOnboarding,
+    sidebarCollapsed
   } = useStore();
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
@@ -94,6 +95,7 @@ function AideoApp() {
 
     // Fix #7: Use async IIFE to ensure unlisten is assigned before cleanup runs
     let unlistenOAuth: (() => void) | undefined;
+    let unlistenOAuthCallback: (() => void) | undefined;
     const setupOAuthListener = async () => {
       unlistenOAuth = await listen<any>('oauth-success', (event) => {
         const session = event.payload;
@@ -108,11 +110,48 @@ function AideoApp() {
           }));
         }
       });
+
+      unlistenOAuthCallback = await listen<string>('oauth-callback-url', async (event) => {
+        const url = event.payload;
+        try {
+          const hash = url.split('#')[1];
+          if (!hash) return;
+          const params = new URLSearchParams(hash);
+          const access_token = params.get('access_token');
+          const refresh_token = params.get('refresh_token');
+
+          if (access_token && refresh_token) {
+            const { getSupabaseClient } = await import('./utils/supabaseClient');
+            const client = getSupabaseClient();
+            if (client) {
+              const { data: { session }, error } = await client.auth.setSession({ access_token, refresh_token });
+              if (error) throw error;
+              if (session) {
+                useStore.setState({
+                  session,
+                  user: session.user ?? null,
+                  authLoading: false
+                });
+                window.dispatchEvent(new CustomEvent('ui-toast', { 
+                  detail: { message: 'Signed in successfully!', type: 'success' } 
+                }));
+              }
+            }
+          }
+        } catch (e: any) {
+          console.error('Failed to resolve OAuth session from callback:', e);
+          useStore.setState({ authLoading: false });
+          window.dispatchEvent(new CustomEvent('ui-toast', { 
+            detail: { message: `OAuth callback error: ${e.message || e}`, type: 'error' } 
+          }));
+        }
+      });
     };
     setupOAuthListener();
 
     return () => {
       if (unlistenOAuth) unlistenOAuth();
+      if (unlistenOAuthCallback) unlistenOAuthCallback();
     };
   }, [loadLibrary, fetchPlaylists]);
 
@@ -204,7 +243,7 @@ function AideoApp() {
 
   return (
     <MotionConfig reducedMotion={lowSpecMode ? "always" : "user"}>
-      <div className={lowSpecMode ? "app low-spec" : "app"}>
+      <div className={`${lowSpecMode ? "app low-spec" : "app"} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
         <Sidebar />
       <main className="app-main">
         <AnimatePresence mode="wait">

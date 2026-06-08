@@ -3,12 +3,12 @@ import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, X } from 'lucide-react';
-import { fmt, baseName } from '../utils';
+import { fmt, baseName, cleanSearchQuery } from '../utils';
 
 interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; duration?: number; }
 
 export function LyricsPanel() {
-  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, setCustomPrompt } = useStore();
+  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, setLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, setCustomPrompt } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [lyricMode, setLyricMode] = useState<'lrc' | 'text'>(() => {
     return (localStorage.getItem('aideo-lyric-mode') as 'lrc' | 'text') || 'lrc';
@@ -67,9 +67,71 @@ export function LyricsPanel() {
     if (!currentTrack && !manualQuery) return;
     setSearching(true); setShowFinder(true); setResults([]);
     try {
-      const query = manualQuery || `${currentTrack?.artist ?? ''} ${currentTrack?.title ?? baseName(currentTrack?.path ?? '')}`;
+      let query = '';
+      let cleanTitle = '';
+      let cleanArtist = '';
+      if (manualQuery) {
+        query = manualQuery;
+        const { artist, title } = cleanSearchQuery('', manualQuery);
+        cleanArtist = artist;
+        cleanTitle = title;
+      } else {
+        const { artist, title } = cleanSearchQuery(currentTrack?.artist, currentTrack?.title ?? baseName(currentTrack?.path ?? ''));
+        cleanArtist = artist;
+        cleanTitle = title;
+        query = `${cleanArtist} ${cleanTitle}`.trim();
+      }
       const r: SearchResult[] = await invoke('search_lyrics_online', { query });
-      setResults(r);
+
+      // Score and rank the results so the exact match floats to the top
+      const targetTitle = cleanTitle || currentTrack?.title || '';
+      const targetArtist = cleanArtist || currentTrack?.artist || '';
+      const targetDuration = currentTrack?.duration;
+
+      const scored = r.map(item => {
+        const cleanStr = (s: string) => s.toLowerCase()
+          .replace(/[()\[\]\-\s_]+/g, '')
+          .replace(/[^\p{L}\p{N}]/gu, '');
+
+        const pTitle = cleanStr(targetTitle);
+        const rTitle = cleanStr(item.title);
+
+        let titleScore = 0;
+        if (pTitle === rTitle) {
+          titleScore = 1.0;
+        } else if (pTitle.includes(rTitle) || rTitle.includes(pTitle)) {
+          titleScore = 0.6;
+        }
+
+        const pArtist = cleanStr(targetArtist);
+        const rArtist = cleanStr(item.artist);
+        let artistScore = 0;
+        if (pArtist && rArtist) {
+          if (pArtist === rArtist || rArtist.includes(pArtist) || pArtist.includes(rArtist)) {
+            artistScore = 1.0;
+          }
+        }
+
+        let durationBonus = 0;
+        if (targetDuration && item.duration) {
+          const diff = Math.abs(targetDuration - item.duration);
+          if (diff <= 3) {
+            durationBonus = 0.5;
+          } else if (diff <= 15) {
+            durationBonus = 0.2;
+          } else if (diff > 60) {
+            durationBonus = -0.3;
+          }
+        }
+
+        const syncBonus = item.raw_lrc || item.source !== 'iTunes' ? 0.2 : 0.0;
+        const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus;
+
+        return { item, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      setResults(scored.map(s => s.item));
     } catch (e) { 
       console.error(e); 
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Lyric search failed: ${e}`, type: 'error' } }));
@@ -94,11 +156,15 @@ export function LyricsPanel() {
           const diffSec = currentTrack.duration - r.duration;
           if (diffSec > 2 && diffSec < 120) {
             const calculatedMs = Math.round(diffSec * 10) * 100;
-            adjustLyricOffset(calculatedMs);
+            setLyricOffset(calculatedMs);
             window.dispatchEvent(new CustomEvent('ui-toast', { 
-              detail: { message: `✨ Sync: Adjusted lyric offset by +${(calculatedMs/1000).toFixed(1)}s to match video length`, type: 'info' } 
+              detail: { message: `✨ Sync: Set lyric offset to +${(calculatedMs/1000).toFixed(1)}s to match video length`, type: 'info' } 
             }));
+          } else {
+            setLyricOffset(0);
           }
+        } else {
+          setLyricOffset(0);
         }
       }
 

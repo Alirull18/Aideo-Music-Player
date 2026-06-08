@@ -9,6 +9,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showSettings: false,
   sidebarLastfmVisible: localStorage.getItem('aideo-sidebar-lastfm') !== 'false',
   sidebarListenbrainzVisible: localStorage.getItem('aideo-sidebar-listenbrainz') !== 'false',
+  sidebarCollapsed: localStorage.getItem('aideo-sidebar-collapsed') === 'true',
   liquidBackgroundEnabled: localStorage.getItem('aideo-liquid-bg') !== 'false',
   showSmartMixWidget: localStorage.getItem('aideo-show-smart-mix') !== 'false',
   playbackError: null,
@@ -93,6 +94,12 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     const next = !get().sidebarListenbrainzVisible;
     localStorage.setItem('aideo-sidebar-listenbrainz', String(next));
     set({ sidebarListenbrainzVisible: next });
+  },
+
+  toggleSidebarCollapsed: () => {
+    const next = !get().sidebarCollapsed;
+    localStorage.setItem('aideo-sidebar-collapsed', String(next));
+    set({ sidebarCollapsed: next });
   },
 
   toggleLiquidBackground: () => {

@@ -4,7 +4,12 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const getSupabaseCredentials = () => {
-  return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY };
+  const localUrl = localStorage.getItem('aideo_supabase_url');
+  const localKey = localStorage.getItem('aideo_supabase_key');
+  return { 
+    url: localUrl || SUPABASE_URL, 
+    key: localKey || SUPABASE_ANON_KEY 
+  };
 };
 
 let supabaseInstance: ReturnType<typeof createClient> | null = null;
@@ -20,6 +25,7 @@ export const getSupabaseClient = () => {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        flowType: 'implicit'
       }
     });
   }

@@ -3,7 +3,7 @@ import { useStore } from '../store';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { Search, UploadCloud, RefreshCw, Image as ImageIcon } from 'lucide-react';
-import { baseName } from '../utils';
+import { baseName, cleanSearchQuery } from '../utils';
 import { extractDominantColor } from '../store/types';
 
 interface SearchResult {
@@ -27,7 +27,8 @@ export function CoverArtModal() {
   // Initialize search query with track details
   useEffect(() => {
     if (!coverArtModalTrack) return;
-    setSearchQuery(`${coverArtModalTrack.artist ?? ''} ${coverArtModalTrack.title ?? baseName(coverArtModalTrack.path)}`.trim());
+    const { artist: cleanArtist, title: cleanTitle } = cleanSearchQuery(coverArtModalTrack.artist, coverArtModalTrack.title ?? baseName(coverArtModalTrack.path));
+    setSearchQuery(`${cleanArtist} ${cleanTitle}`.trim());
     setResults([]);
   }, [coverArtModalTrack]);
 
@@ -51,7 +52,8 @@ export function CoverArtModal() {
   // Trigger search on mount
   useEffect(() => {
     if (!coverArtModalTrack) return;
-    const q = `${coverArtModalTrack.artist ?? ''} ${coverArtModalTrack.title ?? baseName(coverArtModalTrack.path)}`.trim();
+    const { artist: cleanArtist, title: cleanTitle } = cleanSearchQuery(coverArtModalTrack.artist, coverArtModalTrack.title ?? baseName(coverArtModalTrack.path));
+    const q = `${cleanArtist} ${cleanTitle}`.trim();
     if (q) handleSearch(q);
   }, [coverArtModalTrack]);
 

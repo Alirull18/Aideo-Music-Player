@@ -67,4 +67,95 @@ export function parseStreamMetadata(url: string | null) {
   };
 }
 
+export function cleanSearchQuery(artist: string | null | undefined, title: string | null | undefined): { artist: string; title: string } {
+  let a = (artist || '').trim();
+  let t = (title || '').trim();
+
+  // If title is a file path or URL, use base name
+  if (t.startsWith('http://') || t.startsWith('https://')) {
+    t = baseName(t);
+  }
+  // Remove file extension
+  t = t.replace(/\.(mp3|flac|m4a|wav|ogg|aac|wma)$/i, '');
+
+  // Split title by '|' and keep the first part (common on YouTube for channel suffixes)
+  if (t.includes('|')) {
+    t = t.split('|')[0].trim();
+  }
+
+  // Pre-clean leading square brackets/parentheses from title (e.g. [MV], [스튜디오 춤])
+  t = t.replace(/^(\s*[\[\(].*?[\]\)]\s*)+/g, '').trim();
+
+  // Common YouTube publishers/channels that shouldn't be treated as the main artist
+  const PUBLISHERS = [
+    /studio\s*choom/i, /스튜디오\s*춤/i, /kbs\s*kpop/i, /sbs\s*kpop/i, /mnet/i, /m2/i, /1thek/i,
+    /stone\s*music/i, /dingo/i, /colors/i, /genius/i, /hybe\s*labels/i, /jyp/i, /yg\s*entertainment/i,
+    /smtown/i, /starship/i, /fncent/i, /cube/i, /woolliment/i, /fancam/i, /직캠/i, /k-pop/i, /kpop/i,
+    /youtube\s*direct/i, /unknown/i, /online\s*stream/i, /—/
+  ];
+
+  const isPublisher = (name: string) => {
+    return PUBLISHERS.some(regex => regex.test(name));
+  };
+
+  // If artist is generic or is a known publisher channel, clear it so we can infer it from the title
+  if (!a || isPublisher(a)) {
+    a = '';
+  }
+
+  // If artist is empty, try to split title by hyphen/colon/tilde/quote to infer artist and title
+  if (!a) {
+    // Check for "Artist - Title" or "Artist : Title"
+    const delimiters = [/\s*[-—~_]\s*/, /\s*:\s+/];
+    for (const delim of delimiters) {
+      if (delim.test(t)) {
+        const parts = t.split(delim);
+        a = parts[0].trim();
+        t = parts.slice(1).join(' ').trim();
+        break;
+      }
+    }
+
+    // Check for "Artist 'Song'" or 'Artist "Song"'
+    if (!a) {
+      const quoteMatch = t.match(/^([^'"]+)\s+['"]([^'"]+)['"]/);
+      if (quoteMatch) {
+        a = quoteMatch[1].trim();
+        t = quoteMatch[2].trim();
+      }
+    }
+  }
+
+  // Clean tags from title and artist
+  const cleanTags = (s: string) => {
+    return s
+      // Remove brackets/parentheses containing video production/performance keywords
+      .replace(/\s*[([].*?(official|lyrics|video|audio|hq|hd|edit|remix|version|distribution|cover|stage|live|choreo|studio|performance|show|sub|eng|rom|han|fancam|karaoke|instrumental|inst|ver|clip|mv|m\/v|스페셜|special|원더케이).*?[\])]/gi, '')
+      // Remove specific trailing bracketed tags
+      .replace(/\s*[([].*?(4k|8k|1080p|hd|sone|ch|orig).*?[\])]/gi, '')
+      // Remove trailing "from ... studio"
+      .replace(/\s+from\s+.*studio$/i, '')
+      // Remove trailing keywords at the end of the string
+      .replace(/\s+(official|lyrics|video|mv|lrc|distribution|cover|stage|live|choreo|performance|show|sub|raw|hd|hq)$/i, '')
+      // Remove extra whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  let cleanTitle = cleanTags(t);
+  let cleanArtist = cleanTags(a).replace(/\s*-\s*topic$/i, '').trim();
+
+  // If cleanArtist is still a publisher, remove it
+  if (isPublisher(cleanArtist)) {
+    cleanArtist = '';
+  }
+
+  // Remove empty brackets/parentheses
+  cleanTitle = cleanTitle.replace(/[([][\s]*[\])]/g, '').trim();
+  cleanArtist = cleanArtist.replace(/[([][\s]*[\])]/g, '').trim();
+
+  return { artist: cleanArtist, title: cleanTitle };
+}
+
+
 
