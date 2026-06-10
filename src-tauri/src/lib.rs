@@ -2,6 +2,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig, MediaPosition};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State, Listener};
 
 mod artwork;
@@ -404,8 +405,7 @@ async fn listenbrainz_scrobble(artist: String, track: String, timestamp: i64, to
 fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let is_playing = {
         let player = safe_lock(&state.player);
-        let status = safe_lock(&player.status);
-        *status != player::PlaybackStatus::Stopped
+        player.status.load(Ordering::Relaxed) != 0
     };
 
     let mut cache = safe_lock(&state.cached_devices);
@@ -695,35 +695,33 @@ async fn apply_local_cover(path: String, base64_data: String) -> Result<(), Stri
 #[tauri::command]
 fn toggle_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let player = safe_lock(&state.player);
-    let mut mode = safe_lock(&player.exclusive_mode);
-    *mode = !*mode;
-    let val = *mode;
+    let current = player.exclusive_mode.load(Ordering::Relaxed);
+    let next_mode = !current;
+    player.exclusive_mode.store(next_mode, Ordering::Relaxed);
     let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
-    Ok(val)
+    Ok(next_mode)
 }
 
 #[tauri::command]
 fn get_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let player = safe_lock(&state.player);
-    let val = *safe_lock(&player.exclusive_mode);
-    Ok(val)
+    Ok(player.exclusive_mode.load(Ordering::Relaxed))
 }
 
 #[tauri::command]
 fn toggle_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let player = safe_lock(&state.player);
-    let mut mode = safe_lock(&player.bit_perfect);
-    *mode = !*mode;
-    let val = *mode;
+    let current = player.bit_perfect.load(Ordering::Relaxed);
+    let next_mode = !current;
+    player.bit_perfect.store(next_mode, Ordering::Relaxed);
     let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
-    Ok(val)
+    Ok(next_mode)
 }
 
 #[tauri::command]
 fn get_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let player = safe_lock(&state.player);
-    let val = *safe_lock(&player.bit_perfect);
-    Ok(val)
+    Ok(player.bit_perfect.load(Ordering::Relaxed))
 }
 
 // ── Playback commands ─────────────────────────────────────────────────────────
@@ -753,7 +751,7 @@ fn update_media_metadata(
 fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<(), String> {
     let player = safe_lock(&state.player);
     let app_handle = player.app_handle.clone();
-    let pos_f64 = *safe_lock(&player.position_secs);
+    let pos_f64 = f64::from_bits(player.position_secs.load(Ordering::Relaxed));
     let progress = Some(MediaPosition(std::time::Duration::from_secs_f64(pos_f64)));
     if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
         controls
@@ -1000,7 +998,7 @@ fn stop_track(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 fn set_volume(volume: f32, state: State<'_, AppState>) -> Result<(), String> {
     let player = safe_lock(&state.player);
-    *safe_lock(&player.volume) = volume;
+    player.volume.store(volume.to_bits(), Ordering::Relaxed);
     Ok(())
 }
 
@@ -1067,14 +1065,25 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         .as_deref()
         .map(|d| d.starts_with("[ASIO]"))
         .unwrap_or(false);
+        
+    let status_u8 = player.status.load(Ordering::Relaxed);
+    let status_enum = match status_u8 {
+        1 => player::PlaybackStatus::Playing,
+        2 => player::PlaybackStatus::Paused,
+        _ => player::PlaybackStatus::Stopped,
+    };
+    
+    let position_val = f64::from_bits(player.position_secs.load(Ordering::Relaxed));
+    let volume_val = f32::from_bits(player.volume.load(Ordering::Relaxed));
+    
     Ok(serde_json::json!({
-        "status": *safe_lock(&player.status),
+        "status": status_enum,
         "current_track": *safe_lock(&player.current_track),
-        "position_secs": *safe_lock(&player.position_secs),
-        "volume": *safe_lock(&player.volume),
-        "exclusive": *safe_lock(&player.exclusive_mode),
-        "bit_perfect": *safe_lock(&player.bit_perfect),
-        "dev_rate": *safe_lock(&player.current_dev_rate),
+        "position_secs": position_val,
+        "volume": volume_val,
+        "exclusive": player.exclusive_mode.load(Ordering::Relaxed),
+        "bit_perfect": player.bit_perfect.load(Ordering::Relaxed),
+        "dev_rate": player.current_dev_rate.load(Ordering::Relaxed),
         "dsp": *safe_lock(&player.dsp_state),
         "driver_type": if is_asio { "ASIO" } else { "WASAPI" },
     }))

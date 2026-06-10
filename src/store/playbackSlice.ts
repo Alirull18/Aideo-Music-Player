@@ -34,6 +34,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     upsample_rate: 0,
     dither: false,
     exclusive_mode_timing: (localStorage.getItem('aideo_exclusive_timing') as any) || 'polling',
+    preamp_gain: Number(localStorage.getItem('aideo_preamp_gain') || 0.0),
+    limiter_threshold: Number(localStorage.getItem('aideo_limiter_threshold') || -0.1),
+    resampler_phase_mode: (localStorage.getItem('aideo_resampler_phase_mode') as any) || 'linear',
     eq_enabled: false,
     eq_parametric: false,
     eq_graphic_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -367,7 +370,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       'spatial_wet', 'subsonic_enabled', 'night_mode_enabled', 
       'r128_enabled', 'width', 'upsample_rate', 'dither',
       'aideo_filter_enabled', 'aideo_filter_room_size', 'aideo_filter_bass_thump', 
-      'aideo_filter_dampening'
+      'aideo_filter_dampening', 'preamp_gain', 'limiter_threshold', 'resampler_phase_mode'
     ];
     const isActivatingDSP = dspKeys.some(key => {
       if (key === 'upsample_rate') {
@@ -444,6 +447,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_filter_room_size', String(full.aideo_filter_room_size));
     localStorage.setItem('aideo_filter_bass_thump', String(full.aideo_filter_bass_thump));
     localStorage.setItem('aideo_filter_dampening', String(full.aideo_filter_dampening));
+    localStorage.setItem('aideo_preamp_gain', String(full.preamp_gain));
+    localStorage.setItem('aideo_limiter_threshold', String(full.limiter_threshold));
+    localStorage.setItem('aideo_resampler_phase_mode', full.resampler_phase_mode);
 
     // 1. Update React Zustand state instantly for fluid 60fps UI
     set({ dsp: full });

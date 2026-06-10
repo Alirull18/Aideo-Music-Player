@@ -438,10 +438,13 @@ export function AideoLabView() {
     setDSP({
       subsonic_enabled: false,
       night_mode_enabled: false,
-      r128_enabled: false
+      r128_enabled: false,
+      preamp_gain: 0.0,
+      limiter_threshold: -0.1,
+      resampler_phase_mode: 'linear'
     });
     window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: 'Dynamics controls and XY Space Pad centered.', type: 'success' } 
+      detail: { message: 'Dynamics controls, preamp/limiter, and XY Space Pad centered.', type: 'success' } 
     }));
   };
 
@@ -1387,6 +1390,96 @@ export function AideoLabView() {
                     >
                       {dsp.r128_enabled ? 'ENABLED' : 'DISABLED'}
                     </button>
+                  </div>
+                </div>
+
+                {/* Digital Preamp & Peak Limiter Headroom */}
+                <div className="settings-ctrl-card" style={{ padding: 20 }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white', marginBottom: 16 }}>Preamp & Safety Limiter</h4>
+                  
+                  {/* Preamp Gain */}
+                  <div style={{ marginBottom: 18 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Digital Preamp Gain</span>
+                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                          Attenuates signal to create digital headroom, avoiding clipping before EQ processing.
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
+                        {dsp.preamp_gain.toFixed(1)} dB
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="-12.0" max="0.0" step="0.1"
+                      value={dsp.preamp_gain}
+                      disabled={!dsp.enabled}
+                      onChange={e => setDSP({ preamp_gain: parseFloat(e.target.value) })}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.enabled ? 'pointer' : 'default', opacity: dsp.enabled ? 1 : 0.5 }}
+                    />
+                  </div>
+
+                  {/* Limiter Threshold */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Limiter Threshold</span>
+                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                          Dynamic lookahead threshold to prevent clipping while maximizing analog output.
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
+                        {dsp.limiter_threshold.toFixed(1)} dB
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="-6.0" max="0.0" step="0.1"
+                      value={dsp.limiter_threshold}
+                      disabled={!dsp.enabled}
+                      onChange={e => setDSP({ limiter_threshold: parseFloat(e.target.value) })}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.enabled ? 'pointer' : 'default', opacity: dsp.enabled ? 1 : 0.5 }}
+                    />
+                  </div>
+                </div>
+
+                {/* Resampler Phase Response Mode */}
+                <div className="settings-ctrl-card" style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Resampler Phase Response</h4>
+                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                        Controls pre/post-ringing filtering characteristics during high-resolution upsampling.
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', background: 'rgba(255, 255, 255, 0.02)', padding: 3, borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.04)', gap: 4 }}>
+                    {[
+                      { id: 'linear', label: 'Linear Phase', desc: 'Symmetric pre-ringing, traditional' },
+                      { id: 'minimum', label: 'Minimum Phase', desc: 'No pre-ringing, natural decay' },
+                      { id: 'intermediate', label: 'Intermediate', desc: 'Optimized hybrid balance' }
+                    ].map(opt => (
+                      <button
+                        key={opt.id}
+                        onClick={() => setDSP({ resampler_phase_mode: opt.id as any })}
+                        disabled={!dsp.enabled}
+                        title={opt.desc}
+                        style={{
+                          flex: 1,
+                          background: dsp.resampler_phase_mode === opt.id ? 'rgba(255, 255, 255, 0.07)' : 'transparent',
+                          border: 'none',
+                          color: dsp.resampler_phase_mode === opt.id ? 'white' : 'var(--text-dim)',
+                          padding: '6px 8px',
+                          borderRadius: 6,
+                          fontSize: 10,
+                          fontWeight: 600,
+                          cursor: dsp.enabled ? 'pointer' : 'default',
+                          opacity: dsp.enabled ? 1 : 0.5,
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>

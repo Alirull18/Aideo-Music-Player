@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::io::BufRead;
 use std::thread;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use ringbuf::RingBuffer;
 use crossbeam_channel::{Receiver, Sender};
 use rustfft::{FftPlanner, num_complex::Complex};
@@ -1062,6 +1062,9 @@ pub struct DSPState {
     pub upsample_rate: u32,
     pub dither: bool,
     pub exclusive_mode_timing: String,
+    pub preamp_gain: f32,
+    pub limiter_threshold: f32,
+    pub resampler_phase_mode: String,
 
     // EQ
     pub eq_enabled: bool,
@@ -1306,19 +1309,19 @@ pub struct CachedTrack {
 
 pub struct Player {
     pub cmd_tx: std::sync::mpsc::Sender<PlayerCommand>,
-    pub status: Arc<Mutex<PlaybackStatus>>,
+    pub status: Arc<AtomicU8>,
     pub current_track: Arc<Mutex<Option<String>>>,
-    pub position_secs: Arc<Mutex<f64>>,
-    pub volume: Arc<Mutex<f32>>,
-    pub exclusive_mode: Arc<Mutex<bool>>,
+    pub position_secs: Arc<AtomicU64>,
+    pub volume: Arc<AtomicU32>,
+    pub exclusive_mode: Arc<AtomicBool>,
     pub dsp_state: Arc<Mutex<DSPState>>,
     pub target_device: Arc<Mutex<Option<String>>>,
     pub queue: Arc<Mutex<VecDeque<String>>>,
     pub app_handle: tauri::AppHandle,
     pub current_process: Arc<Mutex<Option<std::process::Child>>>,
     pub ffmpeg_path: String,
-    pub bit_perfect: Arc<Mutex<bool>>,
-    pub current_dev_rate: Arc<Mutex<u32>>,
+    pub bit_perfect: Arc<AtomicBool>,
+    pub current_dev_rate: Arc<AtomicU32>,
     pub cache: Arc<Mutex<Option<CachedTrack>>>,
     pub decode_shutdown: Arc<Mutex<Option<Arc<AtomicBool>>>>,
 }
@@ -1407,11 +1410,11 @@ impl Drop for Player {
 impl Player {
     pub fn new(app_handle: tauri::AppHandle) -> Self {
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<PlayerCommand>();
-        let status = Arc::new(Mutex::new(PlaybackStatus::Stopped));
+        let status = Arc::new(AtomicU8::new(0)); // 0 = Stopped
         let current_track = Arc::new(Mutex::new(None::<String>));
-        let position_secs = Arc::new(Mutex::new(0.0f64));
-        let volume = Arc::new(Mutex::new(1.0f32));
-        let exclusive_mode = Arc::new(Mutex::new(false));
+        let position_secs = Arc::new(AtomicU64::new(0.0f64.to_bits()));
+        let volume = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        let exclusive_mode = Arc::new(AtomicBool::new(false));
         let dsp_state = Arc::new(Mutex::new(DSPState {
             enabled: false,
             low_spec_mode: false,
@@ -1424,6 +1427,9 @@ impl Player {
             upsample_rate: 0,
             dither: false,
             exclusive_mode_timing: "polling".to_string(),
+            preamp_gain: 0.0,
+            limiter_threshold: -0.1,
+            resampler_phase_mode: "linear".to_string(),
 
             // EQ
             eq_enabled: false,
@@ -1467,8 +1473,8 @@ impl Player {
         let queue = Arc::new(Mutex::new(VecDeque::new()));
         let current_process = Arc::new(Mutex::new(None::<std::process::Child>));
         let ffmpeg_path = find_ffmpeg_path();
-        let bit_perfect = Arc::new(Mutex::new(false));
-        let current_dev_rate = Arc::new(Mutex::new(0u32));
+        let bit_perfect = Arc::new(AtomicBool::new(false));
+        let current_dev_rate = Arc::new(AtomicU32::new(0u32));
         let cache = Arc::new(Mutex::new(None::<CachedTrack>));
         let decode_shutdown = Arc::new(Mutex::new(None::<Arc<AtomicBool>>));
         
@@ -1527,13 +1533,13 @@ impl Player {
 fn player_loop(
     rx: std::sync::mpsc::Receiver<PlayerCommand>,
     cmd_tx: std::sync::mpsc::Sender<PlayerCommand>,
-    status: Arc<Mutex<PlaybackStatus>>,
+    status: Arc<AtomicU8>,
     current_track: Arc<Mutex<Option<String>>>,
-    position_secs: Arc<Mutex<f64>>,
-    volume: Arc<Mutex<f32>>,
-    exclusive_mode: Arc<Mutex<bool>>,
-    bit_perfect: Arc<Mutex<bool>>,
-    current_dev_rate: Arc<Mutex<u32>>,
+    position_secs: Arc<AtomicU64>,
+    volume: Arc<AtomicU32>,
+    exclusive_mode: Arc<AtomicBool>,
+    bit_perfect: Arc<AtomicBool>,
+    current_dev_rate: Arc<AtomicU32>,
     cache: Arc<Mutex<Option<CachedTrack>>>,
     dsp_state: Arc<Mutex<DSPState>>,
     target_device: Arc<Mutex<Option<String>>>,
@@ -1580,8 +1586,7 @@ fn player_loop(
                 }
 
                 if abort_play {
-                    let mut s = safe_lock(&status);
-                    *s = PlaybackStatus::Stopped;
+                    status.store(0, Ordering::Relaxed); // 0 = Stopped
                     let mut ct = safe_lock(&current_track);
                     *ct = None;
                     continue;
@@ -1593,29 +1598,26 @@ fn player_loop(
                 }
 
                 {
-                    let mut s = safe_lock(&status);
-                    *s = PlaybackStatus::Playing;
+                    status.store(1, Ordering::Relaxed); // 1 = Playing
                     let mut ct = safe_lock(&current_track);
                     *ct = Some(path.clone());
-                    let mut pos = safe_lock(&position_secs);
-                    *pos = start_pos;
+                    position_secs.store(start_pos.to_bits(), Ordering::Relaxed);
                 }
 
                 next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queue), Arc::clone(&current_process), cmd_tx.clone(), &rx, &app_handle, &fft_tx, &ffmpeg_path, Arc::clone(&decode_shutdown));
 
                 if next_track.is_none() {
-                    let mut s = safe_lock(&status);
-                    *s = PlaybackStatus::Stopped;
+                    status.store(0, Ordering::Relaxed); // 0 = Stopped
                     let mut ct = safe_lock(&current_track);
                     *ct = None;
-                    *safe_lock(&position_secs) = 0.0;
+                    position_secs.store(0.0f64.to_bits(), Ordering::Relaxed);
                 }
             }
             PlayerCommand::RestartStream => {
                 let (path, pos) = {
                     let ct = safe_lock(&current_track);
-                    let ps = safe_lock(&position_secs);
-                    if let Some(p) = ct.clone() { (p, *ps) } else { continue; }
+                    let ps = f64::from_bits(position_secs.load(Ordering::Relaxed));
+                    if let Some(p) = ct.clone() { (p, ps) } else { continue; }
                 };
                 // Throttle restarts slightly to avoid spamming the CPU/audio drivers in case of hard failure
                 std::thread::sleep(std::time::Duration::from_millis(250));
@@ -1641,16 +1643,655 @@ fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>
     }
 }
 
-fn soft_limit(sample: f32) -> f32 {
-    let abs = sample.abs();
-    if abs > 0.90 {
-        let sign = if sample > 0.0 { 1.0 } else { -1.0 };
-        let over = abs - 0.90;
-        // Asymptotically approach 1.0 (limit overage to max 0.1)
-        let compressed = over / (1.0 + over * 10.0);
-        sign * (0.90 + compressed)
-    } else {
-        sample
+pub struct LookaheadLimiter {
+    delay_buffers: Vec<VecDeque<f32>>,
+    gain_envelope: f32, // Current gain attenuation (0.0 to 1.0)
+    attack_coeff: f32,
+    release_coeff: f32,
+}
+
+impl LookaheadLimiter {
+    pub fn new(channels: usize, lookahead_ms: f32, sample_rate: f32) -> Self {
+        let lookahead_samples = ((lookahead_ms * 0.001 * sample_rate).round() as usize).max(1);
+        let mut delay_buffers = Vec::with_capacity(channels);
+        for _ in 0..channels {
+            let mut q = VecDeque::with_capacity(lookahead_samples);
+            q.resize(lookahead_samples, 0.0);
+            delay_buffers.push(q);
+        }
+        
+        let attack_time = lookahead_ms * 0.001;
+        let release_time = 0.080f32; // 80ms release
+
+        let attack_coeff = (-1.0 / (attack_time * sample_rate)).exp();
+        let release_coeff = (-1.0 / (release_time * sample_rate)).exp();
+
+        Self {
+            delay_buffers,
+            gain_envelope: 1.0,
+            attack_coeff,
+            release_coeff,
+        }
+    }
+
+    pub fn process(&mut self, samples: &mut [f32], threshold_db: f32) {
+        let threshold = 10.0f32.powf(threshold_db / 20.0);
+        let chs = samples.len();
+        
+        // 1. Push input samples to delay lines
+        for ch in 0..chs {
+            self.delay_buffers[ch].push_back(samples[ch]);
+        }
+
+        // 2. Look ahead: detect the peak in the delay buffers
+        let mut peak = 0.0f32;
+        for ch in 0..chs {
+            for &s in self.delay_buffers[ch].iter() {
+                peak = peak.max(s.abs());
+            }
+        }
+
+        // 3. Calculate target gain for this frame
+        let target_gain = if peak > threshold {
+            threshold / peak
+        } else {
+            1.0
+        };
+
+        // 4. Smooth gain envelope (ballistics)
+        if target_gain < self.gain_envelope {
+            self.gain_envelope = self.gain_envelope * self.attack_coeff + target_gain * (1.0 - self.attack_coeff);
+        } else {
+            self.gain_envelope = self.gain_envelope * self.release_coeff + target_gain * (1.0 - self.release_coeff);
+        }
+
+        // 5. Pop delayed samples and apply gain envelope
+        for ch in 0..chs {
+            if let Some(delayed_sample) = self.delay_buffers[ch].pop_front() {
+                samples[ch] = delayed_sample * self.gain_envelope;
+            }
+        }
+    }
+}#[derive(Clone, Debug)]
+pub struct AllPassFilter {
+    a: f32,
+    x1: f32,
+    y1: f32,
+}
+
+impl AllPassFilter {
+    pub fn new(a: f32) -> Self {
+        Self { a, x1: 0.0, y1: 0.0 }
+    }
+    
+    #[inline]
+    pub fn process(&mut self, x: f32) -> f32 {
+        let y = self.a * x + self.x1 - self.a * self.y1;
+        self.x1 = x;
+        self.y1 = y;
+        y
+    }
+}
+
+pub struct PhaseResponseNode {
+    enabled: bool,
+    mode: String,
+    filters_l: Vec<AllPassFilter>,
+    filters_r: Vec<AllPassFilter>,
+}
+
+impl PhaseResponseNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            mode: "linear".to_string(),
+            filters_l: Vec::new(),
+            filters_r: Vec::new(),
+        }
+    }
+}
+
+impl AudioNode for PhaseResponseNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || self.mode == "linear" || samples.is_empty() {
+            return;
+        }
+        let channels = samples.len();
+        if channels >= 1 {
+            for val in samples[0].iter_mut() {
+                let mut s = *val;
+                for f in &mut self.filters_l {
+                    s = f.process(s);
+                }
+                *val = s;
+            }
+        }
+        if channels >= 2 {
+            for val in samples[1].iter_mut() {
+                let mut s = *val;
+                for f in &mut self.filters_r {
+                    s = f.process(s);
+                }
+                *val = s;
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled;
+        let new_mode = dsp.resampler_phase_mode.clone();
+        if new_mode != self.mode {
+            self.mode = new_mode;
+            let num_filters = match self.mode.as_str() {
+                "minimum" => 6,
+                "intermediate" => 3,
+                _ => 0,
+            };
+            let coeff = match self.mode.as_str() {
+                "minimum" => 0.6f32,
+                "intermediate" => 0.4f32,
+                _ => 0.0f32,
+            };
+            self.filters_l = (0..num_filters).map(|_| AllPassFilter::new(coeff)).collect();
+            self.filters_r = (0..num_filters).map(|_| AllPassFilter::new(coeff)).collect();
+        }
+    }
+}
+
+pub trait AudioNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], sample_rate: f32);
+    fn update_params(&mut self, dsp: &DSPState, sample_rate: f32);
+}
+
+pub struct PreampNode {
+    enabled: bool,
+    gain_linear: f32,
+}
+
+impl PreampNode {
+    pub fn new() -> Self {
+        Self { enabled: false, gain_linear: 1.0 }
+    }
+}
+
+impl AudioNode for PreampNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+        for ch in 0..samples.len() {
+            for sample in samples[ch].iter_mut() {
+                *sample *= self.gain_linear;
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled;
+        self.gain_linear = 10.0f32.powf(dsp.preamp_gain / 20.0);
+    }
+}
+
+pub struct EqNode {
+    enabled: bool,
+    is_parametric: bool,
+    graphic_eq_l: Vec<BiquadFilter>,
+    graphic_eq_r: Vec<BiquadFilter>,
+    parametric_eq_l: Vec<BiquadFilter>,
+    parametric_eq_r: Vec<BiquadFilter>,
+}
+
+impl EqNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            is_parametric: false,
+            graphic_eq_l: vec![BiquadFilter::new(); 10],
+            graphic_eq_r: vec![BiquadFilter::new(); 10],
+            parametric_eq_l: vec![BiquadFilter::new(); 10],
+            parametric_eq_r: vec![BiquadFilter::new(); 10],
+        }
+    }
+}
+
+impl AudioNode for EqNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+        let channels = samples.len();
+        if self.is_parametric {
+            if channels >= 1 {
+                for val in samples[0].iter_mut() {
+                    let mut s = *val;
+                    for j in 0..10 {
+                        s = self.parametric_eq_l[j].process(s);
+                    }
+                    *val = s;
+                }
+            }
+            if channels >= 2 {
+                for val in samples[1].iter_mut() {
+                    let mut s = *val;
+                    for j in 0..10 {
+                        s = self.parametric_eq_r[j].process(s);
+                    }
+                    *val = s;
+                }
+            }
+        } else {
+            if channels >= 1 {
+                for val in samples[0].iter_mut() {
+                    let mut s = *val;
+                    for j in 0..10 {
+                        s = self.graphic_eq_l[j].process(s);
+                    }
+                    *val = s;
+                }
+            }
+            if channels >= 2 {
+                for val in samples[1].iter_mut() {
+                    let mut s = *val;
+                    for j in 0..10 {
+                        s = self.graphic_eq_r[j].process(s);
+                    }
+                    *val = s;
+                }
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.eq_enabled;
+        self.is_parametric = dsp.eq_parametric;
+        if self.enabled {
+            let fs = sample_rate;
+            let graphic_freqs = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+            for j in 0..10 {
+                let gain_db = dsp.eq_graphic_gains.get(j).cloned().unwrap_or(0.0);
+                self.graphic_eq_l[j].set_peaking(fs, graphic_freqs[j], gain_db, 1.0);
+                self.graphic_eq_r[j].set_peaking(fs, graphic_freqs[j], gain_db, 1.0);
+            }
+            for j in 0..10 {
+                if let Some(band) = dsp.eq_parametric_bands.get(j) {
+                    match band.band_type.as_str() {
+                        "lowshelf" => {
+                            self.parametric_eq_l[j].set_lowshelf(fs, band.freq, band.gain, band.q);
+                            self.parametric_eq_r[j].set_lowshelf(fs, band.freq, band.gain, band.q);
+                        }
+                        "highshelf" => {
+                            self.parametric_eq_l[j].set_highshelf(fs, band.freq, band.gain, band.q);
+                            self.parametric_eq_r[j].set_highshelf(fs, band.freq, band.gain, band.q);
+                        }
+                        _ => {
+                            self.parametric_eq_l[j].set_peaking(fs, band.freq, band.gain, band.q);
+                            self.parametric_eq_r[j].set_peaking(fs, band.freq, band.gain, band.q);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub struct SubsonicNode {
+    enabled: bool,
+    subsonic_l: BiquadFilter,
+    subsonic_r: BiquadFilter,
+}
+
+impl SubsonicNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            subsonic_l: BiquadFilter::new(),
+            subsonic_r: BiquadFilter::new(),
+        }
+    }
+}
+
+impl AudioNode for SubsonicNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+        let channels = samples.len();
+        if channels >= 1 {
+            for val in samples[0].iter_mut() {
+                *val = self.subsonic_l.process(*val);
+            }
+        }
+        if channels >= 2 {
+            for val in samples[1].iter_mut() {
+                *val = self.subsonic_r.process(*val);
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.subsonic_enabled;
+        if self.enabled {
+            self.subsonic_l.set_highpass(sample_rate, 18.0, 0.707);
+            self.subsonic_r.set_highpass(sample_rate, 18.0, 0.707);
+        }
+    }
+}
+
+pub struct CrossfeedNode {
+    enabled: bool,
+    crossfeed_lp_l: BiquadFilter,
+    crossfeed_lp_r: BiquadFilter,
+    crossfeed_delay_l: CircularDelayLine,
+    crossfeed_delay_r: CircularDelayLine,
+    crossfeed_level: f32,
+    crossfeed_corner: f32,
+}
+
+impl CrossfeedNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            crossfeed_lp_l: BiquadFilter::new(),
+            crossfeed_lp_r: BiquadFilter::new(),
+            crossfeed_delay_l: CircularDelayLine::new(192000),
+            crossfeed_delay_r: CircularDelayLine::new(192000),
+            crossfeed_level: -6.0,
+            crossfeed_corner: 700.0,
+        }
+    }
+}
+
+impl AudioNode for CrossfeedNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], sample_rate: f32) {
+        if !self.enabled || samples.len() < 2 {
+            return;
+        }
+        let delay_samples = ((0.000300 * sample_rate as f64).round() as usize).clamp(1, 1000);
+        let feed_gain = 10.0f32.powf(self.crossfeed_level / 20.0);
+
+        let (left, right) = samples.split_at_mut(1);
+        let l_channel = &mut left[0];
+        let r_channel = &mut right[0];
+
+        for i in 0..l_channel.len() {
+            let l = l_channel[i];
+            let r = r_channel[i];
+
+            let lp_l = self.crossfeed_lp_l.process(l);
+            let lp_r = self.crossfeed_lp_r.process(r);
+
+            self.crossfeed_delay_l.push(lp_l);
+            self.crossfeed_delay_r.push(lp_r);
+
+            let delayed_l = self.crossfeed_delay_l.read_delayed(delay_samples);
+            let delayed_r = self.crossfeed_delay_r.read_delayed(delay_samples);
+
+            l_channel[i] = l + delayed_r * feed_gain;
+            r_channel[i] = r + delayed_l * feed_gain;
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.crossfeed_enabled;
+        self.crossfeed_level = dsp.crossfeed_level;
+        self.crossfeed_corner = dsp.crossfeed_corner;
+        if self.enabled {
+            self.crossfeed_lp_l.set_lowpass(sample_rate, self.crossfeed_corner, 0.5);
+            self.crossfeed_lp_r.set_lowpass(sample_rate, self.crossfeed_corner, 0.5);
+        }
+    }
+}
+
+pub struct SpatializerNode {
+    enabled: bool,
+    spatial_delay_side: CircularDelayLine,
+    spatial_wet: f32,
+    spatial_haas_delay: f32,
+}
+
+impl SpatializerNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            spatial_delay_side: CircularDelayLine::new(192000),
+            spatial_wet: 0.15,
+            spatial_haas_delay: 7.5,
+        }
+    }
+}
+
+impl AudioNode for SpatializerNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], sample_rate: f32) {
+        if !self.enabled || samples.len() < 2 {
+            return;
+        }
+        let (left, right) = samples.split_at_mut(1);
+        let l_channel = &mut left[0];
+        let r_channel = &mut right[0];
+
+        for i in 0..l_channel.len() {
+            let mut l = l_channel[i];
+            let mut r = r_channel[i];
+
+            let mid = (l + r) * 0.5;
+            let side = (l - r) * 0.5;
+
+            self.spatial_delay_side.push(side);
+
+            let ref1_samples = ((0.0030 * sample_rate as f64).round() as usize).clamp(1, 2047);
+            let ref2_samples = ((0.0055 * sample_rate as f64).round() as usize).clamp(1, 2047);
+            let ref3_samples = ((0.0082 * sample_rate as f64).round() as usize).clamp(1, 2047);
+            let ref4_samples = ((0.0110 * sample_rate as f64).round() as usize).clamp(1, 2047);
+
+            let ref1 = self.spatial_delay_side.read_delayed(ref1_samples) * 0.08;
+            let ref2 = self.spatial_delay_side.read_delayed(ref2_samples) * -0.06;
+            let ref3 = self.spatial_delay_side.read_delayed(ref3_samples) * 0.04;
+            let ref4 = self.spatial_delay_side.read_delayed(ref4_samples) * -0.03;
+
+            let reflections = (ref1 + ref2 + ref3 + ref4) * self.spatial_wet;
+
+            let haas_samples = ((self.spatial_haas_delay * 0.001 * sample_rate).round() as usize).clamp(1, 2047);
+            let side_delayed = self.spatial_delay_side.read_delayed(haas_samples);
+            let side_room = side_delayed + reflections;
+
+            let intensity = self.spatial_wet;
+            let theta = (intensity * std::f32::consts::FRAC_PI_4).clamp(0.0, std::f32::consts::FRAC_PI_2);
+            let cos_t = theta.cos();
+            let sin_t = theta.sin();
+
+            l = mid * cos_t + side_room * sin_t;
+            r = mid * cos_t - side_room * sin_t;
+
+            l_channel[i] = l;
+            r_channel[i] = r;
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.spatial_enabled;
+        self.spatial_wet = dsp.spatial_wet;
+        self.spatial_haas_delay = dsp.spatial_haas_delay;
+    }
+}
+
+pub struct WidthNode {
+    enabled: bool,
+    width: f32,
+}
+
+impl WidthNode {
+    pub fn new() -> Self {
+        Self { enabled: false, width: 1.0 }
+    }
+}
+
+impl AudioNode for WidthNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || samples.len() < 2 || self.width == 1.0 {
+            return;
+        }
+        let (left, right) = samples.split_at_mut(1);
+        let l_channel = &mut left[0];
+        let r_channel = &mut right[0];
+
+        for i in 0..l_channel.len() {
+            let l = l_channel[i];
+            let r = r_channel[i];
+            let mid = (l + r) * 0.5;
+            let side = (l - r) * 0.5;
+            let side_scaled = side * self.width;
+            l_channel[i] = mid + side_scaled;
+            r_channel[i] = mid - side_scaled;
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled;
+        self.width = dsp.width;
+    }
+}
+
+pub struct CompressorNode {
+    enabled: bool,
+    compressor_envelope: f32,
+}
+
+impl CompressorNode {
+    pub fn new() -> Self {
+        Self { enabled: false, compressor_envelope: 0.0 }
+    }
+}
+
+impl AudioNode for CompressorNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+        let channels = samples.len();
+        let attack_coef = (-1.0f32 / (0.010 * sample_rate)).exp();  // 10ms
+        let release_coef = (-1.0f32 / (0.100 * sample_rate)).exp(); // 100ms
+        let threshold = 0.063f32; // -24dBFS
+        let ratio = 2.5f32;
+
+        let len = samples[0].len();
+        for i in 0..len {
+            let mut max_val = 0.0f32;
+            for ch in 0..channels {
+                max_val = max_val.max(samples[ch][i].abs());
+            }
+
+            self.compressor_envelope = if max_val > self.compressor_envelope {
+                self.compressor_envelope * attack_coef + max_val * (1.0 - attack_coef)
+            } else {
+                self.compressor_envelope * release_coef + max_val * (1.0 - release_coef)
+            };
+
+            if self.compressor_envelope > threshold {
+                let env_db = 20.0 * self.compressor_envelope.log10().max(-100.0);
+                let thresh_db = -24.0f32;
+                let overshoot = env_db - thresh_db;
+                let target_gain_db = -overshoot * (1.0 - 1.0 / ratio);
+                let gain = 10.0f32.powf(target_gain_db / 20.0);
+                for ch in 0..channels {
+                    samples[ch][i] *= gain;
+                }
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.night_mode_enabled;
+    }
+}
+
+pub struct NormalizerNode {
+    enabled: bool,
+    r128_slow_rms: f32,
+    r128_agc_gain: f32,
+}
+
+impl NormalizerNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            r128_slow_rms: 0.0001f32,
+            r128_agc_gain: 1.0f32,
+        }
+    }
+}
+
+impl AudioNode for NormalizerNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+        let channels = samples.len();
+        let rms_alpha = (-1.0f32 / (3.0 * sample_rate)).exp();
+        let target_lufs = -14.0f32;
+        let step = 0.5 / sample_rate;
+
+        let len = samples[0].len();
+        for i in 0..len {
+            let mut max_sq = 0.0f32;
+            for ch in 0..channels {
+                let s = samples[ch][i];
+                max_sq = max_sq.max(s * s);
+            }
+
+            self.r128_slow_rms = self.r128_slow_rms * rms_alpha + max_sq * (1.0 - rms_alpha);
+
+            let cur_lufs = 10.0 * self.r128_slow_rms.log10().max(-100.0) - 0.69;
+            let diff = target_lufs - cur_lufs;
+
+            let target_gain = 10.0f32.powf(diff / 20.0).clamp(0.25, 2.0);
+            if self.r128_agc_gain < target_gain {
+                self.r128_agc_gain = (self.r128_agc_gain + step).min(target_gain);
+            } else if self.r128_agc_gain > target_gain {
+                self.r128_agc_gain = (self.r128_agc_gain - step).max(target_gain);
+            }
+
+            for ch in 0..channels {
+                samples[ch][i] *= self.r128_agc_gain;
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.r128_enabled;
+    }
+}
+
+pub struct LimiterNode {
+    enabled: bool,
+    limiter: LookaheadLimiter,
+    threshold_db: f32,
+    final_gain: f32,
+}
+
+impl LimiterNode {
+    pub fn new(channels: usize, lookahead_ms: f32, sample_rate: f32) -> Self {
+        Self {
+            enabled: false,
+            limiter: LookaheadLimiter::new(channels, lookahead_ms, sample_rate),
+            threshold_db: -0.1,
+            final_gain: 1.0,
+        }
+    }
+}
+
+impl AudioNode for LimiterNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+        let channels = samples.len();
+        let len = samples[0].len();
+        let mut frame = vec![0.0f32; channels];
+        for i in 0..len {
+            for ch in 0..channels {
+                frame[ch] = samples[ch][i] * self.final_gain;
+            }
+            self.limiter.process(&mut frame, self.threshold_db);
+            for ch in 0..channels {
+                samples[ch][i] = frame[ch];
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled;
+        self.threshold_db = dsp.limiter_threshold;
+        self.final_gain = if dsp.enabled { 0.95 } else { 1.0 };
     }
 }
 
@@ -1872,13 +2513,13 @@ fn background_decode(
 fn play_file(
     path: &str,
     start_pos: f64,
-    status: Arc<Mutex<PlaybackStatus>>,
+    status: Arc<AtomicU8>,
     current_track: Arc<Mutex<Option<String>>>,
-    position_secs: Arc<Mutex<f64>>,
-    volume: Arc<Mutex<f32>>,
-    exclusive_mode: Arc<Mutex<bool>>,
-    bit_perfect: Arc<Mutex<bool>>,
-    current_dev_rate: Arc<Mutex<u32>>,
+    position_secs: Arc<AtomicU64>,
+    volume: Arc<AtomicU32>,
+    exclusive_mode: Arc<AtomicBool>,
+    bit_perfect: Arc<AtomicBool>,
+    current_dev_rate: Arc<AtomicU32>,
     cache: Arc<Mutex<Option<CachedTrack>>>,
     dsp_state: Arc<Mutex<DSPState>>,
     target_device: Arc<Mutex<Option<String>>>,
@@ -1976,7 +2617,7 @@ fn play_file(
         }
     }
 
-    let is_exclusive = *safe_lock(&exclusive_mode);
+    let is_exclusive = exclusive_mode.load(Ordering::Relaxed);
     let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
 
     // 1b. Safety RAM cache check: Bypass cache for large files (>150MB or >15 minutes duration)
@@ -2139,8 +2780,8 @@ fn play_file(
     // (Only for local files and when Bit-Perfect/Upsampling is requested)
     let request_exclusive = is_exclusive && !is_stream;
 
-    let stream_paused = Arc::new(AtomicBool::new(false));
-    let stream_volume = Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
+    let stream_paused = Arc::clone(&status);
+    let stream_volume = Arc::clone(&volume);
 
     if request_exclusive && !device_display_name.starts_with("[ASIO]") {
         if let Some((config, _)) = configs_to_try.first() {
@@ -2171,7 +2812,7 @@ fn play_file(
                 &exclusive_timing,
                 dither_enabled,
                 move |data: &mut [f32]| {
-                    let paused = paused_cb.load(Ordering::Relaxed);
+                    let paused = paused_cb.load(Ordering::Relaxed) != 1;
                     let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                     let target_gain = if paused { 0.0 } else { vol };
                     
@@ -2226,7 +2867,7 @@ fn play_file(
             } else {
                 println!("[player] TRUE WASAPI Exclusive Mode failed. Falling back to CPAL Shared Mode.");
                 let _ = app_handle.emit("playback-error", "Device does not support WASAPI Exclusive Mode. Falling back to Shared Mode.");
-                *safe_lock(&exclusive_mode) = false;
+                exclusive_mode.store(false, Ordering::Relaxed);
             }
         }
     }
@@ -2274,7 +2915,7 @@ fn play_file(
                                 initialized.set(true);
                             }
                         });
-                        let paused = paused_cb.load(Ordering::Relaxed);
+                        let paused = paused_cb.load(Ordering::Relaxed) != 1;
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };
                         
@@ -2345,7 +2986,7 @@ fn play_file(
                                 initialized.set(true);
                             }
                         });
-                        let paused = paused_cb.load(Ordering::Relaxed);
+                        let paused = paused_cb.load(Ordering::Relaxed) != 1;
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };
                         
@@ -2426,7 +3067,7 @@ fn play_file(
                                 initialized.set(true);
                             }
                         });
-                        let paused = paused_cb.load(Ordering::Relaxed);
+                        let paused = paused_cb.load(Ordering::Relaxed) != 1;
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };
                         
@@ -2565,7 +3206,7 @@ fn play_file(
                                     initialized.set(true);
                                 }
                             });
-                            let paused = paused_cb.load(Ordering::Relaxed);
+                            let paused = paused_cb.load(Ordering::Relaxed) != 1;
                             let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                             let target_gain = if paused { 0.0 } else { vol };
                             
@@ -2630,7 +3271,7 @@ fn play_file(
                                     initialized.set(true);
                                 }
                             });
-                            let paused = paused_cb.load(Ordering::Relaxed);
+                            let paused = paused_cb.load(Ordering::Relaxed) != 1;
                             let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                             let target_gain = if paused { 0.0 } else { vol };
                             
@@ -2728,34 +3369,32 @@ fn play_file(
     let use_ch   = file_ch.min(dev_ch);
     
     // REPORT ACTUAL HARDWARE RATE
-    *safe_lock(&current_dev_rate) = dev_rate as u32;
+    current_dev_rate.store(dev_rate as u32, Ordering::Relaxed);
 
     let chunk_size = 1024usize;
 
-    // Create persistent DSP filter and delay line instances
-    let mut graphic_eq_l = vec![BiquadFilter::new(); 10];
-    let mut graphic_eq_r = vec![BiquadFilter::new(); 10];
-    let mut parametric_eq_l = vec![BiquadFilter::new(); 10];
-    let mut parametric_eq_r = vec![BiquadFilter::new(); 10];
-
-    let mut subsonic_l = BiquadFilter::new();
-    let mut subsonic_r = BiquadFilter::new();
-
-    let mut crossfeed_lp_l = BiquadFilter::new();
-    let mut crossfeed_lp_r = BiquadFilter::new();
-    let mut crossfeed_delay_l = CircularDelayLine::new(192000);
-    let mut crossfeed_delay_r = CircularDelayLine::new(192000);
-
-    let mut spatial_delay_side = CircularDelayLine::new(192000);
-
-    let mut compressor_envelope = 0.0f32;
-    let mut r128_slow_rms = 0.0001f32;
-    let mut r128_agc_gain = 1.0f32;
-
-    let mut last_calculated_rate = 0usize;
-    let mut last_dsp_params: Option<DSPState> = None;
-
     let mut current_dsp = safe_lock(&dsp_state).clone();
+
+    // Create persistent DSP filter and delay line instances
+    let mut nodes: Vec<Box<dyn AudioNode>> = vec![
+        Box::new(PreampNode::new()),
+        Box::new(PhaseResponseNode::new()),
+        Box::new(EqNode::new()),
+        Box::new(SubsonicNode::new()),
+        Box::new(CrossfeedNode::new()),
+        Box::new(SpatializerNode::new()),
+        Box::new(WidthNode::new()),
+        Box::new(CompressorNode::new()),
+        Box::new(NormalizerNode::new()),
+        Box::new(LimiterNode::new(use_ch, 2.0, dev_rate as f32)),
+    ];
+
+    for node in &mut nodes {
+        node.update_params(&current_dsp, dev_rate as f32);
+    }
+
+    let mut last_calculated_rate = dev_rate;
+    let mut last_dsp_params: Option<DSPState> = Some(current_dsp.clone());
     let mut fft_buffer = Vec::with_capacity(2048);
 
     let sinc_len = current_dsp.resampler_sinc_len as usize;
@@ -2795,7 +3434,7 @@ fn play_file(
     let mut running = true;
     let mut next_track_info: Option<(String, f64)> = None;
     let last_exclusive = is_exclusive;
-    let bp_now = *safe_lock(&bit_perfect);
+    let bp_now = bit_perfect.load(Ordering::Relaxed);
     let last_bit_perfect = bp_now;
     let last_upsample_rate = upsample_target;
     let last_interpolation = current_dsp.resampler_interpolation.clone();
@@ -2816,8 +3455,8 @@ fn play_file(
         loop {
             match rx.try_recv() {
                 Ok(PlayerCommand::Stop) => { running = false; break; }
-                Ok(PlayerCommand::Pause) => { *safe_lock(&status) = PlaybackStatus::Paused; }
-                Ok(PlayerCommand::Resume) => { *safe_lock(&status) = PlaybackStatus::Playing; }
+                Ok(PlayerCommand::Pause) => { status.store(2, Ordering::Relaxed); }
+                Ok(PlayerCommand::Resume) => { status.store(1, Ordering::Relaxed); }
                 Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
                 Ok(PlayerCommand::Seek(secs)) => {
                     if let Some(samples_arc) = &decoded_samples {
@@ -2826,7 +3465,7 @@ fn play_file(
                         if ram_cursor >= lock[0].len() && is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
                             ram_cursor = lock[0].len().saturating_sub(1); 
                         }
-                        *safe_lock(&position_secs) = secs;
+                        position_secs.store(secs.to_bits(), Ordering::Relaxed);
                         flush_signal.store(true, Ordering::SeqCst);
                         pending.iter_mut().for_each(|ch| ch.clear());
                     } else if !is_stream {
@@ -2834,7 +3473,7 @@ fn play_file(
                             let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
                             let _ = format.seek(SeekMode::Accurate, SeekTo::TimeStamp { ts: seek_ts, track_id });
                         }
-                        *safe_lock(&position_secs) = secs;
+                        position_secs.store(secs.to_bits(), Ordering::Relaxed);
                         flush_signal.store(true, Ordering::SeqCst);
                         pending.iter_mut().for_each(|ch| ch.clear());
                     } else {
@@ -2843,7 +3482,7 @@ fn play_file(
                         kill_current_process(&current_process);
                         running = false;
                         next_track_info = Some((path.to_string(), secs));
-                        *safe_lock(&position_secs) = secs;
+                        position_secs.store(secs.to_bits(), Ordering::Relaxed);
                         break;
                     }
                 }
@@ -2854,7 +3493,7 @@ fn play_file(
                     safe_lock(&queue).push_back(path);
                 }
                 Ok(PlayerCommand::RestartStream) => {
-                    let current_pos = *safe_lock(&position_secs);
+                    let current_pos = f64::from_bits(position_secs.load(Ordering::Relaxed));
                     running = false;
                     next_track_info = Some((path.to_string(), current_pos));
                     break;
@@ -2863,8 +3502,8 @@ fn play_file(
             }
         }
         if !running { break; }
-        let exc_now = *safe_lock(&exclusive_mode);
-        let bp_now = *safe_lock(&bit_perfect);
+        let exc_now = exclusive_mode.load(Ordering::Relaxed);
+        let bp_now = bit_perfect.load(Ordering::Relaxed);
         let dsp_now = safe_lock(&dsp_state).clone();
         
         // ONLY restart if values actually changed from what we started with
@@ -2882,15 +3521,10 @@ fn play_file(
             || dsp_now.aideo_filter_dampening != last_aideo_filter_dampening
         {
             println!("[player] Hardware/DSP/Parameters change detected. Restarting stream...");
-            let current_pos = *safe_lock(&position_secs);
+            let current_pos = f64::from_bits(position_secs.load(Ordering::Relaxed));
             next_track_info = Some((path.to_string(), current_pos));
             break;
         }
-        // UPDATE ATOMICS FOR STREAM
-        let is_paused = *safe_lock(&status) == PlaybackStatus::Paused;
-        stream_paused.store(is_paused, Ordering::Relaxed);
-        let current_vol = *safe_lock(&volume);
-        stream_volume.store(current_vol.to_bits(), Ordering::Relaxed);
 
         // FILL PENDING BUFFER
         if pending[0].len() < chunk_size * 4 {
@@ -2963,44 +3597,10 @@ fn play_file(
             current_dsp = dsp_now.clone();
         }
 
-        if dsp_dirty && current_dsp.enabled {
-            let fs = dev_rate as f32;
-
-            // 1. Graphic EQ (10 bands)
-            let graphic_freqs = [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
-            for j in 0..10 {
-                let gain_db = current_dsp.eq_graphic_gains.get(j).cloned().unwrap_or(0.0);
-                graphic_eq_l[j].set_peaking(fs, graphic_freqs[j], gain_db, 1.0);
-                graphic_eq_r[j].set_peaking(fs, graphic_freqs[j], gain_db, 1.0);
+        if dsp_dirty {
+            for node in &mut nodes {
+                node.update_params(&current_dsp, dev_rate as f32);
             }
-
-            // 2. Parametric EQ (10 bands)
-            for j in 0..10 {
-                if let Some(band) = current_dsp.eq_parametric_bands.get(j) {
-                    match band.band_type.as_str() {
-                        "lowshelf" => {
-                            parametric_eq_l[j].set_lowshelf(fs, band.freq, band.gain, band.q);
-                            parametric_eq_r[j].set_lowshelf(fs, band.freq, band.gain, band.q);
-                        }
-                        "highshelf" => {
-                            parametric_eq_l[j].set_highshelf(fs, band.freq, band.gain, band.q);
-                            parametric_eq_r[j].set_highshelf(fs, band.freq, band.gain, band.q);
-                        }
-                        _ => {
-                            parametric_eq_l[j].set_peaking(fs, band.freq, band.gain, band.q);
-                            parametric_eq_r[j].set_peaking(fs, band.freq, band.gain, band.q);
-                        }
-                    }
-                }
-            }
-
-            // 3. Subsonic High-Pass Filter (Q=0.707 Butterworth)
-            subsonic_l.set_highpass(fs, 18.0, 0.707);
-            subsonic_r.set_highpass(fs, 18.0, 0.707);
-
-            // 4. Headphone Crossfeed Corner Low-Pass
-            crossfeed_lp_l.set_lowpass(fs, current_dsp.crossfeed_corner, 0.5);
-            crossfeed_lp_r.set_lowpass(fs, current_dsp.crossfeed_corner, 0.5);
         }
         
         'resample: loop {
@@ -3023,6 +3623,15 @@ fn play_file(
                 let mut processed = if file_rate == dev_rate {
                     chunk_planar
                 } else {
+                    // Dynamic Clock Drift Correction (Milestone 5)
+                    let capacity = prod.capacity() as f64;
+                    let current_fill = prod.len() as f64;
+                    let fill_ratio = current_fill / capacity;
+                    let error = 0.5 - fill_ratio; // Positive if underfilled, negative if overfilled
+                    let adjustment = error * 0.002; // Max ±0.1% adjustment
+                    let rel_ratio = 1.0 + adjustment.clamp(-0.001, 0.001);
+                    let _ = resampler.set_resample_ratio_relative(rel_ratio, true);
+
                     let refs: Vec<&[f32]> = chunk_planar.iter().map(|v| v.as_slice()).collect();
                     match resampler.process(&refs, None) {
                         Ok(o) => o,
@@ -3030,155 +3639,9 @@ fn play_file(
                     }
                 };
                 
-                let final_gain = if current_dsp.enabled { 0.95 } else { 1.0 };
-
-                if current_dsp.enabled && use_ch >= 2 {
-                    for i in 0..processed[0].len() {
-                        let mut l = processed[0][i];
-                        let mut r = processed[1][i];
-
-                        // 1. Equalizers
-                        if current_dsp.eq_enabled {
-                            if current_dsp.eq_parametric {
-                                for j in 0..10 {
-                                    l = parametric_eq_l[j].process(l);
-                                    r = parametric_eq_r[j].process(r);
-                                }
-                            } else {
-                                for j in 0..10 {
-                                    l = graphic_eq_l[j].process(l);
-                                    r = graphic_eq_r[j].process(r);
-                                }
-                            }
-                        }
-
-                        // 2. High-Pass Subsonic Rumble Filter (Cut below 18Hz)
-                        if current_dsp.subsonic_enabled {
-                            l = subsonic_l.process(l);
-                            r = subsonic_r.process(r);
-                        }
-
-                        // 3. Headphone Crossfeed (Linkwitz/Chu Moy)
-                        if current_dsp.crossfeed_enabled {
-                            let lp_l = crossfeed_lp_l.process(l);
-                            let lp_r = crossfeed_lp_r.process(r);
-
-                            crossfeed_delay_l.push(lp_l);
-                            crossfeed_delay_r.push(lp_r);
-
-                            let delay_samples = ((0.000300 * dev_rate as f64).round() as usize).clamp(1, 1000);
-                            let delayed_l = crossfeed_delay_l.read_delayed(delay_samples);
-                            let delayed_r = crossfeed_delay_r.read_delayed(delay_samples);
-
-                            let feed_gain = 10.0f32.powf(current_dsp.crossfeed_level / 20.0);
-                            l += delayed_r * feed_gain;
-                            r += delayed_l * feed_gain;
-                        }
-
-                        // 4. Haas Spatializer & Reflections soundstage
-                        if current_dsp.spatial_enabled {
-                            let mid = (l + r) * 0.5;
-                            let side = (l - r) * 0.5;
-
-                            spatial_delay_side.push(side);
-
-                            let ref1_samples = ((0.0030 * dev_rate as f64).round() as usize).clamp(1, 2047);
-                            let ref2_samples = ((0.0055 * dev_rate as f64).round() as usize).clamp(1, 2047);
-                            let ref3_samples = ((0.0082 * dev_rate as f64).round() as usize).clamp(1, 2047);
-                            let ref4_samples = ((0.0110 * dev_rate as f64).round() as usize).clamp(1, 2047);
-
-                            let ref1 = spatial_delay_side.read_delayed(ref1_samples) * 0.08;
-                            let ref2 = spatial_delay_side.read_delayed(ref2_samples) * -0.06;
-                            let ref3 = spatial_delay_side.read_delayed(ref3_samples) * 0.04;
-                            let ref4 = spatial_delay_side.read_delayed(ref4_samples) * -0.03;
-
-                            let reflections = (ref1 + ref2 + ref3 + ref4) * current_dsp.spatial_wet;
-
-                            let haas_samples = ((current_dsp.spatial_haas_delay * 0.001 * dev_rate as f32).round() as usize).clamp(1, 2047);
-                            let side_delayed = spatial_delay_side.read_delayed(haas_samples);
-                            let side_room = side_delayed + reflections;
-
-                            let intensity = current_dsp.spatial_wet;
-                            let theta = (intensity * std::f32::consts::FRAC_PI_4).clamp(0.0, std::f32::consts::FRAC_PI_2);
-                            let cos_t = theta.cos();
-                            let sin_t = theta.sin();
-
-                            l = mid * cos_t + side_room * sin_t;
-                            r = mid * cos_t - side_room * sin_t;
-                        }
-
-                        // Stereo Width Control (0.0 = mono, 1.0 = normal, 2.0 = extra wide)
-                        if current_dsp.width != 1.0 {
-                            let mid = (l + r) * 0.5;
-                            let side = (l - r) * 0.5;
-                            let side_scaled = side * current_dsp.width;
-                            l = mid + side_scaled;
-                            r = mid - side_scaled;
-                        }
-
-                        // 5. Dynamics Night Mode Compressor (2.5:1 ratio)
-                        if current_dsp.night_mode_enabled {
-                            let rectified = l.abs().max(r.abs());
-                            let attack_coef = (-1.0f32 / (0.010 * dev_rate as f32)).exp();  // 10ms
-                            let release_coef = (-1.0f32 / (0.100 * dev_rate as f32)).exp(); // 100ms
-                            
-                            compressor_envelope = if rectified > compressor_envelope {
-                                compressor_envelope * attack_coef + rectified * (1.0 - attack_coef)
-                            } else {
-                                compressor_envelope * release_coef + rectified * (1.0 - release_coef)
-                            };
-
-                            let threshold = 0.063f32; // -24dBFS
-                            let ratio = 2.5f32;
-                            if compressor_envelope > threshold {
-                                let env_db = 20.0 * compressor_envelope.log10().max(-100.0);
-                                let thresh_db = -24.0f32;
-                                let overshoot = env_db - thresh_db;
-                                let target_gain_db = -overshoot * (1.0 - 1.0 / ratio);
-                                let gain = 10.0f32.powf(target_gain_db / 20.0);
-                                l *= gain;
-                                r *= gain;
-                            }
-                        }
-
-                        // 6. EBU R128 Loudness Match slow AGC
-                        if current_dsp.r128_enabled {
-                            let rectified = (l * l).max(r * r);
-                            let rms_alpha = (-1.0f32 / (3.0 * dev_rate as f32)).exp();
-                            r128_slow_rms = r128_slow_rms * rms_alpha + rectified * (1.0 - rms_alpha);
-
-                            let cur_lufs = 10.0 * r128_slow_rms.log10().max(-100.0) - 0.69;
-                            let target_lufs = -14.0f32;
-                            let diff = target_lufs - cur_lufs;
-
-                            let target_gain = 10.0f32.powf(diff / 20.0).clamp(0.25, 2.0);
-                            let step = 0.5 / dev_rate as f32;
-                            if r128_agc_gain < target_gain {
-                                r128_agc_gain = (r128_agc_gain + step).min(target_gain);
-                            } else if r128_agc_gain > target_gain {
-                                r128_agc_gain = (r128_agc_gain - step).max(target_gain);
-                            }
-
-                            l *= r128_agc_gain;
-                            r *= r128_agc_gain;
-                        }
-
-                        processed[0][i] = soft_limit(l * final_gain);
-                        processed[1][i] = soft_limit(r * final_gain);
-                    }
-                } else {
-                    for (ch, channel_buf) in processed.iter_mut().enumerate().take(use_ch) {
-                        for val in channel_buf.iter_mut() {
-                            let mut sample = *val;
-                            if current_dsp.enabled && current_dsp.subsonic_enabled {
-                                if ch == 0 {
-                                    sample = subsonic_l.process(sample);
-                                } else {
-                                    sample = subsonic_r.process(sample);
-                                }
-                            }
-                            *val = soft_limit(sample * final_gain);
-                        }
+                if current_dsp.enabled {
+                    for node in &mut nodes {
+                        node.process(&mut processed, dev_rate as f32);
                     }
                 }
                 let len = processed[0].len();
@@ -3240,7 +3703,7 @@ fn play_file(
                 if flush_signal.load(Ordering::Relaxed) { r_len = 0.0; }
                 let delay_secs = (p_len / file_rate as f64) + (r_len / dev_rate as f64);
                 let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
-                *safe_lock(&position_secs) = true_pos.max(0.0);
+                position_secs.store(true_pos.max(0.0).to_bits(), Ordering::Relaxed);
                 
                 match rx.try_recv() {
                     Ok(PlayerCommand::Stop) => { 
@@ -3257,12 +3720,10 @@ fn play_file(
                         break; 
                     }
                     Ok(PlayerCommand::Pause) => { 
-                        *safe_lock(&status) = PlaybackStatus::Paused; 
-                        stream_paused.store(true, Ordering::Relaxed);
+                        status.store(2, Ordering::Relaxed); 
                     }
                     Ok(PlayerCommand::Resume) => { 
-                        *safe_lock(&status) = PlaybackStatus::Playing; 
-                        stream_paused.store(false, Ordering::Relaxed);
+                        status.store(1, Ordering::Relaxed); 
                     }
                     Ok(PlayerCommand::Play(p, pos)) => { 
                         decode_shutdown.store(true, Ordering::SeqCst);
@@ -3286,7 +3747,7 @@ fn play_file(
                             {
                                 ram_cursor = lock[0].len().saturating_sub(1); 
                             }
-                            *safe_lock(&position_secs) = secs;
+                            position_secs.store(secs.to_bits(), Ordering::Relaxed);
                             flush_signal.store(true, Ordering::SeqCst);
                             pending.iter_mut().for_each(|ch| ch.clear());
                             interleaved.clear();
@@ -3295,7 +3756,7 @@ fn play_file(
                                 let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
                                 let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
                             }
-                            *safe_lock(&position_secs) = secs;
+                            position_secs.store(secs.to_bits(), Ordering::Relaxed);
                             flush_signal.store(true, Ordering::SeqCst);
                             pending.iter_mut().for_each(|ch| ch.clear());
                             interleaved.clear();
@@ -3305,14 +3766,14 @@ fn play_file(
                             kill_current_process(&current_process);
                             running = false;
                             next_track_info = Some((path.to_string(), secs));
-                            *safe_lock(&position_secs) = secs;
+                            position_secs.store(secs.to_bits(), Ordering::Relaxed);
                             break;
                         }
                         break; // ⚡ Break wait loop to process new position
                     }
                     Ok(PlayerCommand::RestartStream) => {
                         let current_p = { safe_lock(&current_track).clone() };
-                        let current_pos = *safe_lock(&position_secs);
+                        let current_pos = f64::from_bits(position_secs.load(Ordering::Relaxed));
                         if let Some(p) = current_p {
                             decode_shutdown.store(true, Ordering::SeqCst);
                             kill_current_process(&current_process);
@@ -3349,7 +3810,7 @@ fn play_file(
         }
         let delay_secs = (p_len / file_rate as f64) + (r_len / dev_rate as f64);
         let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
-        *safe_lock(&position_secs) = true_pos.max(0.0);
+        position_secs.store(true_pos.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
     // 5. WAIT FOR BUFFER TO DRAIN ENTIRELY
@@ -3363,18 +3824,16 @@ fn play_file(
         if flush_signal.load(Ordering::Relaxed) { r_len = 0.0; }
         let delay_secs = (p_len / file_rate as f64) + (r_len / dev_rate as f64);
         let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
-        *safe_lock(&position_secs) = true_pos.max(0.0);
+        position_secs.store(true_pos.max(0.0).to_bits(), Ordering::Relaxed);
 
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
                 PlayerCommand::Stop => { running = false; break; }
                 PlayerCommand::Pause => { 
-                    *safe_lock(&status) = PlaybackStatus::Paused; 
-                    stream_paused.store(true, Ordering::Relaxed);
+                    status.store(2, Ordering::Relaxed); 
                 }
                 PlayerCommand::Resume => { 
-                    *safe_lock(&status) = PlaybackStatus::Playing; 
-                    stream_paused.store(false, Ordering::Relaxed);
+                    status.store(1, Ordering::Relaxed); 
                 }
                 PlayerCommand::Play(p, pos) => { 
                     running = false; 

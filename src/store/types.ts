@@ -54,6 +54,9 @@ export interface DSPState {
   upsample_rate: number;
   dither: boolean;
   exclusive_mode_timing: 'event' | 'polling';
+  preamp_gain: number;
+  limiter_threshold: number;
+  resampler_phase_mode: 'linear' | 'minimum' | 'intermediate';
 
   // EQ
   eq_enabled: boolean;
