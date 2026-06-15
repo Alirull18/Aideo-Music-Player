@@ -2,7 +2,7 @@ import { useState, useEffect, memo } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { MoreVertical, RefreshCw, Activity, Loader2, Heart, DownloadCloud, Check } from 'lucide-react';
+import { MoreVertical, RefreshCw, Activity, Loader2, Heart, DownloadCloud, Check, Trash2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 
 const isStreamTrack = (path: string, format?: string | null) => {
@@ -43,9 +43,10 @@ function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
 }
 
-function CloudCacheButton({ streamUrl, cacheCloudTrack, cachedCloudHashes }: any) {
+function CloudCacheButton({ streamUrl, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes }: any) {
   const [hash, setHash] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   useEffect(() => {
     invoke<string>('get_url_hash', { url: streamUrl }).then(setHash);
@@ -57,12 +58,41 @@ function CloudCacheButton({ streamUrl, cacheCloudTrack, cachedCloudHashes }: any
 
   if (isCached) {
     return (
-      <div 
-        style={{ color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }} 
-        title="Cached Offline"
+      <button
+        onClick={async (e) => {
+          e.stopPropagation();
+          if (window.confirm("Are you sure you want to remove this track from offline cache?")) {
+            setLoading(true);
+            try {
+              await deleteCachedTrack(streamUrl);
+              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Removed from offline cache', type: 'info' } }));
+            } catch (err) {
+              console.error(err);
+            } finally {
+              setLoading(false);
+            }
+          }
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: hovered ? '#ef4444' : '#10b981',
+          cursor: 'pointer',
+          padding: 6,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'color 0.2s',
+          borderRadius: 6,
+          width: 28,
+          height: 28
+        }}
+        title={hovered ? "Remove from Cache" : "Cached Offline"}
       >
-        <Check size={14} />
-      </div>
+        {hovered ? <Trash2 size={14} /> : <Check size={14} />}
+      </button>
     );
   }
 
@@ -80,7 +110,7 @@ function CloudCacheButton({ streamUrl, cacheCloudTrack, cachedCloudHashes }: any
         e.stopPropagation();
         setLoading(true);
         try {
-          await cacheCloudTrack(streamUrl);
+          await cacheCloudTrack({ stream_url: streamUrl });
           window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Cloud track cached successfully for offline playback!', type: 'success' } }));
         } catch (err) {
           console.error(err);
@@ -160,7 +190,7 @@ const TrackRow = memo(({
   t, i, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
   playTrack, setView, setMenuOpenFor, playNextInQueue, addToQueue, matchMetadata, 
   setMatchData, setIsMatching, removeFromPlaylist, setPlaylistModalFor, setEditModalFor,
-  toggleLoveTrack, setCoverArtModalTrack
+  toggleLoveTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
 }: any) => {
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
 
@@ -239,6 +269,14 @@ const TrackRow = memo(({
       <td style={{ textAlign: 'right' }}>
         <div className="track-sub" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
           {fmt(t.duration)}
+          {isStreamTrack(t.path, t.format) && (
+            <CloudCacheButton 
+              streamUrl={t.path} 
+              cacheCloudTrack={() => cacheCloudTrack(t)} 
+              deleteCachedTrack={deleteCachedTrack} 
+              cachedCloudHashes={cachedCloudHashes} 
+            />
+          )}
           <div style={{ position: 'relative' }}>
             <button
               className="icon-btn"
@@ -384,7 +422,7 @@ const TrackRow = memo(({
 
 const CloudTrackRow = memo(({ 
   t, i, active, menuOpenFor, setMenuOpenFor, playCloudTrack, addToQueue, playNextInQueue,
-  cacheCloudTrack, cachedCloudHashes
+  cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
 }: {
   t: CloudTrack,
   i: number,
@@ -394,7 +432,8 @@ const CloudTrackRow = memo(({
   playCloudTrack: (track: CloudTrack) => void,
   addToQueue: (track: any) => void,
   playNextInQueue: (track: any) => void,
-  cacheCloudTrack: (streamUrl: string) => Promise<void>,
+  cacheCloudTrack: (track: any) => Promise<void>,
+  deleteCachedTrack: (streamUrl: string) => Promise<void>,
   cachedCloudHashes: string[]
 }) => {
   const vt = cloudTrackToVirtualTrack(t);
@@ -430,7 +469,12 @@ const CloudTrackRow = memo(({
       <td style={{ textAlign: 'right' }}>
         <div className="track-sub" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
           {fmt(t.duration)}
-          <CloudCacheButton streamUrl={t.stream_url} cacheCloudTrack={cacheCloudTrack} cachedCloudHashes={cachedCloudHashes} />
+          <CloudCacheButton 
+            streamUrl={t.stream_url} 
+            cacheCloudTrack={() => cacheCloudTrack(t)} 
+            deleteCachedTrack={deleteCachedTrack} 
+            cachedCloudHashes={cachedCloudHashes} 
+          />
           <div style={{ position: 'relative' }}>
             <button
               className="icon-btn"
@@ -483,13 +527,13 @@ export function LibraryView() {
     view, tracks, playback, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
     matchMetadata, addToQueue, playNextInQueue, playlists, addToPlaylist,
     subsonicUrl, subsonicUser, subsonicConnected, subsonicPass,
-    jellyfinUrl, jellyfinConnected, toggleLoveTrack, cacheCloudTrack, cachedCloudHashes, fetchCachedCloudHashes,
+    jellyfinUrl, jellyfinConnected, toggleLoveTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
     setCoverArtModalTrack
   } = useStore();
 
   useEffect(() => {
     fetchCachedCloudHashes();
-  }, []);
+  }, [view]);
   
   const [activeSector, setActiveSector] = useState<'local' | 'subsonic' | 'jellyfin'>('local');
   const [menuOpenFor, setMenuOpenFor] = useState<any>(null);
@@ -1046,6 +1090,9 @@ export function LibraryView() {
                       setEditModalFor={setEditModalFor}
                       toggleLoveTrack={toggleLoveTrack}
                       setCoverArtModalTrack={setCoverArtModalTrack}
+                      cacheCloudTrack={cacheCloudTrack}
+                      deleteCachedTrack={deleteCachedTrack}
+                      cachedCloudHashes={cachedCloudHashes}
                     />
                   );
                 })}
@@ -1090,6 +1137,7 @@ export function LibraryView() {
                       addToQueue={addToQueue}
                       playNextInQueue={playNextInQueue}
                       cacheCloudTrack={cacheCloudTrack}
+                      deleteCachedTrack={deleteCachedTrack}
                       cachedCloudHashes={cachedCloudHashes}
                     />
                   );
@@ -1141,6 +1189,7 @@ export function LibraryView() {
                       addToQueue={addToQueue}
                       playNextInQueue={playNextInQueue}
                       cacheCloudTrack={cacheCloudTrack}
+                      deleteCachedTrack={deleteCachedTrack}
                       cachedCloudHashes={cachedCloudHashes}
                     />
                   );

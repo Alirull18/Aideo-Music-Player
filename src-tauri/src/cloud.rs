@@ -406,17 +406,43 @@ pub async fn cache_cloud_track(app_handle: tauri::AppHandle, stream_url: String)
         .await
         .map_err(|e| format!("Failed to download cloud track: {}", e))?;
         
-    if !res.status().is_success() {
-        return Err(format!("Server returned HTTP status: {}", res.status()));
+    // Guard against infinite streams and files over 150MB to prevent memory exhaustion
+    if res.content_length().is_none() {
+        return Err("Cannot cache infinite stream (missing Content-Length)".to_string());
+    }
+    if let Some(len) = res.content_length() {
+        if len > 150 * 1024 * 1024 {
+            return Err("File size exceeds 150MB limit".to_string());
+        }
     }
     
-    let bytes = res.bytes().await.map_err(|e| format!("Failed to read stream bytes: {}", e))?;
+    let temp_path = cache_dir.join(format!("{}.tmp", hash));
     
-    // Encrypt bytes via XOR cipher
-    let encrypted_bytes = xor_cipher(&bytes);
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
     
-    // Save to disk
-    std::fs::write(&cache_path, encrypted_bytes).map_err(|e| format!("Failed to save cache file: {}", e))?;
+    let mut file = tokio::fs::File::create(&temp_path).await
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+        
+    let mut stream = res.bytes_stream();
+    let mut bytes_written = 0;
+    let key = b"AIDEO_OFFLINE_CACHE_KEY_2026";
+    
+    while let Some(chunk_res) = stream.next().await {
+        let chunk = chunk_res.map_err(|e| format!("Stream read error: {}", e))?;
+        let mut chunk_vec = chunk.to_vec();
+        for idx in 0..chunk_vec.len() {
+            let global_pos = bytes_written + idx;
+            chunk_vec[idx] ^= key[global_pos % key.len()];
+        }
+        file.write_all(&chunk_vec).await.map_err(|e| format!("Write failed: {}", e))?;
+        bytes_written += chunk_vec.len();
+    }
+    
+    file.flush().await.map_err(|e| format!("Flush failed: {}", e))?;
+    drop(file);
+    
+    tokio::fs::rename(&temp_path, &cache_path).await.map_err(|e| format!("Rename failed: {}", e))?;
     
     let _ = prune_cache_to_limit_internal(&app_handle);
     
@@ -546,13 +572,6 @@ pub async fn jellyfin_get_library(
     Ok(results)
 }
 
-fn subsonic_encrypt(input: &str) -> String {
-    use base64::Engine;
-    let key = b"aideo_music_player_secret_key_123";
-    let encrypted: Vec<u8> = input.as_bytes().iter().zip(key.iter().cycle()).map(|(b, k)| b ^ k).collect();
-    base64::prelude::BASE64_STANDARD.encode(&encrypted)
-}
-
 fn subsonic_decrypt(input: &str) -> Result<String, String> {
     use base64::Engine;
     let decoded = base64::prelude::BASE64_STANDARD.decode(input.as_bytes()).map_err(|e| e.to_string())?;
@@ -563,15 +582,20 @@ fn subsonic_decrypt(input: &str) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn save_subsonic_password(app_handle: tauri::AppHandle, pass: String) -> Result<(), String> {
+    use keyring::Entry;
+    let entry = Entry::new("AideoMusicPlayer", "subsonic_password").map_err(|e| e.to_string())?;
+    if pass.is_empty() {
+        let _ = entry.delete_credential();
+    } else {
+        entry.set_password(&pass).map_err(|e| e.to_string())?;
+    }
+    
+    // Also cleanup old file if it exists
     use tauri::Manager;
     if let Ok(app_data) = app_handle.path().app_data_dir() {
         let pass_file = app_data.join("subsonic_pass.enc");
-        let _ = std::fs::create_dir_all(&app_data);
-        if pass.is_empty() {
+        if pass_file.exists() {
             let _ = std::fs::remove_file(pass_file);
-        } else {
-            let encrypted = subsonic_encrypt(&pass);
-            let _ = std::fs::write(pass_file, encrypted);
         }
     }
     Ok(())
@@ -579,18 +603,32 @@ pub async fn save_subsonic_password(app_handle: tauri::AppHandle, pass: String) 
 
 #[tauri::command]
 pub async fn get_subsonic_password(app_handle: tauri::AppHandle) -> Result<String, String> {
-    use tauri::Manager;
-    if let Ok(app_data) = app_handle.path().app_data_dir() {
-        let pass_file = app_data.join("subsonic_pass.enc");
-        if pass_file.exists() {
-            if let Ok(content) = std::fs::read_to_string(pass_file) {
-                if let Ok(decrypted) = subsonic_decrypt(&content) {
-                    return Ok(decrypted);
+    use keyring::{Entry, Error};
+    let entry = Entry::new("AideoMusicPlayer", "subsonic_password").map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(pass) => Ok(pass),
+        Err(Error::NoEntry) => {
+            // Check if there is an old encrypted file to migrate
+            use tauri::Manager;
+            if let Ok(app_data) = app_handle.path().app_data_dir() {
+                let pass_file = app_data.join("subsonic_pass.enc");
+                if pass_file.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&pass_file) {
+                        if let Ok(decrypted) = subsonic_decrypt(&content) {
+                            // Migrate to keyring
+                            if entry.set_password(&decrypted).is_ok() {
+                                // Delete old file
+                                let _ = std::fs::remove_file(pass_file);
+                                return Ok(decrypted);
+                            }
+                        }
+                    }
                 }
             }
+            Ok(String::new())
         }
+        Err(e) => Err(e.to_string()),
     }
-    Ok(String::new())
 }
 
 pub fn prune_cache_to_limit_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {

@@ -107,7 +107,7 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
         }
         "ffmpeg" => {
             let zip_dest = aideo_dir.join("ffmpeg.zip");
-            let url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
+            let url = "https://github.com/xihan123/FFmpeg-Audio/releases/download/n8.0.1/ffmpeg-audio-only-8.0.1-windows-x64.zip";
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "Downloading FFmpeg Transcoder in background...",
                 "type": "info"
@@ -119,52 +119,41 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                 "type": "info"
             }));
 
-            let temp_extract_dir = aideo_dir.join("ffmpeg_temp");
-            if temp_extract_dir.exists() {
-                let _ = std::fs::remove_dir_all(&temp_extract_dir);
-            }
+            let extract_func = || -> Result<(), String> {
+                let file = std::fs::File::open(&zip_dest)
+                    .map_err(|e| format!("Failed to open downloaded zip: {}", e))?;
+                let mut archive = zip::ZipArchive::new(file)
+                    .map_err(|e| format!("Failed to read zip archive: {}", e))?;
 
-            // Try PowerShell first (standard Windows)
-            let ps_ok = std::process::Command::new("powershell")
-                .arg("-Command")
-                .arg(format!(
-                    "Expand-Archive -Path '{}' -DestinationPath '{}' -Force; Get-ChildItem -Path '{}' -Filter 'ffmpeg.exe' -Recurse | Move-Item -Destination '{}' -Force",
-                    zip_dest.to_string_lossy(),
-                    temp_extract_dir.to_string_lossy(),
-                    temp_extract_dir.to_string_lossy(),
-                    aideo_dir.to_string_lossy()
-                ))
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
+                let mut extracted = false;
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i)
+                        .map_err(|e| format!("Failed to retrieve file from zip: {}", e))?;
+                    
+                    let outpath = match file.enclosed_name() {
+                        Some(path) => path.to_owned(),
+                        None => continue,
+                    };
 
-            // Fallback: tar.exe is built into Windows 10 1803+ and is NOT stripped by Atlas OS
-            if !ps_ok {
-                println!("[dependencies] PowerShell unavailable or failed. Falling back to tar.exe...");
-                let _ = std::fs::create_dir_all(&temp_extract_dir);
-                let tar_ok = std::process::Command::new("tar")
-                    .args(["-xf", &zip_dest.to_string_lossy(), "-C", &temp_extract_dir.to_string_lossy()])
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false);
-
-                if tar_ok {
-                    // Walk the extracted directory to find ffmpeg.exe and move it
-                    if let Some(entry) = walkdir::WalkDir::new(&temp_extract_dir).into_iter()
-                        .filter_map(|e| e.ok())
-                        .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("ffmpeg.exe"))
-                    {
-                        let _ = std::fs::copy(entry.path(), aideo_dir.join("ffmpeg.exe"));
+                    if outpath.file_name().and_then(|n| n.to_str()).map(|n| n.eq_ignore_ascii_case("ffmpeg.exe")).unwrap_or(false) {
+                        let mut outfile = std::fs::File::create(aideo_dir.join("ffmpeg.exe"))
+                            .map_err(|e| format!("Failed to create destination file: {}", e))?;
+                        std::io::copy(&mut file, &mut outfile)
+                            .map_err(|e| format!("Failed to extract ffmpeg.exe: {}", e))?;
+                        extracted = true;
+                        break;
                     }
                 }
-            }
 
+                if !extracted {
+                    return Err("ffmpeg.exe was not found inside the zip archive".to_string());
+                }
+                Ok(())
+            };
+
+            let extract_res = extract_func();
             let _ = std::fs::remove_file(&zip_dest);
-            let _ = std::fs::remove_dir_all(&temp_extract_dir);
-
-            if !aideo_dir.join("ffmpeg.exe").exists() {
-                return Err("Failed to extract FFmpeg binaries. Both PowerShell and tar extraction failed.".to_string());
-            }
+            extract_res?;
 
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "FFmpeg Transcoder successfully installed!",

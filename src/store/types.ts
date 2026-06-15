@@ -10,6 +10,7 @@ export interface Track {
   cover_url?: string | null;
   is_autoplay?: boolean;
   loved?: number;
+  path_hash?: string | null;
 }
 
 export interface CloudTrack {
@@ -251,7 +252,8 @@ export interface PlayerState {
   toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
   cachedCloudHashes: string[];
   fetchCachedCloudHashes: () => Promise<void>;
-  cacheCloudTrack: (streamUrl: string) => Promise<void>;
+  cacheCloudTrack: (track: any) => Promise<void>;
+  deleteCachedTrack: (streamUrl: string) => Promise<void>;
   generateSmartMix: (mood: string, trendSource: string) => Promise<void>;
   setDriverType: (type: 'WASAPI' | 'ASIO') => void;
   playStream: (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }) => Promise<void>;

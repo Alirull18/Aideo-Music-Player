@@ -537,12 +537,63 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
                 lyric_offset: 0,
                 loved: Some(0),
                 cover_url: None,
+                path_hash: None,
             }
         }
     };
     
     let mut conn = safe_lock(&state.db);
     db::save_tracks(&mut conn, &mut [track]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_track(
+    path: String,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: Option<f64>,
+    format: Option<String>,
+    cover_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let conn = safe_lock(&state.db);
+    conn.execute(
+        "INSERT OR IGNORE INTO tracks (path, title, artist, album, duration, format, loved, cover_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![path, title, artist, album, duration, format, 0, cover_url],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_cached_track(stream_url: String, state: State<'_, AppState>) -> Result<(), String> {
+    let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
+    let Some(data_dir) = dirs::data_dir() else {
+        return Err("Failed to resolve data directory".to_string());
+    };
+    let cache_dir = data_dir.join("Aideo").join("CloudCache");
+    let cache_path = cache_dir.join(format!("{}.cache", hash));
+    let temp_path = cache_dir.join(format!("{}.tmp", hash));
+    
+    if cache_path.exists() {
+        std::fs::remove_file(cache_path).map_err(|e| format!("Failed to delete cache file: {}", e))?;
+    }
+    if temp_path.exists() {
+        let _ = std::fs::remove_file(temp_path);
+    }
+
+    // Only delete from DB if loved is 0 or NULL
+    let conn = safe_lock(&state.db);
+    let loved: i32 = conn.query_row(
+        "SELECT COALESCE(loved, 0) FROM tracks WHERE path = ?1",
+        rusqlite::params![stream_url],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    if loved == 0 {
+        let _ = db::delete_track(&conn, &stream_url);
+    }
     Ok(())
 }
 
@@ -1292,6 +1343,8 @@ pub fn run() {
             remove_from_playlist,
             get_playlist_tracks,
             add_track_to_library,
+            add_track,
+            delete_cached_track,
             delete_track,
             log_playback_start,
             log_playback_end,

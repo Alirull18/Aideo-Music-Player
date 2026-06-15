@@ -89,7 +89,13 @@ const fetchTrackMetadataAndLyrics = async (
 export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   tracks: [],
   currentTrackIndex: -1,
-  currentTrack: null,
+  currentTrack: (() => {
+    try {
+      return JSON.parse(localStorage.getItem('aideo_current_track') || 'null');
+    } catch {
+      return null;
+    }
+  })(),
   shuffle: false,
   repeat: (localStorage.getItem('aideo_repeat') as 'none' | 'all' | 'one') || 'none',
   currentHistoryId: null,
@@ -263,6 +269,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         onlineTrackCache.set(track.path, track);
       }
 
+      localStorage.setItem('aideo_current_track', JSON.stringify(track));
+
       set({
         currentTrackIndex: index,
         currentTrack: track,
@@ -432,6 +440,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
 
       const isOnline = path.startsWith('http://') || path.startsWith('https://');
+
+      if (track) {
+        localStorage.setItem('aideo_current_track', JSON.stringify(track));
+      }
 
       set({
         currentTrackIndex: index,
@@ -979,12 +991,40 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   },
 
-  cacheCloudTrack: async (streamUrl: string) => {
+  cacheCloudTrack: async (track: any) => {
     try {
+      const streamUrl = track.stream_url || track.path;
+      if (!streamUrl) return;
+
+      // 1. Persist metadata to database
+      await invoke('add_track', {
+        path: streamUrl,
+        title: track.title || null,
+        artist: track.artist || null,
+        album: track.album || null,
+        duration: track.duration || null,
+        format: track.provider ? track.provider.toUpperCase() : (track.format || null),
+        coverUrl: track.cover_url || null
+      });
+
+      // 2. Download and encrypt stream
       await invoke('cache_cloud_track', { streamUrl });
+
+      // 3. Reload library and cache lists
       await get().fetchCachedCloudHashes();
+      await get().loadLibrary();
     } catch (e) {
       console.error('cacheCloudTrack:', e);
+    }
+  },
+
+  deleteCachedTrack: async (streamUrl: string) => {
+    try {
+      await invoke('delete_cached_track', { streamUrl });
+      await get().fetchCachedCloudHashes();
+      await get().loadLibrary();
+    } catch (e) {
+      console.error('deleteCachedTrack:', e);
     }
   },
 

@@ -206,6 +206,117 @@ impl Drop for DownloadGuard {
 }
 
 
+fn pipe_url_to_stdin(
+    url: String,
+    mut stdin: std::process::ChildStdin,
+    is_youtube_stream: bool,
+) {
+    let ua = if is_youtube_stream {
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36".to_string()
+    } else {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36".to_string()
+    };
+    
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        let mut bytes_written: u64 = 0;
+        let mut retry_count = 0;
+        let max_retries = 15; // Allow ample retries to recover from long system sleep / wakeup WiFi delay
+
+        while retry_count < max_retries {
+            let client = reqwest::blocking::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+
+            let mut req = client.get(&url).header("User-Agent", &ua);
+            if is_youtube_stream {
+                req = req.header("Referer", "https://www.google.com/");
+            }
+
+            if bytes_written > 0 {
+                req = req.header("Range", format!("bytes={}-", bytes_written));
+                println!("[player-pipe] Requesting HTTP Range resume from byte {}...", bytes_written);
+            }
+
+            match req.send() {
+                Ok(mut response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        retry_count = 0; // Reset retry counter on successful connection
+
+                        if bytes_written > 0 && status == reqwest::StatusCode::OK {
+                            println!("[player-pipe] Server ignored Range header. Skipping first {} bytes...", bytes_written);
+                            let mut to_skip = bytes_written;
+                            let mut skip_buf = [0; 16384];
+                            let mut skip_failed = false;
+                            while to_skip > 0 {
+                                let chunk_size = std::cmp::min(to_skip, skip_buf.len() as u64) as usize;
+                                match response.read(&mut skip_buf[..chunk_size]) {
+                                    Ok(0) => {
+                                        eprintln!("[player-pipe] Server sent premature EOF while skipping.");
+                                        skip_failed = true;
+                                        break;
+                                    }
+                                    Ok(n) => to_skip -= n as u64,
+                                    Err(e) => {
+                                        eprintln!("[player-pipe] Error skipping bytes: {:?}", e);
+                                        skip_failed = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if skip_failed {
+                                retry_count += 1;
+                                std::thread::sleep(std::time::Duration::from_millis(500 * retry_count));
+                                continue;
+                            }
+                        }
+
+                        let mut buffer = [0; 16384];
+                        let mut read_error = false;
+                        loop {
+                            match response.read(&mut buffer) {
+                                Ok(0) => break, // EOF reached
+                                Ok(n) => {
+                                    if stdin.write_all(&buffer[..n]).is_err() {
+                                        // stdin is closed (FFmpeg stopped reading). Exit thread immediately.
+                                        println!("[player-pipe] FFmpeg stdin closed. Terminating pipe thread.");
+                                        return;
+                                    }
+                                    bytes_written += n as u64;
+                                }
+                                Err(e) => {
+                                    eprintln!("[player-pipe] Read error after {} bytes: {:?}. Attempting resume...", bytes_written, e);
+                                    read_error = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if !read_error {
+                            // Streamed to EOF successfully!
+                            return;
+                        }
+                    } else {
+                        eprintln!("[player-pipe] HTTP status error: {}. Retrying...", status);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[player-pipe] Request error: {:?}. Retrying...", e);
+                }
+            }
+
+            retry_count += 1;
+            // Sleep with backoff before retrying
+            let sleep_ms = std::cmp::min(500 * retry_count, 5000);
+            std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+        }
+
+        eprintln!("[player-pipe] Max retries reached. Stream pipe thread failed.");
+    });
+}
+
 fn spawn_youtube_downloader(
     url: String,
     hash: String,
@@ -231,36 +342,12 @@ fn spawn_youtube_downloader(
         let mut cmd = std::process::Command::new(&ffmpeg_path);
         
         let is_youtube_stream = url.contains("youtube.com") || url.contains("googlevideo.com") || url.contains("youtu.be");
-        let ua = if is_youtube_stream {
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36".to_string()
-        } else {
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36".to_string()
-        };
 
         let mut args = Vec::new();
-        if is_youtube_stream {
-            args.push("-referer".to_string());
-            args.push("https://www.google.com/".to_string());
-        }
-        
         args.extend([
-            "-user_agent".to_string(), ua,
-            "-reconnect".to_string(), "1".to_string(),
-            "-reconnect_at_eof".to_string(), "1".to_string(),
-            "-reconnect_streamed".to_string(), "1".to_string(),
-            "-reconnect_delay_max".to_string(), "4".to_string(),
-            "-rw_timeout".to_string(), "10000000".to_string(),
             "-probesize".to_string(), "32768".to_string(),
             "-analyzeduration".to_string(), "100000".to_string(),
-        ]);
-
-        if url.starts_with("https://") {
-            args.push("-tls_verify".to_string());
-            args.push("0".to_string());
-        }
-        
-        args.extend([
-            "-i".to_string(), url.clone(),
+            "-i".to_string(), "pipe:".to_string(),
             "-y".to_string(),
             "-f".to_string(), "wav".to_string(),
             "-acodec".to_string(), "pcm_s16le".to_string(),
@@ -269,14 +356,27 @@ fn spawn_youtube_downloader(
             temp_path.to_string_lossy().to_string(),
         ]);
         
-        cmd.args(&args);
+        cmd.args(&args)
+            .stdin(std::process::Stdio::piped());
         
         #[cfg(target_os = "windows")]
         use std::os::windows::process::CommandExt;
         #[cfg(target_os = "windows")]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         
-        let status = cmd.status();
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[player-bg] FFmpeg background transcode failed to spawn: {:?}", e);
+                return;
+            }
+        };
+
+        if let Some(stdin) = child.stdin.take() {
+            pipe_url_to_stdin(url.clone(), stdin, is_youtube_stream);
+        }
+
+        let status = child.wait();
         match status {
             Ok(s) if s.success() => {
                 println!("[player-bg] Transcode completed successfully for {}", hash);
@@ -770,46 +870,19 @@ fn prepare_decoder(
         let mut args = Vec::new();
         
         if is_stream {
-            // Pass headers ONLY for YouTube streams to bypass Google's 403 blocking,
-            // and avoid sending them to personal/private Subsonic, Jellyfin, or Tidal servers which might reject them.
-            let is_youtube_stream = resolved_url.contains("youtube.com") || resolved_url.contains("googlevideo.com") || resolved_url.contains("youtu.be");
-            let ua = if is_youtube_stream {
-                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36".to_string()
-            } else {
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36".to_string()
-            };
-
-            if is_youtube_stream {
-                args.push("-referer".to_string());
-                args.push("https://www.google.com/".to_string());
-            }
-            
             args.extend([
-                "-user_agent".to_string(), ua,
-                "-reconnect".to_string(), "1".to_string(),
-                "-reconnect_at_eof".to_string(), "1".to_string(),
-                "-reconnect_streamed".to_string(), "1".to_string(),
-                "-reconnect_delay_max".to_string(), "4".to_string(),
-                "-rw_timeout".to_string(), "10000000".to_string(),
                 "-probesize".to_string(), "32768".to_string(),
                 "-analyzeduration".to_string(), "100000".to_string(),
+                "-i".to_string(), "pipe:".to_string(),
             ]);
-
-            if resolved_url.starts_with("https://") {
-                args.push("-tls_verify".to_string());
-                args.push("0".to_string());
-            }
         } else {
             // Local file inputs only need basic probing options
             args.extend([
                 "-probesize".to_string(), "32768".to_string(),
                 "-analyzeduration".to_string(), "100000".to_string(),
+                "-i".to_string(), resolved_url.clone(),
             ]);
         }
-        
-        args.extend([
-            "-i".to_string(), resolved_url.clone(),
-        ]);
 
         if use_ffmpeg_seek && start_pos > 0.0 {
             args.push("-ss".to_string());
@@ -845,6 +918,10 @@ fn prepare_decoder(
         cmd.args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+        if is_stream {
+            cmd.stdin(std::process::Stdio::piped());
+        }
         
         #[cfg(target_os = "windows")]
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
@@ -900,7 +977,7 @@ fn prepare_decoder(
             args.extend([
                 "-probesize".to_string(), "1048576".to_string(),
                 "-analyzeduration".to_string(), "5000000".to_string(),
-                "-i".to_string(), "-".to_string(),
+                "-i".to_string(), "pipe:".to_string(),
             ]);
 
             if start_pos > 0.0 {
@@ -972,6 +1049,14 @@ fn prepare_decoder(
                             if line.contains("Error") { eprintln!("[ffmpeg-err] {}", line); }
                         }
                     });
+                    
+                    if is_stream {
+                        if let Some(stdin) = child.stdin.take() {
+                            let is_youtube = resolved_url.contains("youtube.com") || resolved_url.contains("googlevideo.com") || resolved_url.contains("youtu.be");
+                            pipe_url_to_stdin(resolved_url.clone(), stdin, is_youtube);
+                        }
+                    }
+                    
                     let stdout = child.stdout.take().ok_or("Failed to open FFmpeg stdout")?;
                     *safe_lock(current_process) = Some(child);
                     let source = symphonia::core::io::ReadOnlySource::new(stdout);
@@ -2547,14 +2632,78 @@ fn play_file(
 
     let dsp_now = safe_lock(&dsp_state).clone();
     let transcode_quality = dsp_now.ffmpeg_transcode_quality.clone();
-    let info = match prepare_decoder(&resolved_path, start_pos, app_handle, ffmpeg_path, &current_process, &transcode_quality, &dsp_now) {
-        Ok(i) => i,
-        Err(e) => {
-            kill_current_process(&current_process); // Ensure dead process is reaped immediately
-            let _ = app_handle.emit("playback-error", e);
-            return None;
+
+    let (tx, rx_decoder) = std::sync::mpsc::channel();
+    let path_clone = resolved_path.clone();
+    let app_handle_clone = app_handle.clone();
+    let ffmpeg_clone = ffmpeg_path.to_string();
+    let process_clone = Arc::clone(&current_process);
+    let quality_clone = transcode_quality.clone();
+    let dsp_clone = dsp_now.clone();
+
+    std::thread::spawn(move || {
+        let res = prepare_decoder(
+            &path_clone,
+            start_pos,
+            &app_handle_clone,
+            &ffmpeg_clone,
+            &process_clone,
+            &quality_clone,
+            &dsp_clone,
+        );
+        let _ = tx.send(res);
+    });
+
+    let info = loop {
+        // 1. Check if decoder is ready
+        if let Ok(res) = rx_decoder.try_recv() {
+            match res {
+                Ok(i) => break i,
+                Err(e) => {
+                    kill_current_process(&current_process); // Ensure dead process is reaped immediately
+                    let _ = app_handle.emit("playback-error", e);
+                    return None;
+                }
+            }
         }
+
+        // 2. Poll commands channel to abort preparation instantly if new player command arrives
+        if let Ok(cmd) = rx.try_recv() {
+            match cmd {
+                PlayerCommand::Stop => {
+                    kill_current_process(&current_process);
+                    return None;
+                }
+                PlayerCommand::Play(p, pos) => {
+                    kill_current_process(&current_process);
+                    return Some((p, pos));
+                }
+                PlayerCommand::Seek(secs) => {
+                    kill_current_process(&current_process);
+                    return Some((path.to_string(), secs));
+                }
+                PlayerCommand::Pause => {
+                    status.store(2, Ordering::Relaxed);
+                }
+                PlayerCommand::Resume => {
+                    status.store(1, Ordering::Relaxed);
+                }
+                PlayerCommand::RestartStream => {
+                    kill_current_process(&current_process);
+                    return Some((path.to_string(), start_pos));
+                }
+                PlayerCommand::PushNext(path) => {
+                    safe_lock(&queue).push_front(path);
+                }
+                PlayerCommand::AppendQueue(path) => {
+                    safe_lock(&queue).push_back(path);
+                }
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
     };
+
     let resolved_path = info.resolved_path.clone();
 
     let file_rate = info.file_rate;
@@ -2595,15 +2744,50 @@ fn play_file(
                                 let mut req = client.get(&resolved_url);
                                 req = req.header("User-Agent", USER_AGENT);
 
-                                if let Ok(res) = req.send() {
+                                if let Ok(mut res) = req.send() {
                                     if res.status().is_success() {
-                                        if let Ok(bytes) = res.bytes() {
-                                            let encrypted = crate::cloud::xor_cipher(&bytes);
-                                            if std::fs::write(&temp_path, encrypted).is_ok()
-                                                && std::fs::rename(&temp_path, &cache_path).is_ok()
-                                            {
-                                                println!("[player-bg-cache] Stream successfully cached to disk!");
-                                                let _ = crate::cloud::prune_cache_to_limit_internal(&app);
+                                        let is_infinite = res.content_length().is_none();
+                                        let is_too_large = res.content_length().map(|len| len > 150 * 1024 * 1024).unwrap_or(false);
+
+                                        if is_infinite {
+                                            println!("[player-bg-cache] Aborting cache: Infinite stream detected (missing Content-Length).");
+                                        } else if is_too_large {
+                                            println!("[player-bg-cache] Aborting cache: File size exceeds 150MB limit ({} bytes).", res.content_length().unwrap_or(0));
+                                        } else if let Ok(mut temp_file) = std::fs::File::create(&temp_path) {
+                                            let mut temp_buf = vec![0u8; 16384];
+                                            let mut download_failed = false;
+                                            let mut bytes_written = 0;
+                                            let key = b"AIDEO_OFFLINE_CACHE_KEY_2026";
+                                            
+                                            use std::io::{Read, Write};
+                                            loop {
+                                                match res.read(&mut temp_buf) {
+                                                    Ok(0) => break,
+                                                    Ok(n) => {
+                                                        for idx in 0..n {
+                                                            let global_pos = bytes_written + idx;
+                                                            temp_buf[idx] ^= key[global_pos % key.len()];
+                                                        }
+                                                        if temp_file.write_all(&temp_buf[..n]).is_err() {
+                                                            download_failed = true;
+                                                            break;
+                                                        }
+                                                        bytes_written += n;
+                                                    }
+                                                    Err(_) => {
+                                                        download_failed = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            if !download_failed && bytes_written > 0 {
+                                                let _ = temp_file.flush();
+                                                drop(temp_file);
+                                                if std::fs::rename(&temp_path, &cache_path).is_ok() {
+                                                    println!("[player-bg-cache] Stream successfully cached to disk!");
+                                                    let _ = crate::cloud::prune_cache_to_limit_internal(&app);
+                                                }
                                             }
                                         }
                                     }

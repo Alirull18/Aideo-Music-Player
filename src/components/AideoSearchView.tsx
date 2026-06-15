@@ -45,7 +45,7 @@ export function AideoSearchView() {
   const [isSearching, setIsSearching] = useState(false);
   
   // Tabs State
-  const [searchTab, setSearchTab] = useState<'youtube' | 'tidal'>('youtube');
+  const [searchTab, setSearchTab] = useState<'youtube' | 'tidal'>('tidal');
   
   // Results States
   const [youtubeResults, setYoutubeResults] = useState<YoutubeTrack[]>([]);
@@ -150,8 +150,8 @@ export function AideoSearchView() {
     const handleTriggerSearch = (e: any) => {
       const { query: searchQ, provider } = e.detail || {};
       if (searchQ) {
-        setSearchTab(provider || 'youtube');
-        triggerInstantSearch(searchQ, provider || 'youtube');
+        setSearchTab(provider || 'tidal');
+        triggerInstantSearch(searchQ, provider || 'tidal');
       }
     };
     window.addEventListener('ui-trigger-search', handleTriggerSearch);
@@ -569,7 +569,7 @@ export function AideoSearchView() {
               marginBottom: 8, 
               color: 'white'
             }}>
-              Aideo Search
+              Tidal Search
             </h1>
             <p style={{ color: 'var(--text-dim)', fontSize: 14, transition: 'color 0.3s' }}>
               {activeDescription}

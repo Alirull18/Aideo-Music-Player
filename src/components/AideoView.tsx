@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List } from 'lucide-react';
+import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 
 // Format track duration
@@ -113,6 +113,20 @@ export function AideoView() {
   const [activeSource, setActiveSource] = useState('Library History');
   const [generatingMix, setGeneratingMix] = useState(false);
   const [visibleRecsCount, setVisibleRecsCount] = useState(15);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const handleAideoSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setView('aideo_search');
+    const q = searchQuery.trim();
+    setSearchQuery('');
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('ui-trigger-search', {
+        detail: { query: q, provider: 'tidal' }
+      }));
+    }, 100);
+  };
 
   const handleGenerateSmartMix = async () => {
     setGeneratingMix(true);
@@ -697,6 +711,78 @@ export function AideoView() {
     <div className="aideo-home-wrap">
       {/* Background tint overlay */}
       <div className="aideo-bg-tint"></div>
+
+      {/* Premium Tidal Search Bar */}
+      <div style={{ marginBottom: 36, maxWidth: 640 }}>
+        <form onSubmit={handleAideoSearch} style={{ display: 'flex', gap: 12 }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center' }}>
+              <Search size={18} />
+            </div>
+            <input 
+              type="text" 
+              placeholder="Search Tidal Lossless Cloud..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '14px 20px 14px 48px',
+                borderRadius: 14,
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'rgba(255,255,255,0.03)',
+                backdropFilter: 'blur(12px)',
+                color: 'white',
+                fontSize: 14,
+                fontWeight: 500,
+                outline: 'none',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.2), inset 0 2px 4px rgba(255,255,255,0.02)',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = 'rgba(6, 182, 212, 0.5)';
+                e.target.style.boxShadow = '0 0 20px rgba(6, 182, 212, 0.15), inset 0 2px 4px rgba(255,255,255,0.02)';
+                e.target.style.background = 'rgba(255,255,255,0.05)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = 'rgba(255,255,255,0.08)';
+                e.target.style.boxShadow = '0 4px 20px rgba(0,0,0,0.2), inset 0 2px 4px rgba(255,255,255,0.02)';
+                e.target.style.background = 'rgba(255,255,255,0.03)';
+              }}
+            />
+          </div>
+          <button
+            type="submit"
+            style={{
+              padding: '0 24px',
+              borderRadius: 14,
+              border: '1px solid rgba(6, 182, 212, 0.3)',
+              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.05))',
+              color: '#06b6d4',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              transition: 'all 0.2s ease',
+              boxShadow: '0 4px 15px rgba(6, 182, 212, 0.1)',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'linear-gradient(135deg, rgba(6, 182, 212, 0.3), rgba(6, 182, 212, 0.1))';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(6, 182, 212, 0.2)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.05))';
+              e.currentTarget.style.transform = 'none';
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(6, 182, 212, 0.1)';
+            }}
+          >
+            Search
+          </button>
+        </form>
+      </div>
 
       {/* Greeting Header */}
       <div className="aideo-greeting-header">

@@ -366,7 +366,7 @@ pub async fn chromecast_play(
     
     let is_remote = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
     
-    let stream_url = if is_remote {
+    let mut stream_url = if is_remote {
         resolved_path.clone()
     } else {
         let local_ip = get_local_ip().ok_or("Could not resolve local interface IP address")?;
@@ -375,6 +375,16 @@ pub async fn chromecast_play(
         let encoded_path = urlencoding::encode(&resolved_path);
         format!("http://{}:{}/stream?path={}", local_ip, port, encoded_path)
     };
+    
+    // Rewrite loopback addresses (localhost/127.0.0.1) to local interface IP so Chromecast can reach them
+    if stream_url.contains("://localhost:") || stream_url.contains("://127.0.0.1:") {
+        if let Some(local_ip) = get_local_ip() {
+            stream_url = stream_url
+                .replace("://localhost:", &format!("://{}:", local_ip))
+                .replace("://127.0.0.1:", &format!("://{}:", local_ip));
+            println!("[chromecast] Rewrote local loopback address in stream URL: {}", stream_url);
+        }
+    }
     
     // Resolve clean MIME type
     let resolved_mime = if is_remote {

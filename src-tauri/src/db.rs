@@ -13,6 +13,7 @@ pub struct Track {
     pub lyric_offset: i32,
     pub loved: Option<i32>,
     pub cover_url: Option<String>,
+    pub path_hash: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -300,9 +301,11 @@ pub fn update_track_offset(conn: &Connection, path: &str, offset: i32) -> Result
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, cover_url FROM tracks")?;
     let track_iter = stmt.query_map([], |row| {
+        let path: String = row.get(1)?;
+        let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
         Ok(Track {
             id: row.get(0)?,
-            path: row.get(1)?,
+            path,
             title: row.get(2)?,
             artist: row.get(3)?,
             album: row.get(4)?,
@@ -311,6 +314,7 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             lyric_offset: row.get(7).unwrap_or(0),
             loved: Some(row.get(8).unwrap_or(0)),
             cover_url: row.get(9).ok(),
+            path_hash,
         })
     })?;
 
@@ -383,6 +387,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
             Some(p) => p,
             None => return Err(rusqlite::Error::QueryReturnedNoRows), // skip fully NULL rows
         };
+        let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
         Ok(Track {
             id: row.get(0).unwrap_or(0),
             path,
@@ -394,6 +399,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
             lyric_offset: row.get(7).unwrap_or(0),
             loved: Some(row.get(8).unwrap_or(0)),
             cover_url: row.get(9).ok(),
+            path_hash,
         })
     })?;
 

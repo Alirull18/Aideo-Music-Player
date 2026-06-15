@@ -174,6 +174,7 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
         lyric_offset: 0,
         loved: Some(0),
         cover_url: None,
+        path_hash: None,
     })
 }
 
@@ -236,6 +237,7 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
         lyric_offset: 0,
         loved: Some(0),
         cover_url: None,
+        path_hash: None,
     })
 }
 
@@ -316,5 +318,6 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
         lyric_offset: 0,
         loved: Some(0),
         cover_url: None,
+        path_hash: None,
     })
 }

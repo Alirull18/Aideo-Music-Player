@@ -21,7 +21,23 @@ const performDspInvoke = async (dsp: any) => {
 };
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
-  playback: { status: 'Stopped', current_track: null, position_secs: 0, volume: 1.0, exclusive: false, bit_perfect: false, dev_rate: 0, driver_type: 'WASAPI' },
+  playback: {
+    status: 'Stopped',
+    current_track: (() => {
+      try {
+        const tr = JSON.parse(localStorage.getItem('aideo_current_track') || 'null');
+        return tr ? tr.path : null;
+      } catch {
+        return null;
+      }
+    })(),
+    position_secs: 0,
+    volume: 1.0,
+    exclusive: false,
+    bit_perfect: false,
+    dev_rate: 0,
+    driver_type: 'WASAPI'
+  },
   dsp: {
     enabled: false,
     low_spec_mode: localStorage.getItem('aideo_low_spec') === 'true',
@@ -146,6 +162,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await invoke('stop_track');
       }
       
+      localStorage.removeItem('aideo_current_track');
       set({
         currentTrack: null,
         playback: { 
