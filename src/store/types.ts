@@ -256,7 +256,7 @@ export interface PlayerState {
   deleteCachedTrack: (streamUrl: string) => Promise<void>;
   generateSmartMix: (mood: string, trendSource: string) => Promise<void>;
   setDriverType: (type: 'WASAPI' | 'ASIO') => void;
-  playStream: (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }) => Promise<void>;
+  playStream: (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }, triggerAutoplay?: boolean) => Promise<void>;
   fetchLastfmDashboard: () => Promise<void>;
   matchMetadata: (track: Track) => Promise<any>;
   lastfmUser: any | null;

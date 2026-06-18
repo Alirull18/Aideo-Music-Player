@@ -80,7 +80,13 @@ export function YoutubeSearchView() {
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Downloading: ${track.title}...`, type: 'info' }}));
     
     try {
-      await invoke('download_track', { url: track.url, quality });
+      await invoke('download_track', {
+        url: track.url,
+        quality,
+        title: track.title,
+        artist: track.artist,
+        coverUrl: track.cover_url
+      });
       setDownloadedIds(prev => new Set(prev).add(track.id));
       useStore.getState().loadLibrary(); // Rescan immediately
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Download complete: ${track.title} added to library!`, type: 'success' }}));

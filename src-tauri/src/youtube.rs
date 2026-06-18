@@ -519,6 +519,32 @@ pub async fn search_youtube(query: String) -> Result<Vec<YoutubeTrack>, String> 
     search_youtube_internal(&client, &api_key, &query, true).await
 }
 
+#[tauri::command]
+pub async fn get_search_suggestions(query: String) -> Result<Vec<String>, String> {
+    let url = format!(
+        "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={}",
+        urlencoding::encode(&query)
+    );
+    let client = reqwest::Client::new();
+    let res = client.get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let body = res.text().await.map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let mut suggestions = Vec::new();
+    if let Some(arr) = json.get(1).and_then(|v| v.as_array()) {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                suggestions.push(s.to_string());
+            }
+        }
+    }
+    Ok(suggestions)
+}
+
 fn is_one_hour_or_longer(duration_raw: &str) -> bool {
     let parts: Vec<&str> = duration_raw.split(':').collect();
     if parts.len() >= 3 {
@@ -1634,10 +1660,107 @@ fn run_ytdlp_with_progress(
 use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+async fn add_downloaded_track_to_library(
+    path: String,
+    title: Option<String>,
+    artist: Option<String>,
+    cover_url: Option<String>,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    // 1. Download cover art if provided
+    if let Some(ref url) = cover_url {
+        if !url.is_empty() {
+            let path_obj = std::path::Path::new(&path);
+            if let Some(parent) = path_obj.parent() {
+                if let Some(stem) = path_obj.file_stem() {
+                    let ext = if url.contains(".png") { "png" } else { "jpg" };
+                    let img_path = parent.join(format!("{}.{}", stem.to_string_lossy(), ext));
+                    println!("[youtube] Attempting to download cover art to: {:?}", img_path);
+                    
+                    let client = reqwest::Client::new();
+                    match client.get(url).send().await {
+                        Ok(res) => {
+                            match res.bytes().await {
+                                Ok(bytes) => {
+                                    if let Err(e) = std::fs::write(&img_path, bytes) {
+                                        eprintln!("[youtube] Failed to write downloaded cover art to {:?}: {}", img_path, e);
+                                    } else {
+                                        println!("[youtube] Successfully cached cover art locally.");
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[youtube] Failed to read cover art bytes from URL: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[youtube] Failed to fetch cover art from URL: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Extract metadata or fallback
+    let mut track = match crate::scanner::extract_metadata(std::path::Path::new(&path)) {
+        Some(t) => t,
+        None => {
+            let fallback_title = std::path::Path::new(&path)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+                
+            crate::db::Track {
+                id: 0,
+                path: path.clone(),
+                title: Some(fallback_title),
+                artist: Some("Unknown Artist".to_string()),
+                album: None,
+                duration: None,
+                format: std::path::Path::new(&path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|s| s.to_uppercase()),
+                lyric_offset: 0,
+                loved: Some(0),
+                cover_url: None,
+                path_hash: None,
+            }
+        }
+    };
+
+    // 3. Override extracted metadata with provided metadata if they are present
+    if let Some(t) = title {
+        if !t.is_empty() {
+            track.title = Some(t);
+        }
+    }
+    if let Some(a) = artist {
+        if !a.is_empty() {
+            track.artist = Some(a);
+        }
+    }
+    if let Some(c) = cover_url {
+        if !c.is_empty() {
+            track.cover_url = Some(c);
+        }
+    }
+
+    // 4. Save track to library DB
+    let mut conn = crate::safe_lock(&state.db);
+    crate::db::save_tracks(&mut conn, &mut [track]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn download_track(
     url: String,
     quality: String,
+    title: Option<String>,
+    artist: Option<String>,
+    cover_url: Option<String>,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
@@ -1719,7 +1842,7 @@ pub async fn download_track(
     
     if let Ok(final_path_str) = run_ytdlp_with_progress(&ytdlp_path, &args_1, &url, &app_handle, &music_dir) {
         println!("[youtube] Download SUCCESS! Final file: {}", final_path_str);
-        crate::add_track_to_library(final_path_str.clone(), state)?;
+        add_downloaded_track_to_library(final_path_str.clone(), title.clone(), artist.clone(), cover_url.clone(), &state).await?;
         return Ok(final_path_str);
     }
 
@@ -1733,7 +1856,7 @@ pub async fn download_track(
     // Retry 1: updated yt-dlp with default adaptive arguments
     if let Ok(final_path_str) = run_ytdlp_with_progress(&ytdlp_path, &args_1, &url, &app_handle, &music_dir) {
         println!("[youtube] Retry 1 SUCCESS! Final file: {}", final_path_str);
-        crate::add_track_to_library(final_path_str.clone(), state)?;
+        add_downloaded_track_to_library(final_path_str.clone(), title.clone(), artist.clone(), cover_url.clone(), &state).await?;
         return Ok(final_path_str);
     }
 
@@ -1769,7 +1892,7 @@ pub async fn download_track(
     match run_ytdlp_with_progress(&ytdlp_path, &args_retry_2, &url, &app_handle, &music_dir) {
         Ok(final_path_str) => {
             println!("[youtube] Retry 2 SUCCESS! Final file: {}", final_path_str);
-            crate::add_track_to_library(final_path_str.clone(), state)?;
+            add_downloaded_track_to_library(final_path_str.clone(), title.clone(), artist.clone(), cover_url.clone(), &state).await?;
             Ok(final_path_str)
         }
         Err(e) => {

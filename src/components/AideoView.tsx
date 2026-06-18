@@ -1,10 +1,10 @@
 import { useState, useEffect, memo, useRef } from 'react';
-import { useStore } from '../store';
+import { useStore, Track } from '../store';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search } from 'lucide-react';
+import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 
 // Format track duration
@@ -17,6 +17,276 @@ function fmt(s: number | null) {
 function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
 }
+
+// Format large stats numbers
+function formatNumber(numStr: string | number | null | undefined) {
+  if (!numStr) return '0';
+  const num = typeof numStr === 'number' ? numStr : parseInt(numStr, 10);
+  if (isNaN(num)) return '0';
+  return num.toLocaleString();
+}
+
+// Clean HTML tags from Last.fm biography summaries
+function cleanBio(bioStr: string | null | undefined) {
+  if (!bioStr) return '';
+  return bioStr.replace(/<[^>]*>/g, '').trim();
+}
+
+
+
+// Clickable artist link with hover underline
+const ArtistLink = memo(({ name, onClick }: { name: string; onClick: () => void }) => {
+  const [hover, setHover] = useState(false);
+  return (
+    <span
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        cursor: 'pointer',
+        textDecoration: hover ? 'underline' : 'none',
+        color: hover ? 'var(--accent)' : 'inherit',
+        transition: 'color 0.2s ease',
+      }}
+    >
+      {name}
+    </span>
+  );
+});
+
+// Row for rendering a popular track with resolved cover art via iTunes
+const PopularTrackRow = memo(({ 
+  track, 
+  artistName, 
+  idx, 
+  resolvingTrackId, 
+  downloadingIds, 
+  downloadedIds, 
+  copiedId, 
+  handlePlayPopularTrack, 
+  handleOpenWebBypassForPopular, 
+  handleDownloadPopularTrack,
+  formatNumber,
+  totalTracks
+}: {
+  track: any;
+  artistName: string;
+  idx: number;
+  resolvingTrackId: string | null;
+  downloadingIds: Set<string>;
+  downloadedIds: Set<string>;
+  copiedId: string | null;
+  handlePlayPopularTrack: (name: string) => void;
+  handleOpenWebBypassForPopular: (name: string, provider: 'lucida' | 'squid') => void;
+  handleDownloadPopularTrack: (name: string) => void;
+  formatNumber: (n: any) => string;
+  totalTracks: number;
+}) => {
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const query = `${artistName} - ${track.name}`;
+    fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=1`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.results && data.results.length > 0) {
+          const url = data.results[0].artworkUrl100.replace('100x100bb.jpg', '200x200bb.jpg');
+          setCoverUrl(url);
+        }
+      })
+      .catch(() => {});
+  }, [track.name, artistName]);
+
+  const isResolving = resolvingTrackId === `${artistName}-${track.name}`;
+  const isDownloading = downloadingIds.has(`${artistName}-${track.name}`);
+  const isDownloaded = downloadedIds.has(`${artistName}-${track.name}`);
+
+  return (
+    <div 
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        padding: '12px 20px',
+        borderBottom: idx === totalTracks - 1 ? 'none' : '1px solid rgba(255,255,255,0.04)',
+        transition: 'background 0.2s',
+        gap: 16
+      }}
+      className="dropdown-item-hover"
+    >
+      {/* Number index */}
+      <div style={{ width: 24, fontSize: 13, fontWeight: 700, color: 'var(--text-dim)', display: 'flex', justifyContent: 'center' }}>
+        {idx + 1}
+      </div>
+
+      {/* Cover art thumbnail */}
+      <div style={{ width: 40, height: 40, borderRadius: 8, overflow: 'hidden', background: '#111', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        {coverUrl ? (
+          <img src={coverUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer" />
+        ) : (
+          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
+            <Music size={16} color="var(--text-dim)" />
+          </div>
+        )}
+      </div>
+
+      {/* Title and metadata */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {track.name}
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+          {artistName}
+        </span>
+      </div>
+
+      {/* Listeners stats */}
+      {track.listeners && (
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 500, minWidth: 100, textAlign: 'right' }}>
+          {formatNumber(track.listeners)} listeners
+        </div>
+      )}
+
+      {/* Action Row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Play Button */}
+        <button
+          onClick={() => handlePlayPopularTrack(track.name)}
+          style={{
+            background: isResolving ? 'rgba(6, 182, 212, 0.1)' : 'rgba(255,255,255,0.04)',
+            border: '1px solid ' + (isResolving ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255,255,255,0.08)'),
+            borderRadius: 8,
+            width: 32,
+            height: 32,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: isResolving ? '#06b6d4' : 'white',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={e => {
+            if (!isResolving) e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+          }}
+          onMouseLeave={e => {
+            if (!isResolving) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+          }}
+          title="Play song"
+        >
+          {isResolving ? (
+            <Loader2 className="spin" size={14} />
+          ) : (
+            <Play size={14} fill="currentColor" />
+          )}
+        </button>
+
+        {/* Lucida Web Bypass */}
+        <button
+          onClick={() => handleOpenWebBypassForPopular(track.name, 'lucida')}
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 8,
+            padding: '0 8px',
+            height: 32,
+            fontSize: 11,
+            fontWeight: 700,
+            color: copiedId === `${artistName}-${track.name}-lucida` ? '#10b981' : 'var(--text-dim)',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = '#fff'}
+          onMouseLeave={e => e.currentTarget.style.color = copiedId === `${artistName}-${track.name}-lucida` ? '#10b981' : 'var(--text-dim)'}
+          title="Copy & search FLAC on Lucida"
+        >
+          {copiedId === `${artistName}-${track.name}-lucida` ? <Check size={12} /> : "L"}
+        </button>
+
+        {/* Squid Web Bypass */}
+        <button
+          onClick={() => handleOpenWebBypassForPopular(track.name, 'squid')}
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 8,
+            padding: '0 8px',
+            height: 32,
+            fontSize: 11,
+            fontWeight: 700,
+            color: copiedId === `${artistName}-${track.name}-squid` ? '#10b981' : 'var(--text-dim)',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={e => e.currentTarget.style.color = '#fff'}
+          onMouseLeave={e => e.currentTarget.style.color = copiedId === `${artistName}-${track.name}-squid` ? '#10b981' : 'var(--text-dim)'}
+          title="Copy & search FLAC on Squid"
+        >
+          {copiedId === `${artistName}-${track.name}-squid` ? <Check size={12} /> : "S"}
+        </button>
+
+        {/* Download Button */}
+        {isDownloaded ? (
+          <div 
+            style={{
+              background: 'rgba(16, 185, 129, 0.1)',
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+              borderRadius: 8,
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#10b981'
+            }}
+            title="Added to Offline Library"
+          >
+            <Check size={14} />
+          </div>
+        ) : isDownloading ? (
+          <div 
+            style={{
+              background: 'rgba(16, 185, 129, 0.1)',
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+              borderRadius: 8,
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#10b981'
+            }}
+          >
+            <Loader2 className="spin" size={14} />
+          </div>
+        ) : (
+          <button
+            onClick={() => handleDownloadPopularTrack(track.name)}
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 8,
+              width: 32,
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+            title="Download song offline"
+          >
+            <Download size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+});
 
 // Artwork caching
 const coverArtCache = new Map<string, string | null>();
@@ -94,7 +364,9 @@ export function AideoView() {
     isLoadingRecs,
     setIsLoadingRecs,
     activeDiscoveryTab,
-    setActiveDiscoveryTab
+    setActiveDiscoveryTab,
+    addToQueue,
+    triggerAutoplayRadio
   } = useStore();
   const [greeting, setGreeting] = useState('Good morning');
   const [timeMix, setTimeMix] = useState({
@@ -113,19 +385,182 @@ export function AideoView() {
   const [activeSource, setActiveSource] = useState('Library History');
   const [generatingMix, setGeneratingMix] = useState(false);
   const [visibleRecsCount, setVisibleRecsCount] = useState(15);
+  
+  // YouTube Music / Web Search states
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [quickResults, setQuickResults] = useState<any[]>([]);
+  const [searchActive, setSearchActive] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [artistProfile, setArtistProfile] = useState<any | null>(null);
+  const [resolvingTrackId, setResolvingTrackId] = useState<string | null>(null);
+  const [showFullBio, setShowFullBio] = useState(false);
+  const [artistHeroImage, setArtistHeroImage] = useState<string | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Load search history, click outside, and remote trigger handler
+  useEffect(() => {
+    const history = localStorage.getItem('aideo_search_history');
+    if (history) {
+      try {
+        setSearchHistory(JSON.parse(history));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setSearchFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+
+    const handleRemoteSearch = (e: any) => {
+      const { query: q } = e.detail || {};
+      if (q) {
+        triggerSearch(q);
+      }
+    };
+    window.addEventListener('ui-trigger-aideo-search', handleRemoteSearch);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('ui-trigger-aideo-search', handleRemoteSearch);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (artistProfile && artistProfile.name) {
+      // Fetch artist hero image (using top song or album cover)
+      fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(artistProfile.name)}&media=music&entity=album&limit=1`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.results && data.results.length > 0) {
+            const url = data.results[0].artworkUrl100.replace('100x100bb.jpg', '600x600bb.jpg');
+            setArtistHeroImage(url);
+          } else {
+            setArtistHeroImage(null);
+          }
+        })
+        .catch(() => setArtistHeroImage(null));
+    } else {
+      setArtistHeroImage(null);
+    }
+  }, [artistProfile]);
+
+  // Fetch suggestions and quick results dynamically
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSuggestions([]);
+      setQuickResults([]);
+      return;
+    }
+
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        // Autocomplete suggestions
+        const suggs = await invoke<string[]>('get_search_suggestions', { query: searchQuery.trim() });
+        setSuggestions(suggs.slice(0, 5));
+
+        // Quick search results
+        const tracks = await invoke<any[]>('search_youtube', { query: searchQuery.trim() });
+        setQuickResults(tracks.slice(0, 3));
+      } catch (e) {
+        console.error('Failed to fetch suggestions/quick results:', e);
+      }
+    }, 250);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
+
+  const triggerSearch = async (q: string) => {
+    setSearchQuery(q);
+    setSearchFocused(false);
+    setSearchActive(true);
+    setIsSearching(true);
+    setArtistProfile(null);
+    setShowFullBio(false);
+
+    // Save to search history
+    setSearchHistory(prev => {
+      const next = [q, ...prev.filter(item => item !== q)].slice(0, 10);
+      localStorage.setItem('aideo_search_history', JSON.stringify(next));
+      return next;
+    });
+
+    try {
+      const isShortQuery = q.trim().split(/\s+/).length <= 3;
+      if (isShortQuery) {
+        try {
+          const profile = await invoke<any>('get_artist_profile', { artist: q.trim() });
+          if (profile && profile.name) {
+            setArtistProfile(profile);
+            setIsSearching(false);
+            return;
+          }
+        } catch (e) {
+          console.log("Failed to fetch artist profile:", e);
+        }
+      }
+
+      const tracks = await invoke<any[]>('search_youtube', { query: q });
+      setSearchResults(tracks);
+    } catch (err) {
+      console.error("Search failed:", err);
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Search failed: ${err}`, type: 'error' } }));
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   const handleAideoSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
-    setView('aideo_search');
-    const q = searchQuery.trim();
-    setSearchQuery('');
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('ui-trigger-search', {
-        detail: { query: q, provider: 'tidal' }
-      }));
-    }, 100);
+    if (searchQuery.trim()) {
+      triggerSearch(searchQuery.trim());
+    }
+  };
+
+  const handleDeleteHistory = (e: React.MouseEvent, q: string) => {
+    e.stopPropagation();
+    setSearchHistory(prev => {
+      const next = prev.filter(item => item !== q);
+      localStorage.setItem('aideo_search_history', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const handlePlayQuickTrack = async (track: any) => {
+    setSearchFocused(false);
+    window.dispatchEvent(new CustomEvent('ui-toast', { 
+      detail: { message: `Playing: ${track.title}...`, type: 'info' } 
+    }));
+    try {
+      const parsedSeconds = (() => {
+        const parts = (track.duration_raw || '').split(':').map(Number);
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        return 0;
+      })();
+      await playStream(track.url, {
+        title: track.title,
+        artist: track.artist,
+        cover_url: track.cover_url,
+        duration: parsedSeconds
+      });
+      
+      invoke('update_media_metadata', {
+        title: track.title,
+        artist: track.artist,
+        coverUrl: track.cover_url || null,
+        duration: parsedSeconds,
+      }).catch(() => {});
+    } catch (e) {
+      console.error('Failed to stream quick track:', e);
+    }
   };
 
   const handleGenerateSmartMix = async () => {
@@ -308,7 +743,13 @@ export function AideoView() {
       detail: { message: `Downloading high-fidelity stream: ${track.title}...`, type: 'info' } 
     }));
     try {
-      await invoke('download_track', { url: track.url, quality: 'high' });
+      await invoke('download_track', {
+        url: track.url,
+        quality: 'high',
+        title: track.title,
+        artist: track.artist,
+        coverUrl: track.cover_url
+      });
       setDownloadedIds(prev => {
         const next = new Set(prev);
         next.add(track.id);
@@ -404,6 +845,265 @@ export function AideoView() {
       } catch (e) {
         console.error('Failed to stream track preview:', e);
       }
+    }
+  };
+
+  const handlePlayPopularTrack = async (trackName: string) => {
+    if (!artistProfile) return;
+    const trackId = `${artistProfile.name}-${trackName}`;
+    setResolvingTrackId(trackId);
+    try {
+      const query = `${artistProfile.name} - ${trackName}`;
+      const results = await invoke<any[]>('search_youtube', { query });
+      if (results && results.length > 0) {
+        const match = results[0];
+        const parsedSeconds = (() => {
+          const parts = (match.duration_raw || '').split(':').map(Number);
+          if (parts.length === 2) return parts[0] * 60 + parts[1];
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          return 0;
+        })();
+        await playStream(match.url, {
+          title: match.title,
+          artist: match.artist,
+          cover_url: match.cover_url,
+          duration: parsedSeconds
+        });
+        
+        invoke('update_media_metadata', {
+          title: match.title,
+          artist: match.artist,
+          coverUrl: match.cover_url || null,
+          duration: parsedSeconds,
+        }).catch(() => {});
+      } else {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Could not resolve stream for "${trackName}"`, type: 'error' } 
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to resolve and play popular track:", err);
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Resolution error: ${err}`, type: 'error' } 
+      }));
+    } finally {
+      setResolvingTrackId(null);
+    }
+  };
+
+  const handleOpenWebBypassForPopular = (trackName: string, provider: 'lucida' | 'squid') => {
+    if (!artistProfile) return;
+    const searchString = `${artistProfile.name} - ${trackName}`.trim();
+    const uniqueId = `${artistProfile.name}-${trackName}-${provider}`;
+    navigator.clipboard.writeText(searchString).then(() => {
+      setCopiedId(uniqueId);
+      setTimeout(() => setCopiedId(null), 2000);
+      
+      const targetUrl = provider === 'lucida' ? 'https://lucida.to' : 'https://squid.wtf';
+      
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Copied "${searchString}"! Opening ${provider} in browser...`, type: 'success' } 
+      }));
+      
+      openUrl(targetUrl).catch(() => {
+        window.open(targetUrl, '_blank');
+      });
+    });
+  };
+
+  const handleDownloadPopularTrack = async (trackName: string) => {
+    if (!artistProfile) return;
+    const trackId = `${artistProfile.name}-${trackName}`;
+    if (downloadingIds.has(trackId) || downloadedIds.has(trackId)) return;
+    
+    setDownloadingIds(prev => {
+      const next = new Set(prev);
+      next.add(trackId);
+      return next;
+    });
+
+    window.dispatchEvent(new CustomEvent('ui-toast', { 
+      detail: { message: `Resolving stream to download: ${trackName}...`, type: 'info' } 
+    }));
+
+    try {
+      const query = `${artistProfile.name} - ${trackName}`;
+      const results = await invoke<any[]>('search_youtube', { query });
+      if (results && results.length > 0) {
+        const match = results[0];
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Downloading high-fidelity stream: ${match.title}...`, type: 'info' } 
+        }));
+        await invoke('download_track', {
+          url: match.url,
+          quality: 'high',
+          title: match.title,
+          artist: match.artist,
+          coverUrl: match.cover_url
+        });
+        
+        setDownloadedIds(prev => {
+          const next = new Set(prev);
+          next.add(trackId);
+          return next;
+        });
+
+        await useStore.getState().loadLibrary();
+        await fetchRecommendations();
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Successfully added to offline library: ${match.title}!`, type: 'success' } 
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Could not resolve stream for "${trackName}" to download`, type: 'error' } 
+        }));
+      }
+    } catch (err) {
+      console.error("Download error for popular track:", err);
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Download failed: ${err}`, type: 'error' } 
+      }));
+    } finally {
+      setDownloadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(trackId);
+        return next;
+      });
+    }
+  };
+
+  const handlePlayArtistTopTracks = async (shuffle = false) => {
+    if (!artistProfile || !artistProfile.top_tracks || artistProfile.top_tracks.length === 0) return;
+    
+    window.dispatchEvent(new CustomEvent('ui-toast', { 
+      detail: { message: `Resolving tracks for ${artistProfile.name}...`, type: 'info' } 
+    }));
+
+    let tracksToPlay = [...artistProfile.top_tracks];
+    if (shuffle) {
+      for (let i = tracksToPlay.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [tracksToPlay[i], tracksToPlay[j]] = [tracksToPlay[j], tracksToPlay[i]];
+      }
+    }
+
+    const firstTrack = tracksToPlay[0];
+    const trackName = firstTrack.name;
+    const query = `${artistProfile.name} - ${trackName}`;
+    setResolvingTrackId('top-tracks-play-all');
+
+    try {
+      const results = await invoke<any[]>('search_youtube', { query });
+      if (results && results.length > 0) {
+        const match = results[0];
+        const parsedSeconds = (() => {
+          const parts = (match.duration_raw || '').split(':').map(Number);
+          if (parts.length === 2) return parts[0] * 60 + parts[1];
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          return 0;
+        })();
+
+        // Clear queue on frontend and backend manually to prevent stopping the track that is about to start
+        useStore.setState({ queue: [] });
+        localStorage.setItem('aideo_queue', JSON.stringify([]));
+        await invoke('clear_queue').catch(() => {});
+
+        await playStream(match.url, {
+          title: match.title,
+          artist: match.artist,
+          cover_url: match.cover_url,
+          duration: parsedSeconds
+        }, false);
+
+        const remainingTracks = tracksToPlay.slice(1);
+        
+        (async () => {
+          for (const t of remainingTracks) {
+            try {
+              const res = await invoke<any[]>('search_youtube', { query: `${artistProfile.name} - ${t.name}` });
+              if (res && res.length > 0) {
+                const subMatch = res[0];
+                const subDuration = (() => {
+                  const parts = (subMatch.duration_raw || '').split(':').map(Number);
+                  if (parts.length === 2) return parts[0] * 60 + parts[1];
+                  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+                  return 0;
+                })();
+                const virtualTrack: Track = {
+                  id: -20000 - Math.floor(Math.random() * 100000),
+                  path: subMatch.url,
+                  title: subMatch.title,
+                  artist: subMatch.artist,
+                  duration: subDuration,
+                  format: 'YouTube Direct',
+                  lyric_offset: 0,
+                  cover_url: subMatch.cover_url || null
+                };
+                await addToQueue(virtualTrack);
+              }
+            } catch (err) {
+              console.error("Failed to background resolve track for queue:", err);
+            }
+          }
+          
+          // Once all remaining tracks are queued, trigger autoplay radio to append recommendations at the end
+          const currentTrack = useStore.getState().currentTrack;
+          if (currentTrack) {
+            useStore.getState().triggerAutoplayRadio(currentTrack, false).catch(console.error);
+          }
+        })();
+
+      } else {
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Could not resolve stream for "${trackName}"`, type: 'error' } 
+        }));
+      }
+    } catch (err) {
+      console.error("Play top tracks error:", err);
+    } finally {
+      setResolvingTrackId(null);
+    }
+  };
+
+  const handleStartArtistRadio = async () => {
+    if (!artistProfile || !artistProfile.top_tracks || artistProfile.top_tracks.length === 0) return;
+    const firstTrack = artistProfile.top_tracks[0];
+    setResolvingTrackId('artist-radio');
+    try {
+      const results = await invoke<any[]>('search_youtube', { query: `${artistProfile.name} - ${firstTrack.name}` });
+      if (results && results.length > 0) {
+        const match = results[0];
+        const parsedSeconds = (() => {
+          const parts = (match.duration_raw || '').split(':').map(Number);
+          if (parts.length === 2) return parts[0] * 60 + parts[1];
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          return 0;
+        })();
+        const virtualTrack: Track = {
+          id: -9999,
+          path: match.url,
+          title: match.title,
+          artist: match.artist,
+          duration: parsedSeconds,
+          format: 'YouTube Direct',
+          lyric_offset: 0,
+          cover_url: match.cover_url || null
+        };
+        await playStream(match.url, {
+          title: match.title,
+          artist: match.artist,
+          cover_url: match.cover_url,
+          duration: parsedSeconds
+        }, false);
+        await triggerAutoplayRadio(virtualTrack, true);
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Started ${artistProfile.name} Radio!`, type: 'success' } 
+        }));
+      }
+    } catch (err) {
+      console.error("Start radio error:", err);
+    } finally {
+      setResolvingTrackId(null);
     }
   };
 
@@ -504,7 +1204,9 @@ export function AideoView() {
 
                 <div className="discovery-grid-meta">
                   <h4 className="discovery-grid-title" title={track.title}>{track.title}</h4>
-                  <p className="discovery-grid-artist" title={track.artist}>{track.artist}</p>
+                  <p className="discovery-grid-artist" title={track.artist}>
+                    <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
+                  </p>
                   {track.recommendation_source && (
                     <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`} style={{ fontSize: '7.5px', padding: '2px 6px' }}>
                       {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
@@ -610,7 +1312,9 @@ export function AideoView() {
 
                 <div className="discovery-meta">
                   <h4 className="discovery-title" title={track.title}>{track.title}</h4>
-                  <p className="discovery-artist" title={track.artist}>{track.artist}</p>
+                  <p className="discovery-artist" title={track.artist}>
+                    <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
+                  </p>
                   {track.recommendation_source && (
                     <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
                       {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
@@ -712,8 +1416,8 @@ export function AideoView() {
       {/* Background tint overlay */}
       <div className="aideo-bg-tint"></div>
 
-      {/* Premium Tidal Search Bar */}
-      <div style={{ marginBottom: 36, maxWidth: 640 }}>
+      {/* Premium Web Search Bar */}
+      <div style={{ marginBottom: 36, maxWidth: 640, position: 'relative' }} ref={dropdownRef}>
         <form onSubmit={handleAideoSearch} style={{ display: 'flex', gap: 12 }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center' }}>
@@ -721,12 +1425,18 @@ export function AideoView() {
             </div>
             <input 
               type="text" 
-              placeholder="Search Tidal Lossless Cloud..."
+              placeholder="Search web stream..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  setSearchFocused(false);
+                }
+              }}
               style={{
                 width: '100%',
-                padding: '14px 20px 14px 48px',
+                padding: searchQuery ? '14px 44px 14px 48px' : '14px 20px 14px 48px',
                 borderRadius: 14,
                 border: '1px solid rgba(255,255,255,0.08)',
                 background: 'rgba(255,255,255,0.03)',
@@ -738,9 +1448,9 @@ export function AideoView() {
                 boxShadow: '0 4px 20px rgba(0,0,0,0.2), inset 0 2px 4px rgba(255,255,255,0.02)',
                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
-              onFocus={(e) => {
-                e.target.style.borderColor = 'rgba(6, 182, 212, 0.5)';
-                e.target.style.boxShadow = '0 0 20px rgba(6, 182, 212, 0.15), inset 0 2px 4px rgba(255,255,255,0.02)';
+              onFocusCapture={(e) => {
+                e.target.style.borderColor = 'rgba(var(--accent-rgb), 0.5)';
+                e.target.style.boxShadow = '0 0 20px rgba(var(--accent-rgb), 0.15), inset 0 2px 4px rgba(255,255,255,0.02)';
                 e.target.style.background = 'rgba(255,255,255,0.05)';
               }}
               onBlur={(e) => {
@@ -749,15 +1459,50 @@ export function AideoView() {
                 e.target.style.background = 'rgba(255,255,255,0.03)';
               }}
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSuggestions([]);
+                  setQuickResults([]);
+                }}
+                style={{
+                  position: 'absolute',
+                  right: 16,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.4)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: 4,
+                  borderRadius: '50%',
+                  transition: 'background 0.2s, color 0.2s',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  e.currentTarget.style.color = '#fff';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'none';
+                  e.currentTarget.style.color = 'rgba(255,255,255,0.4)';
+                }}
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
           <button
             type="submit"
             style={{
               padding: '0 24px',
               borderRadius: 14,
-              border: '1px solid rgba(6, 182, 212, 0.3)',
-              background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.05))',
-              color: '#06b6d4',
+              border: '1px solid rgba(var(--accent-rgb), 0.3)',
+              background: 'linear-gradient(135deg, rgba(var(--accent-rgb), 0.2), rgba(var(--accent-rgb), 0.05))',
+              color: 'var(--dynamic-accent)',
               fontSize: 14,
               fontWeight: 600,
               cursor: 'pointer',
@@ -766,499 +1511,936 @@ export function AideoView() {
               justifyContent: 'center',
               gap: 8,
               transition: 'all 0.2s ease',
-              boxShadow: '0 4px 15px rgba(6, 182, 212, 0.1)',
+              boxShadow: '0 4px 15px rgba(var(--accent-rgb), 0.1)',
             }}
             onMouseEnter={e => {
-              e.currentTarget.style.background = 'linear-gradient(135deg, rgba(6, 182, 212, 0.3), rgba(6, 182, 212, 0.1))';
+              e.currentTarget.style.background = 'linear-gradient(135deg, rgba(var(--accent-rgb), 0.3), rgba(var(--accent-rgb), 0.1))';
               e.currentTarget.style.transform = 'translateY(-1px)';
-              e.currentTarget.style.boxShadow = '0 6px 20px rgba(6, 182, 212, 0.2)';
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(var(--accent-rgb), 0.2)';
             }}
             onMouseLeave={e => {
-              e.currentTarget.style.background = 'linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(6, 182, 212, 0.05))';
+              e.currentTarget.style.background = 'linear-gradient(135deg, rgba(var(--accent-rgb), 0.2), rgba(var(--accent-rgb), 0.05))';
               e.currentTarget.style.transform = 'none';
-              e.currentTarget.style.boxShadow = '0 4px 15px rgba(6, 182, 212, 0.1)';
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(var(--accent-rgb), 0.1)';
             }}
           >
             Search
           </button>
         </form>
-      </div>
 
-      {/* Greeting Header */}
-      <div className="aideo-greeting-header">
-        <div className="aideo-header-info">
-          <motion.h1 
-            initial={{ opacity: 0, y: -15 }} 
-            animate={{ opacity: 1, y: 0 }} 
-            transition={{ duration: 0.5 }}
-            className="aideo-title"
-          >
-            {greeting}, Listener
-          </motion.h1>
-          <p className="aideo-subtitle">Your personalized music portal is fully customized and ready.</p>
-        </div>
-        <div className="aideo-header-stats">
-          <div className="aideo-stat-box">
-            <span className="aideo-stat-num">{tracks.length}</span>
-            <span className="aideo-stat-label">Tracks</span>
-          </div>
-          <div className="aideo-stat-box">
-            <span className="aideo-stat-num">{totalPlays}</span>
-            <span className="aideo-stat-label">Total Plays</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Section: Your Mixes */}
-      <section className="aideo-section">
-        <h2 className="aideo-sec-title">Mixed for You</h2>
-        <div className="aideo-mix-grid">
-          {/* Card: My Supermix */}
-          <motion.div 
-            whileTap={{ scale: 0.98 }}
-            onClick={() => playDynamicMix('supermix')}
-            className="aideo-mix-card supermix"
-          >
-            <div className="mix-card-content">
-              <div className="mix-card-icon-wrap sm">
-                <Sparkles size={22} className="pulse" />
-              </div>
-              <div className="mix-card-text">
-                <h3>My Supermix</h3>
-                <p>Your top tracks blended with random library favorites</p>
-              </div>
-              <button className="mix-play-btn">
-                <Play size={18} fill="currentColor" />
-              </button>
-            </div>
-          </motion.div>
-
-          {/* Card: Aideo Recap */}
-          <motion.div 
-            whileTap={{ scale: 0.98 }}
-            onClick={() => playDynamicMix('recap')}
-            className="aideo-mix-card recap"
-          >
-            <div className="mix-card-content">
-              <div className="mix-card-icon-wrap rc">
-                <History size={22} />
-              </div>
-              <div className="mix-card-text">
-                <h3>Aideo Recap Mix</h3>
-                <p>The ultimate recap of your top-played music</p>
-              </div>
-              <button className="mix-play-btn">
-                <Play size={18} fill="currentColor" />
-              </button>
-            </div>
-          </motion.div>
-
-          {/* Card: Discovery Mix */}
-          <motion.div 
-            whileTap={{ scale: 0.98 }}
-            onClick={() => playDynamicMix('discovery')}
-            className="aideo-mix-card discovery"
-          >
-            <div className="mix-card-content">
-              <div className="mix-card-icon-wrap dc">
-                <Compass size={22} />
-              </div>
-              <div className="mix-card-text">
-                <h3>Discovery Mix</h3>
-                <p>Explore gems in your library that you haven't played much</p>
-              </div>
-              <button className="mix-play-btn">
-                <Play size={18} fill="currentColor" />
-              </button>
-            </div>
-          </motion.div>
-
-          {/* Card: Dynamic Time-of-Day Mix */}
-          <motion.div 
-            whileTap={{ scale: 0.98 }}
-            onClick={() => playDynamicMix('chill')}
-            className="aideo-mix-card chill"
-          >
-            <div className="mix-card-content">
-              <div className="mix-card-icon-wrap ch">
-                {timeMix.iconType === 'sunrise' ? (
-                  <Sunrise size={22} className="pulse" />
-                ) : timeMix.iconType === 'focus' ? (
-                  <Coffee size={22} />
-                ) : (
-                  <Moon size={22} />
-                )}
-              </div>
-              <div className="mix-card-text">
-                <h3>{timeMix.title}</h3>
-                <p>{timeMix.description}</p>
-              </div>
-              <button className="mix-play-btn">
-                <Play size={18} fill="currentColor" />
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      </section>
-
-
-
-      {/* Section: Aideo Discovery Hub */}
-      <section className="aideo-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <h2 className="aideo-sec-title" style={{ margin: 0 }}>Discovery Hub</h2>
-            <span style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 20, background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent)', border: '1px solid rgba(139, 92, 246, 0.2)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Tailored for You</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <button 
-              onClick={() => setDiscoveryViewMode(prev => prev === 'list' ? 'grid' : 'list')}
-              style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
-              title={discoveryViewMode === 'list' ? "Switch to Grid view" : "Switch to List view"}
-            >
-              {discoveryViewMode === 'list' ? <LayoutGrid size={12} /> : <List size={12} />}
-              {discoveryViewMode === 'list' ? "Grid View" : "List View"}
-            </button>
-            <button 
-              onClick={fetchRecommendations} 
-              disabled={isLoadingRecs}
-              style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
-            >
-              <RefreshCw size={12} className={isLoadingRecs ? "spin" : ""} />
-              Refresh Recommendations
-            </button>
-          </div>
-        </div>
-
-        {isLoadingRecs ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 260, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20 }}>
-            <Loader2 className="spin" size={28} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-            <span style={{ fontSize: 13, fontWeight: 500 }}>Curating recommendations based on your offline history...</span>
-          </div>
-        ) : discoveryData ? (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {/* Premium Tab Switched Bar */}
-            <div style={{ 
-              display: 'flex', 
-              gap: 8, 
-              padding: 4, 
-              background: 'rgba(255, 255, 255, 0.03)', 
-              border: '1px solid rgba(255, 255, 255, 0.06)', 
-              borderRadius: 12, 
-              marginBottom: 20,
-              width: 'fit-content'
-            }}>
-              {discoveryData.recommendations && discoveryData.recommendations.length > 0 && (
-                <button
-                  onClick={() => setActiveDiscoveryTab('recommendations')}
-                  className={`settings-tab-btn ${activeDiscoveryTab === 'recommendations' ? 'active' : ''}`}
-                  style={{
-                    padding: '8px 16px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    background: activeDiscoveryTab === 'recommendations' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
-                    border: 'none',
-                    color: activeDiscoveryTab === 'recommendations' ? 'var(--accent)' : 'var(--text-dim)',
-                    transition: 'all 0.2s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}
-                >
-                  <Sparkles size={12} />
-                  {tracks.length > 0 ? "Tailored Mix" : "Curated Seeds"}
-                </button>
-              )}
-
-              {discoveryData.global_charts && discoveryData.global_charts.length > 0 && (
-                <button
-                  onClick={() => setActiveDiscoveryTab('charts')}
-                  className={`settings-tab-btn ${activeDiscoveryTab === 'charts' ? 'active' : ''}`}
-                  style={{
-                    padding: '8px 16px',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    background: activeDiscoveryTab === 'charts' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                    border: 'none',
-                    color: activeDiscoveryTab === 'charts' ? '#f87171' : 'var(--text-dim)',
-                    transition: 'all 0.2s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}
-                >
-                  <Compass size={12} />
-                  Worldwide Charts
-                </button>
-              )}
-            </div>
-
-            {/* Shelf Content */}
-            <motion.div
-              key={activeDiscoveryTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              {activeDiscoveryTab === 'recommendations' && (
-                <>
-                  {renderTrackCarousel(discoveryData.recommendations.slice(0, visibleRecsCount))}
-                  {discoveryData.recommendations.length > visibleRecsCount && (
-                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
-                      <button
-                        onClick={() => setVisibleRecsCount(prev => prev + 15)}
-                        style={{
-                          background: 'rgba(255, 255, 255, 0.03)',
-                          border: '1px solid rgba(255, 255, 255, 0.08)',
-                          color: '#fff',
-                          padding: '10px 24px',
-                          borderRadius: 20,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
-                          e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                        }}
-                      >
-                        Load More Recommendations
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-              {activeDiscoveryTab === 'charts' && renderTrackCarousel(discoveryData.global_charts)}
-            </motion.div>
-          </div>
-        ) : (
-          <div className="aideo-empty-box">
-            <Compass size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-            <p>We searched online but couldn't find any recommendations matching your current library interests. Try expanding your music taste!</p>
-          </div>
-        )}
-      </section>
-
-      {/* Section: Quick Recap Grid */}
-      <section className="aideo-section">
-        <h2 className="aideo-sec-title">Quick Recap</h2>
-        {recapTracks.length > 0 ? (
-          <div className="aideo-recap-grid">
-            {recapTracks.map((t) => (
+        {/* Floating Suggestions Dropdown */}
+        {searchFocused && (searchHistory.length > 0 || suggestions.length > 0 || quickResults.length > 0) && (
+          <div style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            left: 0,
+            right: 0,
+            background: 'rgba(12, 12, 20, 0.96)',
+            backdropFilter: 'blur(24px)',
+            borderRadius: 16,
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+            zIndex: 1000,
+            overflow: 'hidden',
+            padding: '12px 0',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            {/* History Items */}
+            {searchHistory.slice(0, 5).map(q => (
               <div 
-                key={t.id || t.path} 
-                className="aideo-recap-item"
-                onClick={() => { playTrack(t); setView('nowplaying'); }}
+                key={`hist-${q}`}
+                onClick={() => triggerSearch(q)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                }}
+                className="dropdown-item-hover"
               >
-                <div className="aideo-item-cover-wrap">
-                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
-                  <div className="aideo-item-play-overlay">
-                    <Play size={16} fill="white" color="white" />
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'rgba(255, 255, 255, 0.85)', fontSize: 13, fontWeight: 500, flex: 1, minWidth: 0 }}>
+                  <History size={14} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q}</span>
                 </div>
-                <div className="aideo-item-info">
-                  <div className="aideo-item-title" title={t.title || baseName(t.path)}>
-                    {t.title || baseName(t.path)}
-                  </div>
-                  <div className="aideo-item-artist" title={t.artist || 'Unknown Artist'}>
-                    {t.artist || 'Unknown Artist'}
-                  </div>
-                </div>
-                <div className="aideo-item-duration">{fmt(t.duration)}</div>
-                {playCounts[t.path] > 0 && (
-                  <div className="aideo-item-badge">
-                    <Star size={10} fill="var(--accent)" color="var(--accent)" style={{ marginRight: 4 }} />
-                    {playCounts[t.path]} {playCounts[t.path] === 1 ? 'play' : 'plays'}
-                  </div>
-                )}
+                <button
+                  onClick={(e) => handleDeleteHistory(e, q)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'rgba(255,255,255,0.4)',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    borderRadius: '50%',
+                    transition: 'background 0.2s, color 0.2s',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+                    e.currentTarget.style.color = '#f87171';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = 'none';
+                    e.currentTarget.style.color = 'rgba(255,255,255,0.4)';
+                  }}
+                >
+                  <X size={13} />
+                </button>
               </div>
             ))}
-          </div>
-        ) : (
-          <div className="aideo-empty-box">
-            <Music size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-            <p style={{ marginBottom: 16 }}>Add folders in settings to scan and load tracks into your library.</p>
-            <button className="btn btn-primary" onClick={() => setView('settings')} style={{ padding: '8px 16px', fontSize: 12 }}>
-              Open Settings
-            </button>
-          </div>
-        )}
-      </section>
- 
-      {/* Section: Recently Played Horizontal Carousel */}
-      <section className="aideo-section" style={{ marginBottom: 40 }}>
-        <h2 className="aideo-sec-title">Recently Played</h2>
-        {recentTracks.length > 0 ? (
-          <div className="aideo-carousel">
-            {recentTracks.map(t => (
-              <motion.div 
-                key={t.id || t.path}
-                whileHover={{ scale: 1.03 }}
-                className="aideo-carousel-card"
-                onClick={() => { playTrack(t); setView('nowplaying'); }}
+
+            {/* Autocomplete Suggestion Items */}
+            {suggestions.map(q => (
+              <div 
+                key={`sugg-${q}`}
+                onClick={() => triggerSearch(q)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '8px 16px',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                  color: 'rgba(255, 255, 255, 0.85)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  gap: 12,
+                }}
+                className="dropdown-item-hover"
               >
-                <div className="carousel-cover-wrap">
-                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
-                  <div className="carousel-play-overlay">
-                    <div className="carousel-play-btn-circle">
-                      <Play size={20} fill="white" color="white" />
+                <Search size={14} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q}</span>
+              </div>
+            ))}
+
+            {/* Quick Play Songs Section */}
+            {quickResults.length > 0 && (
+              <>
+                <div style={{
+                  padding: '12px 16px 6px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--text-dim)',
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                  borderTop: '1px solid rgba(255,255,255,0.06)',
+                  marginTop: 6,
+                }}>
+                  Songs
+                </div>
+                {quickResults.map(track => (
+                  <div 
+                    key={`quick-${track.id}`}
+                    onClick={() => handlePlayQuickTrack(track)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 16px',
+                      cursor: 'pointer',
+                      transition: 'background 0.2s',
+                      gap: 12,
+                    }}
+                    className="dropdown-item-hover"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+                      {track.cover_url ? (
+                        <img 
+                          src={track.cover_url} 
+                          alt="" 
+                          style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div style={{ width: 36, height: 36, borderRadius: 6, background: '#1a1a24', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Music size={16} color="var(--text-dim)" />
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {track.title}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {track.artist}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>
+                      {track.duration_raw}
                     </div>
                   </div>
-                </div>
-                <div className="carousel-meta">
-                  <h4 className="carousel-title" title={t.title || baseName(t.path)}>
-                    {t.title || baseName(t.path)}
-                  </h4>
-                  <p className="carousel-artist" title={t.artist || 'Unknown Artist'}>
-                    {t.artist || 'Unknown Artist'}
-                  </p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        ) : (
-          <div className="aideo-empty-box">
-            <History size={32} />
-            <p>Your play history is empty. Listen to some tracks from your library first!</p>
+                ))}
+              </>
+            )}
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Section: AI Smart Mix Builder */}
-      {showSmartMixWidget && (
-      <section className="aideo-section" style={{ marginBottom: 32 }}>
-        <h2 className="aideo-sec-title">AI Smart Mix Builder</h2>
-        <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline mixes custom-tailored to scrobble trends, listening history metrics, and mood parameters.</p>
-        
-        <div style={{
-          background: 'var(--glass)',
-          border: '1px solid var(--glass-border)',
-          borderRadius: 20,
-          padding: 24,
-          backdropFilter: 'blur(20px)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          gap: 24,
-          alignItems: 'center'
-        }}>
-          {/* Mood Selector */}
-          <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Select Mood</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {['Energetic', 'Chill', 'Focus', 'Melancholic', 'Happy'].map(m => {
-                const active = activeMood === m;
-                const emoji = m === 'Energetic' ? '⚡' : m === 'Chill' ? '☕' : m === 'Focus' ? '🎯' : m === 'Melancholic' ? '🌧️' : '☀️';
-                return (
-                  <button
-                    key={m}
-                    onClick={() => setActiveMood(m)}
-                    style={{
-                      background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
-                      border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
-                      borderRadius: 10,
-                      padding: '8px 14px',
-                      color: 'white',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                    }}
-                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
-                  >
-                    {emoji} {m}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Seed Trend Source Selector */}
-          <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Seed Trend Source</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {['Library History', 'Last.fm Trends', 'ListenBrainz Scrobbles'].map(s => {
-                const active = activeSource === s;
-                const icon = s.includes('Library') ? '💿' : s.includes('Last.fm') ? '📻' : '🎵';
-                return (
-                  <button
-                    key={s}
-                    onClick={() => setActiveSource(s)}
-                    style={{
-                      background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
-                      border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
-                      borderRadius: 10,
-                      padding: '8px 14px',
-                      color: 'white',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                    }}
-                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
-                  >
-                    {icon} {s}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Generator trigger button */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      {searchActive ? (
+        <div className="aideo-search-results-view">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28 }}>
             <button
-              onClick={handleGenerateSmartMix}
-              disabled={generatingMix}
+              onClick={() => {
+                setSearchActive(false);
+                setSearchQuery('');
+                setSearchResults([]);
+                setArtistProfile(null);
+              }}
               style={{
-                padding: '14px 28px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: 'white',
+                padding: '8px 16px',
                 borderRadius: 12,
-                fontSize: 14,
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #a855f7, #6366f1)',
-                boxShadow: '0 0 20px rgba(168, 85, 247, 0.45)',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 10,
-                cursor: 'pointer',
-                border: 'none',
-                color: 'white',
-                transition: 'transform 0.2s, opacity 0.2s',
-                opacity: generatingMix ? 0.75 : 1
+                gap: 8,
+                transition: 'all 0.2s',
               }}
-              onMouseEnter={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.03)'; }}
-              onMouseLeave={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.0)'; }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)'}
             >
-              {generatingMix ? (
-                <>
-                  <Loader2 className="spin" size={16} /> Compiling AI Patterns...
-                </>
-              ) : (
-                <>
-                  <Sparkles size={16} /> Generate & Play AI Mix
-                </>
-              )}
+              <ArrowLeft size={16} />
+              Back to Dashboard
             </button>
+            <h1 style={{ fontSize: 28, fontWeight: 800, color: 'white', margin: 0 }}>
+              Search Results for <span style={{ color: 'var(--accent)' }}>"{searchQuery}"</span>
+            </h1>
           </div>
+
+          {isSearching ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 320, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20 }}>
+              <Loader2 className="spin" size={36} style={{ marginBottom: 12, color: 'var(--accent)' }} />
+              <span style={{ fontSize: 14, fontWeight: 500 }}>Searching YouTube Music...</span>
+            </div>
+          ) : artistProfile ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+              {/* Hero Banner */}
+              <div style={{
+                position: 'relative',
+                borderRadius: 20,
+                overflow: 'hidden',
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                padding: '40px',
+                display: 'flex',
+                gap: '32px',
+                alignItems: 'center',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                minHeight: '260px'
+              }}>
+                {/* Blurred Cover Art Background */}
+                {artistHeroImage && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundImage: `url(${artistHeroImage})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    filter: 'blur(60px) brightness(0.25)',
+                    opacity: 0.65,
+                    zIndex: 0,
+                    transform: 'scale(1.1)'
+                  }} />
+                )}
+                
+                {/* Artist Artwork / Thumbnail */}
+                <div style={{
+                  position: 'relative',
+                  width: 180,
+                  height: 180,
+                  borderRadius: 20,
+                  overflow: 'hidden',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  zIndex: 1,
+                  flexShrink: 0,
+                  background: '#1a1a24',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {artistHeroImage ? (
+                    <img 
+                      src={artistHeroImage} 
+                      alt={artistProfile.name} 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <Music size={64} color="var(--text-dim)" />
+                  )}
+                </div>
+
+                {/* Artist Information & Actions */}
+                <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
+                  <div>
+                    <h2 style={{ fontSize: '40px', fontWeight: 900, color: 'white', margin: '0 0 8px 0', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
+                      {artistProfile.name}
+                    </h2>
+                    <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--text-dim)', fontWeight: 500 }}>
+                      {artistProfile.listeners && (
+                        <span>👥 {formatNumber(artistProfile.listeners)} monthly listeners</span>
+                      )}
+                      {artistProfile.playcount && (
+                        <span>💿 {formatNumber(artistProfile.playcount)} total plays</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Biography Summary */}
+                  {artistProfile.bio && (
+                    <div style={{ maxWidth: '720px' }}>
+                      <p style={{
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        color: 'rgba(255,255,255,0.75)',
+                        margin: 0,
+                        display: '-webkit-box',
+                        WebkitLineClamp: showFullBio ? 'unset' : 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {cleanBio(artistProfile.bio)}
+                      </p>
+                      {cleanBio(artistProfile.bio).length > 200 && (
+                        <button
+                          onClick={() => setShowFullBio(!showFullBio)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#06b6d4',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            padding: '4px 0',
+                            marginTop: 4,
+                            cursor: 'pointer',
+                            transition: 'color 0.2s'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.color = '#22d3ee'}
+                          onMouseLeave={e => e.currentTarget.style.color = '#06b6d4'}
+                        >
+                          {showFullBio ? 'Show Less' : 'Read More'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions buttons */}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                    <button
+                      onClick={() => handlePlayArtistTopTracks(false)}
+                      disabled={resolvingTrackId === 'top-tracks-play-all'}
+                      style={{
+                        padding: '10px 24px',
+                        borderRadius: 12,
+                        fontSize: 13,
+                        fontWeight: 700,
+                        background: 'var(--accent)',
+                        border: 'none',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        cursor: 'pointer',
+                        transition: 'transform 0.2s, background 0.2s',
+                        boxShadow: '0 4px 15px rgba(139, 92, 246, 0.4)'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                      onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+                    >
+                      {resolvingTrackId === 'top-tracks-play-all' ? (
+                        <Loader2 className="spin" size={16} />
+                      ) : (
+                        <Play size={16} fill="white" />
+                      )}
+                      Play Top Tracks
+                    </button>
+                    <button
+                      onClick={() => handlePlayArtistTopTracks(true)}
+                      disabled={resolvingTrackId === 'top-tracks-play-all'}
+                      style={{
+                        padding: '10px 20px',
+                        borderRadius: 12,
+                        fontSize: 13,
+                        fontWeight: 700,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        cursor: 'pointer',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                    >
+                      Shuffle
+                    </button>
+                    <button
+                      onClick={handleStartArtistRadio}
+                      disabled={resolvingTrackId === 'artist-radio'}
+                      style={{
+                        padding: '10px 20px',
+                        borderRadius: 12,
+                        fontSize: 13,
+                        fontWeight: 700,
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        cursor: 'pointer',
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                    >
+                      {resolvingTrackId === 'artist-radio' ? (
+                        <Loader2 className="spin" size={16} />
+                      ) : (
+                        <Sparkles size={16} />
+                      )}
+                      Start Radio
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Popular Tracks Section */}
+              <div>
+                <h3 style={{ fontSize: 20, fontWeight: 800, color: 'white', marginBottom: 16 }}>Popular Songs</h3>
+                <div style={{
+                  background: 'var(--glass)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 20,
+                  overflow: 'hidden',
+                  backdropFilter: 'blur(20px)'
+                }}>
+                  {artistProfile.top_tracks && artistProfile.top_tracks.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      {artistProfile.top_tracks.map((t: any, idx: number) => (
+                        <PopularTrackRow
+                          key={`top-track-${idx}`}
+                          track={t}
+                          artistName={artistProfile.name}
+                          idx={idx}
+                          resolvingTrackId={resolvingTrackId}
+                          downloadingIds={downloadingIds}
+                          downloadedIds={downloadedIds}
+                          copiedId={copiedId}
+                          handlePlayPopularTrack={handlePlayPopularTrack}
+                          handleOpenWebBypassForPopular={handleOpenWebBypassForPopular}
+                          handleDownloadPopularTrack={handleDownloadPopularTrack}
+                          formatNumber={formatNumber}
+                          totalTracks={artistProfile.top_tracks.length}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)' }}>
+                      No popular tracks found for this artist.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : searchResults.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {renderTrackCarousel(searchResults)}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 260, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20 }}>
+              <Music size={36} style={{ marginBottom: 12, color: 'var(--accent)' }} />
+              <span style={{ fontSize: 14, fontWeight: 500 }}>No results found for "{searchQuery}".</span>
+            </div>
+          )}
         </div>
-      </section>
+      ) : (
+        <>
+          {/* Greeting Header */}
+          <div className="aideo-greeting-header">
+            <div className="aideo-header-info">
+              <motion.h1 
+                initial={{ opacity: 0, y: -15 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                transition={{ duration: 0.5 }}
+                className="aideo-title"
+              >
+                {greeting}, Listener
+              </motion.h1>
+              <p className="aideo-subtitle">Your personalized music portal is fully customized and ready.</p>
+            </div>
+            <div className="aideo-header-stats">
+              <div className="aideo-stat-box">
+                <span className="aideo-stat-num">{tracks.length}</span>
+                <span className="aideo-stat-label">Tracks</span>
+              </div>
+              <div className="aideo-stat-box">
+                <span className="aideo-stat-num">{totalPlays}</span>
+                <span className="aideo-stat-label">Total Plays</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Your Mixes */}
+          <section className="aideo-section">
+            <h2 className="aideo-sec-title">Mixed for You</h2>
+            <div className="aideo-mix-grid">
+              {/* Card: My Supermix */}
+              <motion.div 
+                whileTap={{ scale: 0.98 }}
+                onClick={() => playDynamicMix('supermix')}
+                className="aideo-mix-card supermix"
+              >
+                <div className="mix-card-content">
+                  <div className="mix-card-icon-wrap sm">
+                    <Sparkles size={22} className="pulse" />
+                  </div>
+                  <div className="mix-card-text">
+                    <h3>My Supermix</h3>
+                    <p>Your top tracks blended with random library favorites</p>
+                  </div>
+                  <button className="mix-play-btn">
+                    <Play size={18} fill="currentColor" />
+                  </button>
+                </div>
+              </motion.div>
+
+              {/* Card: Aideo Recap */}
+              <motion.div 
+                whileTap={{ scale: 0.98 }}
+                onClick={() => playDynamicMix('recap')}
+                className="aideo-mix-card recap"
+              >
+                <div className="mix-card-content">
+                  <div className="mix-card-icon-wrap rc">
+                    <History size={22} />
+                  </div>
+                  <div className="mix-card-text">
+                    <h3>Aideo Recap Mix</h3>
+                    <p>The ultimate recap of your top-played music</p>
+                  </div>
+                  <button className="mix-play-btn">
+                    <Play size={18} fill="currentColor" />
+                  </button>
+                </div>
+              </motion.div>
+
+              {/* Card: Discovery Mix */}
+              <motion.div 
+                whileTap={{ scale: 0.98 }}
+                onClick={() => playDynamicMix('discovery')}
+                className="aideo-mix-card discovery"
+              >
+                <div className="mix-card-content">
+                  <div className="mix-card-icon-wrap dc">
+                    <Compass size={22} />
+                  </div>
+                  <div className="mix-card-text">
+                    <h3>Discovery Mix</h3>
+                    <p>Explore gems in your library that you haven't played much</p>
+                  </div>
+                  <button className="mix-play-btn">
+                    <Play size={18} fill="currentColor" />
+                  </button>
+                </div>
+              </motion.div>
+
+              {/* Card: Dynamic Time-of-Day Mix */}
+              <motion.div 
+                whileTap={{ scale: 0.98 }}
+                onClick={() => playDynamicMix('chill')}
+                className="aideo-mix-card chill"
+              >
+                <div className="mix-card-content">
+                  <div className="mix-card-icon-wrap ch">
+                    {timeMix.iconType === 'sunrise' ? (
+                      <Sunrise size={22} className="pulse" />
+                    ) : timeMix.iconType === 'focus' ? (
+                      <Coffee size={22} />
+                    ) : (
+                      <Moon size={22} />
+                    )}
+                  </div>
+                  <div className="mix-card-text">
+                    <h3>{timeMix.title}</h3>
+                    <p>{timeMix.description}</p>
+                  </div>
+                  <button className="mix-play-btn">
+                    <Play size={18} fill="currentColor" />
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </section>
+
+          {/* Section: Aideo Discovery Hub */}
+          <section className="aideo-section">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h2 className="aideo-sec-title" style={{ margin: 0 }}>Discovery Hub</h2>
+                <span style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 20, background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent)', border: '1px solid rgba(139, 92, 246, 0.2)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Tailored for You</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <button 
+                  onClick={() => setDiscoveryViewMode(prev => prev === 'list' ? 'grid' : 'list')}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+                  title={discoveryViewMode === 'list' ? "Switch to Grid view" : "Switch to List view"}
+                >
+                  {discoveryViewMode === 'list' ? <LayoutGrid size={12} /> : <List size={12} />}
+                  {discoveryViewMode === 'list' ? "Grid View" : "List View"}
+                </button>
+                <button 
+                  onClick={fetchRecommendations} 
+                  disabled={isLoadingRecs}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+                >
+                  <RefreshCw size={12} className={isLoadingRecs ? "spin" : ""} />
+                  Refresh Recommendations
+                </button>
+              </div>
+            </div>
+
+            {isLoadingRecs ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 260, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20 }}>
+                <Loader2 className="spin" size={28} style={{ marginBottom: 12, color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 500 }}>Curating recommendations based on your offline history...</span>
+              </div>
+            ) : discoveryData ? (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {/* Premium Tab Switched Bar */}
+                <div style={{ 
+                  display: 'flex', 
+                  gap: 8, 
+                  padding: 4, 
+                  background: 'rgba(255, 255, 255, 0.03)', 
+                  border: '1px solid rgba(255, 255, 255, 0.06)', 
+                  borderRadius: 12, 
+                  marginBottom: 20,
+                  width: 'fit-content'
+                }}>
+                  {discoveryData.recommendations && discoveryData.recommendations.length > 0 && (
+                    <button
+                      onClick={() => setActiveDiscoveryTab('recommendations')}
+                      className={`settings-tab-btn ${activeDiscoveryTab === 'recommendations' ? 'active' : ''}`}
+                      style={{
+                        padding: '8px 16px',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        background: activeDiscoveryTab === 'recommendations' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                        border: 'none',
+                        color: activeDiscoveryTab === 'recommendations' ? 'var(--accent)' : 'var(--text-dim)',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Sparkles size={12} />
+                      {tracks.length > 0 ? "Tailored Mix" : "Curated Seeds"}
+                    </button>
+                  )}
+
+                  {discoveryData.global_charts && discoveryData.global_charts.length > 0 && (
+                    <button
+                      onClick={() => setActiveDiscoveryTab('charts')}
+                      className={`settings-tab-btn ${activeDiscoveryTab === 'charts' ? 'active' : ''}`}
+                      style={{
+                        padding: '8px 16px',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        borderRadius: 8,
+                        cursor: 'pointer',
+                        background: activeDiscoveryTab === 'charts' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                        border: 'none',
+                        color: activeDiscoveryTab === 'charts' ? '#f87171' : 'var(--text-dim)',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Compass size={12} />
+                      Worldwide Charts
+                    </button>
+                  )}
+                </div>
+
+                {/* Shelf Content */}
+                <motion.div
+                  key={activeDiscoveryTab}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  {activeDiscoveryTab === 'recommendations' && (
+                    <>
+                      {renderTrackCarousel(discoveryData.recommendations.slice(0, visibleRecsCount))}
+                      {discoveryData.recommendations.length > visibleRecsCount && (
+                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                          <button
+                            onClick={() => setVisibleRecsCount(prev => prev + 15)}
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid rgba(255, 255, 255, 0.08)',
+                              color: '#fff',
+                              padding: '10px 24px',
+                              borderRadius: 20,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                              e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                            }}
+                          >
+                            Load More Recommendations
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {activeDiscoveryTab === 'charts' && renderTrackCarousel(discoveryData.global_charts)}
+                </motion.div>
+              </div>
+            ) : (
+              <div className="aideo-empty-box">
+                <Compass size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
+                <p>We searched online but couldn't find any recommendations matching your current library interests. Try expanding your music taste!</p>
+              </div>
+            )}
+          </section>
+
+          {/* Section: Quick Recap Grid */}
+          <section className="aideo-section">
+            <h2 className="aideo-sec-title">Quick Recap</h2>
+            {recapTracks.length > 0 ? (
+              <div className="aideo-recap-grid">
+                {recapTracks.map((t) => (
+                  <div 
+                    key={t.id || t.path} 
+                    className="aideo-recap-item"
+                    onClick={() => { playTrack(t); setView('nowplaying'); }}
+                  >
+                    <div className="aideo-item-cover-wrap">
+                      <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
+                      <div className="aideo-item-play-overlay">
+                        <Play size={16} fill="white" color="white" />
+                      </div>
+                    </div>
+                    <div className="aideo-item-info">
+                      <div className="aideo-item-title" title={t.title || baseName(t.path)}>
+                        {t.title || baseName(t.path)}
+                      </div>
+                      <div className="aideo-item-artist" title={t.artist || 'Unknown Artist'}>
+                        <ArtistLink name={t.artist || 'Unknown Artist'} onClick={() => triggerSearch(t.artist || 'Unknown Artist')} />
+                      </div>
+                    </div>
+                    <div className="aideo-item-duration">{fmt(t.duration)}</div>
+                    {playCounts[t.path] > 0 && (
+                      <div className="aideo-item-badge">
+                        <Star size={10} fill="var(--accent)" color="var(--accent)" style={{ marginRight: 4 }} />
+                        {playCounts[t.path]} {playCounts[t.path] === 1 ? 'play' : 'plays'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="aideo-empty-box">
+                <Music size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
+                <p style={{ marginBottom: 16 }}>Add folders in settings to scan and load tracks into your library.</p>
+                <button className="btn btn-primary" onClick={() => setView('settings')} style={{ padding: '8px 16px', fontSize: 12 }}>
+                  Open Settings
+                </button>
+              </div>
+            )}
+          </section>
+     
+          {/* Section: Recently Played Horizontal Carousel */}
+          <section className="aideo-section" style={{ marginBottom: 40 }}>
+            <h2 className="aideo-sec-title">Recently Played</h2>
+            {recentTracks.length > 0 ? (
+              <div className="aideo-carousel">
+                {recentTracks.map(t => (
+                  <motion.div 
+                    key={t.id || t.path}
+                    whileHover={{ scale: 1.03 }}
+                    className="aideo-carousel-card"
+                    onClick={() => { playTrack(t); setView('nowplaying'); }}
+                  >
+                    <div className="carousel-cover-wrap">
+                      <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
+                      <div className="carousel-play-overlay">
+                        <div className="carousel-play-btn-circle">
+                          <Play size={20} fill="white" color="white" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="carousel-meta">
+                      <h4 className="carousel-title" title={t.title || baseName(t.path)}>
+                        {t.title || baseName(t.path)}
+                      </h4>
+                      <p className="carousel-artist" title={t.artist || 'Unknown Artist'}>
+                        <ArtistLink name={t.artist || 'Unknown Artist'} onClick={() => triggerSearch(t.artist || 'Unknown Artist')} />
+                      </p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <div className="aideo-empty-box">
+                <History size={32} />
+                <p>Your play history is empty. Listen to some tracks from your library first!</p>
+              </div>
+            )}
+          </section>
+
+          {/* Section: AI Smart Mix Builder */}
+          {showSmartMixWidget && (
+          <section className="aideo-section" style={{ marginBottom: 32 }}>
+            <h2 className="aideo-sec-title">AI Smart Mix Builder</h2>
+            <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline mixes custom-tailored to scrobble trends, listening history metrics, and mood parameters.</p>
+            
+            <div style={{
+              background: 'var(--glass)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: 20,
+              padding: 24,
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: 24,
+              alignItems: 'center'
+            }}>
+              {/* Mood Selector */}
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Select Mood</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {['Energetic', 'Chill', 'Focus', 'Melancholic', 'Happy'].map(m => {
+                    const active = activeMood === m;
+                    const emoji = m === 'Energetic' ? '⚡' : m === 'Chill' ? '☕' : m === 'Focus' ? '🎯' : m === 'Melancholic' ? '🌧️' : '☀️';
+                    return (
+                      <button
+                        key={m}
+                        onClick={() => setActiveMood(m)}
+                        style={{
+                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+                          border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
+                          borderRadius: 10,
+                          padding: '8px 14px',
+                          color: 'white',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                      >
+                        {emoji} {m}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Seed Trend Source Selector */}
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Seed Trend Source</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {['Library History', 'Last.fm Trends', 'ListenBrainz Scrobbles'].map(s => {
+                    const active = activeSource === s;
+                    const icon = s.includes('Library') ? '💿' : s.includes('Last.fm') ? '📻' : '🎵';
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setActiveSource(s)}
+                        style={{
+                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+                          border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
+                          borderRadius: 10,
+                          padding: '8px 14px',
+                          color: 'white',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                      >
+                        {icon} {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Generator trigger button */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={handleGenerateSmartMix}
+                  disabled={generatingMix}
+                  style={{
+                    padding: '14px 28px',
+                    borderRadius: 12,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    background: 'linear-gradient(135deg, #a855f7, #6366f1)',
+                    boxShadow: '0 0 20px rgba(168, 85, 247, 0.45)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    cursor: 'pointer',
+                    border: 'none',
+                    color: 'white',
+                    transition: 'transform 0.2s, opacity 0.2s',
+                    opacity: generatingMix ? 0.75 : 1
+                  }}
+                  onMouseEnter={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.03)'; }}
+                  onMouseLeave={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.0)'; }}
+                >
+                  {generatingMix ? (
+                    <>
+                      <Loader2 className="spin" size={16} /> Compiling AI Patterns...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={16} /> Generate & Play AI Mix
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </section>
+          )}
+        </>
       )}
     </div>
   );

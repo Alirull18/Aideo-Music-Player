@@ -136,6 +136,7 @@ fn select_output_config(
 lazy_static::lazy_static! {
     static ref YOUTUBE_URL_CACHE: std::sync::Mutex<std::collections::HashMap<String, String>> = std::sync::Mutex::new(std::collections::HashMap::new());
     static ref ACTIVE_DOWNLOADS: std::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>> = std::sync::Mutex::new(std::collections::HashMap::new());
+    static ref ACTIVE_DOWNLOAD_PROCS: std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::Mutex<Option<std::process::Child>>>>> = std::sync::Mutex::new(std::collections::HashMap::new());
 }
 
 struct GrowingFileReader {
@@ -331,9 +332,16 @@ fn spawn_youtube_downloader(
         active.insert(hash.clone(), complete.clone());
     }
     
+    let child_ref = Arc::new(std::sync::Mutex::new(None));
+    let child_ref_clone = Arc::clone(&child_ref);
+    if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+        active_procs.insert(hash.clone(), child_ref.clone());
+    }
+    
+    let hash_clone = hash.clone();
     std::thread::spawn(move || {
         let _guard = DownloadGuard {
-            hash: hash.clone(),
+            hash: hash_clone.clone(),
             complete: complete_clone,
         };
         
@@ -357,7 +365,9 @@ fn spawn_youtube_downloader(
         ]);
         
         cmd.args(&args)
-            .stdin(std::process::Stdio::piped());
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         
         #[cfg(target_os = "windows")]
         use std::os::windows::process::CommandExt;
@@ -368,31 +378,116 @@ fn spawn_youtube_downloader(
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[player-bg] FFmpeg background transcode failed to spawn: {:?}", e);
+                if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+                    active_procs.remove(&hash_clone);
+                }
                 return;
             }
         };
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
 
         if let Some(stdin) = child.stdin.take() {
             pipe_url_to_stdin(url.clone(), stdin, is_youtube_stream);
         }
 
-        let status = child.wait();
-        match status {
-            Ok(s) if s.success() => {
-                println!("[player-bg] Transcode completed successfully for {}", hash);
-                // Encrypt the temp file to cache path
-                if let Ok(bytes) = std::fs::read(&temp_path) {
-                    let encrypted = crate::cloud::xor_cipher(&bytes);
-                    if std::fs::write(&cache_path, encrypted).is_ok() {
-                        println!("[player-bg] Encrypted cache written successfully: {:?}", cache_path);
-                        // Clean up temp file
-                        let _ = std::fs::remove_file(&temp_path);
+        // Put the child in the child_ref mutex
+        {
+            if let Ok(mut lock) = child_ref_clone.lock() {
+                *lock = Some(child);
+            }
+        }
+
+        // Spawn a thread to read and discard stdout to prevent pipe buffer blocking
+        if let Some(mut out) = stdout {
+            std::thread::spawn(move || {
+                use std::io::Read;
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = out.read(&mut buf) {
+                    if n == 0 { break; }
+                }
+            });
+        }
+
+        // Spawn a thread to read and discard stderr to prevent pipe buffer blocking
+        if let Some(mut err) = stderr {
+            std::thread::spawn(move || {
+                use std::io::Read;
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = err.read(&mut buf) {
+                    if n == 0 { break; }
+                }
+            });
+        }
+
+        // Wait for transcoding completion using non-blocking try_wait loop
+        let mut transcode_success = false;
+        loop {
+            // Check if the process has been aborted (drained from ACTIVE_DOWNLOAD_PROCS)
+            let is_aborted = {
+                if let Ok(active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+                    !active_procs.contains_key(&hash_clone)
+                } else {
+                    false
+                }
+            };
+            if is_aborted {
+                break;
+            }
+
+            let mut lock = child_ref_clone.lock().unwrap();
+            if let Some(ref mut child_proc) = *lock {
+                match child_proc.try_wait() {
+                    Ok(None) => {
+                        // Still running. Drop lock and sleep.
+                    }
+                    Ok(Some(status)) => {
+                        transcode_success = status.success();
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("[player-bg] Error polling transcode process status: {:?}", e);
+                        break;
+                    }
+                }
+            } else {
+                // Child has been taken out by abort thread
+                break;
+            }
+            drop(lock);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Ensure we remove it from ACTIVE_DOWNLOAD_PROCS if it exited naturally
+        if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+            active_procs.remove(&hash_clone);
+        }
+
+        if transcode_success {
+            println!("[player-bg] Transcode completed successfully for {}", hash_clone);
+            // Encrypt the temp file to cache path
+            if let Ok(bytes) = std::fs::read(&temp_path) {
+                let encrypted = crate::cloud::xor_cipher(&bytes);
+                if std::fs::write(&cache_path, encrypted).is_ok() {
+                    println!("[player-bg] Encrypted cache written successfully: {:?}", cache_path);
+                    // Clean up temp file
+                    let _ = std::fs::remove_file(&temp_path);
+                }
+            }
+        } else {
+            eprintln!("[player-bg] FFmpeg background transcode failed or was interrupted.");
+            // Kill and wait for child process to guarantee termination
+            {
+                if let Ok(mut lock) = child_ref_clone.lock() {
+                    if let Some(mut child_proc) = lock.take() {
+                        let _ = child_proc.kill();
+                        let _ = child_proc.wait();
                     }
                 }
             }
-            res => {
-                eprintln!("[player-bg] FFmpeg background transcode failed or was interrupted: {:?}", res);
-            }
+            // Clean up temp file
+            let _ = std::fs::remove_file(&temp_path);
         }
     });
     
@@ -1671,6 +1766,7 @@ fn player_loop(
                 }
 
                 if abort_play {
+                    abort_background_downloads();
                     status.store(0, Ordering::Relaxed); // 0 = Stopped
                     let mut ct = safe_lock(&current_track);
                     *ct = None;
@@ -1725,6 +1821,26 @@ fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>
     if let Some(mut child) = safe_lock(current_process).take() {
         let _ = child.kill();
         let _ = child.wait(); // reap zombie process immediately
+    }
+}
+
+pub fn abort_background_downloads() {
+    println!("[player] Aborting all active background downloads...");
+    if let Ok(active) = ACTIVE_DOWNLOADS.lock() {
+        for flag in active.values() {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+    if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+        for (hash, child_ref) in active_procs.drain() {
+            println!("[player] Killing background transcode process for hash: {}", hash);
+            if let Ok(mut lock) = child_ref.lock() {
+                if let Some(mut child) = lock.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
     }
 }
 
@@ -2671,14 +2787,17 @@ fn play_file(
         if let Ok(cmd) = rx.try_recv() {
             match cmd {
                 PlayerCommand::Stop => {
+                    abort_background_downloads();
                     kill_current_process(&current_process);
                     return None;
                 }
                 PlayerCommand::Play(p, pos) => {
+                    abort_background_downloads();
                     kill_current_process(&current_process);
                     return Some((p, pos));
                 }
                 PlayerCommand::Seek(secs) => {
+                    abort_background_downloads();
                     kill_current_process(&current_process);
                     return Some((path.to_string(), secs));
                 }
@@ -2689,6 +2808,7 @@ fn play_file(
                     status.store(1, Ordering::Relaxed);
                 }
                 PlayerCommand::RestartStream => {
+                    abort_background_downloads();
                     kill_current_process(&current_process);
                     return Some((path.to_string(), start_pos));
                 }
@@ -3638,10 +3758,10 @@ fn play_file(
     while running {
         loop {
             match rx.try_recv() {
-                Ok(PlayerCommand::Stop) => { running = false; break; }
+                Ok(PlayerCommand::Stop) => { abort_background_downloads(); running = false; break; }
                 Ok(PlayerCommand::Pause) => { status.store(2, Ordering::Relaxed); }
                 Ok(PlayerCommand::Resume) => { status.store(1, Ordering::Relaxed); }
-                Ok(PlayerCommand::Play(p, pos)) => { running = false; next_track_info = Some((p, pos)); break; }
+                Ok(PlayerCommand::Play(p, pos)) => { abort_background_downloads(); running = false; next_track_info = Some((p, pos)); break; }
                 Ok(PlayerCommand::Seek(secs)) => {
                     if let Some(samples_arc) = &decoded_samples {
                         let lock = safe_lock(samples_arc);
@@ -3662,6 +3782,7 @@ fn play_file(
                         pending.iter_mut().for_each(|ch| ch.clear());
                     } else {
                         // HTTP Stream: Restart FFmpeg starting at target offset!
+                        abort_background_downloads();
                         decode_shutdown.store(true, Ordering::SeqCst);
                         kill_current_process(&current_process);
                         running = false;
@@ -3677,6 +3798,7 @@ fn play_file(
                     safe_lock(&queue).push_back(path);
                 }
                 Ok(PlayerCommand::RestartStream) => {
+                    abort_background_downloads();
                     let current_pos = f64::from_bits(position_secs.load(Ordering::Relaxed));
                     running = false;
                     next_track_info = Some((path.to_string(), current_pos));
@@ -3891,6 +4013,7 @@ fn play_file(
                 
                 match rx.try_recv() {
                     Ok(PlayerCommand::Stop) => { 
+                        abort_background_downloads();
                         decode_shutdown.store(true, Ordering::SeqCst);
                         kill_current_process(&current_process);
                         
@@ -3910,6 +4033,7 @@ fn play_file(
                         status.store(1, Ordering::Relaxed); 
                     }
                     Ok(PlayerCommand::Play(p, pos)) => { 
+                        abort_background_downloads();
                         decode_shutdown.store(true, Ordering::SeqCst);
                         kill_current_process(&current_process);
                         
@@ -3938,7 +4062,7 @@ fn play_file(
                         } else if !is_stream {
                             if let Some(tb) = time_base {
                                 let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
-                                let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+                                  let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
                             }
                             position_secs.store(secs.to_bits(), Ordering::Relaxed);
                             flush_signal.store(true, Ordering::SeqCst);
@@ -3946,6 +4070,7 @@ fn play_file(
                             interleaved.clear();
                         } else {
                             // HTTP Stream: Restart FFmpeg starting at target offset!
+                            abort_background_downloads();
                             decode_shutdown.store(true, Ordering::SeqCst);
                             kill_current_process(&current_process);
                             running = false;
@@ -3959,6 +4084,7 @@ fn play_file(
                         let current_p = { safe_lock(&current_track).clone() };
                         let current_pos = f64::from_bits(position_secs.load(Ordering::Relaxed));
                         if let Some(p) = current_p {
+                            abort_background_downloads();
                             decode_shutdown.store(true, Ordering::SeqCst);
                             kill_current_process(&current_process);
                             
@@ -4012,7 +4138,7 @@ fn play_file(
 
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
-                PlayerCommand::Stop => { running = false; break; }
+                PlayerCommand::Stop => { abort_background_downloads(); running = false; break; }
                 PlayerCommand::Pause => { 
                     status.store(2, Ordering::Relaxed); 
                 }
@@ -4020,6 +4146,7 @@ fn play_file(
                     status.store(1, Ordering::Relaxed); 
                 }
                 PlayerCommand::Play(p, pos) => { 
+                    abort_background_downloads();
                     running = false; 
                     next_track_info = Some((p, pos)); 
                     break; 

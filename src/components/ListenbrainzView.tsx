@@ -34,9 +34,12 @@ export function ListenbrainzView() {
     const searchString = `${artist} - ${title}`;
     navigator.clipboard.writeText(searchString).then(() => {
       window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Copied "${searchString}"! Switching to Aideo Search...`, type: 'success' } 
+        detail: { message: `Copied "${searchString}"! Switching to Aideo...`, type: 'success' } 
       }));
-      setView('aideo_search');
+      setView('aideo');
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ui-trigger-aideo-search', { detail: { query: searchString } }));
+      }, 100);
     });
   };
 

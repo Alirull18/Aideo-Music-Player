@@ -143,10 +143,11 @@ const coverArtCache = new Map<string, string | null>();
 const pendingArtRequests = new Map<string, Promise<any>>();
 
 function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | null }) {
-  const isCloud = path.startsWith('http://') || path.startsWith('https://') || (coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://')));
+  const isTrackLocal = !path.startsWith('http://') && !path.startsWith('https://');
+  const isCloud = !isTrackLocal || (coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://')));
   const isSelfHosted = coverUrl && (coverUrl.startsWith('http://') || coverUrl.includes('/rest/getCoverArt.view') || coverUrl.includes('/Images/Primary'));
-  const isRemote = coverUrl && coverUrl.startsWith('https://') && !isSelfHosted;
-  const targetPath = isRemote ? coverUrl : (coverUrl || path);
+  const isRemote = !isTrackLocal && coverUrl && coverUrl.startsWith('https://') && !isSelfHosted;
+  const targetPath = isTrackLocal ? path : (isRemote ? coverUrl : (coverUrl || path));
   const [art, setArt] = useState<string | null>(isRemote ? coverUrl : (coverArtCache.get(targetPath) || null));
 
   useEffect(() => {
@@ -161,12 +162,19 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
     if (!art && !coverArtCache.has(targetPath)) {
       if (!pendingArtRequests.has(targetPath)) {
         const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
-          const artUrl = (res && typeof res === 'string') ? res : null;
+          let artUrl = (res && typeof res === 'string') ? res : null;
+          if (!artUrl && isTrackLocal && coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'))) {
+            artUrl = coverUrl;
+          }
           coverArtCache.set(targetPath, artUrl);
           return artUrl;
         }).catch(() => {
-          coverArtCache.set(targetPath, null);
-          return null;
+          let fallbackUrl = null;
+          if (isTrackLocal && coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'))) {
+            fallbackUrl = coverUrl;
+          }
+          coverArtCache.set(targetPath, fallbackUrl);
+          return fallbackUrl;
         }).finally(() => {
           pendingArtRequests.delete(targetPath);
         });
@@ -177,7 +185,7 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
         if (resolvedArt) setArt(resolvedArt);
       });
     }
-  }, [targetPath, art, isRemote, isCloud, coverUrl]);
+  }, [targetPath, art, isRemote, isCloud, isTrackLocal, coverUrl]);
 
   return (
     <div className="lib-thumb-mini">

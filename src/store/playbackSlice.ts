@@ -555,7 +555,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set(s => ({ playback: { ...s.playback, driver_type: type } }));
   },
 
-  playStream: async (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }) => {
+  playStream: async (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }, triggerAutoplay = true) => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       window.dispatchEvent(new CustomEvent('ui-toast', { 
         detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
@@ -642,7 +642,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       } else {
         await invoke('play_track', { path: url, startPos: 0.0 });
       }
-      get().triggerAutoplayRadio(virtualTrack, true).catch(console.error);
+      if (triggerAutoplay) {
+        get().triggerAutoplayRadio(virtualTrack, true).catch(console.error);
+      }
 
       // Trigger high-fidelity lyric lookup for stream/preview
       set({ lyricStatus: 'loading' });

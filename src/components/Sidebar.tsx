@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Search, Activity, Heart, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export function Sidebar() {
   const { 
@@ -69,12 +69,7 @@ export function Sidebar() {
           {!sidebarCollapsed && <span>Aideo</span>}
         </div>
       )}
-      {appMode === 'hybrid' && (
-        <div className={`nav-item ${view === 'aideo_search' ? 'active' : ''}`} onClick={() => setView('aideo_search')} title={sidebarCollapsed ? "Tidal Search" : undefined}>
-          <Search size={18} />
-          {!sidebarCollapsed && <span>Tidal Search</span>}
-        </div>
-      )}
+
       <div className={`nav-item ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView('aideo_lab')} title={sidebarCollapsed ? "Aideo Lab" : undefined}>
         <Activity size={18} />
         {!sidebarCollapsed && <span>Aideo Lab</span>}

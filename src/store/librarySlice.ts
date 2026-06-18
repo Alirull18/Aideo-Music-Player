@@ -33,8 +33,36 @@ const fetchTrackMetadataAndLyrics = async (
             coverUrl: art,
             duration: track.duration || 0,
           }).catch(() => {});
+        } else {
+          // Fallback to local cover if online retrieval returned null/empty and it is a local path
+          if (!path.startsWith('http://') && !path.startsWith('https://')) {
+            invoke('get_cover_art', { path }).then(async (localArt: any) => {
+              if (!pathsEqual(get().playback.current_track, path)) return;
+              if (localArt && typeof localArt === 'string') {
+                set({ coverArt: localArt });
+                try {
+                  const color = await extractDominantColor(localArt);
+                  set({ accentColor: color });
+                } catch (_) {}
+              }
+            }).catch(() => {});
+          }
         }
-      }).catch(() => {});
+      }).catch(() => {
+        // Fallback to local cover on connection failure/error
+        if (!path.startsWith('http://') && !path.startsWith('https://')) {
+          invoke('get_cover_art', { path }).then(async (localArt: any) => {
+            if (!pathsEqual(get().playback.current_track, path)) return;
+            if (localArt && typeof localArt === 'string') {
+              set({ coverArt: localArt });
+              try {
+                const color = await extractDominantColor(localArt);
+                set({ accentColor: color });
+              } catch (_) {}
+            }
+          }).catch(() => {});
+        }
+      });
     } else {
       extractDominantColor(track.cover_url).then((color) => {
         set({ accentColor: color });

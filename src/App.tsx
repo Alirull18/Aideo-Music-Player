@@ -13,7 +13,6 @@ import { AideoView } from './components/AideoView';
 import { NowPlayingView } from './components/NowPlayingView';
 import { LastfmView } from './components/LastfmView';
 import { ListenbrainzView } from './components/ListenbrainzView';
-import { AideoSearchView } from './components/AideoSearchView';
 
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
@@ -70,12 +69,13 @@ function AideoApp() {
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
-    const { fetchDevices, initializeQueue, loadSubsonicPassword } = useStore.getState();
+    const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession } = useStore.getState();
     loadLibrary();
     fetchPlaylists();
     fetchDevices();
     initializeQueue();
     loadSubsonicPassword();
+    checkSession().catch(e => console.error("checkSession error:", e));
 
     // Synchronize Windows Keep Awake status with backend on startup
     const initialKeepAwake = localStorage.getItem('aideo_keep_awake') === 'true';
@@ -271,13 +271,6 @@ function AideoApp() {
             <motion.div key="listenbrainz" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ListenbrainzView />
-            </motion.div>
-          )}
-
-          {view === 'aideo_search' && (
-            <motion.div key="aideo_search" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <AideoSearchView />
             </motion.div>
           )}
 

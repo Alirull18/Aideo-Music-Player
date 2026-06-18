@@ -320,6 +320,20 @@ async fn lastfm_get_top_artists(username: String) -> Result<serde_json::Value, S
     lastfm::get_top_artists(&username).await
 }
 
+#[tauri::command]
+async fn get_artist_profile(artist: String) -> Result<serde_json::Value, String> {
+    let info = lastfm_api::get_artist_info(&artist).await?;
+    let top_tracks = lastfm_api::get_artist_top_tracks(&artist).await?;
+    
+    Ok(serde_json::json!({
+        "name": info.get("name"),
+        "bio": info.get("bio").and_then(|b| b.get("summary")),
+        "listeners": info.get("stats").and_then(|s| s.get("listeners")),
+        "playcount": info.get("stats").and_then(|s| s.get("playcount")),
+        "top_tracks": top_tracks,
+    }))
+}
+
 // ── MusicBrainz Commands ──────────────────────────────────────────────────
 #[tauri::command]
 async fn mbz_search_recording(title: String, artist: String) -> Result<serde_json::Value, String> {
@@ -1037,10 +1051,12 @@ fn stop_track(state: State<'_, AppState>) -> Result<(), String> {
         .cmd_tx
         .send(player::PlayerCommand::Stop)
         .map_err(|e| e.to_string())?;
+    player::abort_background_downloads();
         
     // Unblock the player_loop instantly if it is stuck connecting to a stream
     if let Some(mut child) = safe_lock(&player.current_process).take() {
         let _ = child.kill();
+        let _ = child.wait();
     }
         
     Ok(())
@@ -1332,6 +1348,7 @@ pub fn run() {
             lastfm_get_user_info,
             lastfm_get_recent_tracks,
             lastfm_get_top_artists,
+            get_artist_profile,
             mbz_search_recording,
             mbz_get_cover_art,
             update_discord_presence,
@@ -1351,6 +1368,7 @@ pub fn run() {
             get_unsynced_history,
             mark_history_synced,
             youtube::search_youtube,
+            youtube::get_search_suggestions,
             youtube::download_track,
             youtube::get_aideo_recommendations,
             youtube::check_and_download_ytdlp,

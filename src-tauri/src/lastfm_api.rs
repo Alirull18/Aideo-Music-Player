@@ -230,3 +230,31 @@ pub async fn get_artist_top_tags(artist: &str) -> Result<Vec<String>, String> {
     
     Ok(tags)
 }
+
+/// 🔍 Fetch artist info from Last.fm
+pub async fn get_artist_info(artist: &str) -> Result<Value, String> {
+    let client = Client::new();
+    let api_key = get_api_key();
+    
+    let res = client.get(API_URL)
+        .query(&[
+            ("method", "artist.getinfo"),
+            ("artist", artist),
+            ("api_key", &api_key),
+            ("format", "json"),
+            ("autocorrect", "1")
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: Value = res.json().await.map_err(|e| e.to_string())?;
+    
+    if let Some(err_code) = json.get("error") {
+        let msg = json.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown Last.fm error");
+        return Err(format!("Last.fm API error {}: {}", err_code, msg));
+    }
+
+    Ok(json.get("artist").cloned().unwrap_or(Value::Null))
+}
+
