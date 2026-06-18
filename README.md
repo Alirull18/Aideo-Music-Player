@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.8.3
+# 💎 Aideo Music Player v0.8.4
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,12 +61,12 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.8.3 (Google Cast / Chromecast Integration & Playback Transfer)
+## 📢 What's New in v0.8.4 (Offline Cover Art Caching & Startup Session Persistence)
 
-* **📺 Google Cast / Chromecast Support**: Stream your local audio files and online music streams to any compatible Chromecast, Nest speaker, or smart display.
-* **🔄 Seamless Playback Transfer**: Smoothly hand over active playback from your laptop to your Chromecast receiver starting from the exact second it was playing, and sync it back to your laptop player when disconnecting.
-* **⏱️ Real-Time Seek Sync**: Synchronizes the laptop seek bar and controls with the active Cast receiver, avoiding drift caused by network buffering.
-* **🛡️ Transition Protection & CORS**: Supports HTTP OPTIONS preflight CORS requests on the local server for safe device buffering, and blocks stale position updates immediately after seeking or skipping to ensure responsive controls.
+* **💿 Local Cover Art Caching**: Downloads and caches cover art sidecar images (`{stem}.jpg`/`.png`) locally next to audio files for all web streams.
+* **🛡️ CORS-Immune Rendering**: Automatically falls back to serving cached local data URLs if Google/YTM user-content servers block hotlinking or the user is offline.
+* **🔑 Startup Session Persistence**: Automatically restores user logins and cloud sync credentials from secure local storage at launch, eliminating repetitive logins.
+* **🎵 Rich Web Stream Metadata**: Enriches imported library entries with accurate artist name, title, and cover metadata directly upon stream downloads.
 
 ---
 
@@ -82,8 +82,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.8.3 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.8.3_x64_en-US.msi`).
+1. **Download**: Get the latest v0.8.4 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.8.4_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---
