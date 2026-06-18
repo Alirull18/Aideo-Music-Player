@@ -667,8 +667,21 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         duration: metadata?.duration || 0,
       }).catch(() => { });
 
-      await invoke('update_media_playback', { playing: true });
-    } catch (e) { console.error('playStream error:', e); }
+    } catch (e) {
+      console.error('playStream error:', e);
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Streaming failed: ${e}`, type: 'error' }
+      }));
+      set((s: any) => ({
+        playback: {
+          ...s.playback,
+          status: 'Stopped',
+          current_track: null,
+          position_secs: 0
+        },
+        currentTrack: null
+      }));
+    }
   },
 
   addToQueue: async (track: Track) => {

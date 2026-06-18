@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.8.4
+# 💎 Aideo Music Player v0.8.5
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,12 +61,12 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.8.4 (Offline Cover Art Caching & Startup Session Persistence)
+## 📢 What's New in v0.8.5 (Robust YouTube Stream Resolution & Playback Queue Cleanup)
 
-* **💿 Local Cover Art Caching**: Downloads and caches cover art sidecar images (`{stem}.jpg`/`.png`) locally next to audio files for all web streams.
-* **🛡️ CORS-Immune Rendering**: Automatically falls back to serving cached local data URLs if Google/YTM user-content servers block hotlinking or the user is offline.
-* **🔑 Startup Session Persistence**: Automatically restores user logins and cloud sync credentials from secure local storage at launch, eliminating repetitive logins.
-* **🎵 Rich Web Stream Metadata**: Enriches imported library entries with accurate artist name, title, and cover metadata directly upon stream downloads.
+* **🚀 Robust YouTube Resolution**: Resolves on-the-fly streaming watch URLs using automatic `yt-dlp` updates on failure and player-client bypass configurations (`mweb,android`) to eliminate signature decryption blocks and HTTP 403/429 throttling errors.
+* **🛡️ Proactive Dependency Verification**: Automatically checks for the presence of both `yt-dlp.exe` and `ffmpeg.exe` prior to starting web streams, immediately showing helpful, context-rich plugin notifications rather than timing out.
+* **🗑️ Automatic Playback Queue Cleanup**: Dynamically filters out and discards unplayable or broken tracks from the playback queue in React and the Tauri backend upon error, auto-advancing to the next valid track.
+* **💿 Offline Cover Caching**: Downloads and caches cover art sidecar images locally next to audio files for web streams with CORS-immune fallback rendering and persistent session recovery.
 
 ---
 
@@ -82,8 +82,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.8.4 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.8.4_x64_en-US.msi`).
+1. **Download**: Get the latest v0.8.5 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.8.5_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---

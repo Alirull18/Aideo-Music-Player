@@ -500,6 +500,36 @@ pub fn clear_youtube_url_cache() {
     }
 }
 
+fn run_ytdlp_resolve(ytdlp_path: &std::path::Path, args: &[String]) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
+
+    let mut cmd = std::process::Command::new(ytdlp_path);
+    cmd.args(args);
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    match cmd.output() {
+        Ok(out) => {
+            if out.status.success() {
+                let stdout_str = String::from_utf8_lossy(&out.stdout);
+                let direct_url = stdout_str.trim().to_string();
+                if direct_url.starts_with("http") {
+                    return Some(direct_url);
+                }
+            } else {
+                let stderr_str = String::from_utf8_lossy(&out.stderr);
+                eprintln!("[player] yt-dlp resolve failed: {}", stderr_str.trim());
+            }
+        }
+        Err(e) => {
+            eprintln!("[player] Failed to execute yt-dlp resolve: {}", e);
+        }
+    }
+    None
+}
+
 pub fn resolve_youtube_url(url: &str) -> String {
     if !url.contains("youtube.com") && !url.contains("youtu.be") {
         return url.to_string();
@@ -525,50 +555,79 @@ pub fn resolve_youtube_url(url: &str) -> String {
         return url.to_string();
     }
     
-    #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt;
-    
-    let mut cmd = std::process::Command::new(&ytdlp_path);
     let cache_dir_str = aideo_dir.join("cache").to_string_lossy().to_string();
-    cmd.args([
-        "-g",
-        "-f", "251/140/bestaudio/best",
-        "--cache-dir", &cache_dir_str,
-        "--force-ipv4",
-        "--no-check-formats",
-        "--no-playlist",
-        "--no-check-certificate",
-        "--sleep-interval", "0",
-        "--max-sleep-interval", "0",
-        "--sleep-requests", "0",
-        url
-    ]);
     
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    // Attempt 1: Default arguments
+    let args_1 = vec![
+        "-g".to_string(),
+        "-f".to_string(), "251/140/bestaudio/best".to_string(),
+        "--cache-dir".to_string(), cache_dir_str.clone(),
+        "--force-ipv4".to_string(),
+        "--no-check-formats".to_string(),
+        "--no-playlist".to_string(),
+        "--no-check-certificate".to_string(),
+        "--sleep-interval".to_string(), "0".to_string(),
+        "--max-sleep-interval".to_string(), "0".to_string(),
+        "--sleep-requests".to_string(), "0".to_string(),
+        url.to_string(),
+    ];
     
-    match cmd.output() {
-        Ok(out) => {
-            if out.status.success() {
-                let stdout_str = String::from_utf8_lossy(&out.stdout);
-                let direct_url = stdout_str.trim().to_string();
-                if direct_url.starts_with("http") {
-                    println!("[player] Successfully extracted YouTube direct stream URL!");
-                    // Store in cache
-                    let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-                    cache.insert(url.to_string(), direct_url.clone());
-                    return direct_url;
-                }
-            } else {
-                let stderr_str = String::from_utf8_lossy(&out.stderr);
-                eprintln!("[player] yt-dlp extraction failed: {}", stderr_str.trim());
-            }
-        }
-        Err(e) => {
-            eprintln!("[player] Failed to execute yt-dlp: {}", e);
-        }
+    if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_1) {
+        println!("[player] Successfully extracted YouTube direct stream URL on first attempt!");
+        let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
+        cache.insert(url.to_string(), direct.clone());
+        return direct;
     }
     
+    // Attempt 2: Self-update and retry
+    println!("[player] Initial resolve failed. Attempting to self-update yt-dlp...");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut update_cmd = std::process::Command::new(&ytdlp_path);
+        update_cmd.arg("-U");
+        update_cmd.creation_flags(0x08000000);
+        let _ = update_cmd.status();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut update_cmd = std::process::Command::new(&ytdlp_path);
+        update_cmd.arg("-U");
+        let _ = update_cmd.status();
+    }
+        
+    if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_1) {
+        println!("[player] Successfully extracted YouTube direct stream URL after update!");
+        let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
+        cache.insert(url.to_string(), direct.clone());
+        return direct;
+    }
+    
+    // Attempt 3: Retry with mweb and android player client parameters
+    println!("[player] Resolve failed after update. Retrying with extractor player client arguments...");
+    let args_3 = vec![
+        "-g".to_string(),
+        "-f".to_string(), "251/140/bestaudio/best".to_string(),
+        "--cache-dir".to_string(), cache_dir_str.clone(),
+        "--force-ipv4".to_string(),
+        "--no-check-formats".to_string(),
+        "--no-playlist".to_string(),
+        "--no-check-certificate".to_string(),
+        "--sleep-interval".to_string(), "0".to_string(),
+        "--max-sleep-interval".to_string(), "0".to_string(),
+        "--sleep-requests".to_string(), "0".to_string(),
+        "--extractor-args".to_string(), "youtube:player-client=mweb,android".to_string(),
+        url.to_string(),
+    ];
+    
+    if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_3) {
+        println!("[player] Successfully extracted YouTube direct stream URL with client bypass!");
+        let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
+        cache.insert(url.to_string(), direct.clone());
+        return direct;
+    }
+    
+    println!("[player] Failed to resolve YouTube stream URL through all attempts.");
     url.to_string()
 }
 
@@ -659,8 +718,12 @@ fn prepare_decoder(
         let data_dir = dirs::data_dir().ok_or("Could not locate AppData directory")?;
         let aideo_dir = data_dir.join("Aideo");
         let ytdlp_path = aideo_dir.join("yt-dlp.exe");
+        let ffmpeg_plugin_path = aideo_dir.join("ffmpeg.exe");
         if !ytdlp_path.exists() {
             return Err("The yt-dlp plugin is missing. Please install the yt-dlp plugin in Settings -> Plugins to play YouTube tracks!".to_string());
+        }
+        if !ffmpeg_plugin_path.exists() {
+            return Err("The FFmpeg transcoder is missing. Please install the FFmpeg Transcoder in Settings -> Plugins to stream YouTube tracks!".to_string());
         }
 
         if let Some((cache_path, temp_path)) = get_cache_paths(path) {
@@ -922,7 +985,12 @@ fn prepare_decoder(
         }
         
         if !ffmpeg_exists {
-            return Err("This audio track is encoded in a format that requires external transcoding (e.g. Dolby Atmos / DTS). Please install the FFmpeg Transcoder in the Settings tab to play it!".to_string());
+            let msg = if is_stream {
+                "The FFmpeg transcoder is required for playing online web streams. Please install the FFmpeg Transcoder in Settings -> Plugins to start playback!".to_string()
+            } else {
+                "This audio track is encoded in a format that requires external transcoding (e.g. Dolby Atmos / DTS). Please install the FFmpeg Transcoder in the Settings tab to play it!".to_string()
+            };
+            return Err(msg);
         }
 
         println!("[player] Preparing FFmpeg transcode proxy for {} (seek position: {}s)...", path, start_pos);

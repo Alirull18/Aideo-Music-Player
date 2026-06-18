@@ -395,6 +395,34 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
     } catch (e) {
       console.error('playTrack error:', e);
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Playback failed: ${e}`, type: 'error' }
+      }));
+      
+      // Filter out the failed track from the queue if it's there
+      const currentQueue = get().queue;
+      const filteredQueue = currentQueue.filter((t: Track) => !pathsEqual(t.path, track.path));
+      if (filteredQueue.length !== currentQueue.length) {
+        set({ queue: filteredQueue });
+        localStorage.setItem('aideo_queue', JSON.stringify(filteredQueue));
+        const idx = currentQueue.findIndex((t: Track) => pathsEqual(t.path, track.path));
+        if (idx !== -1) {
+          invoke('remove_from_queue', { index: idx }).catch(console.error);
+        }
+      }
+
+      set((s: any) => ({
+        playback: {
+          ...s.playback,
+          status: 'Stopped',
+          current_track: null,
+          position_secs: 0
+        },
+        currentTrack: null
+      }));
+      setTimeout(() => {
+        get().playNext();
+      }, 1500);
     }
 
     const state = get();

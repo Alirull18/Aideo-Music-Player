@@ -1,11 +1,11 @@
 {
-  "version": "0.8.4",
-  "notes": "💎 AIDEO v0.8.4: Offline cover art caching, rich web stream metadata resolution, and startup session persistence.",
-  "pub_date": "2026-06-18T15:00:00Z",
+  "version": "0.8.5",
+  "notes": "💎 AIDEO v0.8.5: Robust YouTube URL stream resolution with player-client fallbacks, proactive dependency verification, and automatic playback queue cleanup.",
+  "pub_date": "2026-06-19T02:00:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUOGxKNlE5aVY1M2Q3bVFiR21vazhJOVhwMjVHcVpmSytmWWpOV0w4a0J1ZDRpemV1Q1lCSlE3aS9SQUs3YWJGQzJKU0R3QWhHUW10Y2xtV01EWHQwMGovVlc0VWdLeEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5MTYyOTE0CWZpbGU6QWlkZW9fMC41LjBfeDY0X2VuLVVTLm1zaQpzcExKOUFScFdtTE55VDZoYUlEOUIzckFlcXV1L2dLcFgyakx2NGpiLzVRNThvSWs4S29wR1NrTVpDdVRaOE9IUFlnS2M0V3NZcjFiRTZjTmZEOGFEdz09Cg==",
-      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.8.4/Aideo_0.8.4_x64_en-US.msi"
+      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.8.5/Aideo_0.8.5_x64_en-US.msi"
     }
   }
 }
