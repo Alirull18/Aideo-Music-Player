@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.8.6
+# 💎 Aideo Music Player v0.8.7
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,14 +61,12 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.8.6 (YTM Key Caching, Chromecast Fixes & Landing Page Visualizer Repairs)
+## 📢 What's New in v0.8.7 (Web Stream Whitelist, CORS Dynamic Themes & Transition Sync Fixes)
 
-* **⚡ YouTube Music (InnerTube) API Caching**: Created a thread-safe global cache for the InnerTube API key, reducing autocomplete and search response times in half by eliminating redundant blocking network requests to music.youtube.com.
-* **🔌 Crate-Wide Connection Pooling**: Migrated all Subsonic, Jellyfin, and YouTube Music handlers to reuse the global pooled HTTP client, optimizing sockets and preventing connection handshakes on every request.
-* **⏳ Audio Stream Safeness**: Set strict connection and request timeouts to prevent the background player preparation thread from hanging indefinitely on dead playlist stream URLs.
-* **📺 Chromecast Auto-Skip Fix**: Corrected Chromecast idle-state handling to ensure the player only advances to the next track when a song finishes playing, preventing accidental skips during manual stops or disconnects.
-* **🗃️ Database Cover Art Preservation**: Fixed a database logic bug where scanning local metadata or saving tracks with missing artwork would overwrite and delete existing cover art URLs or custom-healed album art from the database.
-* **🎨 Landing Page Visualizer Repair**: Fixed a fatal JavaScript TypeError crash on the landing page caused by a missing background particle canvas element, unfreezing the interactive EQ graph and spectrogram visualizer.
+* **🌐 HLS Playback & Transcoding Whitelist**: Added HLS whitelisting support (`-protocol_whitelist file,http,https,tcp,tls,dns`) for FFmpeg direct stream resolved URLs (resolving HLS manifest direct playback crashes).
+* **🎨 Tainted Canvas SecurityError Fix**: Resolved browser security sandboxing issues on dynamic color extraction by applying `crossOrigin = 'anonymous'` to remote cover art images.
+* **⏱️ Lyric Sync Transition Race Condition**: Added `pathsEqual` checks to prevent slow online lyric fetches, translations, or Romaji requests from overwriting active track states when skipping songs.
+* **⚡ Decaying Rank Bonus**: Integrated a decaying rank-based scoring bonus into auto-fetching and manual searching to respect search engine relevance order on close title/artist matches.
 
 ---
 
@@ -84,8 +82,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.8.6 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.8.6_x64_en-US.msi`).
+1. **Download**: Get the latest v0.8.7 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.8.7_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---

@@ -352,12 +352,40 @@ fn spawn_youtube_downloader(
         let mut cmd = std::process::Command::new(&ffmpeg_path);
         
         let is_youtube_stream = url.contains("youtube.com") || url.contains("googlevideo.com") || url.contains("youtu.be");
+        let is_hls = url.contains("hls_playlist") || url.contains(".m3u8");
 
         let mut args = Vec::new();
         args.extend([
+            "-loglevel".to_string(), "warning".to_string(),
             "-probesize".to_string(), "32768".to_string(),
             "-analyzeduration".to_string(), "100000".to_string(),
-            "-i".to_string(), "pipe:".to_string(),
+        ]);
+
+        if is_hls {
+            let ua = if is_youtube_stream {
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
+            } else {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+            };
+            args.extend([
+                "-protocol_whitelist".to_string(), "file,http,https,tcp,tls,dns".to_string(),
+                "-user_agent".to_string(), ua.to_string(),
+            ]);
+            if is_youtube_stream {
+                args.extend([
+                    "-headers".to_string(), "Referer: https://www.google.com/\r\n".to_string(),
+                ]);
+            }
+            args.extend([
+                "-i".to_string(), url.clone(),
+            ]);
+        } else {
+            args.extend([
+                "-i".to_string(), "pipe:".to_string(),
+            ]);
+        }
+
+        args.extend([
             "-y".to_string(),
             "-f".to_string(), "wav".to_string(),
             "-acodec".to_string(), "pcm_s16le".to_string(),
@@ -366,9 +394,15 @@ fn spawn_youtube_downloader(
             temp_path.to_string_lossy().to_string(),
         ]);
         
-        cmd.args(&args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
+        cmd.args(&args);
+        
+        if is_hls {
+            cmd.stdin(std::process::Stdio::null());
+        } else {
+            cmd.stdin(std::process::Stdio::piped());
+        }
+        
+        cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         
         #[cfg(target_os = "windows")]
@@ -390,8 +424,10 @@ fn spawn_youtube_downloader(
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        if let Some(stdin) = child.stdin.take() {
-            pipe_url_to_stdin(url.clone(), stdin, is_youtube_stream);
+        if !is_hls {
+            if let Some(stdin) = child.stdin.take() {
+                pipe_url_to_stdin(url.clone(), stdin, is_youtube_stream);
+            }
         }
 
         // Put the child in the child_ref mutex
@@ -412,13 +448,13 @@ fn spawn_youtube_downloader(
             });
         }
 
-        // Spawn a thread to read and discard stderr to prevent pipe buffer blocking
-        if let Some(mut err) = stderr {
+        // Spawn a thread to read and print stderr to prevent pipe buffer blocking and aid in debugging
+        if let Some(err) = stderr {
             std::thread::spawn(move || {
-                use std::io::Read;
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = err.read(&mut buf) {
-                    if n == 0 { break; }
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(err);
+                for line in reader.lines().map_while(Result::ok) {
+                    eprintln!("[ffmpeg-bg-err] {}", line);
                 }
             });
         }
@@ -1018,6 +1054,7 @@ fn prepare_decoder(
         } else {
             path.to_string()
         };
+        let is_hls = is_stream && (resolved_url.contains("hls_playlist") || resolved_url.contains(".m3u8"));
         let mut use_ffmpeg_seek = true;
 
         if is_stream && start_pos > 0.0 {
@@ -1041,13 +1078,37 @@ fn prepare_decoder(
         
         if is_stream {
             args.extend([
+                "-loglevel".to_string(), "warning".to_string(),
                 "-probesize".to_string(), "32768".to_string(),
                 "-analyzeduration".to_string(), "100000".to_string(),
-                "-i".to_string(), "pipe:".to_string(),
             ]);
+            if is_hls {
+                let ua = if is_youtube_stream {
+                    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
+                } else {
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                };
+                args.extend([
+                    "-protocol_whitelist".to_string(), "file,http,https,tcp,tls,dns".to_string(),
+                    "-user_agent".to_string(), ua.to_string(),
+                ]);
+                if is_youtube_stream {
+                    args.extend([
+                        "-headers".to_string(), "Referer: https://www.google.com/\r\n".to_string(),
+                    ]);
+                }
+                args.extend([
+                    "-i".to_string(), resolved_url.clone(),
+                ]);
+            } else {
+                args.extend([
+                    "-i".to_string(), "pipe:".to_string(),
+                ]);
+            }
         } else {
             // Local file inputs only need basic probing options
             args.extend([
+                "-loglevel".to_string(), "warning".to_string(),
                 "-probesize".to_string(), "32768".to_string(),
                 "-analyzeduration".to_string(), "100000".to_string(),
                 "-i".to_string(), resolved_url.clone(),
@@ -1090,7 +1151,11 @@ fn prepare_decoder(
         .stderr(std::process::Stdio::piped());
 
         if is_stream {
-            cmd.stdin(std::process::Stdio::piped());
+            if is_hls {
+                cmd.stdin(std::process::Stdio::null());
+            } else {
+                cmd.stdin(std::process::Stdio::piped());
+            }
         }
         
         #[cfg(target_os = "windows")]
@@ -1195,7 +1260,7 @@ fn prepare_decoder(
                     thread::spawn(move || {
                         let reader = std::io::BufReader::new(stderr);
                         for line in reader.lines().map_while(Result::ok) {
-                            if line.contains("Error") { eprintln!("[ffmpeg-err] {}", line); }
+                            eprintln!("[ffmpeg-err] {}", line);
                         }
                         // Kill yt-dlp when ffmpeg exits to prevent orphan processes
                         let _ = ytdlp_child.kill();
@@ -1216,14 +1281,16 @@ fn prepare_decoder(
                     thread::spawn(move || {
                         let reader = std::io::BufReader::new(stderr);
                         for line in reader.lines().map_while(Result::ok) {
-                            if line.contains("Error") { eprintln!("[ffmpeg-err] {}", line); }
+                            eprintln!("[ffmpeg-err] {}", line);
                         }
                     });
                     
                     if is_stream {
-                        if let Some(stdin) = child.stdin.take() {
-                            let is_youtube = resolved_url.contains("youtube.com") || resolved_url.contains("googlevideo.com") || resolved_url.contains("youtu.be");
-                            pipe_url_to_stdin(resolved_url.clone(), stdin, is_youtube);
+                        if !is_hls {
+                            if let Some(stdin) = child.stdin.take() {
+                                let is_youtube = resolved_url.contains("youtube.com") || resolved_url.contains("googlevideo.com") || resolved_url.contains("youtu.be");
+                                pipe_url_to_stdin(resolved_url.clone(), stdin, is_youtube);
+                            }
                         }
                     }
                     

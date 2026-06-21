@@ -853,7 +853,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const manualQueue = currentQueue.filter(t => !t.is_autoplay);
       const existingAutoplay = forceReset ? [] : currentQueue.filter(t => t.is_autoplay);
 
-      const cleanText = (str: string) => {
+      const cleanText = (str: string | null) => {
         if (!str) return '';
         let val = str.toLowerCase();
         val = val.replace(/[\(\[][^\)\]]+[\)\]]/g, '');

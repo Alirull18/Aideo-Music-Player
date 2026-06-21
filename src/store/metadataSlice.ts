@@ -1,7 +1,7 @@
 import { StateCreator } from 'zustand';
 import { PlayerState, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { cleanSearchQuery } from '../utils';
+import { cleanSearchQuery, pathsEqual } from '../utils';
 
 export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   lyrics: [],
@@ -40,7 +40,9 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       await invoke('save_lyrics_file', { path, content: lrc });
       const lines: any = await invoke('get_lyrics', { path });
-      if (Array.isArray(lines)) set({ lyrics: lines, lyricStatus: 'found' });
+      if (pathsEqual(get().playback.current_track, path)) {
+        if (Array.isArray(lines)) set({ lyrics: lines, lyricStatus: 'found' });
+      }
     } catch (e) { console.error(e); }
   },
 
@@ -65,7 +67,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         const targetArtist = cleanArtist || track.artist || '';
         const targetDuration = track.duration;
 
-        const scoredResults = lyricResults.map(r => {
+        const scoredResults = lyricResults.map((r, index) => {
           const clean = (s: string) => s.toLowerCase()
             .replace(/[()\[\]\-\s_]+/g, '')
             .replace(/[^\p{L}\p{N}]/gu, '');
@@ -102,7 +104,8 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
           }
 
           const syncBonus = r.raw_lrc || r.source !== 'iTunes' ? 0.2 : 0.0;
-          const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus;
+          const rankBonus = Math.max(0, 0.15 - (index * 0.03));
+          const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + rankBonus;
 
           return { result: r, score, titleScore };
         });
@@ -154,6 +157,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (!playback.current_track || lyrics.length === 0) return;
     set({ isTranslating: true });
     try {
+      const trackPath = playback.current_track;
       const translated = await Promise.all(
         lyrics.map(async (l) => {
           if (!l.text) return l;
@@ -163,15 +167,18 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
           } catch { return l; }
         })
       );
-      set({ lyrics: translated });
+      if (pathsEqual(get().playback.current_track, trackPath)) {
+        set({ lyrics: translated });
+      }
     } catch (e) { console.error(e); } finally { set({ isTranslating: false }); }
   },
 
   getRomaji: async () => {
-    const { lyrics } = get();
+    const { lyrics, playback } = get();
     if (lyrics.length === 0) return;
     set({ isTranslating: true });
     try {
+      const trackPath = playback.current_track;
       const withRomaji = await Promise.all(
         lyrics.map(async (l) => {
           if (!l.text || l.romaji) return l;
@@ -181,7 +188,9 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
           } catch { return l; }
         })
       );
-      set({ lyrics: withRomaji });
+      if (pathsEqual(get().playback.current_track, trackPath)) {
+        set({ lyrics: withRomaji });
+      }
     } catch (e) { console.error(e); } finally { set({ isTranslating: false }); }
   },
 

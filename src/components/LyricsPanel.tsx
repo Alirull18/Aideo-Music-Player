@@ -88,7 +88,7 @@ export function LyricsPanel() {
       const targetArtist = cleanArtist || currentTrack?.artist || '';
       const targetDuration = currentTrack?.duration;
 
-      const scored = r.map(item => {
+      const scored = r.map((item, index) => {
         const cleanStr = (s: string) => s.toLowerCase()
           .replace(/[()\[\]\-\s_]+/g, '')
           .replace(/[^\p{L}\p{N}]/gu, '');
@@ -125,7 +125,8 @@ export function LyricsPanel() {
         }
 
         const syncBonus = item.raw_lrc || item.source !== 'iTunes' ? 0.2 : 0.0;
-        const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus;
+        const rankBonus = Math.max(0, 0.15 - (index * 0.03));
+        const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + rankBonus;
 
         return { item, score };
       });

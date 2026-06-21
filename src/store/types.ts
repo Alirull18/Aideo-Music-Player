@@ -387,6 +387,9 @@ function hslToRgb(h: number, s: number, l: number) {
 export function extractDominantColor(dataUrl: string): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
+    if (dataUrl && !dataUrl.startsWith('data:')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = 10; canvas.height = 10;

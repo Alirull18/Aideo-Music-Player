@@ -25,7 +25,7 @@
       "description": "A high-fidelity, audiophile-grade desktop music player for Windows. Features AutoEQ headphones calibration, parametric equalizer, real-time DSP, Apple Music metadata lookup, and local cover art caching.",
       "downloadUrl": "https://github.com/Alirull18/Aideo-Music-Player/releases/latest",
       "releaseNotes": "https://github.com/Alirull18/Aideo-Music-Player/blob/main/README.md",
-      "softwareVersion": "0.8.6",
+      "softwareVersion": "0.8.7",
       "author": {
         "@type": "Person",
         "name": "Alirul"
@@ -79,7 +79,7 @@
             <div class="hero-info">
                 <div class="release-badge">
                     <span class="pulse-dot"></span>
-                    Version 0.8.6 Is Live &bull; Stable Auto-Updates
+                    Version 0.8.7 Is Live &bull; Stable Auto-Updates
                 </div>
                 <h1 id="hero-title">Pristine Sound.<br/><span class="gradient-text">Dynamic Soul.</span></h1>
                 <p class="tagline">An audiophile-grade desktop music player and DSP console for Windows. Unleash calibrated acoustic responses via a real-time **Biquad DSP engine**, integrated **AutoEQ indexing** for 4,000+ headphones, and a tokio-powered **YouTube Music AI Discovery Hub**.</p>
@@ -502,10 +502,15 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
                     <h3>Robust Stream Resolving & Queue Cleanup</h3>
                     <p>Enables self-updating and client-bypass arguments for direct streaming, adds proactive dependency checks to avoid silent timeouts, and implements automatic failed track removal from the playback queue.</p>
                 </div>
-                <div class="timeline-node active" id="node-v8-6">
-                    <span class="node-badge glow">v0.8.6</span>
-                    <h3>YTM Key Caching, Chromecast Fixes & Landing Page Visualizer Repairs</h3>
+                <div class="timeline-node done" id="node-v8-6">
+                    <span class="node-badge">v0.8.6</span>
+                    <h3>YTM Key Caching & Chromecast Fixes</h3>
                     <p>Optimizes YouTube Music InnerTube key retrieval via caching, pools HTTP connections crate-wide, prevents dead playlist hangs with timeouts, corrects Chromecast auto-skip triggers, preserves database cover art from local scans, and resolves landing page visualizer TypeError crashes.</p>
+                </div>
+                <div class="timeline-node active" id="node-v8-7">
+                    <span class="node-badge glow">v0.8.7</span>
+                    <h3>HLS Streaming, CORS Canvas, and Lyric Transition Sync Repairs</h3>
+                    <p>Enables whitelisted HLS manifest direct streaming/transcoding on YouTube tracks, resolves cross-origin canvas tainting crashes in dynamic accent color matching, prevents skipped track lyric overlaps with state checks, and aligns auto-fetch / manual search with decaying rank bonuses.</p>
                 </div>
                 <div class="timeline-node future" id="node-vnext">
                     <span class="node-badge">Next Core</span>

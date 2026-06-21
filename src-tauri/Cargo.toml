@@ -1,6 +1,6 @@
 [package]
 name = "aideo"
-version = "0.8.6"
+version = "0.8.7"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
