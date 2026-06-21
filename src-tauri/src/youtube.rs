@@ -1237,12 +1237,42 @@ pub async fn get_youtube_autoplay_recommendations(
         }
     }
 
+    // Query recently played track titles/artists from db to exclude them
+    let recently_played: std::collections::HashSet<String> = {
+        let mut plays = std::collections::HashSet::new();
+        let conn = crate::safe_lock(&state.db);
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT title, artist FROM playback_history 
+             WHERE title IS NOT NULL AND artist IS NOT NULL AND title != '' AND artist != ''
+             ORDER BY timestamp DESC LIMIT 100"
+        ) {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Some(row) = rows.next().unwrap_or(None) {
+                    if let (Ok(t), Ok(a)) = (row.get::<_, String>(0), row.get::<_, String>(1)) {
+                        let clean_t = clean_title(&t);
+                        let clean_a = a.to_lowercase().trim().to_string();
+                        plays.insert(format!("{} - {}", clean_a, clean_t));
+                    }
+                }
+            }
+        }
+        plays
+    };
+
     // ── AIDEO AUTOPLAY ENGINE V2 FILTER PIPELINE ──
     let _artist_lower = artist.to_lowercase();
     let mut filtered_tracks = Vec::new();
     let mut seen_titles = std::collections::HashSet::new();
 
     for track in tracks {
+        // 0. Drop recently played tracks
+        let clean_t = clean_title(&track.title);
+        let clean_a = track.artist.to_lowercase().trim().to_string();
+        let track_key = format!("{} - {}", clean_a, clean_t);
+        if recently_played.contains(&track_key) {
+            println!("[autoplay-filter] Drop recently played track (from DB match): '{}' by '{}'", track.title, track.artist);
+            continue;
+        }
         // 0. Instrumental/Third-Party Filter
         if is_third_party_or_instrumental(&track.title, &track.artist) {
             println!("[autoplay-filter] Drop instrumental/third-party track: '{}' by '{}'", track.title, track.artist);

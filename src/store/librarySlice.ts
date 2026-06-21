@@ -853,6 +853,18 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const manualQueue = currentQueue.filter(t => !t.is_autoplay);
       const existingAutoplay = forceReset ? [] : currentQueue.filter(t => t.is_autoplay);
 
+      const cleanText = (str: string) => {
+        if (!str) return '';
+        let val = str.toLowerCase();
+        val = val.replace(/[\(\[][^\)\]]+[\)\]]/g, '');
+        val = val.replace(/\s+(feat|ft|featuring|official\s+audio|official\s+video).*$/i, '');
+        return val.trim();
+      };
+
+      const playedTitleArtistSet = new Set(
+        get().playHistory.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
+      );
+
       const playedSet = new Set(get().playHistory.map(t => t.path));
       const currentTrackPath = track.path;
       const existingPaths = new Set([
@@ -860,21 +872,32 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         ...manualQueue.map(t => t.path),
         ...existingAutoplay.map(t => t.path)
       ]);
+      const existingTitleArtistSet = new Set([
+        `${cleanText(track.artist)} - ${cleanText(track.title)}`,
+        ...manualQueue.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`),
+        ...existingAutoplay.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
+      ]);
 
       const clearedSet = new Set(get().recentlyClearedAutoplayPaths || []);
       let finalRecommended = recommendedTracks.filter(t => 
         !playedSet.has(t.path) && 
+        !playedTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
         !existingPaths.has(t.path) && 
+        !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
         !clearedSet.has(t.path)
       );
       if (finalRecommended.length === 0) {
         finalRecommended = recommendedTracks.filter(t => 
           !existingPaths.has(t.path) && 
+          !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
           !clearedSet.has(t.path)
         );
       }
       if (finalRecommended.length === 0) {
-        finalRecommended = recommendedTracks.filter(t => !existingPaths.has(t.path));
+        finalRecommended = recommendedTracks.filter(t => 
+          !existingPaths.has(t.path) &&
+          !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`)
+        );
       }
 
       const needed = Math.max(0, 5 - existingAutoplay.length);
