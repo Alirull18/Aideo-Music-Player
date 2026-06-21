@@ -228,6 +228,7 @@ fn pipe_url_to_stdin(
             let client = reqwest::blocking::Client::builder()
                 .danger_accept_invalid_certs(true)
                 .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(45))
                 .build()
                 .unwrap_or_else(|_| reqwest::blocking::Client::new());
 
@@ -2934,7 +2935,11 @@ fn play_file(
                             let temp_path = cache_dir.join(format!("{}.tmp", hash));
                             if !cache_path.exists() {
                                 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
-                                let client = reqwest::blocking::Client::new();
+                                let client = reqwest::blocking::Client::builder()
+                                    .timeout(std::time::Duration::from_secs(30))
+                                    .connect_timeout(std::time::Duration::from_secs(10))
+                                    .build()
+                                    .unwrap_or_else(|_| reqwest::blocking::Client::new());
                                 let mut req = client.get(&resolved_url);
                                 req = req.header("User-Agent", USER_AGENT);
 
