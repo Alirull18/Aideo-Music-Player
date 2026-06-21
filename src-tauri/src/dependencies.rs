@@ -119,8 +119,10 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                 "type": "info"
             }));
 
-            let extract_func = || -> Result<(), String> {
-                let file = std::fs::File::open(&zip_dest)
+            let aideo_dir_clone = aideo_dir.clone();
+            let zip_dest_clone = zip_dest.clone();
+            let extract_res = tokio::task::spawn_blocking(move || {
+                let file = std::fs::File::open(&zip_dest_clone)
                     .map_err(|e| format!("Failed to open downloaded zip: {}", e))?;
                 let mut archive = zip::ZipArchive::new(file)
                     .map_err(|e| format!("Failed to read zip archive: {}", e))?;
@@ -136,7 +138,7 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                     };
 
                     if outpath.file_name().and_then(|n| n.to_str()).map(|n| n.eq_ignore_ascii_case("ffmpeg.exe")).unwrap_or(false) {
-                        let mut outfile = std::fs::File::create(aideo_dir.join("ffmpeg.exe"))
+                        let mut outfile = std::fs::File::create(aideo_dir_clone.join("ffmpeg.exe"))
                             .map_err(|e| format!("Failed to create destination file: {}", e))?;
                         std::io::copy(&mut file, &mut outfile)
                             .map_err(|e| format!("Failed to extract ffmpeg.exe: {}", e))?;
@@ -145,14 +147,14 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                     }
                 }
 
+                let _ = std::fs::remove_file(&zip_dest_clone);
+
                 if !extracted {
                     return Err("ffmpeg.exe was not found inside the zip archive".to_string());
                 }
                 Ok(())
-            };
-
-            let extract_res = extract_func();
-            let _ = std::fs::remove_file(&zip_dest);
+            }).await.map_err(|e| format!("Extraction task panicked: {}", e))?;
+            
             extract_res?;
 
             let _ = app_handle.emit("ui-toast", serde_json::json!({

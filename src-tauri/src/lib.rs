@@ -1,3 +1,13 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::needless_range_loop,
+    clippy::manual_flatten,
+    clippy::type_complexity,
+    clippy::collapsible_if,
+    clippy::collapsible_match,
+    clippy::missing_const_for_thread_local
+)]
+
 use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig, MediaPosition};
@@ -36,6 +46,18 @@ pub fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     }
 }
 
+static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+pub(crate) fn get_http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 pub struct AppState {
     pub player: Arc<Mutex<player::Player>>,
     pub db: Arc<Mutex<rusqlite::Connection>>,
@@ -62,7 +84,7 @@ async fn translate_lyric_line(text: String) -> Result<(String, String), String> 
         "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&dt=rm&q={}",
         urlencoding::encode(&text)
     );
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     let data = res
         .json::<serde_json::Value>()
@@ -131,97 +153,114 @@ async fn open_oauth_window(app_handle: tauri::AppHandle, url: String, provider: 
 // ── Online Search commands ──────────────────────────────────────────────────
 #[tauri::command]
 async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String> {
-    let mut results = Vec::new();
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let encoded_query = urlencoding::encode(&query);
 
-    let lrc_url = format!("https://lrclib.net/api/search?q={}", encoded_query);
-    if let Ok(res) = client.get(&lrc_url).send().await {
-        if let Ok(data) = res.json::<serde_json::Value>().await {
-            if let Some(list) = data.as_array() {
-                for item in list.iter().take(5) {
-                    results.push(SearchResult {
-                        id: item["id"].to_string(),
-                        title: item["trackName"].as_str().unwrap_or("").to_string(),
-                        artist: item["artistName"].as_str().unwrap_or("").to_string(),
-                        source: "LRCLIB".to_string(),
-                        synced: !item["syncedLyrics"].is_null(),
-                        content_id: None,
-                        raw_lrc: item["syncedLyrics"]
-                            .as_str()
-                            .or(item["plainLyrics"].as_str())
-                            .map(|s| s.to_string()),
-                        duration: item["duration"].as_f64(),
-                    });
+    let lrc_fut = async {
+        let mut results = Vec::new();
+        let lrc_url = format!("https://lrclib.net/api/search?q={}", encoded_query);
+        if let Ok(res) = client.get(&lrc_url).send().await {
+            if let Ok(data) = res.json::<serde_json::Value>().await {
+                if let Some(list) = data.as_array() {
+                    for item in list.iter().take(5) {
+                        results.push(SearchResult {
+                            id: item["id"].to_string(),
+                            title: item["trackName"].as_str().unwrap_or("").to_string(),
+                            artist: item["artistName"].as_str().unwrap_or("").to_string(),
+                            source: "LRCLIB".to_string(),
+                            synced: !item["syncedLyrics"].is_null(),
+                            content_id: None,
+                            raw_lrc: item["syncedLyrics"]
+                                .as_str()
+                                .or(item["plainLyrics"].as_str())
+                                .map(|s| s.to_string()),
+                            duration: item["duration"].as_f64(),
+                        });
+                    }
                 }
             }
         }
-    }
+        results
+    };
 
-    let ne_url = format!(
-        "https://music.163.com/api/search/get?s={}&type=1&limit=5",
-        encoded_query
-    );
-    if let Ok(res) = client.get(&ne_url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .header("Referer", "https://music.163.com")
-        .send().await {
-        if let Ok(data) = res.json::<serde_json::Value>().await {
-            if let Some(songs) = data["result"]["songs"].as_array() {
-                for item in songs {
-                    let ne_id = item["id"].as_i64().map(|i| i.to_string())
-                        .or_else(|| item["id"].as_str().map(|s| s.to_string()))
-                        .unwrap_or_else(|| item["id"].to_string());
-                        
-                    results.push(SearchResult {
-                        id: ne_id.clone(),
-                        title: item["name"].as_str().unwrap_or("").to_string(),
-                        artist: item["artists"]
-                            .as_array()
-                            .and_then(|arr| arr.first())
-                            .and_then(|a| a["name"].as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        source: "NetEase".to_string(),
-                        synced: true,
-                        content_id: Some(ne_id),
-                        raw_lrc: None,
-                        duration: item["duration"].as_f64().map(|ms| ms / 1000.0)
-                            .or_else(|| item["dt"].as_f64().map(|ms| ms / 1000.0)),
-                    });
+    let ne_fut = async {
+        let mut results = Vec::new();
+        let ne_url = format!(
+            "https://music.163.com/api/search/get?s={}&type=1&limit=5",
+            encoded_query
+        );
+        if let Ok(res) = client.get(&ne_url)
+            .header("Referer", "https://music.163.com")
+            .send().await {
+            if let Ok(data) = res.json::<serde_json::Value>().await {
+                if let Some(songs) = data["result"]["songs"].as_array() {
+                    for item in songs {
+                        let ne_id = item["id"].as_i64().map(|i| i.to_string())
+                            .or_else(|| item["id"].as_str().map(|s| s.to_string()))
+                            .unwrap_or_else(|| item["id"].to_string());
+                            
+                        results.push(SearchResult {
+                            id: ne_id.clone(),
+                            title: item["name"].as_str().unwrap_or("").to_string(),
+                            artist: item["artists"]
+                                .as_array()
+                                .and_then(|arr| arr.first())
+                                .and_then(|a| a["name"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            source: "NetEase".to_string(),
+                            synced: true,
+                            content_id: Some(ne_id),
+                            raw_lrc: None,
+                            duration: item["duration"].as_f64().map(|ms| ms / 1000.0)
+                                .or_else(|| item["dt"].as_f64().map(|ms| ms / 1000.0)),
+                        });
+                    }
                 }
             }
         }
-    }
+        results
+    };
 
-    let qq_url = format!(
-        "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w={}&format=json",
-        encoded_query
-    );
-    if let Ok(res) = client.get(&qq_url).send().await {
-        if let Ok(data) = res.json::<serde_json::Value>().await {
-            if let Some(songs) = data["data"]["song"]["list"].as_array() {
-                for item in songs {
-                    results.push(SearchResult {
-                        id: item["songmid"].as_str().unwrap_or("").to_string(),
-                        title: item["songname"].as_str().unwrap_or("").to_string(),
-                        artist: item["singer"]
-                            .as_array()
-                            .and_then(|arr| arr.first())
-                            .and_then(|s| s["name"].as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        source: "QQMusic".to_string(),
-                        synced: true,
-                        content_id: Some(item["songmid"].as_str().unwrap_or("").to_string()),
-                        raw_lrc: None,
-                        duration: item["interval"].as_f64()
-                            .or_else(|| item["duration"].as_f64()),
-                    });
+    let qq_fut = async {
+        let mut results = Vec::new();
+        let qq_url = format!(
+            "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w={}&format=json",
+            encoded_query
+        );
+        if let Ok(res) = client.get(&qq_url).send().await {
+            if let Ok(data) = res.json::<serde_json::Value>().await {
+                if let Some(songs) = data["data"]["song"]["list"].as_array() {
+                    for item in songs {
+                        results.push(SearchResult {
+                            id: item["songmid"].as_str().unwrap_or("").to_string(),
+                            title: item["songname"].as_str().unwrap_or("").to_string(),
+                            artist: item["singer"]
+                                .as_array()
+                                .and_then(|arr| arr.first())
+                                .and_then(|s| s["name"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            source: "QQMusic".to_string(),
+                            synced: true,
+                            content_id: Some(item["songmid"].as_str().unwrap_or("").to_string()),
+                            raw_lrc: None,
+                            duration: item["interval"].as_f64()
+                                .or_else(|| item["duration"].as_f64()),
+                        });
+                    }
                 }
             }
         }
-    }
+        results
+    };
+
+    let (lrc_res, ne_res, qq_res) = tokio::join!(lrc_fut, ne_fut, qq_fut);
+    
+    let mut results = Vec::new();
+    results.extend(lrc_res);
+    results.extend(ne_res);
+    results.extend(qq_res);
 
     Ok(results)
 }
@@ -229,13 +268,12 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
 
 #[tauri::command]
 async fn get_netease_lrc(id: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let url = format!(
         "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1&os=pc",
         id
     );
     let res = client.get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .header("Referer", "https://music.163.com")
         .send().await.map_err(|e| e.to_string())?;
     let data = res
@@ -251,12 +289,11 @@ async fn get_netease_lrc(id: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn get_qqmusic_lrc(mid: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let url = format!("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={}&format=json&nobase64=1", mid);
     let res = client
         .get(&url)
         .header("Referer", "https://y.qq.com/portal/player.html")
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -383,7 +420,7 @@ fn add_to_queue_bulk(paths: Vec<String>, state: State<'_, AppState>) -> Result<(
 
 #[tauri::command]
 async fn listenbrainz_scrobble(artist: String, track: String, timestamp: i64, token: String) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let payload = serde_json::json!({
         "listen_type": "single",
         "payload": [
@@ -473,56 +510,61 @@ fn set_audio_device(state: State<'_, AppState>, name: String) -> Result<(), Stri
 // ── Scanner commands ──────────────────────────────────────────────────────────
 #[tauri::command]
 async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
-    let mut all_scanned_tracks = Vec::new();
-    for dir in &dirs {
-        let tracks = scanner::scan_directory(dir, &app_handle);
-        all_scanned_tracks.extend(tracks);
-    }
+    let db_conn_arc = Arc::clone(&state.db);
+    let app_handle_clone = app_handle.clone();
+    
+    tokio::task::spawn_blocking(move || {
+        let mut all_scanned_tracks = Vec::new();
+        for dir in &dirs {
+            let tracks = scanner::scan_directory(dir, &app_handle_clone);
+            all_scanned_tracks.extend(tracks);
+        }
 
-    let mut conn = safe_lock(&state.db);
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    
-    let mut db_tracks = Vec::new();
-    {
-        let mut stmt = tx.prepare("SELECT id, path FROM tracks").map_err(|e| e.to_string())?;
-        let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
-        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-            let id: i32 = row.get(0).map_err(|e| e.to_string())?;
-            let path: String = row.get(1).map_err(|e| e.to_string())?;
-            db_tracks.push((id, path));
+        let mut conn = safe_lock(&db_conn_arc);
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        
+        let mut db_tracks = Vec::new();
+        {
+            let mut stmt = tx.prepare("SELECT id, path FROM tracks").map_err(|e| e.to_string())?;
+            let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+                let id: i32 = row.get(0).map_err(|e| e.to_string())?;
+                let path: String = row.get(1).map_err(|e| e.to_string())?;
+                db_tracks.push((id, path));
+            }
         }
-    }
-    
-    let db_paths: std::collections::HashSet<String> = db_tracks.iter().map(|(_, p)| p.clone()).collect();
-    
-    for track in all_scanned_tracks {
-        if !db_paths.contains(&track.path) {
-            tx.execute(
-                "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![
-                    track.path,
-                    track.title,
-                    track.artist,
-                    track.album,
-                    track.duration,
-                    track.format,
-                    track.lyric_offset,
-                ],
-            ).map_err(|e| e.to_string())?;
+        
+        let db_paths: std::collections::HashSet<String> = db_tracks.iter().map(|(_, p)| p.clone()).collect();
+        
+        for track in all_scanned_tracks {
+            if !db_paths.contains(&track.path) {
+                tx.execute(
+                    "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    rusqlite::params![
+                        track.path,
+                        track.title,
+                        track.artist,
+                        track.album,
+                        track.duration,
+                        track.format,
+                        track.lyric_offset,
+                    ],
+                ).map_err(|e| e.to_string())?;
+            }
         }
-    }
-    
-    for (_id, path) in db_tracks {
-        if !std::path::Path::new(&path).exists() {
-            tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
+        
+        for (_id, path) in db_tracks {
+            if !std::path::Path::new(&path).exists() {
+                tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
+            }
         }
-    }
-    
-    tx.commit().map_err(|e| e.to_string())?;
-    
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(0);
-    Ok(count as usize)
+        
+        tx.commit().map_err(|e| e.to_string())?;
+        
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(0);
+        Ok(count as usize)
+    }).await.map_err(|e| format!("Scanning task panicked: {}", e))?
 }
 
 #[tauri::command]
@@ -658,22 +700,35 @@ fn delete_track(path: String, state: State<'_, AppState>) -> Result<(), String> 
     let conn = safe_lock(&state.db);
     db::delete_track(&conn, &path).map_err(|e| e.to_string())?;
     
-    // 1. Delete the main audio file
-    let audio_path = std::path::Path::new(&path);
-    let _ = std::fs::remove_file(audio_path);
+    // 1. Delete the main audio file (if local)
+    if !path.starts_with("http://") && !path.starts_with("https://") {
+        let audio_path = std::path::Path::new(&path);
+        let _ = std::fs::remove_file(audio_path);
 
-    // 2. Delete sidecar files (.lrc, .jpg, .png)
-    if let (Some(parent), Some(stem)) = (audio_path.parent(), audio_path.file_stem()) {
-        if let Some(stem_str) = stem.to_str() {
-            let lrc_path = parent.join(format!("{}.lrc", stem_str));
-            let jpg_path = parent.join(format!("{}.jpg", stem_str));
-            let png_path = parent.join(format!("{}.png", stem_str));
-
-            let _ = std::fs::remove_file(lrc_path);
-            let _ = std::fs::remove_file(jpg_path);
-            let _ = std::fs::remove_file(png_path);
+        // 2. Delete sidecar files (.jpg, .png next to the file)
+        if let (Some(parent), Some(stem)) = (audio_path.parent(), audio_path.file_stem()) {
+            if let Some(stem_str) = stem.to_str() {
+                let jpg_path = parent.join(format!("{}.jpg", stem_str));
+                let png_path = parent.join(format!("{}.png", stem_str));
+                let _ = std::fs::remove_file(jpg_path);
+                let _ = std::fs::remove_file(png_path);
+            }
+        }
+    } else {
+        // Delete Cloud Cache files if it's an online track
+        let hash = format!("{:x}", md5::compute(path.as_bytes()));
+        if let Some(data_dir) = dirs::data_dir() {
+            let cache_dir = data_dir.join("Aideo").join("CloudCache");
+            let cache_path = cache_dir.join(format!("{}.cache", hash));
+            let temp_path = cache_dir.join(format!("{}.tmp", hash));
+            let _ = std::fs::remove_file(cache_path);
+            let _ = std::fs::remove_file(temp_path);
         }
     }
+
+    // 3. Delete the lyric file (covers both local and remote)
+    let lrc_path = lyrics::get_lrc_path(&path);
+    let _ = std::fs::remove_file(lrc_path);
 
     Ok(())
 }
@@ -687,23 +742,7 @@ fn get_lyrics(path: String) -> Result<Vec<lyrics::LyricLine>, String> {
 #[tauri::command]
 async fn get_cover_art(path: String) -> Result<Option<String>, String> {
     if path.starts_with("http://") || path.starts_with("https://") {
-        let client = reqwest::Client::new();
-        if let Ok(res) = client.get(&path).send().await {
-            let status = res.status();
-            if status.is_success() {
-                let mime = res.headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("image/jpeg")
-                    .to_string();
-                if let Ok(bytes) = res.bytes().await {
-                    use base64::Engine;
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                    return Ok(Some(format!("data:{};base64,{}", mime, encoded)));
-                }
-            }
-        }
-        return Ok(None);
+        return Ok(Some(path));
     }
     
     Ok(artwork::get_cover_art(&path))
@@ -717,7 +756,7 @@ fn save_lyrics_file(path: String, content: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
 

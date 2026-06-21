@@ -227,6 +227,7 @@ fn pipe_url_to_stdin(
         while retry_count < max_retries {
             let client = reqwest::blocking::Client::builder()
                 .danger_accept_invalid_certs(true)
+                .connect_timeout(std::time::Duration::from_secs(10))
                 .build()
                 .unwrap_or_else(|_| reqwest::blocking::Client::new());
 
@@ -660,7 +661,12 @@ pub fn pre_resolve_youtube_url(url: String) {
 fn resolve_playlist_url(url: &str) -> String {
     let url_lower = url.to_lowercase();
     if url_lower.ends_with(".pls") || url_lower.ends_with(".m3u") {
-        if let Ok(res) = reqwest::blocking::get(url) {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+        if let Ok(res) = client.get(url).send() {
             if let Ok(text) = res.text() {
                 if url_lower.ends_with(".pls") {
                     for line in text.lines() {

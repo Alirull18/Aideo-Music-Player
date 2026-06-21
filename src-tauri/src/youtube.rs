@@ -143,20 +143,14 @@ fn get_fallback_innertube_key() -> String {
     format!("{}{}", p1, p2)
 }
 
-pub async fn fetch_innertube_key() -> String {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .build();
+static INNERTUBE_KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-    let client = match client {
-        Ok(c) => c,
-        Err(_) => {
-            println!("⚠ [YOUTUBE ENGINE] Failed to build reqwest client. Using fallback InnerTube API key.");
-            return get_fallback_innertube_key();
-        }
-    };
+pub async fn fetch_innertube_key() -> String {
+    if let Some(cached) = INNERTUBE_KEY.get() {
+        return cached.clone();
+    }
+
+    let client = crate::get_http_client();
 
     let response = client.get("https://music.youtube.com/")
         .header("Accept-Language", "en-US,en;q=0.9")
@@ -171,20 +165,24 @@ pub async fn fetch_innertube_key() -> String {
         }
     };
 
-    if let Some(caps) = RE_INNERTUBE_1.captures(&html) {
-        if let Some(m) = caps.get(1) {
-            return m.as_str().to_string();
-        }
-    }
+    let key = if let Some(caps) = RE_INNERTUBE_1.captures(&html) {
+        caps.get(1).map(|m| m.as_str().to_string())
+    } else if let Some(caps) = RE_INNERTUBE_2.captures(&html) {
+        caps.get(1).map(|m| m.as_str().to_string())
+    } else {
+        None
+    };
 
-    if let Some(caps) = RE_INNERTUBE_2.captures(&html) {
-        if let Some(m) = caps.get(1) {
-            return m.as_str().to_string();
+    let final_key = match key {
+        Some(k) => k,
+        None => {
+            println!("⚠ [YOUTUBE ENGINE] Could not extract InnerTube API key from music.youtube.com HTML. Using fallback key.");
+            get_fallback_innertube_key()
         }
-    }
+    };
 
-    println!("⚠ [YOUTUBE ENGINE] Could not extract InnerTube API key from music.youtube.com HTML. Using fallback key.");
-    get_fallback_innertube_key()
+    let _ = INNERTUBE_KEY.set(final_key.clone());
+    final_key
 }
 
 async fn fetch_track_duration(client: &reqwest::Client, api_key: &str, video_id: &str) -> Option<String> {
@@ -509,14 +507,8 @@ pub async fn search_youtube(query: String) -> Result<Vec<YoutubeTrack>, String> 
     let api_key = fetch_innertube_key().await;
     println!("[youtube] Searching YouTube Music via InnerTube with key: {}", api_key);
 
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    search_youtube_internal(&client, &api_key, &query, true).await
+    let client = crate::get_http_client();
+    search_youtube_internal(client, &api_key, &query, true).await
 }
 
 #[tauri::command]
@@ -525,9 +517,8 @@ pub async fn get_search_suggestions(query: String) -> Result<Vec<String>, String
         "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={}",
         urlencoding::encode(&query)
     );
-    let client = reqwest::Client::new();
+    let client = crate::get_http_client();
     let res = client.get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -558,12 +549,7 @@ fn is_one_hour_or_longer(duration_raw: &str) -> bool {
 #[tauri::command]
 pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Vec<String>) -> Result<Vec<YoutubeTrack>, String> {
     let api_key = fetch_innertube_key().await;
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::get_http_client();
 
     let (queries, is_empty_fallback) = if top_artists.is_empty() {
         (
@@ -999,12 +985,7 @@ pub async fn get_youtube_autoplay_recommendations(
     let api_key = fetch_innertube_key().await;
     println!("[youtube] Aideo Autoplay Engine v2: Resolving Watch Next Radio for '{}' by '{}' (Discovery Level: {})", title, artist, discovery_level);
 
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::get_http_client();
 
     // --- CANDIDATE GENERATION SOURCE 1: YouTube Music Watch Next ---
     let mut tracks = Vec::new();
@@ -1251,7 +1232,7 @@ pub async fn get_youtube_autoplay_recommendations(
     if tracks.is_empty() {
         println!("[youtube] Autoplay endpoint returned no recommendations. Executing fallback search recommendations for artist: {}", artist);
         let search_query = format!("{} similar songs recommendations", artist);
-        if let Ok(fallback_tracks) = search_youtube_internal(&client, &api_key, &search_query, false).await {
+        if let Ok(fallback_tracks) = search_youtube_internal(client, &api_key, &search_query, false).await {
             tracks = fallback_tracks;
         }
     }
@@ -1677,7 +1658,7 @@ async fn add_downloaded_track_to_library(
                     let img_path = parent.join(format!("{}.{}", stem.to_string_lossy(), ext));
                     println!("[youtube] Attempting to download cover art to: {:?}", img_path);
                     
-                    let client = reqwest::Client::new();
+                    let client = crate::get_http_client();
                     match client.get(url).send().await {
                         Ok(res) => {
                             match res.bytes().await {
@@ -1840,7 +1821,17 @@ pub async fn download_track(
         args_1.push(ffmpeg_loc_str.clone());
     }
     
-    if let Ok(final_path_str) = run_ytdlp_with_progress(&ytdlp_path, &args_1, &url, &app_handle, &music_dir) {
+    let ytdlp_path_c = ytdlp_path.clone();
+    let args_1_c = args_1.clone();
+    let url_c = url.clone();
+    let app_handle_c = app_handle.clone();
+    let music_dir_c = music_dir.clone();
+    
+    let run_res = tokio::task::spawn_blocking(move || {
+        run_ytdlp_with_progress(&ytdlp_path_c, &args_1_c, &url_c, &app_handle_c, &music_dir_c)
+    }).await.map_err(|e| format!("yt-dlp task panicked: {}", e))?;
+
+    if let Ok(final_path_str) = run_res {
         println!("[youtube] Download SUCCESS! Final file: {}", final_path_str);
         add_downloaded_track_to_library(final_path_str.clone(), title.clone(), artist.clone(), cover_url.clone(), &state).await?;
         return Ok(final_path_str);
@@ -1848,13 +1839,26 @@ pub async fn download_track(
 
     // Attempt self-update of yt-dlp
     println!("[youtube] Initial attempt failed. Attempting to self-update yt-dlp...");
-    let _ = std::process::Command::new(&ytdlp_path)
-        .arg("-U")
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
+    let ytdlp_path_c = ytdlp_path.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(&ytdlp_path_c)
+            .arg("-U")
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+    }).await;
 
     // Retry 1: updated yt-dlp with default adaptive arguments
-    if let Ok(final_path_str) = run_ytdlp_with_progress(&ytdlp_path, &args_1, &url, &app_handle, &music_dir) {
+    let ytdlp_path_c = ytdlp_path.clone();
+    let args_1_c = args_1.clone();
+    let url_c = url.clone();
+    let app_handle_c = app_handle.clone();
+    let music_dir_c = music_dir.clone();
+    
+    let run_res = tokio::task::spawn_blocking(move || {
+        run_ytdlp_with_progress(&ytdlp_path_c, &args_1_c, &url_c, &app_handle_c, &music_dir_c)
+    }).await.map_err(|e| format!("yt-dlp task panicked: {}", e))?;
+
+    if let Ok(final_path_str) = run_res {
         println!("[youtube] Retry 1 SUCCESS! Final file: {}", final_path_str);
         add_downloaded_track_to_library(final_path_str.clone(), title.clone(), artist.clone(), cover_url.clone(), &state).await?;
         return Ok(final_path_str);
@@ -1889,7 +1893,17 @@ pub async fn download_track(
         args_retry_2.push(ffmpeg_loc_str.clone());
     }
 
-    match run_ytdlp_with_progress(&ytdlp_path, &args_retry_2, &url, &app_handle, &music_dir) {
+    let ytdlp_path_c = ytdlp_path.clone();
+    let args_retry_2_c = args_retry_2.clone();
+    let url_c = url.clone();
+    let app_handle_c = app_handle.clone();
+    let music_dir_c = music_dir.clone();
+    
+    let run_res = tokio::task::spawn_blocking(move || {
+        run_ytdlp_with_progress(&ytdlp_path_c, &args_retry_2_c, &url_c, &app_handle_c, &music_dir_c)
+    }).await.map_err(|e| format!("yt-dlp task panicked: {}", e))?;
+
+    match run_res {
         Ok(final_path_str) => {
             println!("[youtube] Retry 2 SUCCESS! Final file: {}", final_path_str);
             add_downloaded_track_to_library(final_path_str.clone(), title.clone(), artist.clone(), cover_url.clone(), &state).await?;
@@ -1972,12 +1986,7 @@ pub async fn get_personalized_discovery_hub(
     state: State<'_, AppState>,
 ) -> Result<DiscoveryHubData, String> {
     let api_key = fetch_innertube_key().await;
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::get_http_client();
 
     // 1. Unified track tracking to avoid duplicates across all shelves
     let mut seen_ids = std::collections::HashSet::new();
@@ -2094,7 +2103,7 @@ pub async fn get_personalized_discovery_hub(
             "top pop songs right now",
         ];
         let pick = rand::rng().random_range(0..fallback_queries.len());
-        if let Ok(tracks) = search_youtube_internal(&client, &api_key, fallback_queries[pick], false).await {
+        if let Ok(tracks) = search_youtube_internal(client, &api_key, fallback_queries[pick], false).await {
             for mut t in tracks.into_iter().take(8) {
                 if is_third_party_or_instrumental(&t.title, &t.artist) || is_compilation_channel(&t.artist) {
                     continue;

@@ -264,7 +264,7 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                  (SELECT id FROM tracks WHERE path = :path),
                  :path, :title, :artist, :album, :duration, :format, :lyric_offset,
                  COALESCE((SELECT loved FROM tracks WHERE path = :path), 0),
-                 :cover_url
+                 COALESCE(:cover_url, (SELECT cover_url FROM tracks WHERE path = :path))
              )",
             rusqlite::named_params! {
                 ":path": &track.path,

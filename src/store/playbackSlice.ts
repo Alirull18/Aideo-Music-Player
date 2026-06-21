@@ -239,7 +239,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
               const nextPos = isTransitioning ? s.playback.position_secs : status.position_secs;
               
               // If the song finished naturally, transition to next track
-              if (nextStatus === 'Stopped' && s.playback.status === 'Playing' && !isTransitioning) {
+              if (nextStatus === 'Stopped' && status.idle_reason === 'Finished' && s.playback.status === 'Playing' && !isTransitioning) {
                 setTimeout(() => {
                   get().playNext();
                 }, 100);

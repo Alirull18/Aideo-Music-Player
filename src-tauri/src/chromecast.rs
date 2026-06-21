@@ -489,21 +489,22 @@ pub async fn chromecast_get_status() -> Result<serde_json::Value, String> {
                 oxicast::PlayerState::Playing => "Playing",
                 oxicast::PlayerState::Paused => "Paused",
                 oxicast::PlayerState::Buffering => "Playing", // keep UI in active playback mode during buffering
-                oxicast::PlayerState::Idle => {
-                    // Check if the stream finished naturally
-                    if status.idle_reason == Some(oxicast::IdleReason::Finished) {
-                        "Stopped"
-                    } else {
-                        "Stopped"
-                    }
-                }
+                oxicast::PlayerState::Idle => "Stopped",
                 _ => "Stopped",
             };
+            let idle_reason_str = status.idle_reason.as_ref().map(|r| match r {
+                oxicast::IdleReason::Finished => "Finished",
+                oxicast::IdleReason::Cancelled => "Cancelled",
+                oxicast::IdleReason::Interrupted => "Interrupted",
+                oxicast::IdleReason::Error => "Error",
+                _ => "Unknown",
+            });
             Ok(serde_json::json!({
                 "status": state_str,
                 "position_secs": status.current_time,
                 "duration": status.duration.unwrap_or(0.0),
                 "volume": status.volume.level,
+                "idle_reason": idle_reason_str,
             }))
         }
         Ok(None) => {

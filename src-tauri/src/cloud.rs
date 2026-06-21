@@ -43,7 +43,7 @@ pub async fn subsonic_ping(url: String, user: String, pass: String) -> Result<bo
         salt
     );
     
-    let client = reqwest::Client::new();
+    let client = crate::get_http_client();
     let res = client.get(&query_url)
         .send()
         .await
@@ -99,7 +99,7 @@ pub async fn subsonic_search(url: String, user: String, pass: String, query: Str
         salt
     );
     
-    let client = reqwest::Client::new();
+    let client = crate::get_http_client();
     let res = client.get(&query_url)
         .send()
         .await
@@ -174,7 +174,7 @@ pub async fn jellyfin_ping(url: String, api_key: String) -> Result<bool, String>
     let clean_url = url.trim_end_matches('/');
     let query_url = format!("{}/System/Info?api_key={}", clean_url, api_key);
     
-    let client = reqwest::Client::new();
+    let client = crate::get_http_client();
     let res = client.get(&query_url)
         .send()
         .await
@@ -198,7 +198,7 @@ pub async fn jellyfin_search(url: String, api_key: String, query: String) -> Res
         api_key
     );
     
-    let client = reqwest::Client::new();
+    let client = crate::get_http_client();
     let res = client.get(&query_url)
         .send()
         .await
@@ -309,7 +309,7 @@ pub async fn subsonic_get_library(
         salt
     );
     
-    let client = reqwest::Client::new();
+    let client = crate::get_http_client();
     let res = client.get(&query_url)
         .send()
         .await
@@ -503,7 +503,7 @@ pub async fn jellyfin_get_library(
         api_key
     );
     
-    let client = reqwest::Client::new();
+    let client = crate::get_http_client();
     let res = client.get(&query_url)
         .send()
         .await
