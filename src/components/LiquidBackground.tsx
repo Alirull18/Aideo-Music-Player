@@ -38,15 +38,16 @@ function hexToHsl(hex: string) {
   };
 }
 
-function shiftHue(hsl: { h: number; s: number; l: number }, degree: number) {
-  const h = (hsl.h + degree + 360) % 360;
-  return `hsl(${h}, ${hsl.s}%, ${Math.min(hsl.l * 0.75, 45)}%)`;
-}
 
 export function LiquidBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { accentColor, playback, lowSpecMode, liquidBackgroundEnabled } = useStore();
   const spectrumRef = useRef<number[]>(new Array(64).fill(0));
+
+  const smoothedBass = useRef(0);
+  const smoothedMids = useRef(0);
+  const smoothedTreble = useRef(0);
+  const timeRef = useRef(0);
 
   useEffect(() => {
     const unlisten = listen<number[]>('audio-spectrum', (event) => {
@@ -69,13 +70,6 @@ export function LiquidBackground() {
     canvas.height = 250;
 
     let animId: number;
-    let time = 0;
-
-    const blobs = [
-      { baseRad: 80, angle: 0 },
-      { baseRad: 100, angle: Math.PI / 3 },
-      { baseRad: 90, angle: Math.PI * 2 / 3 }
-    ];
 
     const render = () => {
       const w = canvas.width;
@@ -86,39 +80,94 @@ export function LiquidBackground() {
       ctx.fillRect(0, 0, w, h);
 
       const hsl = hexToHsl(accentColor);
-      const color1 = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(hsl.l * 0.4, 25)}%)`;
-      const color2 = shiftHue(hsl, 45);
-      const color3 = shiftHue(hsl, -45);
+      
+      // Calculate slow continuous hue drift (1 full cycle every 9 minutes)
+      const hueShift = (Date.now() / 1500) % 360;
+      const baseHue = (hsl.h + hueShift) % 360;
+      
+      const s = Math.max(hsl.s, 55); // ensure rich, premium saturation
+      const l = Math.min(Math.max(hsl.l, 30), 65); // keep lightness in check
+
+      const color1 = `hsl(${baseHue}, ${s}%, ${Math.min(l * 0.45, 25)}%)`;
+      const color2 = `hsl(${(baseHue + 75) % 360}, ${s}%, ${Math.min(l * 0.45, 25)}%)`;
+      const color3 = `hsl(${(baseHue - 75) % 360}, ${s}%, ${Math.min(l * 0.45, 25)}%)`;
       const colors = [color1, color2, color3];
 
-      // Calculate audio energy from low-frequency bands
+      // Calculate audio energy from specific frequency bands
       const bands = spectrumRef.current;
-      let energy = 0;
+      let bassEnergy = 0;
+      let midEnergy = 0;
+      let trebleEnergy = 0;
+
       if (bands && bands.length > 0) {
-        const checkBands = Math.min(bands.length, 12);
-        let sum = 0;
-        for (let i = 0; i < checkBands; i++) {
-          sum += bands[i];
-        }
-        energy = sum / checkBands;
+        // Bass (0-6)
+        let bassSum = 0;
+        for (let i = 0; i < 7; i++) bassSum += bands[i] || 0;
+        bassEnergy = bassSum / 7;
+
+        // Mids (7-20)
+        let midSum = 0;
+        for (let i = 7; i < 21; i++) midSum += bands[i] || 0;
+        midEnergy = midSum / 14;
+
+        // Treble (21-45)
+        let trebleSum = 0;
+        for (let i = 21; i < 46; i++) trebleSum += bands[i] || 0;
+        trebleEnergy = trebleSum / 25;
       }
 
-      const targetPulse = 1.0 + energy * 0.5; // up to 50% pulsing amplitude
-      time += 0.0035 + energy * 0.012; // drift faster on audio spikes
+      // Smooth the energy values
+      smoothedBass.current += (bassEnergy - smoothedBass.current) * 0.15;
+      smoothedMids.current += (midEnergy - smoothedMids.current) * 0.15;
+      smoothedTreble.current += (trebleEnergy - smoothedTreble.current) * 0.15;
 
-      blobs.forEach((blob, idx) => {
-        const cx = w / 2 + Math.cos(time + blob.angle) * (w * 0.25);
-        const cy = h / 2 + Math.sin(time * 0.75 + blob.angle) * (h * 0.25);
+      // Time variables updated dynamically by audio energy
+      timeRef.current += 0.002 + smoothedBass.current * 0.008;
 
-        const radial = ctx.createRadialGradient(cx, cy, 2, cx, cy, blob.baseRad * targetPulse);
-        radial.addColorStop(0, colors[idx]);
+      const t = timeRef.current;
+
+      // Render 3 audio-reactive, orbiting blobs with Lissajous trajectories
+      // Blob 0: Bass (Reacts to low frequencies, orbits in a small central circle)
+      {
+        const cx = w / 2 + Math.cos(t * 1.2) * (w * 0.15);
+        const cy = h / 2 + Math.sin(t * 1.2) * (h * 0.15);
+        const rad = 70 * (1.0 + smoothedBass.current * 0.8);
+        const radial = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad);
+        radial.addColorStop(0, colors[0]);
         radial.addColorStop(1, 'transparent');
-
         ctx.fillStyle = radial;
         ctx.beginPath();
-        ctx.arc(cx, cy, blob.baseRad * targetPulse, 0, Math.PI * 2);
+        ctx.arc(cx, cy, rad, 0, Math.PI * 2);
         ctx.fill();
-      });
+      }
+
+      // Blob 1: Midrange (Reacts to vocal/mid frequencies, horizontal figure-8 pattern)
+      {
+        const cx = w / 2 + Math.cos(t * 0.8) * (w * 0.28);
+        const cy = h / 2 + Math.sin(t * 1.6) * (h * 0.12);
+        const rad = 90 * (1.0 + smoothedMids.current * 0.5);
+        const radial = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad);
+        radial.addColorStop(0, colors[1]);
+        radial.addColorStop(1, 'transparent');
+        ctx.fillStyle = radial;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Blob 2: Treble (Reacts to hi-hats/detail, vertical figure-8 pattern)
+      {
+        const cx = w / 2 + Math.sin(t * 1.4) * (w * 0.12);
+        const cy = h / 2 + Math.cos(t * 0.7) * (h * 0.28);
+        const rad = 80 * (1.0 + smoothedTreble.current * 0.4);
+        const radial = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad);
+        radial.addColorStop(0, colors[2]);
+        radial.addColorStop(1, 'transparent');
+        ctx.fillStyle = radial;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       animId = requestAnimationFrame(render);
     };
