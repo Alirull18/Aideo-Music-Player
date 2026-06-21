@@ -126,6 +126,7 @@ pub async fn download_and_install(url: String, app_handle: tauri::AppHandle) -> 
         
         Command::new("cmd.exe")
             .raw_arg(format!("/C {}", cmd_str))
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn()
             .map_err(|e| e.to_string())?;
     }
