@@ -8,8 +8,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { 
   Settings, Library, Radio, FolderSearch, RefreshCw, DownloadCloud, 
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
-  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User,
-  Cast, Loader2, Wifi, WifiOff
+  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User
 } from 'lucide-react';
 
 interface PresetTheme {
@@ -104,8 +103,7 @@ export function SettingsView() {
     autoplayDiscoveryLevel, setAutoplayDiscoveryLevel,
     setShowOnboarding, setOnboardingCompleted,
     cacheSizeLimit, setCacheSizeLimit,
-    chromecast_devices, chromecast_active_device, chromecast_scanning, chromecast_connected,
-    discoverCastDevices, connectCastDevice, disconnectCastDevice
+    discoverCastDevices
   } = useStore();
 
   // Tab navigation State
