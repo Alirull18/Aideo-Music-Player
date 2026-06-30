@@ -22,7 +22,15 @@ fn extract_art(audio_path: &str) -> Option<String> {
     }
 
     let mut probed = get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions {
+                limit_metadata_bytes: symphonia::core::meta::Limit::Maximum(1024 * 1024 * 16),
+                limit_visual_bytes: symphonia::core::meta::Limit::Maximum(1024 * 1024 * 16),
+            },
+        )
         .ok()?;
 
     // Try inline metadata first (MP3, AAC)

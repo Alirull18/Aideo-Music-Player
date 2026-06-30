@@ -1738,6 +1738,10 @@ async fn add_downloaded_track_to_library(
                 loved: Some(0),
                 cover_url: None,
                 path_hash: None,
+                bpm: None,
+                energy: None,
+                bass_ratio: None,
+                treble_ratio: None,
             }
         }
     };
@@ -1989,9 +1993,19 @@ pub async fn check_and_download_ytdlp(app_handle: tauri::AppHandle) -> Result<bo
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct YoutubeMix {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub cover_url: Option<String>,
+    pub tracks: Vec<YoutubeTrack>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DiscoveryHubData {
     pub recommendations: Vec<YoutubeTrack>,
     pub global_charts: Vec<YoutubeTrack>,
+    pub mixed_for_you: Vec<YoutubeMix>,
 }
 
 /// Capitalises the first character of a string slice (used for genre labels).
@@ -2001,6 +2015,472 @@ fn capitalize_first(s: &str) -> String {
         None => String::new(),
         Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
     }
+}
+
+fn interleave_tracks(online: Vec<YoutubeTrack>, local: Vec<YoutubeTrack>, limit: usize) -> Vec<YoutubeTrack> {
+    let mut interleaved = Vec::new();
+    let mut online_iter = online.into_iter();
+    let mut local_iter = local.into_iter();
+    
+    while interleaved.len() < limit {
+        match (local_iter.next(), online_iter.next()) {
+            (Some(l), Some(o)) => {
+                interleaved.push(l);
+                if interleaved.len() < limit {
+                    interleaved.push(o);
+                }
+            }
+            (Some(l), None) => {
+                interleaved.push(l);
+            }
+            (None, Some(o)) => {
+                interleaved.push(o);
+            }
+            (None, None) => {
+                break;
+            }
+        }
+    }
+    interleaved
+}
+
+fn generate_local_mixes(
+    conn: &rusqlite::Connection,
+    _seed_artists: &[String],
+    _top_artists: &[String],
+) -> Vec<YoutubeMix> {
+    use rand::seq::SliceRandom;
+    let mut rng = rand::rng();
+
+    let lib_tracks = crate::db::get_all_tracks(conn).unwrap_or_default();
+    if lib_tracks.is_empty() {
+        return Vec::new();
+    }
+
+    // 1. Fetch play counts
+    let mut play_counts = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*) FROM playback_history GROUP BY track_path") {
+        if let Ok(mut rows) = stmt.query([]) {
+            while let Some(row) = rows.next().unwrap_or(None) {
+                if let (Ok(path), Ok(count)) = (row.get::<_, String>(0), row.get::<_, i64>(1)) {
+                    play_counts.insert(path, count);
+                }
+            }
+        }
+    }
+
+    // Convert helper
+    let map_local_to_youtube_track = |track: &crate::db::Track| -> YoutubeTrack {
+        let duration_raw = if let Some(d) = track.duration {
+            let length_seconds = d as u32;
+            let seconds = length_seconds % 60;
+            let minutes = (length_seconds / 60) % 60;
+            let hours = length_seconds / 3600;
+            if hours > 0 {
+                format!("{}:{}:{:02}", hours, minutes, seconds)
+            } else {
+                format!("{}:{:02}", minutes, seconds)
+            }
+        } else {
+            "0:00".to_string()
+        };
+
+        YoutubeTrack {
+            id: format!("local_{}", track.id),
+            title: track.title.clone().unwrap_or_else(|| "Unknown Title".to_string()),
+            artist: track.artist.clone().unwrap_or_else(|| "Unknown Artist".to_string()),
+            cover_url: track.cover_url.clone(),
+            duration_raw,
+            url: track.path.clone(),
+            recommendation_source: None,
+        }
+    };
+
+    let mut mixes = Vec::new();
+
+    // A. My Supermix (Local)
+    let mut loved_and_top: Vec<crate::db::Track> = Vec::new();
+    for t in &lib_tracks {
+        if t.loved.unwrap_or(0) == 1 {
+            loved_and_top.push(t.clone());
+        }
+    }
+    let mut top_played = lib_tracks.clone();
+    top_played.sort_by(|a, b| {
+        let count_a = play_counts.get(&a.path).unwrap_or(&0);
+        let count_b = play_counts.get(&b.path).unwrap_or(&0);
+        count_b.cmp(count_a)
+    });
+    for t in top_played.iter().take(15) {
+        if !loved_and_top.iter().any(|st| st.path == t.path) {
+            loved_and_top.push(t.clone());
+        }
+    }
+    loved_and_top.shuffle(&mut rng);
+
+    let mut rest_tracks: Vec<crate::db::Track> = lib_tracks.iter()
+        .filter(|t| !loved_and_top.iter().any(|st| st.path == t.path))
+        .cloned()
+        .collect();
+    rest_tracks.shuffle(&mut rng);
+
+    let mut supermix_candidates = loved_and_top;
+    let needed = 25usize.saturating_sub(supermix_candidates.len());
+    supermix_candidates.extend(rest_tracks.into_iter().take(needed));
+
+    mixes.push(YoutubeMix {
+        id: "local_mix_supermix".to_string(),
+        title: "My Supermix (Local)".to_string(),
+        description: "Your favorite local tracks mixed with hidden library gems.".to_string(),
+        cover_url: None,
+        tracks: supermix_candidates.iter().map(|t| {
+            let mut yt = map_local_to_youtube_track(t);
+            yt.recommendation_source = Some("My Supermix".to_string());
+            yt
+        }).collect(),
+    });
+
+    // B. Aideo Recap Mix (Local)
+    let mut recap_candidates: Vec<crate::db::Track> = lib_tracks.iter()
+        .filter(|t| play_counts.get(&t.path).unwrap_or(&0) > &0)
+        .cloned()
+        .collect();
+    recap_candidates.sort_by(|a, b| {
+        let count_a = play_counts.get(&a.path).unwrap_or(&0);
+        let count_b = play_counts.get(&b.path).unwrap_or(&0);
+        count_b.cmp(count_a)
+    });
+    recap_candidates.truncate(20);
+
+    mixes.push(YoutubeMix {
+        id: "local_mix_recap".to_string(),
+        title: "Aideo Recap Mix (Local)".to_string(),
+        description: "The ultimate recap of your most-played local tracks.".to_string(),
+        cover_url: None,
+        tracks: recap_candidates.iter().map(|t| {
+            let mut yt = map_local_to_youtube_track(t);
+            yt.recommendation_source = Some("Recap Mix".to_string());
+            yt
+        }).collect(),
+    });
+
+    // C. Discovery Mix (Local)
+    let mut discovery_candidates: Vec<crate::db::Track> = lib_tracks.iter()
+        .filter(|t| *play_counts.get(&t.path).unwrap_or(&0) == 0)
+        .cloned()
+        .collect();
+    discovery_candidates.shuffle(&mut rng);
+    discovery_candidates.truncate(20);
+
+    if discovery_candidates.len() < 10 {
+        let mut least_played = lib_tracks.clone();
+        least_played.sort_by(|a, b| {
+            let count_a = play_counts.get(&a.path).unwrap_or(&0);
+            let count_b = play_counts.get(&b.path).unwrap_or(&0);
+            count_a.cmp(count_b)
+        });
+        for t in least_played {
+            if !discovery_candidates.iter().any(|dt| dt.path == t.path) {
+                discovery_candidates.push(t);
+                if discovery_candidates.len() >= 20 {
+                    break;
+                }
+            }
+        }
+    }
+
+    mixes.push(YoutubeMix {
+        id: "local_mix_discovery".to_string(),
+        title: "Discovery Mix (Local)".to_string(),
+        description: "Rediscover overlooked tracks in your offline library.".to_string(),
+        cover_url: None,
+        tracks: discovery_candidates.iter().map(|t| {
+            let mut yt = map_local_to_youtube_track(t);
+            yt.recommendation_source = Some("Discovery Mix".to_string());
+            yt
+        }).collect(),
+    });
+
+    // D. Chill & Unwind Mix (Local)
+    let chill_keywords = ["chill", "relax", "acoustic", "ambient", "lofi", "lo-fi", "sleep", "jazz", "slow", "calm", "soft"];
+    let mut chill_candidates: Vec<crate::db::Track> = lib_tracks.iter()
+        .filter(|t| {
+            let title = t.title.clone().unwrap_or_default().to_lowercase();
+            let artist = t.artist.clone().unwrap_or_default().to_lowercase();
+            let album = t.album.clone().unwrap_or_default().to_lowercase();
+            chill_keywords.iter().any(|k| title.contains(k) || artist.contains(k) || album.contains(k))
+        })
+        .cloned()
+        .collect();
+    chill_candidates.shuffle(&mut rng);
+    chill_candidates.truncate(20);
+
+    if chill_candidates.len() < 10 {
+        let mut rest = lib_tracks.clone();
+        rest.shuffle(&mut rng);
+        for t in rest {
+            if !chill_candidates.iter().any(|ct| ct.path == t.path) {
+                chill_candidates.push(t);
+                if chill_candidates.len() >= 20 {
+                    break;
+                }
+            }
+        }
+    }
+
+    mixes.push(YoutubeMix {
+        id: "local_mix_chill".to_string(),
+        title: "Chill & Unwind Mix (Local)".to_string(),
+        description: "A relaxing selection designed for peaceful evenings.".to_string(),
+        cover_url: None,
+        tracks: chill_candidates.iter().map(|t| {
+            let mut yt = map_local_to_youtube_track(t);
+            yt.recommendation_source = Some("Chill Mix".to_string());
+            yt
+        }).collect(),
+    });
+
+    mixes
+}
+
+pub async fn generate_hybrid_mixes(
+    client: &reqwest::Client,
+    api_key: &str,
+    seed_artists: &[String],
+    top_artists: &[String],
+    top_genre: &str,
+    lib_tracks: &[crate::db::Track],
+    play_counts: &std::collections::HashMap<String, i64>,
+) -> Result<Vec<YoutubeMix>, String> {
+    use rand::seq::{SliceRandom, IndexedRandom};
+
+    // Map helper
+    let map_local_to_youtube_track = |track: &crate::db::Track| -> YoutubeTrack {
+        let duration_raw = if let Some(d) = track.duration {
+            let length_seconds = d as u32;
+            let seconds = length_seconds % 60;
+            let minutes = (length_seconds / 60) % 60;
+            let hours = length_seconds / 3600;
+            if hours > 0 {
+                format!("{}:{}:{:02}", hours, minutes, seconds)
+            } else {
+                format!("{}:{:02}", minutes, seconds)
+            }
+        } else {
+            "0:00".to_string()
+        };
+
+        YoutubeTrack {
+            id: format!("local_{}", track.id),
+            title: track.title.clone().unwrap_or_else(|| "Unknown Title".to_string()),
+            artist: track.artist.clone().unwrap_or_else(|| "Unknown Artist".to_string()),
+            cover_url: track.cover_url.clone(),
+            duration_raw,
+            url: track.path.clone(),
+            recommendation_source: Some("Offline Library".to_string()),
+        }
+    };
+
+    // Build a pool of all unique artists from top_artists, seed_artists, and lib_tracks
+    let mut pool_artists = Vec::new();
+    for ta in top_artists {
+        if !ta.is_empty() && !pool_artists.contains(ta) {
+            pool_artists.push(ta.clone());
+        }
+    }
+    for sa in seed_artists {
+        if !sa.is_empty() && !pool_artists.contains(sa) {
+            pool_artists.push(sa.clone());
+        }
+    }
+    for t in lib_tracks {
+        if let Some(ref art) = t.artist {
+            if !art.is_empty() && !pool_artists.contains(art) {
+                pool_artists.push(art.clone());
+            }
+        }
+    }
+
+    // Pick a random artist from our combined pool
+    let artist_2 = {
+        let mut rng = rand::rng();
+        if !pool_artists.is_empty() {
+            pool_artists.choose(&mut rng).cloned().unwrap_or_else(|| "popular pop".to_string())
+        } else {
+            "popular pop".to_string()
+        }
+    };
+
+    let artist_1 = top_artists.first().or(seed_artists.first()).cloned().unwrap_or_default();
+    let q1 = if !artist_1.is_empty() {
+        format!("{} greatest hits", artist_1)
+    } else {
+        "popular acoustic hits".to_string()
+    };
+    
+    let q2 = if !artist_2.is_empty() {
+        format!("{} mix", artist_2)
+    } else {
+        "chill pop music".to_string()
+    };
+
+    let q3 = format!("{} playlist", top_genre);
+    let q4 = "lofi hip hop radio beats to relax study".to_string();
+
+    let queries = vec![
+        (q1, "supermix"),
+        (q2, "artist_mix"),
+        (q3, "genre_mix"),
+        (q4, "chill_mix"),
+    ];
+
+    let mut search_tasks = Vec::new();
+    for (query, mix_type) in queries {
+        let client_c = client.clone();
+        let api_key_c = api_key.to_string();
+        let mix_type_c = mix_type.to_string();
+        search_tasks.push(async move {
+            (search_youtube_internal(&client_c, &api_key_c, &query, false).await, mix_type_c)
+        });
+    }
+
+    let search_results = futures::future::join_all(search_tasks).await;
+
+    let mut rng = rand::rng();
+    let mut mixes = Vec::new();
+
+    for (res, mix_type) in search_results {
+        let mut online_tracks = Vec::new();
+        if let Ok(tracks) = res {
+            for mut track in tracks {
+                let title_lower = track.title.to_lowercase();
+                let artist_lower = track.artist.to_lowercase();
+
+                let has_unofficial_keywords = [
+                    "lyrics", "lyric", "가사", "color coded", "color-coded", "translation", "sub", "subbed", "mv lyric",
+                    "fancam", "concert", "live in", "live at", "live [", "[live", "live performance", "live at",
+                    "tour", "compilation", "playlist", "nonstop", "non-stop", "lagu viral", "viral hits", "trending hits",
+                    "full album", "album mp3", "full version", "||", "mashup", "tribute", "fanmade", "fan-made", "fmv",
+                    "slowed", "reverb", "nightcore", "10 hours", "10 hrs", "loop", "cover", "remix", "karaoke", "instrumental"
+                ].iter().any(|&term| title_lower.contains(term));
+
+                let is_junk_artist = [
+                    "lyrics", "lirik", "playlist", "compilation", "tribute", "cover", "karaoke", "fanmade", "official lirik",
+                    "7clouds", "cloudkid", "proximity", "trap nation", "chill nation", "house nation", "bass nation", "rap nation", "indie nation"
+                ].iter().any(|&term| artist_lower.contains(term));
+
+                if has_unofficial_keywords || is_junk_artist {
+                    continue;
+                }
+
+                if is_third_party_or_instrumental(&track.title, &track.artist) {
+                    continue;
+                }
+                if is_compilation_channel(&track.artist) {
+                    continue;
+                }
+
+                track.recommendation_source = Some("Online Mix".to_string());
+                online_tracks.push(track);
+            }
+        }
+
+        // Get local tracks matching the criteria
+        let mut local_matches = Vec::new();
+        match mix_type.as_str() {
+            "supermix" => {
+                for t in lib_tracks {
+                    if t.loved.unwrap_or(0) == 1 {
+                        local_matches.push(map_local_to_youtube_track(t));
+                    }
+                }
+                let mut top_played = lib_tracks.to_vec();
+                top_played.sort_by(|a, b| {
+                    let count_a = play_counts.get(&a.path).unwrap_or(&0);
+                    let count_b = play_counts.get(&b.path).unwrap_or(&0);
+                    count_b.cmp(count_a)
+                });
+                for t in top_played.iter().take(15) {
+                    let yt = map_local_to_youtube_track(t);
+                    if !local_matches.iter().any(|lm| lm.url == yt.url) {
+                        local_matches.push(yt);
+                    }
+                }
+                local_matches.shuffle(&mut rng);
+            }
+            "artist_mix" => {
+                let clean_artist = artist_2.to_lowercase();
+                if !clean_artist.is_empty() {
+                    for t in lib_tracks {
+                        if t.artist.clone().unwrap_or_default().to_lowercase().contains(&clean_artist) {
+                            local_matches.push(map_local_to_youtube_track(t));
+                        }
+                    }
+                }
+                local_matches.shuffle(&mut rng);
+            }
+            "genre_mix" => {
+                let clean_genre = top_genre.to_lowercase();
+                if !clean_genre.is_empty() {
+                    for t in lib_tracks {
+                        let matches_genre = t.format.clone().unwrap_or_default().to_lowercase().contains(&clean_genre)
+                            || t.album.clone().unwrap_or_default().to_lowercase().contains(&clean_genre);
+                        if matches_genre {
+                            local_matches.push(map_local_to_youtube_track(t));
+                        }
+                    }
+                }
+                local_matches.shuffle(&mut rng);
+            }
+            "chill_mix" => {
+                let chill_keywords = ["chill", "relax", "acoustic", "ambient", "lofi", "lo-fi", "sleep", "jazz", "slow", "calm", "soft"];
+                for t in lib_tracks {
+                    let title = t.title.clone().unwrap_or_default().to_lowercase();
+                    let artist = t.artist.clone().unwrap_or_default().to_lowercase();
+                    let album = t.album.clone().unwrap_or_default().to_lowercase();
+                    if chill_keywords.iter().any(|k| title.contains(k) || artist.contains(k) || album.contains(k)) {
+                        local_matches.push(map_local_to_youtube_track(t));
+                    }
+                }
+                local_matches.shuffle(&mut rng);
+            }
+            _ => {}
+        }
+
+        // Interleave the tracks
+        let limit = 20;
+        let interleaved = interleave_tracks(online_tracks, local_matches, limit);
+
+        let (title, description) = match mix_type.as_str() {
+            "supermix" => (
+                "My Supermix".to_string(),
+                "Your top local favorites blended with fresh online recommendations.".to_string(),
+            ),
+            "artist_mix" => (
+                format!("{} Mix", artist_2),
+                format!("Explore the catalog of {} mixed with local library files.", artist_2),
+            ),
+            "genre_mix" => (
+                format!("{} Mix", capitalize_first(top_genre)),
+                format!("A custom selection of {} tracks from local and online sources.", top_genre),
+            ),
+            "chill_mix" => (
+                "Chill Focus Mix".to_string(),
+                "Steady, relaxing background sessions for focus and unwind.".to_string(),
+            ),
+            _ => ("Custom Mix".to_string(), "Personalized mix.".to_string()),
+        };
+
+        mixes.push(YoutubeMix {
+            id: format!("hybrid_mix_{}", mix_type),
+            title,
+            description,
+            cover_url: None,
+            tracks: interleaved,
+        });
+    }
+
+    Ok(mixes)
 }
 
 #[tauri::command]
@@ -2013,8 +2493,128 @@ pub async fn get_personalized_discovery_hub(
     lastfm_top_artists: Vec<String>,
     listenbrainz_connected: bool,
     listenbrainz_recs: Vec<String>,
+    app_mode: String,
+    is_online: bool,
     state: State<'_, AppState>,
 ) -> Result<DiscoveryHubData, String> {
+    // A. Query SQLite Top Genre
+    let top_genre = {
+        let mut g_res = "Chill".to_string();
+        let conn = safe_lock(&state.db);
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT genre, COUNT(*) as c 
+             FROM playback_history 
+             WHERE genre IS NOT NULL AND genre != '' AND genre != 'Unknown' 
+             GROUP BY genre 
+             ORDER BY c DESC 
+             LIMIT 1"
+        ) {
+            if let Ok(mut rows) = stmt.query([]) {
+                if let Some(row) = rows.next().unwrap_or(None) {
+                    if let Ok(g) = row.get::<_, String>(0) {
+                        g_res = g;
+                    }
+                }
+            }
+        }
+        g_res
+    };
+
+    // B. Check Local Mode or Offline status
+    if app_mode == "local" || !is_online {
+        println!("[discovery-hub] Generating offline/local discovery hub data.");
+        let (recs, charts) = {
+            let conn = safe_lock(&state.db);
+            let lib_tracks = crate::db::get_all_tracks(&conn).unwrap_or_default();
+            
+            let mut play_counts = std::collections::HashMap::new();
+            if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*) FROM playback_history GROUP BY track_path") {
+                if let Ok(mut rows) = stmt.query([]) {
+                    while let Some(row) = rows.next().unwrap_or(None) {
+                        if let (Ok(path), Ok(count)) = (row.get::<_, String>(0), row.get::<_, i64>(1)) {
+                            play_counts.insert(path, count);
+                        }
+                    }
+                }
+            }
+
+            let map_local_to_youtube_track = |track: &crate::db::Track, source: &str| -> YoutubeTrack {
+                let duration_raw = if let Some(d) = track.duration {
+                    let length_seconds = d as u32;
+                    let seconds = length_seconds % 60;
+                    let minutes = (length_seconds / 60) % 60;
+                    let hours = length_seconds / 3600;
+                    if hours > 0 {
+                        format!("{}:{}:{:02}", hours, minutes, seconds)
+                    } else {
+                        format!("{}:{:02}", minutes, seconds)
+                    }
+                } else {
+                    "0:00".to_string()
+                };
+
+                YoutubeTrack {
+                    id: format!("local_{}", track.id),
+                    title: track.title.clone().unwrap_or_else(|| "Unknown Title".to_string()),
+                    artist: track.artist.clone().unwrap_or_else(|| "Unknown Artist".to_string()),
+                    cover_url: track.cover_url.clone(),
+                    duration_raw,
+                    url: track.path.clone(),
+                    recommendation_source: Some(source.to_string()),
+                }
+            };
+
+            let mut recs = Vec::new();
+            let mut seen_local = std::collections::HashSet::new();
+            
+            for t in &lib_tracks {
+                if t.loved.unwrap_or(0) == 1 {
+                    seen_local.insert(t.path.clone());
+                    recs.push(map_local_to_youtube_track(t, "Loved Local Track"));
+                }
+            }
+            
+            let mut sorted_tracks = lib_tracks.clone();
+            sorted_tracks.sort_by(|a, b| {
+                let count_a = play_counts.get(&a.path).unwrap_or(&0);
+                let count_b = play_counts.get(&b.path).unwrap_or(&0);
+                count_b.cmp(count_a)
+            });
+            
+            for t in sorted_tracks.iter().take(20) {
+                if seen_local.insert(t.path.clone()) {
+                    recs.push(map_local_to_youtube_track(t, "Highly Played"));
+                }
+            }
+            
+            use rand::seq::SliceRandom;
+            let mut rng = rand::rng();
+            let mut rest_tracks: Vec<_> = lib_tracks.iter().filter(|t| !seen_local.contains(&t.path)).collect();
+            rest_tracks.shuffle(&mut rng);
+            for t in rest_tracks.into_iter().take(30) {
+                recs.push(map_local_to_youtube_track(t, "Library Discovery"));
+            }
+
+            let mut charts = Vec::new();
+            for t in sorted_tracks.iter().take(15) {
+                charts.push(map_local_to_youtube_track(t, "Local Top Hits"));
+            }
+
+            (recs, charts)
+        };
+
+        let mixed_for_you = {
+            let conn = safe_lock(&state.db);
+            generate_local_mixes(&conn, &seed_artists, &top_artists)
+        };
+
+        return Ok(DiscoveryHubData {
+            recommendations: recs,
+            global_charts: charts,
+            mixed_for_you,
+        });
+    }
+
     let api_key = fetch_innertube_key().await;
     let client = crate::get_http_client();
 
@@ -2701,9 +3301,35 @@ pub async fn get_personalized_discovery_hub(
         }
     }
 
+    let (lib_tracks, play_counts) = {
+        let conn = safe_lock(&state.db);
+        let tracks = crate::db::get_all_tracks(&conn).unwrap_or_default();
+        let mut play_counts = std::collections::HashMap::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*) FROM playback_history GROUP BY track_path") {
+            if let Ok(mut rows) = stmt.query([]) {
+                while let Some(row) = rows.next().unwrap_or(None) {
+                    if let (Ok(path), Ok(count)) = (row.get::<_, String>(0), row.get::<_, i64>(1)) {
+                        play_counts.insert(path, count);
+                    }
+                }
+            }
+        }
+        (tracks, play_counts)
+    };
+
+    let mixed_for_you = match generate_hybrid_mixes(client, &api_key, &seed_artists, &top_artists, &top_genre, &lib_tracks, &play_counts).await {
+        Ok(mixes) => mixes,
+        Err(e) => {
+            println!("⚠ [Discovery Hub] Hybrid mix generation failed ({}). Falling back to local mixes.", e);
+            let conn = safe_lock(&state.db);
+            generate_local_mixes(&conn, &seed_artists, &top_artists)
+        }
+    };
+
     Ok(DiscoveryHubData {
         recommendations: final_recs,
         global_charts,
+        mixed_for_you,
     })
 }
 
@@ -2777,6 +3403,50 @@ mod tests {
             println!("Track {}: ID={}, Title='{}', Artist='{}', Duration='{}', Cover='{:?}'",
                 i, t.id, t.title, t.artist, t.duration_raw, t.cover_url);
         }
+    }
+
+    #[test]
+    fn test_capitalize_first() {
+        assert_eq!(capitalize_first(""), "");
+        assert_eq!(capitalize_first("a"), "A");
+        assert_eq!(capitalize_first("A"), "A");
+        assert_eq!(capitalize_first("hello"), "Hello");
+        assert_eq!(capitalize_first("hELLO"), "HELLO");
+        assert_eq!(capitalize_first("chill focus"), "Chill focus");
+        assert_eq!(capitalize_first("ünder"), "Ünder");
+    }
+
+    #[test]
+    fn test_interleave_tracks() {
+        let create_track = |id: &str| YoutubeTrack {
+            id: id.to_string(),
+            title: format!("Title {}", id),
+            artist: format!("Artist {}", id),
+            cover_url: None,
+            duration_raw: "3:00".to_string(),
+            url: format!("url_{}", id),
+            recommendation_source: None,
+        };
+
+        let online = vec![create_track("o1"), create_track("o2"), create_track("o3")];
+        let local = vec![create_track("l1"), create_track("l2")];
+
+        // limit 4 -> l1, o1, l2, o2
+        let res = interleave_tracks(online.clone(), local.clone(), 4);
+        assert_eq!(res.len(), 4);
+        assert_eq!(res[0].id, "l1");
+        assert_eq!(res[1].id, "o1");
+        assert_eq!(res[2].id, "l2");
+        assert_eq!(res[3].id, "o2");
+
+        // limit 5 -> l1, o1, l2, o2, o3 (local runs out, online fills the rest)
+        let res2 = interleave_tracks(online.clone(), local.clone(), 5);
+        assert_eq!(res2.len(), 5);
+        assert_eq!(res2[4].id, "o3");
+
+        // limit 10 -> truncates at actual total length (5)
+        let res3 = interleave_tracks(online, local, 10);
+        assert_eq!(res3.len(), 5);
     }
 }
 

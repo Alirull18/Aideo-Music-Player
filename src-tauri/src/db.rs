@@ -14,6 +14,10 @@ pub struct Track {
     pub loved: Option<i32>,
     pub cover_url: Option<String>,
     pub path_hash: Option<String>,
+    pub bpm: Option<f64>,
+    pub energy: Option<f64>,
+    pub bass_ratio: Option<f64>,
+    pub treble_ratio: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -52,6 +56,12 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 
     // Migration: Add cover_url column if it doesn't exist
     let _ = conn.execute("ALTER TABLE tracks ADD COLUMN cover_url TEXT", []);
+
+    // Migration: Add sonic profile columns if they don't exist
+    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL DEFAULT 120.0", []);
+    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN energy REAL DEFAULT 0.5", []);
+    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN bass_ratio REAL DEFAULT 0.33", []);
+    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN treble_ratio REAL DEFAULT 0.33", []);
 
     // Create playlist tables
     conn.execute(
@@ -298,8 +308,16 @@ pub fn update_track_offset(conn: &Connection, path: &str, offset: i32) -> Result
     Ok(())
 }
 
+pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energy: f64, bass_ratio: f64, treble_ratio: f64) -> Result<()> {
+    conn.execute(
+        "UPDATE tracks SET bpm = ?1, energy = ?2, bass_ratio = ?3, treble_ratio = ?4 WHERE path = ?5",
+        rusqlite::params![bpm, energy, bass_ratio, treble_ratio, path],
+    )?;
+    Ok(())
+}
+
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, cover_url FROM tracks")?;
+    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, cover_url, bpm, energy, bass_ratio, treble_ratio FROM tracks")?;
     let track_iter = stmt.query_map([], |row| {
         let path: String = row.get(1)?;
         let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
@@ -315,6 +333,10 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             loved: Some(row.get(8).unwrap_or(0)),
             cover_url: row.get(9).ok(),
             path_hash,
+            bpm: row.get(10).ok(),
+            energy: row.get(11).ok(),
+            bass_ratio: row.get(12).ok(),
+            treble_ratio: row.get(13).ok(),
         })
     })?;
 
@@ -374,7 +396,7 @@ pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &st
 
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.cover_url 
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio 
          FROM playlist_tracks pt
          LEFT JOIN tracks t ON t.path = pt.track_path 
          WHERE pt.playlist_id = ?1 
@@ -400,6 +422,10 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
             loved: Some(row.get(8).unwrap_or(0)),
             cover_url: row.get(9).ok(),
             path_hash,
+            bpm: row.get(10).ok(),
+            energy: row.get(11).ok(),
+            bass_ratio: row.get(12).ok(),
+            treble_ratio: row.get(13).ok(),
         })
     })?;
 

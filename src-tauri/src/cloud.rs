@@ -11,6 +11,7 @@ pub struct CloudTrack {
     pub cover_url: Option<String>,
     pub stream_url: String,
     pub provider: String, // "subsonic" or "jellyfin"
+    pub path_hash: Option<String>,
 }
 
 // ── Subsonic Commands ────────────────────────────────────────────────────────
@@ -151,6 +152,8 @@ pub async fn subsonic_search(url: String, user: String, pass: String, query: Str
                 urlencoding::encode(&album)
             );
             
+            let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
+            
             results.push(CloudTrack {
                 id,
                 title,
@@ -160,6 +163,7 @@ pub async fn subsonic_search(url: String, user: String, pass: String, query: Str
                 cover_url,
                 stream_url,
                 provider: "subsonic".to_string(),
+                path_hash,
             });
         }
     }
@@ -255,6 +259,8 @@ pub async fn jellyfin_search(url: String, api_key: String, query: String) -> Res
                 urlencoding::encode(&album)
             );
             
+            let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
+            
             results.push(CloudTrack {
                 id,
                 title,
@@ -264,6 +270,7 @@ pub async fn jellyfin_search(url: String, api_key: String, query: String) -> Res
                 cover_url,
                 stream_url,
                 provider: "jellyfin".to_string(),
+                path_hash,
             });
         }
     }
@@ -360,6 +367,8 @@ pub async fn subsonic_get_library(
                 urlencoding::encode(&album)
             );
             
+            let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
+            
             results.push(CloudTrack {
                 id,
                 title,
@@ -369,6 +378,7 @@ pub async fn subsonic_get_library(
                 cover_url,
                 stream_url,
                 provider: "subsonic".to_string(),
+                path_hash,
             });
         }
     }
@@ -556,6 +566,8 @@ pub async fn jellyfin_get_library(
                 urlencoding::encode(&album)
             );
             
+            let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
+            
             results.push(CloudTrack {
                 id,
                 title,
@@ -565,6 +577,7 @@ pub async fn jellyfin_get_library(
                 cover_url,
                 stream_url,
                 provider: "jellyfin".to_string(),
+                path_hash,
             });
         }
     }
@@ -574,7 +587,7 @@ pub async fn jellyfin_get_library(
 
 fn subsonic_decrypt(input: &str) -> Result<String, String> {
     use base64::Engine;
-    let decoded = base64::prelude::BASE64_STANDARD.decode(input.as_bytes()).map_err(|e| e.to_string())?;
+    let decoded = base64::engine::general_purpose::STANDARD.decode(input.as_bytes()).map_err(|e| e.to_string())?;
     let key = b"aideo_music_player_secret_key_123";
     let decrypted: Vec<u8> = decoded.iter().zip(key.iter().cycle()).map(|(b, k)| b ^ k).collect();
     String::from_utf8(decrypted).map_err(|e| e.to_string())

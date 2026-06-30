@@ -207,16 +207,14 @@ impl Drop for DownloadGuard {
 }
 
 
+const YT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+
 fn pipe_url_to_stdin(
     url: String,
     mut stdin: std::process::ChildStdin,
     is_youtube_stream: bool,
 ) {
-    let ua = if is_youtube_stream {
-        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36".to_string()
-    } else {
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36".to_string()
-    };
+    let ua = YT_USER_AGENT.to_string();
     
     std::thread::spawn(move || {
         use std::io::{Read, Write};
@@ -595,10 +593,10 @@ pub fn resolve_youtube_url(url: &str) -> String {
     
     let cache_dir_str = aideo_dir.join("cache").to_string_lossy().to_string();
     
-    // Attempt 1: Default arguments
     let args_1 = vec![
         "-g".to_string(),
         "-f".to_string(), "251/140/bestaudio/best".to_string(),
+        "--user-agent".to_string(), YT_USER_AGENT.to_string(),
         "--cache-dir".to_string(), cache_dir_str.clone(),
         "--force-ipv4".to_string(),
         "--no-check-formats".to_string(),
@@ -641,11 +639,10 @@ pub fn resolve_youtube_url(url: &str) -> String {
         return direct;
     }
     
-    // Attempt 3: Retry with mweb and android player client parameters
-    println!("[player] Resolve failed after update. Retrying with extractor player client arguments...");
     let args_3 = vec![
         "-g".to_string(),
         "-f".to_string(), "251/140/bestaudio/best".to_string(),
+        "--user-agent".to_string(), YT_USER_AGENT.to_string(),
         "--cache-dir".to_string(), cache_dir_str.clone(),
         "--force-ipv4".to_string(),
         "--no-check-formats".to_string(),
@@ -1646,6 +1643,9 @@ pub struct Player {
     pub current_dev_rate: Arc<AtomicU32>,
     pub cache: Arc<Mutex<Option<CachedTrack>>>,
     pub decode_shutdown: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    pub file_rate: Arc<AtomicU32>,
+    pub file_ch: Arc<AtomicU8>,
+    pub file_format: Arc<Mutex<Option<String>>>,
 }
 
 fn analyzer_loop(rx: Receiver<(Vec<f32>, f32)>, app_handle: tauri::AppHandle) {
@@ -1720,6 +1720,26 @@ fn analyzer_loop(rx: Receiver<(Vec<f32>, f32)>, app_handle: tauri::AppHandle) {
         }
         
         let _ = app_handle.emit("audio-spectrum", bands);
+    }
+}
+
+fn detect_format_from_path(path: &str) -> String {
+    if path.contains("youtube.com") || path.contains("youtu.be") || path.contains("googlevideo.com") {
+        "YouTube".to_string()
+    } else if path.contains("tidal.com") || path.contains("api.tidal.com") {
+        "Tidal Lossless".to_string()
+    } else if path.contains("/rest/stream") || path.contains("/rest/stream.view") {
+        "Subsonic Cloud".to_string()
+    } else if path.contains("/Audio/") && path.contains("/stream") {
+        "Jellyfin Cloud".to_string()
+    } else if path.starts_with("http") {
+        "HTTP Stream".to_string()
+    } else {
+        std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_uppercase())
+            .unwrap_or_else(|| "Unknown".to_string())
     }
 }
 
@@ -1799,6 +1819,9 @@ impl Player {
         let current_dev_rate = Arc::new(AtomicU32::new(0u32));
         let cache = Arc::new(Mutex::new(None::<CachedTrack>));
         let decode_shutdown = Arc::new(Mutex::new(None::<Arc<AtomicBool>>));
+        let file_rate = Arc::new(AtomicU32::new(0));
+        let file_ch = Arc::new(AtomicU8::new(0));
+        let file_format = Arc::new(Mutex::new(None::<String>));
         
         let cp = Arc::clone(&current_process);
         let s = Arc::clone(&status);
@@ -1816,6 +1839,9 @@ impl Player {
         let dr = Arc::clone(&current_dev_rate);
         let ca = Arc::clone(&cache);
         let ds = Arc::clone(&decode_shutdown);
+        let fr = Arc::clone(&file_rate);
+        let fc = Arc::clone(&file_ch);
+        let fmt = Arc::clone(&file_format);
 
         // Cleanup orphaned .tmp files in CloudCache on startup
         if let Some(data_dir) = dirs::data_dir() {
@@ -1845,10 +1871,10 @@ impl Player {
         let cmd_tx_clone = cmd_tx.clone();
         thread::Builder::new()
             .name("player".into())
-            .spawn(move || player_loop(cmd_rx, cmd_tx_clone, s, c, p, v, exc, bp, dr, ca, dsp, dev, qt, cp, app, fft_tx, ff, ds))
+            .spawn(move || player_loop(cmd_rx, cmd_tx_clone, s, c, p, v, exc, bp, dr, ca, dsp, dev, qt, cp, app, fft_tx, ff, ds, fr, fc, fmt))
             .expect("Failed to spawn player thread");
 
-        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache, decode_shutdown }
+        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache, decode_shutdown, file_rate, file_ch, file_format }
     }
 }
 
@@ -1871,6 +1897,9 @@ fn player_loop(
     fft_tx: Sender<(Vec<f32>, f32)>,
     ffmpeg_path: String,
     decode_shutdown: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    file_rate: Arc<AtomicU32>,
+    file_ch: Arc<AtomicU8>,
+    file_format: Arc<Mutex<Option<String>>>,
 ) {
     let mut next_track: Option<(String, f64)> = None;
 
@@ -1927,7 +1956,7 @@ fn player_loop(
                     position_secs.store(start_pos.to_bits(), Ordering::Relaxed);
                 }
 
-                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queue), Arc::clone(&current_process), cmd_tx.clone(), &rx, &app_handle, &fft_tx, &ffmpeg_path, Arc::clone(&decode_shutdown));
+                next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queue), Arc::clone(&current_process), cmd_tx.clone(), &rx, &app_handle, &fft_tx, &ffmpeg_path, Arc::clone(&decode_shutdown), Arc::clone(&file_rate), Arc::clone(&file_ch), Arc::clone(&file_format));
 
                 if next_track.is_none() {
                     status.store(0, Ordering::Relaxed); // 0 = Stopped
@@ -2874,6 +2903,9 @@ fn play_file(
     fft_tx: &Sender<(Vec<f32>, f32)>,
     ffmpeg_path: &str,
     player_decode_shutdown: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    file_rate_out: Arc<AtomicU32>,
+    file_ch_out: Arc<AtomicU8>,
+    file_format_out: Arc<Mutex<Option<String>>>,
 ) -> Option<(String, f64)> {
     // ELEVATE AUDIO PUMP THREAD PRIORITY
     #[cfg(target_os = "windows")]
@@ -2916,7 +2948,12 @@ fn play_file(
         // 1. Check if decoder is ready
         if let Ok(res) = rx_decoder.try_recv() {
             match res {
-                Ok(i) => break i,
+                Ok(i) => {
+                    file_rate_out.store(i.file_rate as u32, Ordering::Relaxed);
+                    file_ch_out.store(i.file_ch as u8, Ordering::Relaxed);
+                    *safe_lock(&file_format_out) = Some(detect_format_from_path(path));
+                    break i;
+                }
                 Err(e) => {
                     kill_current_process(&current_process); // Ensure dead process is reaped immediately
                     let _ = app_handle.emit("playback-error", e);

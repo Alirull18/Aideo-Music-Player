@@ -175,6 +175,10 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
         loved: Some(0),
         cover_url: None,
         path_hash: None,
+        bpm: None,
+        energy: None,
+        bass_ratio: None,
+        treble_ratio: None,
     })
 }
 
@@ -238,6 +242,10 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
         loved: Some(0),
         cover_url: None,
         path_hash: None,
+        bpm: None,
+        energy: None,
+        bass_ratio: None,
+        treble_ratio: None,
     })
 }
 
@@ -319,5 +327,9 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
         loved: Some(0),
         cover_url: None,
         path_hash: None,
+        bpm: None,
+        energy: None,
+        bass_ratio: None,
+        treble_ratio: None,
     })
 }

@@ -1,11 +1,11 @@
 {
-  "version": "0.8.7",
-  "notes": "💎 AIDEO v0.8.7: Web streaming robustness, HLS playback & transcoding whitelist fixes, CORS canvas dynamic theme fixes, and transition lyric sync race condition resolved.",
-  "pub_date": "2026-06-22T02:30:00Z",
+  "version": "0.8.9",
+  "notes": "💎 AIDEO v0.8.9: Randomized Artist Mixes in Discovery Hub, unified Aideo Connect & Google Cast playback popover, separated Mixed for You shelf, Now Playing title layout fix, and Chromaprint-based audio fingerprinting engine.",
+  "pub_date": "2026-06-30T06:00:00Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUOGxKNlE5aVY1M2Q3bVFiR21vazhJOVhwMjVHcVpmSytmWWpOV0w4a0J1ZDRpemV1Q1lCSlE3aS9SQUs3YWJGQzJKU0R3QWhHUW10Y2xtV01EWHQwMGovVlc0VWdLeEFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5MTYyOTE0CWZpbGU6QWlkZW9fMC41LjBfeDY0X2VuLVVTLm1zaQpzcExKOUFScFdtTE55VDZoYUlEOUIzckFlcXV1L2dLcFgyakx2NGpiLzVRNThvSWs4S29wR1NrTVpDdVRaOE9IUFlnS2M0V3NZcjFiRTZjTmZEOGFEdz09Cg==",
-      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.8.7/Aideo_0.8.7_x64_en-US.msi"
+      "url": "https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.8.9/Aideo_0.8.9_x64_en-US.msi"
     }
   }
 }

@@ -761,6 +761,10 @@ pub async fn tidal_download(
                                 loved: Some(0),
                                 cover_url: None,
                                 path_hash: None,
+                                bpm: None,
+                                energy: None,
+                                bass_ratio: None,
+                                treble_ratio: None,
                             };
                             let mut tracks = vec![new_track];
                             let mut conn = crate::safe_lock(&db_clone);

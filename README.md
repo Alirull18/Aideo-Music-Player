@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.8.7
+# 💎 Aideo Music Player v0.8.9
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,12 +61,14 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.8.7 (Web Stream Whitelist, CORS Dynamic Themes & Transition Sync Fixes)
+## 📢 What's New in v0.8.9 (Randomized Mixes, Connect & Cast Hub, Now Playing Layout)
 
-* **🌐 HLS Playback & Transcoding Whitelist**: Added HLS whitelisting support (`-protocol_whitelist file,http,https,tcp,tls,dns`) for FFmpeg direct stream resolved URLs (resolving HLS manifest direct playback crashes).
-* **🎨 Tainted Canvas SecurityError Fix**: Resolved browser security sandboxing issues on dynamic color extraction by applying `crossOrigin = 'anonymous'` to remote cover art images.
-* **⏱️ Lyric Sync Transition Race Condition**: Added `pathsEqual` checks to prevent slow online lyric fetches, translations, or Romaji requests from overwriting active track states when skipping songs.
-* **⚡ Decaying Rank Bonus**: Integrated a decaying rank-based scoring bonus into auto-fetching and manual searching to respect search engine relevance order on close title/artist matches.
+* **🎲 Randomized Artist Mixes**: The Discovery Hub now picks a random artist from your entire local library and online seed profiles for the Artist Mix card — every refresh gives you a completely different artist.
+* **📡 Unified Connect & Cast Popover**: Merged the Aideo Connect remote control (QR code + URL) and Google Cast device discovery into a single popover accessible directly from the playback bar.
+* **🎵 Separated Mixed for You Shelf**: The Mixed for You section is now permanently displayed at the top of the Discovery Hub, independent of the tab switcher.
+* **🎶 Now Playing Title Fix**: Song title and metadata tags (format, bit-perfect, autoplay) are now on separate rows, preventing long titles from being truncated.
+* **🔊 Chromaprint Audio Fingerprinting**: Added a native Chromaprint FFI engine for acoustic fingerprint-based track identification and duplicate detection.
+* **🎛️ Signal Path Detail**: The Audio Control Center signal path now shows detailed routing information.
 
 ---
 
@@ -82,8 +84,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.8.7 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.8.7_x64_en-US.msi`).
+1. **Download**: Get the latest v0.8.9 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.8.9_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---

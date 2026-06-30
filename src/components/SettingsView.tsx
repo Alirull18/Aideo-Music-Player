@@ -8,7 +8,8 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { 
   Settings, Library, Radio, FolderSearch, RefreshCw, DownloadCloud, 
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
-  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User
+  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User,
+  Cast, Loader2, Wifi, WifiOff
 } from 'lucide-react';
 
 interface PresetTheme {
@@ -102,7 +103,9 @@ export function SettingsView() {
     connectSubsonic, disconnectSubsonic, connectJellyfin, disconnectJellyfin,
     autoplayDiscoveryLevel, setAutoplayDiscoveryLevel,
     setShowOnboarding, setOnboardingCompleted,
-    cacheSizeLimit, setCacheSizeLimit
+    cacheSizeLimit, setCacheSizeLimit,
+    chromecast_devices, chromecast_active_device, chromecast_scanning, chromecast_connected,
+    discoverCastDevices, connectCastDevice, disconnectCastDevice
   } = useStore();
 
   // Tab navigation State
@@ -119,6 +122,19 @@ export function SettingsView() {
   const [jellyfinUrlInput, setJellyfinUrlInput] = useState(jellyfinUrl || '');
   const [jellyfinApiKeyInput, setJellyfinApiKeyInput] = useState(localStorage.getItem('aideo_jellyfin_api_key') || '');
   const [jellyfinError, setJellyfinError] = useState('');
+
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
+  useEffect(() => {
+    invoke<string>('get_remote_connection_url')
+      .then(setRemoteUrl)
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'system') {
+      discoverCastDevices();
+    }
+  }, [activeTab]);
 
   // Sync inputs with store values on change or reset
   useEffect(() => {
@@ -1780,6 +1796,69 @@ export function SettingsView() {
                 />
               </div>
             </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'aideo-connect',
+      title: 'Aideo Connect Remote Control',
+      description: 'Control your playback from any phone, tablet, or web browser on your local network.',
+      keywords: 'aideo connect remote control host web server phone tablet qr code web interface browser link network',
+      tab: 'system',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 250 }}>
+              <div className="settings-ctrl-title">Aideo Connect Hub</div>
+              <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
+                Open this URL on your phone or scan the QR code to remotely play, pause, skip, seek, and adjust volume in real-time.
+              </div>
+              {remoteUrl ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <a 
+                    href={remoteUrl} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    style={{ 
+                      color: 'var(--accent)', 
+                      fontSize: 15, 
+                      fontWeight: 600, 
+                      textDecoration: 'underline',
+                      wordBreak: 'break-all'
+                    }}
+                  >
+                    {remoteUrl}
+                  </a>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                    Make sure your remote device is connected to the same Wi-Fi network.
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+                  Starting Aideo Connect Server...
+                </div>
+              )}
+            </div>
+
+            {remoteUrl && (
+              <div style={{ 
+                background: 'white', 
+                padding: 12, 
+                borderRadius: 16, 
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }}>
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(remoteUrl)}`} 
+                  alt="Aideo Connect QR Code"
+                  style={{ width: 140, height: 140, display: 'block' }}
+                />
+              </div>
+            )}
           </div>
         </div>
       )

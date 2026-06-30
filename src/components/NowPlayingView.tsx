@@ -24,7 +24,7 @@ export function NowPlayingView() {
   const { 
     playback, currentDevice, coverArt, accentColor, dsp, 
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
-    setView, toggleLoveTrack
+    setView, toggleLoveTrack, toggleControlCenter
   } = useStore();
   const current = currentTrack;
 
@@ -259,6 +259,17 @@ export function NowPlayingView() {
                 <Heart size={18} fill={current.loved === 1 ? '#ef4444' : 'transparent'} />
               </button>
             )}
+          </div>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            width: '100%',
+            marginTop: 6
+          }}>
             {current?.format && (
               <span 
                 className={`quality-tag ${
@@ -304,13 +315,53 @@ export function NowPlayingView() {
               <span className="live-badge" style={{ flexShrink: 0 }}>LIVE</span>
             )}
             {playback.bit_perfect && (
-              <span className="bit-badge" style={{ flexShrink: 0, background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', boxShadow: '0 0 12px rgba(6, 182, 212, 0.4)' }}>
-                {currentDevice?.startsWith('[ASIO]') ? 'ASIO BIT-PERFECT' : 'BIT-PERFECT'} {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
+              <span 
+                className="bit-badge" 
+                onClick={() => toggleControlCenter()}
+                style={{ 
+                  flexShrink: 0, 
+                  background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', 
+                  boxShadow: '0 0 12px rgba(6, 182, 212, 0.4)',
+                  cursor: 'pointer'
+                }}
+                title="View Audio Signal Path"
+              >
+                {currentDevice?.startsWith('[ASIO]') ? 'ASIO BIT-PERFECT' : 'BIT-PERFECT'} {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''} 🎛️
               </span>
             )}
             {dsp.upsample_rate > 0 && !playback.bit_perfect && (
-              <span className="bit-badge" style={{ flexShrink: 0, background: 'linear-gradient(135deg, #a855f7, #6366f1)', boxShadow: '0 0 12px rgba(168, 85, 247, 0.4)' }}>
-                HI-RES · {dsp.upsample_rate / 1000}kHz
+              <span 
+                className="bit-badge" 
+                onClick={() => toggleControlCenter()}
+                style={{ 
+                  flexShrink: 0, 
+                  background: 'linear-gradient(135deg, #a855f7, #6366f1)', 
+                  boxShadow: '0 0 12px rgba(168, 85, 247, 0.4)',
+                  cursor: 'pointer'
+                }}
+                title="View Audio Signal Path"
+              >
+                HI-RES · {dsp.upsample_rate / 1000}kHz 🎛️
+              </span>
+            )}
+            {!playback.bit_perfect && dsp.upsample_rate <= 0 && (
+              <span 
+                className="bit-badge" 
+                onClick={() => toggleControlCenter()}
+                style={{ 
+                  flexShrink: 0, 
+                  background: 'linear-gradient(135deg, #374151, #4b5563)', 
+                  boxShadow: '0 0 8px rgba(0,0,0,0.2)',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  color: '#9ca3af',
+                  border: '1px solid rgba(255,255,255,0.05)'
+                }}
+                title="View Audio Signal Path"
+              >
+                SIGNAL PATH 🎛️
               </span>
             )}
             {autoplayEnabled && (current?.path.startsWith('http') || current?.format === 'Tidal FLAC') && (
@@ -348,6 +399,8 @@ export function NowPlayingView() {
 
       {/* Lyrics — Right column */}
       {showLyrics && <LyricsPanel />}
+
+
     </div>
   );
 }

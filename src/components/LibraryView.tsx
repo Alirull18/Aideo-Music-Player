@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { MoreVertical, RefreshCw, Activity, Loader2, Heart, DownloadCloud, Check, Trash2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
+import { Track, Playlist } from '../store/types';
 
 const isStreamTrack = (path: string, format?: string | null) => {
   return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
@@ -19,6 +20,7 @@ interface CloudTrack {
   cover_url: string | null;
   stream_url: string;
   provider: 'subsonic' | 'jellyfin';
+  path_hash?: string | null;
 }
 
 const cloudTrackToVirtualTrack = (ct: CloudTrack) => {
@@ -30,7 +32,8 @@ const cloudTrackToVirtualTrack = (ct: CloudTrack) => {
     duration: ct.duration,
     format: ct.provider.toUpperCase(),
     lyric_offset: 0,
-    cover_url: ct.cover_url
+    cover_url: ct.cover_url,
+    path_hash: ct.path_hash
   };
 };
 
@@ -43,14 +46,26 @@ function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
 }
 
-function CloudCacheButton({ streamUrl, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes }: any) {
-  const [hash, setHash] = useState<string | null>(null);
+interface CloudCacheButtonProps {
+  streamUrl: string;
+  cacheCloudTrack: (track: any) => Promise<void> | void;
+  deleteCachedTrack: (streamUrl: string) => Promise<void> | void;
+  cachedCloudHashes: string[];
+  precomputedHash?: string | null;
+}
+
+function CloudCacheButton({ streamUrl, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, precomputedHash }: CloudCacheButtonProps) {
+  const [hash, setHash] = useState<string | null>(precomputedHash || null);
   const [loading, setLoading] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   useEffect(() => {
-    invoke<string>('get_url_hash', { url: streamUrl }).then(setHash);
-  }, [streamUrl]);
+    if (!precomputedHash) {
+      invoke<string>('get_url_hash', { url: streamUrl }).then(setHash);
+    } else {
+      setHash(precomputedHash);
+    }
+  }, [streamUrl, precomputedHash]);
 
   const isCached = hash ? cachedCloudHashes.includes(hash) : false;
 
@@ -143,38 +158,30 @@ const coverArtCache = new Map<string, string | null>();
 const pendingArtRequests = new Map<string, Promise<any>>();
 
 function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | null }) {
-  const isTrackLocal = !path.startsWith('http://') && !path.startsWith('https://');
-  const isCloud = !isTrackLocal || (coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://')));
-  const isSelfHosted = coverUrl && (coverUrl.startsWith('http://') || coverUrl.includes('/rest/getCoverArt.view') || coverUrl.includes('/Images/Primary'));
-  const isRemote = !isTrackLocal && coverUrl && coverUrl.startsWith('https://') && !isSelfHosted;
-  const targetPath = isTrackLocal ? path : (isRemote ? coverUrl : (coverUrl || path));
-  const [art, setArt] = useState<string | null>(isRemote ? coverUrl : (coverArtCache.get(targetPath) || null));
+  const targetPath = coverUrl || path;
+  const [art, setArt] = useState<string | null>(coverArtCache.get(targetPath) || null);
 
   useEffect(() => {
-    if (isRemote) {
-      setArt(coverUrl);
+    let active = true;
+    const cached = coverArtCache.get(targetPath) || null;
+    setArt(cached);
+
+    if (!targetPath) return;
+
+    if (targetPath.startsWith('data:')) {
+      setArt(targetPath);
       return;
     }
-    if (isCloud && !coverUrl) {
-      setArt(null);
-      return;
-    }
-    if (!art && !coverArtCache.has(targetPath)) {
+
+    if (!cached && !coverArtCache.has(targetPath)) {
       if (!pendingArtRequests.has(targetPath)) {
         const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
-          let artUrl = (res && typeof res === 'string') ? res : null;
-          if (!artUrl && isTrackLocal && coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'))) {
-            artUrl = coverUrl;
-          }
+          const artUrl = (res && typeof res === 'string') ? res : null;
           coverArtCache.set(targetPath, artUrl);
           return artUrl;
         }).catch(() => {
-          let fallbackUrl = null;
-          if (isTrackLocal && coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://'))) {
-            fallbackUrl = coverUrl;
-          }
-          coverArtCache.set(targetPath, fallbackUrl);
-          return fallbackUrl;
+          coverArtCache.set(targetPath, null);
+          return null;
         }).finally(() => {
           pendingArtRequests.delete(targetPath);
         });
@@ -182,10 +189,16 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
       }
       
       pendingArtRequests.get(targetPath)?.then(resolvedArt => {
-        if (resolvedArt) setArt(resolvedArt);
+        if (active) {
+          setArt(resolvedArt || null);
+        }
       });
     }
-  }, [targetPath, art, isRemote, isCloud, isTrackLocal, coverUrl]);
+
+    return () => {
+      active = false;
+    };
+  }, [targetPath]);
 
   return (
     <div className="lib-thumb-mini">
@@ -194,12 +207,38 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
   );
 }
 
+interface TrackRowProps {
+  t: Track;
+  i: number;
+  active: boolean;
+  isHighRes: boolean;
+  menuOpenFor: number | null;
+  isMatching: number | null;
+  currentPlaylist: Playlist | null;
+  playTrack: (track: Track) => Promise<void> | void;
+  setView: (view: any) => void;
+  setMenuOpenFor: (id: number | null) => void;
+  playNextInQueue: (track: Track) => Promise<void> | void;
+  addToQueue: (track: Track) => Promise<void> | void;
+  matchMetadata: (track: Track) => Promise<any>;
+  setMatchData: (data: { track: Track; match: any } | null) => void;
+  setIsMatching: (id: number | null) => void;
+  removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void> | void;
+  setPlaylistModalFor: (track: Track | null) => void;
+  setEditModalFor: (track: Track | null) => void;
+  toggleLoveTrack: (path: string) => Promise<void> | void;
+  setCoverArtModalTrack: (track: Track | null) => void;
+  cacheCloudTrack: (track: Track) => Promise<void> | void;
+  deleteCachedTrack: (streamUrl: string) => Promise<void> | void;
+  cachedCloudHashes: string[];
+}
+
 const TrackRow = memo(({ 
   t, i, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
   playTrack, setView, setMenuOpenFor, playNextInQueue, addToQueue, matchMetadata, 
   setMatchData, setIsMatching, removeFromPlaylist, setPlaylistModalFor, setEditModalFor,
   toggleLoveTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
-}: any) => {
+}: TrackRowProps) => {
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
 
   return (
@@ -283,6 +322,7 @@ const TrackRow = memo(({
               cacheCloudTrack={() => cacheCloudTrack(t)} 
               deleteCachedTrack={deleteCachedTrack} 
               cachedCloudHashes={cachedCloudHashes} 
+              precomputedHash={t.path_hash}
             />
           )}
           <div style={{ position: 'relative' }}>
@@ -363,6 +403,72 @@ const TrackRow = memo(({
                       )}
                       {isMatching === t.id ? 'Searching...' : 'Magic Match'}
                   </div>
+
+                  <div
+                    onClick={async (e) => { 
+                      e.stopPropagation();
+                      setMenuOpenFor(null);
+                      setIsMatching(t.id);
+                      try {
+                        const res: any = await invoke('acoustid_identify_track', { path: t.path });
+                        const recording = res.acoustid?.results?.[0]?.recordings?.[0];
+                        if (recording) {
+                          const match = {
+                            title: recording.title,
+                            artist: recording.artists?.[0]?.name || 'Unknown Artist',
+                            album: recording.releasegroups?.[0]?.title || '',
+                          };
+                          setMatchData({ track: t, match });
+                        } else {
+                          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Acoustic Match: No matches found.', type: 'warning' } }));
+                        }
+                      } catch (err) {
+                        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Acoustic Match failed: ${err}`, type: 'error' } }));
+                      } finally {
+                        setIsMatching(null);
+                      }
+                    }}
+                    style={{ padding: '10px 14px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(168, 85, 247, 0.15)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    {isMatching === t.id ? (
+                        <RefreshCw size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
+                      ) : (
+                        <Activity size={14} />
+                      )}
+                      {isMatching === t.id ? 'Analyzing...' : 'Acoustic Match'}
+                  </div>
+
+                  <div
+                    onClick={async (e) => { 
+                      e.stopPropagation();
+                      setMenuOpenFor(null);
+                      try {
+                        const similar: any[] = await invoke('get_similar_tracks', { path: t.path });
+                        if (similar && similar.length > 0) {
+                          const store = useStore.getState();
+                          await store.clearQueue();
+                          for (const track of similar) {
+                            await store.addToQueue(track);
+                          }
+                          playTrack(similar[0]);
+                          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix: Queued ${similar.length} similar tracks!`, type: 'success' } }));
+                        } else {
+                          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' } }));
+                        }
+                      } catch (err) {
+                        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } }));
+                      }
+                    }}
+                    style={{ padding: '10px 14px', fontSize: 13, color: '#10b981', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <Activity size={14} style={{ color: '#10b981' }} />
+                    Sonic Mix
+                  </div>
+
                   <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
                   <div
                     onClick={(e) => { 
@@ -482,6 +588,7 @@ const CloudTrackRow = memo(({
             cacheCloudTrack={() => cacheCloudTrack(t)} 
             deleteCachedTrack={deleteCachedTrack} 
             cachedCloudHashes={cachedCloudHashes} 
+            precomputedHash={t.path_hash}
           />
           <div style={{ position: 'relative' }}>
             <button

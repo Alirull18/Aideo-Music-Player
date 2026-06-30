@@ -4,8 +4,9 @@ import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Coffee, Play, Pause, Music, Star, Sunrise, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft } from 'lucide-react';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
+import { YoutubeMix } from '../store/types';
 
 // Format track duration
 function fmt(s: number | null) {
@@ -16,6 +17,22 @@ function fmt(s: number | null) {
 // Extract track base name
 function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
+}
+
+// Parse raw duration strings into seconds (defaulting to 180s if 0 or invalid)
+function parseDuration(raw: string | null | undefined): number {
+  if (!raw) return 180;
+  const parts = raw.split(':').map(Number);
+  if (parts.some(isNaN)) return 180;
+  let secs = 0;
+  if (parts.length === 3) {
+    secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+  } else if (parts.length === 2) {
+    secs = parts[0] * 60 + parts[1];
+  } else {
+    secs = parts[0] || 0;
+  }
+  return secs > 0 ? secs : 180;
 }
 
 // Format large stats numbers
@@ -304,22 +321,22 @@ function getBadgeClass(source: string) {
 }
 
 const TrackCardThumbnail = memo(({ path, coverUrl }: { path: string, coverUrl?: string | null }) => {
-  const isCloud = path.startsWith('http://') || path.startsWith('https://') || (coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://')));
-  const isSelfHosted = coverUrl && (coverUrl.startsWith('http://') || coverUrl.includes('/rest/getCoverArt.view') || coverUrl.includes('/Images/Primary'));
-  const isRemote = coverUrl && coverUrl.startsWith('https://') && !isSelfHosted;
-  const targetPath = isRemote ? coverUrl : (coverUrl || path);
-  const [art, setArt] = useState<string | null>(isRemote ? coverUrl : (coverArtCache.get(targetPath) || null));
+  const targetPath = coverUrl || path;
+  const [art, setArt] = useState<string | null>(coverArtCache.get(targetPath) || null);
 
   useEffect(() => {
-    if (isRemote) {
-      setArt(coverUrl);
+    let active = true;
+    const cached = coverArtCache.get(targetPath) || null;
+    setArt(cached);
+
+    if (!targetPath) return;
+
+    if (targetPath.startsWith('data:')) {
+      setArt(targetPath);
       return;
     }
-    if (isCloud && !coverUrl) {
-      setArt(null);
-      return;
-    }
-    if (!art && !coverArtCache.has(targetPath)) {
+
+    if (!cached && !coverArtCache.has(targetPath)) {
       if (!pendingArtRequests.has(targetPath)) {
         const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
           const artUrl = (res && typeof res === 'string') ? res : null;
@@ -335,10 +352,16 @@ const TrackCardThumbnail = memo(({ path, coverUrl }: { path: string, coverUrl?: 
       }
       
       pendingArtRequests.get(targetPath)?.then(resolvedArt => {
-        if (resolvedArt) setArt(resolvedArt);
+        if (active) {
+          setArt(resolvedArt || null);
+        }
       });
     }
-  }, [targetPath, art, isRemote, isCloud, coverUrl]);
+
+    return () => {
+      active = false;
+    };
+  }, [targetPath]);
 
   return (
     <img src={art || defaultCover} alt="" loading="lazy" className="aideo-track-img" />
@@ -351,7 +374,6 @@ export function AideoView() {
     playHistory, 
     playCounts, 
     playTrack, 
-    playDynamicMix, 
     setView, 
     playStream,
     playback,
@@ -366,14 +388,10 @@ export function AideoView() {
     activeDiscoveryTab,
     setActiveDiscoveryTab,
     addToQueue,
-    triggerAutoplayRadio
+    triggerAutoplayRadio,
+    appMode
   } = useStore();
   const [greeting, setGreeting] = useState('Good morning');
-  const [timeMix, setTimeMix] = useState({
-    title: 'Chill Mix',
-    description: 'A relaxing selection designed for peaceful environments',
-    iconType: 'chill'
-  });
   const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
   const isFetchingRef = useRef(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
@@ -539,12 +557,7 @@ export function AideoView() {
       detail: { message: `Playing: ${track.title}...`, type: 'info' } 
     }));
     try {
-      const parsedSeconds = (() => {
-        const parts = (track.duration_raw || '').split(':').map(Number);
-        if (parts.length === 2) return parts[0] * 60 + parts[1];
-        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-        return 0;
-      })();
+      const parsedSeconds = parseDuration(track.duration_raw);
       await playStream(track.url, {
         title: track.title,
         artist: track.artist,
@@ -700,13 +713,17 @@ export function AideoView() {
         lastfmTopArtists: lastfmTopArtistsList,
         listenbrainzConnected: isLbConnected,
         listenbrainzRecs: lbTracks,
+        appMode,
+        isOnline: navigator.onLine,
       });
 
       setDiscoveryData(resolved);
-      if (!resolved.recommendations || resolved.recommendations.length === 0) {
-        if (resolved.global_charts && resolved.global_charts.length > 0) {
-          setActiveDiscoveryTab('charts');
-        }
+      if (resolved.mixed_for_you && resolved.mixed_for_you.length > 0) {
+        setActiveDiscoveryTab('mixed');
+      } else if (resolved.recommendations && resolved.recommendations.length > 0) {
+        setActiveDiscoveryTab('recommendations');
+      } else if (resolved.global_charts && resolved.global_charts.length > 0) {
+        setActiveDiscoveryTab('charts');
       }
     } catch (err) {
       console.error('Failed to load personalized discovery recommendations:', err);
@@ -822,12 +839,7 @@ export function AideoView() {
         detail: { message: `Streaming preview: ${track.title}...`, type: 'info' } 
       }));
       try {
-        const parsedSeconds = (() => {
-          const parts = (track.duration_raw || '').split(':').map(Number);
-          if (parts.length === 2) return parts[0] * 60 + parts[1];
-          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-          return 0;
-        })();
+        const parsedSeconds = parseDuration(track.duration_raw);
         await playStream(track.url, {
           title: track.title,
           artist: track.artist,
@@ -848,6 +860,83 @@ export function AideoView() {
     }
   };
 
+  const handlePlayDiscoveryMix = async (mix: any) => {
+    if (!mix.tracks || mix.tracks.length === 0) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: "This mix has no tracks.", type: 'warning' } 
+      }));
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent('ui-toast', { 
+      detail: { message: `✨ Loading Mix: ${mix.title}...`, type: 'info' } 
+    }));
+
+    try {
+      const parsedSeconds = (track: any): number => parseDuration(track.duration_raw);
+
+      const tracksToQueue: Track[] = mix.tracks.map((t: any) => {
+        const isOnline = t.url.startsWith('http://') || t.url.startsWith('https://');
+        if (isOnline) {
+          return {
+            id: -30000 - Math.floor(Math.random() * 100000),
+            path: t.url,
+            title: t.title,
+            artist: t.artist,
+            duration: parsedSeconds(t),
+            format: 'YouTube Direct',
+            cover_url: t.cover_url || null,
+          } as Track;
+        } else {
+          const existing = tracks.find(lt => lt.path === t.url);
+          if (existing) return existing;
+          return {
+            id: parseInt(t.id.replace('local_', '')) || -9999,
+            path: t.url,
+            title: t.title,
+            artist: t.artist,
+            duration: parsedSeconds(t),
+            format: 'Local File',
+            cover_url: t.cover_url || null,
+          } as Track;
+        }
+      });
+
+      const upcoming = tracksToQueue.slice(1);
+      useStore.setState({ queue: upcoming });
+      localStorage.setItem('aideo_queue', JSON.stringify(upcoming));
+
+      await invoke('clear_queue');
+      if (upcoming.length > 0) {
+        const paths = upcoming.map(t => t.path);
+        await invoke('add_to_queue_bulk', { paths });
+      }
+
+      const first = tracksToQueue[0];
+      const isFirstOnline = first.path.startsWith('http://') || first.path.startsWith('https://');
+      if (isFirstOnline) {
+        await playStream(first.path, {
+          title: first.title || undefined,
+          artist: first.artist || undefined,
+          cover_url: first.cover_url,
+          duration: first.duration || undefined,
+        }, false);
+      } else {
+        await playTrack(first);
+      }
+
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Playing ${mix.title}!`, type: 'success' } 
+      }));
+      setView('nowplaying');
+    } catch (err) {
+      console.error("Failed to play discovery mix:", err);
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Failed to load mix: ${err}`, type: 'error' } 
+      }));
+    }
+  };
+
   const handlePlayPopularTrack = async (trackName: string) => {
     if (!artistProfile) return;
     const trackId = `${artistProfile.name}-${trackName}`;
@@ -857,12 +946,7 @@ export function AideoView() {
       const results = await invoke<any[]>('search_youtube', { query });
       if (results && results.length > 0) {
         const match = results[0];
-        const parsedSeconds = (() => {
-          const parts = (match.duration_raw || '').split(':').map(Number);
-          if (parts.length === 2) return parts[0] * 60 + parts[1];
-          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-          return 0;
-        })();
+        const parsedSeconds = parseDuration(match.duration_raw);
         await playStream(match.url, {
           title: match.title,
           artist: match.artist,
@@ -996,12 +1080,7 @@ export function AideoView() {
       const results = await invoke<any[]>('search_youtube', { query });
       if (results && results.length > 0) {
         const match = results[0];
-        const parsedSeconds = (() => {
-          const parts = (match.duration_raw || '').split(':').map(Number);
-          if (parts.length === 2) return parts[0] * 60 + parts[1];
-          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-          return 0;
-        })();
+        const parsedSeconds = parseDuration(match.duration_raw);
 
         // Clear queue on frontend and backend manually to prevent stopping the track that is about to start
         useStore.setState({ queue: [] });
@@ -1023,12 +1102,7 @@ export function AideoView() {
               const res = await invoke<any[]>('search_youtube', { query: `${artistProfile.name} - ${t.name}` });
               if (res && res.length > 0) {
                 const subMatch = res[0];
-                const subDuration = (() => {
-                  const parts = (subMatch.duration_raw || '').split(':').map(Number);
-                  if (parts.length === 2) return parts[0] * 60 + parts[1];
-                  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-                  return 0;
-                })();
+                const subDuration = parseDuration(subMatch.duration_raw);
                 const virtualTrack: Track = {
                   id: -20000 - Math.floor(Math.random() * 100000),
                   path: subMatch.url,
@@ -1073,12 +1147,7 @@ export function AideoView() {
       const results = await invoke<any[]>('search_youtube', { query: `${artistProfile.name} - ${firstTrack.name}` });
       if (results && results.length > 0) {
         const match = results[0];
-        const parsedSeconds = (() => {
-          const parts = (match.duration_raw || '').split(':').map(Number);
-          if (parts.length === 2) return parts[0] * 60 + parts[1];
-          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-          return 0;
-        })();
+        const parsedSeconds = parseDuration(match.duration_raw);
         const virtualTrack: Track = {
           id: -9999,
           path: match.url,
@@ -1113,27 +1182,6 @@ export function AideoView() {
     if (hrs < 12) setGreeting('Good morning');
     else if (hrs < 18) setGreeting('Good afternoon');
     else setGreeting('Good evening');
-
-    // Dynamic Mood Mix based on local time
-    if (hrs >= 5 && hrs < 12) {
-      setTimeMix({
-        title: 'Sunrise Energy Mix',
-        description: 'Upbeat tracks to energize your morning routine',
-        iconType: 'sunrise'
-      });
-    } else if (hrs >= 12 && hrs < 17) {
-      setTimeMix({
-        title: 'Productive Focus Mix',
-        description: 'Steady, mid-tempo tracks to keep your flow going',
-        iconType: 'focus'
-      });
-    } else {
-      setTimeMix({
-        title: 'Chill & Unwind Mix',
-        description: 'A relaxing selection designed for peaceful evenings',
-        iconType: 'chill'
-      });
-    }
   }, []);
 
   // Compute "Recently Played" Track Objects
@@ -1991,97 +2039,7 @@ export function AideoView() {
             </div>
           </div>
 
-          {/* Section: Your Mixes */}
-          <section className="aideo-section">
-            <h2 className="aideo-sec-title">Mixed for You</h2>
-            <div className="aideo-mix-grid">
-              {/* Card: My Supermix */}
-              <motion.div 
-                whileTap={{ scale: 0.98 }}
-                onClick={() => playDynamicMix('supermix')}
-                className="aideo-mix-card supermix"
-              >
-                <div className="mix-card-content">
-                  <div className="mix-card-icon-wrap sm">
-                    <Sparkles size={22} className="pulse" />
-                  </div>
-                  <div className="mix-card-text">
-                    <h3>My Supermix</h3>
-                    <p>Your top tracks blended with random library favorites</p>
-                  </div>
-                  <button className="mix-play-btn">
-                    <Play size={18} fill="currentColor" />
-                  </button>
-                </div>
-              </motion.div>
 
-              {/* Card: Aideo Recap */}
-              <motion.div 
-                whileTap={{ scale: 0.98 }}
-                onClick={() => playDynamicMix('recap')}
-                className="aideo-mix-card recap"
-              >
-                <div className="mix-card-content">
-                  <div className="mix-card-icon-wrap rc">
-                    <History size={22} />
-                  </div>
-                  <div className="mix-card-text">
-                    <h3>Aideo Recap Mix</h3>
-                    <p>The ultimate recap of your top-played music</p>
-                  </div>
-                  <button className="mix-play-btn">
-                    <Play size={18} fill="currentColor" />
-                  </button>
-                </div>
-              </motion.div>
-
-              {/* Card: Discovery Mix */}
-              <motion.div 
-                whileTap={{ scale: 0.98 }}
-                onClick={() => playDynamicMix('discovery')}
-                className="aideo-mix-card discovery"
-              >
-                <div className="mix-card-content">
-                  <div className="mix-card-icon-wrap dc">
-                    <Compass size={22} />
-                  </div>
-                  <div className="mix-card-text">
-                    <h3>Discovery Mix</h3>
-                    <p>Explore gems in your library that you haven't played much</p>
-                  </div>
-                  <button className="mix-play-btn">
-                    <Play size={18} fill="currentColor" />
-                  </button>
-                </div>
-              </motion.div>
-
-              {/* Card: Dynamic Time-of-Day Mix */}
-              <motion.div 
-                whileTap={{ scale: 0.98 }}
-                onClick={() => playDynamicMix('chill')}
-                className="aideo-mix-card chill"
-              >
-                <div className="mix-card-content">
-                  <div className="mix-card-icon-wrap ch">
-                    {timeMix.iconType === 'sunrise' ? (
-                      <Sunrise size={22} className="pulse" />
-                    ) : timeMix.iconType === 'focus' ? (
-                      <Coffee size={22} />
-                    ) : (
-                      <Moon size={22} />
-                    )}
-                  </div>
-                  <div className="mix-card-text">
-                    <h3>{timeMix.title}</h3>
-                    <p>{timeMix.description}</p>
-                  </div>
-                  <button className="mix-play-btn">
-                    <Play size={18} fill="currentColor" />
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          </section>
 
           {/* Section: Aideo Discovery Hub */}
           <section className="aideo-section">
@@ -2121,6 +2079,77 @@ export function AideoView() {
               </div>
             ) : discoveryData ? (
               <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {/* Permanent Mixed for You Shelf at the Top */}
+                {discoveryData.mixed_for_you && discoveryData.mixed_for_you.length > 0 && (
+                  <div style={{ marginBottom: 32 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                      <Layers size={18} color="var(--accent)" />
+                      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Mixed for You</h2>
+                    </div>
+                    <div className="aideo-mix-grid">
+                      {discoveryData.mixed_for_you.map((mix: YoutubeMix) => {
+                        const isRecap = mix.id.includes('recap');
+                        const isDiscovery = mix.id.includes('discovery');
+                        const isChill = mix.id.includes('chill');
+                        const isArtist = mix.id.includes('artist_mix');
+                        const isGenre = mix.id.includes('genre_mix');
+                        
+                        let iconType = 'sparkles';
+                        let iconColorClass = 'sm';
+                        if (isRecap) { iconType = 'recap'; iconColorClass = 'rc'; }
+                        else if (isDiscovery || isArtist || isGenre) { iconType = 'discovery'; iconColorClass = 'dc'; }
+                        else if (isChill) { iconType = 'chill'; iconColorClass = 'ch'; }
+
+                        const renderIcon = () => {
+                          switch (iconType) {
+                            case 'recap': return <History size={22} />;
+                            case 'discovery': return <Compass size={22} />;
+                            case 'chill': return <Moon size={22} />;
+                            default: return <Sparkles size={22} className="pulse" />;
+                          }
+                        };
+
+                        return (
+                          <motion.div 
+                            key={mix.id}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handlePlayDiscoveryMix(mix)}
+                            className={`aideo-mix-card ${iconColorClass}`}
+                          >
+                            <div className="mix-card-content">
+                              <div className={`mix-card-icon-wrap ${iconColorClass}`}>
+                                {renderIcon()}
+                              </div>
+                              <div className="mix-card-text">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{mix.title}</h3>
+                                  <span style={{
+                                    fontSize: 8,
+                                    fontWeight: 800,
+                                    padding: '2px 5px',
+                                    borderRadius: 10,
+                                    background: mix.id.startsWith('local_mix_') ? 'rgba(255,255,255,0.06)' : 'rgba(59, 130, 246, 0.15)',
+                                    color: mix.id.startsWith('local_mix_') ? 'var(--text-dim)' : '#60a5fa',
+                                    border: mix.id.startsWith('local_mix_') ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(59, 130, 246, 0.2)',
+                                    textTransform: 'uppercase',
+                                    lineHeight: 1
+                                  }}>
+                                    {mix.id.startsWith('local_mix_') ? 'Local' : 'Hybrid'}
+                                  </span>
+                                </div>
+                                <p style={{ margin: '2px 0 0 0', fontSize: 11, color: 'var(--text-dim)' }}>{mix.description}</p>
+                              </div>
+                              <button className="mix-play-btn">
+                                <Play size={18} fill="currentColor" />
+                              </button>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Premium Tab Switched Bar */}
                 <div style={{ 
                   display: 'flex', 
@@ -2132,6 +2161,8 @@ export function AideoView() {
                   marginBottom: 20,
                   width: 'fit-content'
                 }}>
+
+
                   {discoveryData.recommendations && discoveryData.recommendations.length > 0 && (
                     <button
                       onClick={() => setActiveDiscoveryTab('recommendations')}
@@ -2183,12 +2214,12 @@ export function AideoView() {
 
                 {/* Shelf Content */}
                 <motion.div
-                  key={activeDiscoveryTab}
+                  key={activeDiscoveryTab === 'mixed' ? 'recommendations' : activeDiscoveryTab}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
                 >
-                  {activeDiscoveryTab === 'recommendations' && (
+                  {(activeDiscoveryTab === 'recommendations' || activeDiscoveryTab === 'mixed') && (
                     <>
                       {renderTrackCarousel(discoveryData.recommendations.slice(0, visibleRecsCount))}
                       {discoveryData.recommendations.length > visibleRecsCount && (
@@ -2227,15 +2258,8 @@ export function AideoView() {
                   {activeDiscoveryTab === 'charts' && renderTrackCarousel(discoveryData.global_charts)}
                 </motion.div>
               </div>
-            ) : (
-              <div className="aideo-empty-box">
-                <Compass size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-                <p>We searched online but couldn't find any recommendations matching your current library interests. Try expanding your music taste!</p>
-              </div>
-            )}
+            ) : null}
           </section>
-
-          {/* Section: Quick Recap Grid */}
           <section className="aideo-section">
             <h2 className="aideo-sec-title">Quick Recap</h2>
             {recapTracks.length > 0 ? (

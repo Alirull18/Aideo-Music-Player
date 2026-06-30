@@ -33,6 +33,8 @@ pub mod updater;
 pub mod cloud;
 pub mod dependencies;
 pub mod chromecast;
+pub mod sonic_analyzer;
+pub mod remote_server;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -520,21 +522,32 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
             all_scanned_tracks.extend(tracks);
         }
 
-        let mut conn = safe_lock(&db_conn_arc);
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        
-        let mut db_tracks = Vec::new();
-        {
-            let mut stmt = tx.prepare("SELECT id, path FROM tracks").map_err(|e| e.to_string())?;
+        let db_tracks = {
+            let conn = safe_lock(&db_conn_arc);
+            let mut stmt = conn.prepare("SELECT id, path FROM tracks").map_err(|e| e.to_string())?;
             let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+            let mut list = Vec::new();
             while let Some(row) = rows.next().map_err(|e| e.to_string())? {
                 let id: i32 = row.get(0).map_err(|e| e.to_string())?;
                 let path: String = row.get(1).map_err(|e| e.to_string())?;
-                db_tracks.push((id, path));
+                list.push((id, path));
+            }
+            list
+        };
+
+        let mut paths_to_delete = Vec::new();
+        for (_, path) in &db_tracks {
+            if !path.starts_with("http://") && !path.starts_with("https://") {
+                if !std::path::Path::new(path).exists() {
+                    paths_to_delete.push(path.clone());
+                }
             }
         }
+
+        let mut conn = safe_lock(&db_conn_arc);
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         
-        let db_paths: std::collections::HashSet<String> = db_tracks.iter().map(|(_, p)| p.clone()).collect();
+        let db_paths: std::collections::HashSet<String> = db_tracks.into_iter().map(|(_, p)| p).collect();
         
         for track in all_scanned_tracks {
             if !db_paths.contains(&track.path) {
@@ -554,10 +567,8 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
             }
         }
         
-        for (_id, path) in db_tracks {
-            if !std::path::Path::new(&path).exists() {
-                tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
-            }
+        for path in paths_to_delete {
+            tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
         }
         
         tx.commit().map_err(|e| e.to_string())?;
@@ -594,6 +605,10 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
                 loved: Some(0),
                 cover_url: None,
                 path_hash: None,
+                bpm: None,
+                energy: None,
+                bass_ratio: None,
+                treble_ratio: None,
             }
         }
     };
@@ -742,7 +757,29 @@ fn get_lyrics(path: String) -> Result<Vec<lyrics::LyricLine>, String> {
 #[tauri::command]
 async fn get_cover_art(path: String) -> Result<Option<String>, String> {
     if path.starts_with("http://") || path.starts_with("https://") {
-        return Ok(Some(path));
+        let client = get_http_client();
+        match client.get(&path)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .send().await {
+            Ok(res) => {
+                if res.status().is_success() {
+                    let content_type = res.headers()
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("image/jpeg")
+                        .to_string();
+                    if let Ok(bytes) = res.bytes().await {
+                        use base64::Engine;
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        return Ok(Some(format!("data:{content_type};base64,{encoded}")));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[get_cover_art] Failed to fetch remote cover art: {}", e);
+            }
+        }
+        return Ok(None);
     }
     
     Ok(artwork::get_cover_art(&path))
@@ -1192,12 +1229,127 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "dev_rate": player.current_dev_rate.load(Ordering::Relaxed),
         "dsp": *safe_lock(&player.dsp_state),
         "driver_type": if is_asio { "ASIO" } else { "WASAPI" },
+        "file_rate": player.file_rate.load(Ordering::Relaxed),
+        "file_ch": player.file_ch.load(Ordering::Relaxed),
+        "file_format": *safe_lock(&player.file_format),
     }))
 }
 
 #[tauri::command]
 fn log_error(msg: String) {
     println!("[frontend-error] {}", msg);
+}
+
+#[tauri::command]
+async fn acoustid_identify_track(state: State<'_, AppState>, path: String) -> Result<serde_json::Value, String> {
+    let path_str = path.clone();
+    let (fingerprint, duration, profile) = tokio::task::spawn_blocking(move || {
+        crate::sonic_analyzer::analyze_audio_file(&path_str)
+    }).await.map_err(|e| e.to_string())??;
+
+    {
+        let conn = safe_lock(&state.db);
+        let _ = crate::db::update_track_sonic_profile(
+            &conn,
+            &path,
+            profile.bpm,
+            profile.energy,
+            profile.bass_ratio,
+            profile.treble_ratio,
+        );
+    }
+
+    let client = crate::get_http_client();
+    let client_key = "8Wa374EF"; 
+    let duration_sec = duration.round() as u32;
+
+    let url = format!(
+        "https://api.acoustid.org/v2/lookup?client={}&meta=recordings+releasegroups+compress&duration={}&fingerprint={}",
+        client_key,
+        duration_sec,
+        urlencoding::encode(&fingerprint)
+    );
+
+    let res = client.get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Acoustid lookup network request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Acoustid API returned error status: {}", res.status()));
+    }
+
+    let body = res.text().await.map_err(|e| format!("Failed to read Acoustid response: {}", e))?;
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse Acoustid response JSON: {}", e))?;
+
+    Ok(serde_json::json!({
+        "acoustid": json,
+        "profile": profile
+    }))
+}
+
+#[tauri::command]
+async fn get_similar_tracks(state: State<'_, AppState>, path: String) -> Result<Vec<crate::db::Track>, String> {
+    let conn = safe_lock(&state.db);
+    let all_tracks = crate::db::get_all_tracks(&conn).map_err(|e| e.to_string())?;
+    
+    let seed = all_tracks.iter().find(|t| t.path == path)
+        .ok_or_else(|| "Seed track not found in database".to_string())?;
+        
+    let seed_bpm = seed.bpm.unwrap_or(120.0);
+    let seed_energy = seed.energy.unwrap_or(0.5);
+    let seed_bass = seed.bass_ratio.unwrap_or(0.33);
+    let seed_treble = seed.treble_ratio.unwrap_or(0.33);
+    
+    let mut scored_tracks = Vec::new();
+    
+    for track in all_tracks {
+        if track.path == path {
+            continue;
+        }
+        
+        let t_bpm = track.bpm.unwrap_or(120.0);
+        let t_energy = track.energy.unwrap_or(0.5);
+        let t_bass = track.bass_ratio.unwrap_or(0.33);
+        let t_treble = track.treble_ratio.unwrap_or(0.33);
+        
+        let bpm_diff = (seed_bpm - t_bpm) / 60.0;
+        let energy_diff = seed_energy - t_energy;
+        let bass_diff = seed_bass - t_bass;
+        let treble_diff = seed_treble - t_treble;
+        
+        let distance = (
+            1.5 * bpm_diff * bpm_diff +
+            1.0 * energy_diff * energy_diff +
+            1.2 * bass_diff * bass_diff +
+            0.8 * treble_diff * treble_diff
+        ).sqrt();
+        
+        scored_tracks.push((track, distance));
+    }
+    
+    scored_tracks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    
+    let result: Vec<crate::db::Track> = scored_tracks.into_iter()
+        .take(15)
+        .map(|(t, _)| t)
+        .collect();
+        
+    Ok(result)
+}
+
+fn get_local_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    let _ = socket.connect("8.8.8.8:80");
+    socket.local_addr().ok().map(|addr| addr.ip().to_string())
+}
+
+#[tauri::command]
+fn get_remote_connection_url() -> Result<String, String> {
+    let port = crate::remote_server::ACTIVE_PORT.get().copied().ok_or_else(|| "Remote server not active".to_string())?;
+    let ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    Ok(format!("http://{}:{}", ip, port))
 }
 
 #[tauri::command]
@@ -1444,6 +1596,9 @@ pub fn run() {
             cloud::get_url_hash,
             get_windows_accent_color,
             clear_application_cache,
+            acoustid_identify_track,
+            get_similar_tracks,
+            get_remote_connection_url,
             open_cache_folder,
             check_files_exist,
             chromecast::chromecast_discover,
@@ -1500,13 +1655,20 @@ pub fn run() {
                 }
             }
 
-            let app_data = app.path().app_data_dir().unwrap();
-            let db_path = app_data.join("aideo.db");
+            let db_path = match app.path().app_data_dir() {
+                Ok(dir) => dir.join("aideo.db"),
+                Err(_) => {
+                    eprintln!("[system] WARNING: Failed to resolve AppData directory. Falling back to current directory.");
+                    std::env::current_dir()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                        .join("aideo.db")
+                }
+            };
             if let Some(parent) = db_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let db_path_str = db_path.to_str().unwrap();
-            let conn = match db::init_db(db_path_str) {
+            let db_path_lossy = db_path.to_string_lossy();
+            let conn = match db::init_db(&db_path_lossy) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("[system] SQLite initialization failed ({}). Falling back to safe in-memory database configuration.", e);
@@ -1643,11 +1805,28 @@ pub fn run() {
                 controls_opt = Some(controls);
             }
 
+            let player_arc = Arc::new(Mutex::new(player::Player::new(app.handle().clone())));
+            let db_arc = Arc::new(Mutex::new(conn));
+            let media_controls_arc = Arc::new(Mutex::new(controls_opt));
+            let cached_devices_arc = Arc::new(Mutex::new(Vec::new()));
+
             app.manage(AppState {
-                player: Arc::new(Mutex::new(player::Player::new(app.handle().clone()))),
-                db: Arc::new(Mutex::new(conn)),
-                media_controls: Arc::new(Mutex::new(controls_opt)),
-                cached_devices: Arc::new(Mutex::new(Vec::new())),
+                player: player_arc.clone(),
+                db: db_arc.clone(),
+                media_controls: media_controls_arc.clone(),
+                cached_devices: cached_devices_arc.clone(),
+            });
+
+            let app_state_clone = Arc::new(AppState {
+                player: player_arc,
+                db: db_arc,
+                media_controls: media_controls_arc,
+                cached_devices: cached_devices_arc,
+            });
+
+            let app_handle_for_server = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                crate::remote_server::start_remote_server(app_handle_for_server, app_state_clone).await;
             });
 
             #[cfg(target_os = "windows")]
@@ -1663,4 +1842,14 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[allow(dead_code)]
+fn test_chromaprint_api() {
+    let mut fp = chromaprint::Fingerprinter::new(chromaprint::Algorithm::default());
+    let _ = fp.start(44100, 2);
+    let chunk: Vec<i16> = vec![0; 1024];
+    let _ = fp.feed(&chunk);
+    let _ = fp.finish();
+    let _encoded: String = fp.encode();
 }

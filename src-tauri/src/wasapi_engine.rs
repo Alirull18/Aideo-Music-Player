@@ -234,8 +234,15 @@ where
             return;
         }
 
-        let format_desc = if is_float { "Float32" } else { if valid_bits == 24 { "Int24" } else if bits == 32 { "Int32" } else { "Int16" } };
-        println!("[wasapi] Exclusive Mode STARTED: {}Hz {}ch [{}]", sample_rate, channels, format_desc);
+        let mut xor_state = rand::random::<u32>().max(1);
+        macro_rules! next_dither {
+            () => {{
+                xor_state ^= xor_state << 13;
+                xor_state ^= xor_state >> 17;
+                xor_state ^= xor_state << 5;
+                (xor_state as f32 / 4294967295.0) - 0.5
+            }};
+        }
 
         while !shutdown_clone.load(Ordering::Relaxed) {
             if is_polling {
@@ -293,8 +300,8 @@ where
                     for (i, &sample) in f32_data.iter().enumerate() {
                         let clamped = sample.clamp(-1.0, 1.0);
                         let val = if dither_enabled {
-                            let r1 = rand::random::<f32>() - 0.5;
-                            let r2 = rand::random::<f32>() - 0.5;
+                            let r1 = next_dither!();
+                            let r2 = next_dither!();
                             clamped * multiplier + r1 + r2
                         } else {
                             clamped * multiplier
@@ -312,8 +319,8 @@ where
                     for (i, &sample) in f32_data.iter().enumerate() {
                         let clamped = sample.clamp(-1.0, 1.0);
                         let val = if dither_enabled {
-                            let r1 = rand::random::<f32>() - 0.5;
-                            let r2 = rand::random::<f32>() - 0.5;
+                            let r1 = next_dither!();
+                            let r2 = next_dither!();
                             clamped * multiplier + r1 + r2
                         } else {
                             clamped * multiplier
@@ -333,8 +340,8 @@ where
                 for (i, &sample) in f32_data.iter().enumerate() {
                     let clamped = sample.clamp(-1.0, 1.0);
                     let val = if dither_enabled {
-                        let r1 = rand::random::<f32>() - 0.5;
-                        let r2 = rand::random::<f32>() - 0.5;
+                        let r1 = next_dither!();
+                        let r2 = next_dither!();
                         clamped * multiplier + r1 + r2
                     } else {
                         clamped * multiplier
@@ -353,8 +360,8 @@ where
                 for (i, &sample) in f32_data.iter().enumerate() {
                     let clamped = sample.clamp(-1.0, 1.0);
                     let val = if dither_enabled {
-                        let r1 = rand::random::<f32>() - 0.5;
-                        let r2 = rand::random::<f32>() - 0.5;
+                        let r1 = next_dither!();
+                        let r2 = next_dither!();
                         clamped * multiplier + r1 + r2
                     } else {
                         clamped * multiplier

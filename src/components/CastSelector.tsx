@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import { Cast, Loader2, Wifi, WifiOff, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { invoke } from '@tauri-apps/api/core';
 
 export function CastSelector() {
   const {
@@ -13,6 +14,8 @@ export function CastSelector() {
     connectCastDevice,
     disconnectCastDevice,
   } = useStore();
+
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
 
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -27,6 +30,14 @@ export function CastSelector() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      invoke<string>('get_remote_connection_url')
+        .then(setRemoteUrl)
+        .catch(console.error);
+    }
+  }, [isOpen]);
 
   // Trigger scan when opening
   const handleToggle = () => {
@@ -76,7 +87,7 @@ export function CastSelector() {
               position: 'absolute',
               bottom: 'calc(100% + 12px)',
               right: 0,
-              width: 300,
+              width: 340,
               background: 'rgba(20, 20, 30, 0.85)',
               backdropFilter: 'blur(24px)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -247,6 +258,62 @@ export function CastSelector() {
                 </button>
               </div>
             )}
+
+            {/* Divider */}
+            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '4px 0' }} />
+
+            {/* Aideo Connect Hub */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--accent)' }}>
+                  Aideo Connect Remote
+                </span>
+              </div>
+              
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                Control your music from any phone on your local Wi-Fi.
+              </div>
+
+              {remoteUrl ? (
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <a
+                      href={remoteUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--accent)',
+                        fontWeight: 600,
+                        textDecoration: 'underline',
+                        wordBreak: 'break-all'
+                      }}
+                    >
+                      {remoteUrl}
+                    </a>
+                  </div>
+                  <div style={{
+                    background: 'white',
+                    padding: 6,
+                    borderRadius: 8,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=${encodeURIComponent(remoteUrl)}`}
+                      alt="Pairing QR Code"
+                      style={{ width: 70, height: 70, display: 'block' }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                  Starting Aideo Connect...
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

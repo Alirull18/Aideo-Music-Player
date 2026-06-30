@@ -24,6 +24,30 @@ export interface CloudTrack {
   provider: 'subsonic' | 'jellyfin';
 }
 
+export interface YoutubeTrack {
+  id: string;
+  title: string;
+  artist: string;
+  cover_url: string | null;
+  duration_raw: string;
+  url: string;
+  recommendation_source?: string | null;
+}
+
+export interface YoutubeMix {
+  id: string;
+  title: string;
+  description: string;
+  cover_url: string | null;
+  tracks: YoutubeTrack[];
+}
+
+export interface DiscoveryHubData {
+  recommendations: YoutubeTrack[];
+  global_charts: YoutubeTrack[];
+  mixed_for_you: YoutubeMix[];
+}
+
 export interface Playlist {
   id: number;
   name: string;
@@ -103,6 +127,9 @@ export interface PlaybackState {
   last_seek_time?: number;
   last_played_track?: string | null;
   last_poll_time?: number;
+  file_rate?: number;
+  file_ch?: number;
+  file_format?: string | null;
 }
 
 export interface CustomPromptState {
@@ -299,10 +326,10 @@ export interface PlayerState {
   toggleDeveloperNotifications: () => void;
 
   // Discovery Hub State
-  discoveryData: any;
+  discoveryData: DiscoveryHubData | null;
   isLoadingRecs: boolean;
   activeDiscoveryTab: string;
-  setDiscoveryData: (data: any) => void;
+  setDiscoveryData: (data: DiscoveryHubData | null) => void;
   setIsLoadingRecs: (loading: boolean) => void;
   setActiveDiscoveryTab: (tab: string) => void;
   cacheSizeLimit: number;

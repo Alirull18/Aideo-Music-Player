@@ -2,11 +2,30 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 
-import { Activity, Settings2, RefreshCw, X } from 'lucide-react';
+import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles } from 'lucide-react';
 
 export function AudioControlCenter() {
   const { dsp, setDSP, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices } = useStore();
   const [devOpen, setDevOpen] = useState(false);
+
+  const fileRate = playback.file_rate || 44100;
+  const fileCh = playback.file_ch || 2;
+  const fileFormat = playback.file_format || 'PCM';
+
+  const dspActive = dsp.enabled || dsp.eq_enabled || dsp.crossfeed_enabled || dsp.spatial_enabled || dsp.night_mode_enabled || dsp.subsonic_enabled;
+
+  const isAsio = currentDevice?.startsWith('[ASIO]');
+  const isWasapiExclusive = playback.exclusive;
+  
+  const outputMode = isAsio ? 'ASIO Bit-Perfect' : isWasapiExclusive ? 'WASAPI Exclusive' : 'Shared Mixer';
+  const outputRate = playback.dev_rate || fileRate;
+
+  const formatHz = (hz: number) => {
+    if (hz >= 1000) {
+      return `${(hz / 1000).toFixed(1)} kHz`;
+    }
+    return `${hz} Hz`;
+  };
 
   useEffect(() => {
     if (showControlCenter && devices.length === 0) {
@@ -19,7 +38,7 @@ export function AudioControlCenter() {
   return (
     <div className="modal-overlay" onClick={toggleControlCenter} style={{ backdropFilter: 'blur(16px)', background: 'rgba(0,0,0,0.6)' }}>
       <motion.div className="modal-box" onClick={e => e.stopPropagation()}
-        style={{ width: 800, maxWidth: '90vw', height: 600, maxHeight: '90vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        style={{ width: 1100, maxWidth: '95vw', height: 620, maxHeight: '95vh', padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
         initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}>
 
         {/* Header */}
@@ -40,9 +59,9 @@ export function AudioControlCenter() {
         </div>
 
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {/* Left Column: DSP / Soundstage */}
-          <div style={{ flex: 2, padding: 32, borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 48 }}>
+          {/* Column 1: DSP / Soundstage */}
+          <div style={{ flex: 1.2, padding: 32, borderRight: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Activity size={18} /> Soundstage Engine
               </h3>
@@ -54,13 +73,13 @@ export function AudioControlCenter() {
               </div>
             </div>
 
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 32 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center', width: '100%', flex: 1, justifyContent: 'center' }}>
               <div style={{ width: '100%', maxWidth: 500 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: dsp.width < 1.0 ? 'var(--accent)' : 'var(--text-dim)', transition: 'color 0.2s' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: dsp.width < 1.0 ? 'var(--accent)' : 'var(--text-dim)', transition: 'color 0.2s' }}>
                     HEADPHONE CROSSFEED
                   </span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: dsp.width > 1.0 ? 'var(--accent)' : 'var(--text-dim)', transition: 'color 0.2s' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: dsp.width > 1.0 ? 'var(--accent)' : 'var(--text-dim)', transition: 'color 0.2s' }}>
                     SPATIAL WIDENER
                   </span>
                 </div>
@@ -69,17 +88,17 @@ export function AudioControlCenter() {
                   style={{ width: '100%', height: 6, accentColor: 'var(--accent)', cursor: 'pointer' }}
                   onChange={e => setDSP({ width: +e.target.value })} />
 
-                <div style={{ marginTop: 24, textAlign: 'center' }}>
-                  <div style={{ fontSize: 48, fontWeight: 800, color: 'var(--accent)', fontFamily: 'monospace' }}>
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                  <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--accent)', fontFamily: 'monospace' }}>
                     {Math.round(dsp.width * 100)}%
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, textTransform: 'uppercase', letterSpacing: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, textTransform: 'uppercase', letterSpacing: 2 }}>
                     {dsp.width === 1.0 ? 'Natural Stereo' : dsp.width < 1.0 ? 'Focused Center' : 'Immersive Width'}
                   </div>
                 </div>
               </div>
 
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: 24, borderRadius: 16, maxWidth: 400, fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px 16px', borderRadius: 8, width: '100%', maxWidth: 500, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
                 <p style={{ margin: 0 }}>
                   {dsp.width < 1.0
                     ? "Crossfeed blends stereo channels to reduce ear fatigue when using headphones, simulating the natural sound of speakers."
@@ -91,8 +110,8 @@ export function AudioControlCenter() {
             </div>
           </div>
 
-          {/* Right Column: Hardware & Output */}
-          <div style={{ flex: 1, padding: 32, background: 'rgba(255,255,255,0.02)', overflowY: 'auto' }}>
+          {/* Column 2: Hardware & Output */}
+          <div style={{ flex: 1.2, padding: 32, borderRight: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.01)', overflowY: 'auto' }}>
             <h3 style={{ margin: 0, marginBottom: 24, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Settings2 size={18} /> Output Hardware
             </h3>
@@ -223,7 +242,115 @@ export function AudioControlCenter() {
                 </div>
               </div>
             </div>
+          </div>
 
+          {/* Column 3: Detailed Vertical Signal Path */}
+          <div style={{ flex: 1.5, padding: 32, background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+            <h3 style={{ margin: 0, marginBottom: 24, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AudioLines size={18} color="var(--accent)" /> Detailed Signal Path
+            </h3>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'relative', flex: 1 }}>
+              {/* Node 1: Source */}
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)' }}>
+                <div style={{ padding: 8, borderRadius: 6, background: 'rgba(168, 85, 247, 0.1)', color: '#a855f7' }}>
+                  <AudioLines size={16} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>Source</div>
+                  <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2 }}>{fileFormat} Stream</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <span>{formatHz(fileRate)}</span>
+                    <span style={{ opacity: 0.3 }}>•</span>
+                    <span>{fileCh === 1 ? 'Mono' : fileCh === 2 ? 'Stereo' : `${fileCh} Channels`}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Connecting Line 1 */}
+              <div style={{ width: 2, height: 16, background: 'var(--accent)', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />
+
+              {/* Node 2: DSP */}
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderColor: dspActive ? 'var(--accent)' : '' }}>
+                <div style={{ padding: 8, borderRadius: 6, background: dspActive ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.02)', color: dspActive ? '#6366f1' : '#6b7280' }}>
+                  <Settings size={16} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>DSP Engine</div>
+                  <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2 }}>
+                    {dspActive ? 'Processing Active' : 'Bypassed (Lossless)'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {dsp.eq_enabled && (
+                      <span style={{ color: '#818cf8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Sparkles size={10} /> Graphic EQ enabled
+                      </span>
+                    )}
+                    {dsp.crossfeed_enabled && <span>• Linkwitz Headphone Crossfeed active</span>}
+                    {dsp.spatial_enabled && <span>• Haas Spatial Widener active</span>}
+                    {dsp.subsonic_enabled && <span>• Subsonic filter active</span>}
+                    {dsp.width !== 1.0 && <span>• Soundstage Width: {Math.round(dsp.width * 100)}%</span>}
+                    {!dspActive && <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No active DSP modifiers</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Connecting Line 2 */}
+              <div style={{ width: 2, height: 16, background: dsp.upsample_rate > 0 ? '#06b6d4' : 'var(--accent)', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />
+
+              {/* Node 3: Resampler */}
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderColor: dsp.upsample_rate > 0 ? '#06b6d4' : '' }}>
+                <div style={{ padding: 8, borderRadius: 6, background: dsp.upsample_rate > 0 ? 'rgba(6, 182, 212, 0.1)' : 'rgba(255,255,255,0.02)', color: dsp.upsample_rate > 0 ? '#06b6d4' : '#6b7280' }}>
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>Resampler</div>
+                  <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2 }}>
+                    {dsp.upsample_rate > 0 ? 'Rubato Sinc upsampling' : 'No Resampling'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+                    {dsp.upsample_rate > 0 ? (
+                      <span style={{ color: '#22d3ee', fontWeight: 'medium' }}>
+                        {formatHz(fileRate)} → {formatHz(dsp.upsample_rate)} ({dsp.resampler_interpolation || 'Sinc'} interpolation)
+                      </span>
+                    ) : (
+                      <span style={{ opacity: 0.5, fontStyle: 'italic' }}>Direct bitstream matching sample rate</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Connecting Line 3 */}
+              <div style={{ width: 2, height: 16, background: '#22c55e', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />
+
+              {/* Node 4: Output Driver */}
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                <div style={{ padding: 8, borderRadius: 6, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e' }}>
+                  <Volume2 size={16} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 9, color: '#22c55e', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>Output Driver</div>
+                  <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {currentDevice || 'Default Audio Device'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span style={{ color: '#4ade80', fontWeight: 'bold' }}>{outputMode}</span>
+                    <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span>Output Rate: {formatHz(outputRate)}</span>
+                      <span style={{ opacity: 0.3 }}>•</span>
+                      <span>{fileCh === 1 ? 'Mono' : fileCh === 2 ? 'Stereo' : `${fileCh} Channels`}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--glass-border)', display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)' }}>
+              <span>Aideo Pipeline v2</span>
+              <span style={{ color: playback.bit_perfect ? '#06b6d4' : '#a855f7', fontWeight: 'bold' }}>
+                {playback.bit_perfect ? 'PURPLE: BIT-PERFECT' : 'GREEN: HIGH QUALITY'}
+              </span>
+            </div>
           </div>
         </div>
       </motion.div>

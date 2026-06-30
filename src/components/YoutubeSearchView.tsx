@@ -4,15 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Search, Download, Loader2, Music, CheckCircle2, X } from 'lucide-react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
-
-interface YoutubeTrack {
-  id: string;
-  title: string;
-  artist: string;
-  cover_url: string | null;
-  duration_raw: string;
-  url: string;
-}
+import { YoutubeTrack } from '../store/types';
 
 export function YoutubeSearchView() {
   const [query, setQuery] = useState('');
