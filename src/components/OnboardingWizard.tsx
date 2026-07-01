@@ -454,7 +454,7 @@ export function OnboardingWizard() {
                     {depStatus?.ytdlp_installed ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
                   </div>
                   <div>
-                    <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>YouTube Audio Resolver</h3>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>Web Stream Resolver</h3>
                     <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
                       Handles direct lossless stream extraction. Size: {depStatus?.ytdlp_size ? `${(depStatus.ytdlp_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
                     </p>

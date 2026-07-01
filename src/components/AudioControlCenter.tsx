@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 
-import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles } from 'lucide-react';
+import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles, Wifi, Globe, Gauge, Database } from 'lucide-react';
 
 export function AudioControlCenter() {
-  const { dsp, setDSP, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices } = useStore();
+  const { dsp, setDSP, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry } = useStore();
   const [devOpen, setDevOpen] = useState(false);
 
   const fileRate = playback.file_rate || 44100;
@@ -240,6 +240,106 @@ export function AudioControlCenter() {
                     Reduces quantization distortion by adding 24-bit TPDF noise. Recommended for high-end DACs.
                   </div>
                 </div>
+              </div>
+
+              {/* Stream Telemetry & Connection Monitor */}
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1, marginTop: 16 }}>Stream Telemetry</div>
+                {networkTelemetry ? (
+                  <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    
+                    {/* Latency & Speed Row */}
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <div style={{ flex: 1, padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Globe size={14} style={{ color: networkTelemetry.latency_ms < 60 ? '#10b981' : networkTelemetry.latency_ms < 150 ? '#f59e0b' : '#ef4444' }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 8, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Latency</div>
+                          <div style={{ fontSize: 12, fontWeight: 'bold', color: networkTelemetry.latency_ms < 60 ? '#34d399' : networkTelemetry.latency_ms < 150 ? '#fbbf24' : '#f87171' }}>
+                            {networkTelemetry.latency_ms > 0 ? `${networkTelemetry.latency_ms} ms` : 'Testing...'}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ flex: 1, padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Gauge size={14} style={{ color: networkTelemetry.current_download_rate_bps > 0 ? 'var(--accent)' : '#6b7280' }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 8, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Speed</div>
+                          <div style={{ fontSize: 12, fontWeight: 'bold', color: 'white' }}>
+                            {(() => {
+                              const bps = networkTelemetry.current_download_rate_bps * 8; // Convert bytes to bits
+                              if (bps >= 1000000) return `${(bps / 1000000).toFixed(2)} Mbps`;
+                              if (bps >= 1000) return `${(bps / 1000).toFixed(1)} Kbps`;
+                              return `${bps} bps`;
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Buffer Progress */}
+                    {networkTelemetry.active_stream_total_bytes > 0 && (
+                      <div style={{ padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>
+                          <span>Stream Buffer</span>
+                          <span>
+                            {(() => {
+                              const pct = (networkTelemetry.active_stream_buffered_bytes / networkTelemetry.active_stream_total_bytes) * 100;
+                              return `${pct.toFixed(0)}%`;
+                            })()}
+                          </span>
+                        </div>
+                        <div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden', marginBottom: 6 }}>
+                          <div style={{ 
+                            height: '100%', 
+                            background: 'var(--accent)', 
+                            width: `${(networkTelemetry.active_stream_buffered_bytes / networkTelemetry.active_stream_total_bytes) * 100}%`,
+                            transition: 'width 0.5s ease-out'
+                          }} />
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-dim)', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>
+                            {(() => {
+                              const bytes = networkTelemetry.active_stream_buffered_bytes;
+                              if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+                              return `${(bytes / 1024).toFixed(0)} KB`;
+                            })()}
+                          </span>
+                          <span>
+                            {(() => {
+                              const bytes = networkTelemetry.active_stream_total_bytes;
+                              if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+                              return `${(bytes / 1024).toFixed(0)} KB`;
+                            })()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Data Usage Section */}
+                    <div style={{ padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Database size={14} style={{ color: 'var(--text-dim)' }} />
+                        <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-dim)' }}>Session Data Used</span>
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 'bold', color: 'white' }}>
+                        {(() => {
+                          const bytes = networkTelemetry.session_downloaded_bytes;
+                          if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(2)} GB`;
+                          if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+                          return `${(bytes / 1024).toFixed(0)} KB`;
+                        })()}
+                      </span>
+                    </div>
+
+                  </div>
+                ) : (
+                  <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Wifi size={16} style={{ color: '#10b981', opacity: 0.8 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Local Audio Active</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>Offline source (0ms network latency).</div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

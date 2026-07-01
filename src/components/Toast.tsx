@@ -47,7 +47,7 @@ function formatToastMessage(
     context = "Last.fm Scrobbler (lastfm.rs)";
     cleanMsg = "Last.fm scrobbling connection error.";
   } else if (msgLower.includes("update") || msgLower.includes("download")) {
-    context = "Downloader/Updater (updater.rs / youtube.rs)";
+    context = "Downloader/Updater (updater.rs / downloader.rs)";
     cleanMsg = "Operation failed during download or update check.";
   }
 

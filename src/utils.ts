@@ -79,8 +79,8 @@ export function parseStreamMetadata(url: string | null) {
     const isYoutube = u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be') || u.hostname.includes('googlevideo.com');
     if (isYoutube) {
       return {
-        title: 'YouTube Audio',
-        artist: 'YouTube Music',
+        title: 'Web Audio Stream',
+        artist: 'Web Stream',
         album: ''
       };
     }

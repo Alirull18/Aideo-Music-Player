@@ -377,6 +377,7 @@ export function AideoView() {
     setView, 
     playStream,
     playback,
+    currentTrack,
     pauseTrack,
     resumeTrack,
     generateSmartMix,
@@ -640,7 +641,7 @@ export function AideoView() {
       let offlineSeedArtists: string[] = [];
       const artistPlayCounts: Record<string, number> = {};
       currentTracks.forEach(track => {
-        if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio') {
+        if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio' && track.artist !== 'Web Audio Stream') {
           const count = currentPlayCounts[track.path] || 0;
           if (count > 0) {
             artistPlayCounts[track.artist] = (artistPlayCounts[track.artist] || 0) + count;
@@ -656,7 +657,7 @@ export function AideoView() {
       if (offlineSeedArtists.length === 0) {
         const artistFrequencies: Record<string, number> = {};
         currentTracks.forEach(track => {
-          if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio') {
+          if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio' && track.artist !== 'Web Audio Stream') {
             artistFrequencies[track.artist] = (artistFrequencies[track.artist] || 0) + 1;
           }
         });
@@ -668,7 +669,7 @@ export function AideoView() {
       }
 
       // Find top played artists for re-ranking
-      const topArtists = Object.entries(artistPlayCounts)
+      let topArtists = Object.entries(artistPlayCounts)
         .sort((a, b) => b[1] - a[1])
         .map(entry => entry[0])
         .slice(0, 5);
@@ -677,11 +678,17 @@ export function AideoView() {
         topArtists.push(...offlineSeedArtists);
       }
 
+      // Inject the currently playing artist as the number 1 seed and top artist
+      if (currentTrack && currentTrack.artist && currentTrack.artist !== 'Unknown Artist' && currentTrack.artist !== 'YouTube Audio' && currentTrack.artist !== 'Web Audio Stream' && currentTrack.artist !== 'Web Stream' && currentTrack.artist !== 'Online Stream') {
+        offlineSeedArtists = [currentTrack.artist, ...offlineSeedArtists.filter(a => a !== currentTrack.artist)].slice(0, 5);
+        topArtists = [currentTrack.artist, ...topArtists.filter(a => a !== currentTrack.artist)].slice(0, 5);
+      }
+
       // Find library artists for re-ranking
       const libraryArtists = Array.from(new Set(
         currentTracks
           .map(t => t.artist)
-          .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio')
+          .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio' && a !== 'Web Audio Stream' && a !== 'Web Stream')
       ));
 
       // Gather Last.fm Top Artists names
@@ -733,21 +740,17 @@ export function AideoView() {
     }
   };
 
-  // Load recommendations when library is loaded
+  // Load/refresh recommendations when library is loaded
   useEffect(() => {
-    if (!discoveryData) {
-      if (tracks.length > 0) {
+    if (tracks.length > 0) {
+      fetchRecommendations();
+    } else {
+      const timer = setTimeout(() => {
         fetchRecommendations();
-      } else {
-        const timer = setTimeout(() => {
-          if (!discoveryData) {
-            fetchRecommendations();
-          }
-        }, 1000);
-        return () => clearTimeout(timer);
-      }
+      }, 1000);
+      return () => clearTimeout(timer);
     }
-  }, [tracks.length, discoveryData]);
+  }, [tracks.length]);
 
   const handleDownloadTrack = async (track: any) => {
     if (downloadingIds.has(track.id) || downloadedIds.has(track.id)) return;
@@ -782,7 +785,7 @@ export function AideoView() {
     } catch (err) {
       console.error("Download error", err);
       window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `YouTube download failed: ${err}`, type: 'error' } 
+        detail: { message: `Web stream download failed: ${err}`, type: 'error' } 
       }));
     } finally {
       setDownloadingIds(prev => {
@@ -1764,7 +1767,7 @@ export function AideoView() {
           {isSearching ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 320, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20 }}>
               <Loader2 className="spin" size={36} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-              <span style={{ fontSize: 14, fontWeight: 500 }}>Searching YouTube Music...</span>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>Searching Web Stream...</span>
             </div>
           ) : artistProfile ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -2344,11 +2347,11 @@ export function AideoView() {
             )}
           </section>
 
-          {/* Section: AI Smart Mix Builder */}
+          {/* Section: Smart Mix Builder */}
           {showSmartMixWidget && (
           <section className="aideo-section" style={{ marginBottom: 32 }}>
-            <h2 className="aideo-sec-title">AI Smart Mix Builder</h2>
-            <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline mixes custom-tailored to scrobble trends, listening history metrics, and mood parameters.</p>
+            <h2 className="aideo-sec-title">Smart Mix Builder</h2>
+            <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline playlists custom-tailored to your listening trends, habits, and mood.</p>
             
             <div style={{
               background: 'var(--glass)',
@@ -2452,11 +2455,11 @@ export function AideoView() {
                 >
                   {generatingMix ? (
                     <>
-                      <Loader2 className="spin" size={16} /> Compiling AI Patterns...
+                      <Loader2 className="spin" size={16} /> Analyzing Patterns...
                     </>
                   ) : (
                     <>
-                      <Sparkles size={16} /> Generate & Play AI Mix
+                      <Sparkles size={16} /> Generate & Play Smart Mix
                     </>
                   )}
                 </button>

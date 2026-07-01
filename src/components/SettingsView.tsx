@@ -510,10 +510,10 @@ export function SettingsView() {
               </div>
             </div>
 
-            {/* AI Smart Mix Builder Visibility Switch */}
+            {/* Smart Mix Builder Visibility Switch */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>AI Smart Mix Builder</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Smart Mix Builder</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show or hide the smart playlist builder card in the Aideo tab.</div>
               </div>
               <div style={{ marginTop: 8 }}>
@@ -2061,10 +2061,10 @@ export function SettingsView() {
               <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
                 Aideo stores four types of caches locally:
                 <ul style={{ margin: '8px 0 0 16px', padding: 0, listStyleType: 'disc', color: 'var(--text-dim)', fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <li><strong>Cloud Audio Stream Cache:</strong> Local copies of streamed Subsonic, Jellyfin, YouTube, and Tidal tracks saved for offline access.</li>
-                  <li><strong>yt-dlp temporary cache:</strong> Temporary files created during background URL extractions.</li>
+                  <li><strong>Cloud Audio Stream Cache:</strong> Local copies of streamed Subsonic, Jellyfin, Web Stream, and Tidal tracks saved for offline access.</li>
+                  <li><strong>Web stream decoder temporary cache:</strong> Temporary files created during background URL extractions.</li>
                   <li><strong>Temporary Decrypted Audio:</strong> Piped stream buffers in the system temp directory.</li>
-                  <li><strong>In-Memory URL Resolves:</strong> Cached YouTube streaming URLs to avoid rate limits.</li>
+                  <li><strong>In-Memory URL Resolves:</strong> Cached Web Stream URLs to avoid rate limits.</li>
                 </ul>
               </div>
 
@@ -2470,8 +2470,8 @@ function DependencyManagerPanel() {
   const deps = [
     {
       id: 'ytdlp',
-      name: 'Web Stream Decoder (yt-dlp)',
-      desc: 'Enables streaming, parsing, and searching community web stream catalogues.',
+      name: 'Web Stream Decoder',
+      desc: 'Enables playing, parsing, and downloading high-fidelity web audio streams.',
       installed: status?.ytdlp_installed,
       size: status?.ytdlp_size
     },

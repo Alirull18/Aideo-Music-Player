@@ -37,6 +37,31 @@ struct DecoderInfo {
     pub resolved_path: String,
 }
 
+pub static SESSION_DOWNLOADED_BYTES: AtomicU64 = AtomicU64::new(0);
+pub static CURRENT_DOWNLOAD_SPEED_BPS: AtomicU32 = AtomicU32::new(0);
+pub static STREAM_LATENCY_MS: AtomicU32 = AtomicU32::new(0);
+pub static ACTIVE_STREAM_BUFFERED_BYTES: AtomicU64 = AtomicU64::new(0);
+pub static ACTIVE_STREAM_TOTAL_BYTES: AtomicU64 = AtomicU64::new(0);
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct NetworkTelemetry {
+    pub session_downloaded_bytes: u64,
+    pub current_download_rate_bps: u32,
+    pub latency_ms: u32,
+    pub active_stream_buffered_bytes: u64,
+    pub active_stream_total_bytes: u64,
+}
+
+pub fn get_network_telemetry() -> NetworkTelemetry {
+    NetworkTelemetry {
+        session_downloaded_bytes: SESSION_DOWNLOADED_BYTES.load(Ordering::Relaxed),
+        current_download_rate_bps: CURRENT_DOWNLOAD_SPEED_BPS.load(Ordering::Relaxed),
+        latency_ms: STREAM_LATENCY_MS.load(Ordering::Relaxed),
+        active_stream_buffered_bytes: ACTIVE_STREAM_BUFFERED_BYTES.load(Ordering::Relaxed),
+        active_stream_total_bytes: ACTIVE_STREAM_TOTAL_BYTES.load(Ordering::Relaxed),
+    }
+}
+
 /// 🎚️ Hardware Rate Switching & Config Selection
 fn select_output_config(
     device: &cpal::Device,
@@ -225,8 +250,8 @@ fn pipe_url_to_stdin(
         while retry_count < max_retries {
             let client = reqwest::blocking::Client::builder()
                 .danger_accept_invalid_certs(true)
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .timeout(std::time::Duration::from_secs(45))
+                .connect_timeout(std::time::Duration::from_secs(15))
+                .timeout(std::time::Duration::from_secs(120))
                 .build()
                 .unwrap_or_else(|_| reqwest::blocking::Client::new());
 
@@ -245,6 +270,12 @@ fn pipe_url_to_stdin(
                     let status = response.status();
                     if status.is_success() {
                         retry_count = 0; // Reset retry counter on successful connection
+
+                        if let Some(len) = response.content_length() {
+                            ACTIVE_STREAM_TOTAL_BYTES.store(len + bytes_written, Ordering::Relaxed);
+                        } else {
+                            ACTIVE_STREAM_TOTAL_BYTES.store(0, Ordering::Relaxed);
+                        }
 
                         if bytes_written > 0 && status == reqwest::StatusCode::OK {
                             println!("[player-pipe] Server ignored Range header. Skipping first {} bytes...", bytes_written);
@@ -286,6 +317,8 @@ fn pipe_url_to_stdin(
                                         return;
                                     }
                                     bytes_written += n as u64;
+                                    SESSION_DOWNLOADED_BYTES.fetch_add(n as u64, Ordering::Relaxed);
+                                    ACTIVE_STREAM_BUFFERED_BYTES.store(bytes_written, Ordering::Relaxed);
                                 }
                                 Err(e) => {
                                     eprintln!("[player-pipe] Read error after {} bytes: {:?}. Attempting resume...", bytes_written, e);
@@ -319,11 +352,14 @@ fn pipe_url_to_stdin(
 }
 
 fn spawn_youtube_downloader(
-    url: String,
+    original_url: String,
+    resolved_url: String,
     hash: String,
     temp_path: std::path::PathBuf,
     cache_path: std::path::PathBuf,
     ffmpeg_path: String,
+    ytdlp_path: String,
+    app_handle: tauri::AppHandle,
 ) -> Arc<AtomicBool> {
     let complete = Arc::new(AtomicBool::new(false));
     let complete_clone = complete.clone();
@@ -339,191 +375,264 @@ fn spawn_youtube_downloader(
     }
     
     let hash_clone = hash.clone();
+    let app_handle_clone = app_handle.clone();
     std::thread::spawn(move || {
         let _guard = DownloadGuard {
             hash: hash_clone.clone(),
             complete: complete_clone,
         };
         
-        println!("[player-bg] Starting YouTube background transcode: {} -> {:?}", url, temp_path);
+        let is_youtube_stream = original_url.contains("youtube.com") || original_url.contains("googlevideo.com") || original_url.contains("youtu.be");
+        let is_hls = original_url.contains("hls_playlist") || original_url.contains(".m3u8");
         
-        let mut cmd = std::process::Command::new(&ffmpeg_path);
-        
-        let is_youtube_stream = url.contains("youtube.com") || url.contains("googlevideo.com") || url.contains("youtu.be");
-        let is_hls = url.contains("hls_playlist") || url.contains(".m3u8");
+        let mut use_ytdlp = is_youtube_stream && !is_hls && std::path::Path::new(&ytdlp_path).exists();
+        let mut transcode_success;
 
-        let mut args = Vec::new();
-        args.extend([
-            "-loglevel".to_string(), "warning".to_string(),
-            "-probesize".to_string(), "32768".to_string(),
-            "-analyzeduration".to_string(), "100000".to_string(),
-        ]);
+        for attempt in 0..2 {
+            println!("[player-bg] YouTube background transcode attempt {} (use_ytdlp={}): {} -> {:?}", attempt, use_ytdlp, original_url, temp_path);
 
-        if is_hls {
-            let ua = if is_youtube_stream {
-                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
+            let mut ytdlp_child = if use_ytdlp {
+                let mut ytdlp_cmd = std::process::Command::new(&ytdlp_path);
+                let cache_dir_str = temp_path.parent().unwrap().join("cache").to_string_lossy().to_string();
+                ytdlp_cmd.args([
+                    "-f", "251/140/bestaudio/best",
+                    "--user-agent", YT_USER_AGENT,
+                    "--cache-dir", &cache_dir_str,
+                    "--force-ipv4",
+                    "--no-check-formats",
+                    "--no-playlist",
+                    "--no-check-certificate",
+                    "--sleep-interval", "0",
+                    "--max-sleep-interval", "0",
+                    "--sleep-requests", "0",
+                    "--extractor-args", "youtube:player-client=mweb,android",
+                    "-o", "-",
+                    &original_url
+                ]);
+                
+                #[cfg(target_os = "windows")]
+                use std::os::windows::process::CommandExt;
+                #[cfg(target_os = "windows")]
+                ytdlp_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                
+                ytdlp_cmd
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .ok()
             } else {
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                None
             };
+            
+            let mut cmd = std::process::Command::new(&ffmpeg_path);
+            
+            let mut args = Vec::new();
             args.extend([
-                "-protocol_whitelist".to_string(), "file,http,https,tcp,tls,dns".to_string(),
-                "-user_agent".to_string(), ua.to_string(),
+                "-loglevel".to_string(), "warning".to_string(),
+                "-probesize".to_string(), "32768".to_string(),
+                "-analyzeduration".to_string(), "100000".to_string(),
             ]);
-            if is_youtube_stream {
+            
+            if is_hls {
+                let ua = if is_youtube_stream {
+                    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
+                } else {
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                };
                 args.extend([
-                    "-headers".to_string(), "Referer: https://www.google.com/\r\n".to_string(),
+                    "-protocol_whitelist".to_string(), "file,http,https,tcp,tls,dns".to_string(),
+                    "-user_agent".to_string(), ua.to_string(),
+                ]);
+                if is_youtube_stream {
+                    args.extend([
+                        "-headers".to_string(), "Referer: https://www.google.com/\r\n".to_string(),
+                    ]);
+                }
+                args.extend([
+                    "-i".to_string(), resolved_url.clone(),
+                ]);
+            } else {
+                args.extend([
+                    "-i".to_string(), "pipe:".to_string(),
                 ]);
             }
+            
             args.extend([
-                "-i".to_string(), url.clone(),
+                "-y".to_string(),
+                "-f".to_string(), "wav".to_string(),
+                "-acodec".to_string(), "pcm_s16le".to_string(),
+                "-ar".to_string(), "44100".to_string(),
+                "-ac".to_string(), "2".to_string(),
+                temp_path.to_string_lossy().to_string(),
             ]);
-        } else {
-            args.extend([
-                "-i".to_string(), "pipe:".to_string(),
-            ]);
-        }
-
-        args.extend([
-            "-y".to_string(),
-            "-f".to_string(), "wav".to_string(),
-            "-acodec".to_string(), "pcm_s16le".to_string(),
-            "-ar".to_string(), "44100".to_string(),
-            "-ac".to_string(), "2".to_string(),
-            temp_path.to_string_lossy().to_string(),
-        ]);
-        
-        cmd.args(&args);
-        
-        if is_hls {
-            cmd.stdin(std::process::Stdio::null());
-        } else {
-            cmd.stdin(std::process::Stdio::piped());
-        }
-        
-        cmd.stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        
-        #[cfg(target_os = "windows")]
-        use std::os::windows::process::CommandExt;
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[player-bg] FFmpeg background transcode failed to spawn: {:?}", e);
-                if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
-                    active_procs.remove(&hash_clone);
-                }
-                return;
+            
+            cmd.args(&args);
+            
+            if is_hls {
+                cmd.stdin(std::process::Stdio::null());
+            } else if let Some(ref mut ytdlp) = ytdlp_child {
+                let stdout_pipe = ytdlp.stdout.take().unwrap();
+                cmd.stdin(std::process::Stdio::from(stdout_pipe));
+            } else {
+                cmd.stdin(std::process::Stdio::piped());
             }
-        };
-
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-
-        if !is_hls {
-            if let Some(stdin) = child.stdin.take() {
-                pipe_url_to_stdin(url.clone(), stdin, is_youtube_stream);
-            }
-        }
-
-        // Put the child in the child_ref mutex
-        {
-            if let Ok(mut lock) = child_ref_clone.lock() {
-                *lock = Some(child);
-            }
-        }
-
-        // Spawn a thread to read and discard stdout to prevent pipe buffer blocking
-        if let Some(mut out) = stdout {
-            std::thread::spawn(move || {
-                use std::io::Read;
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = out.read(&mut buf) {
-                    if n == 0 { break; }
-                }
-            });
-        }
-
-        // Spawn a thread to read and print stderr to prevent pipe buffer blocking and aid in debugging
-        if let Some(err) = stderr {
-            std::thread::spawn(move || {
-                use std::io::{BufRead, BufReader};
-                let reader = BufReader::new(err);
-                for line in reader.lines().map_while(Result::ok) {
-                    eprintln!("[ffmpeg-bg-err] {}", line);
-                }
-            });
-        }
-
-        // Wait for transcoding completion using non-blocking try_wait loop
-        let mut transcode_success = false;
-        loop {
-            // Check if the process has been aborted (drained from ACTIVE_DOWNLOAD_PROCS)
-            let is_aborted = {
-                if let Ok(active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
-                    !active_procs.contains_key(&hash_clone)
-                } else {
-                    false
+            
+            cmd.stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            
+            #[cfg(target_os = "windows")]
+            use std::os::windows::process::CommandExt;
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            
+            let mut child = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[player-bg] FFmpeg background transcode failed to spawn on attempt {}: {:?}", attempt, e);
+                    if let Some(mut ytdlp) = ytdlp_child {
+                        let _ = ytdlp.kill();
+                    }
+                    if use_ytdlp {
+                        use_ytdlp = false;
+                        let _ = std::fs::remove_file(&temp_path);
+                        continue;
+                    }
+                    if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+                        active_procs.remove(&hash_clone);
+                    }
+                    return;
                 }
             };
-            if is_aborted {
-                break;
-            }
-
-            let mut lock = child_ref_clone.lock().unwrap();
-            if let Some(ref mut child_proc) = *lock {
-                match child_proc.try_wait() {
-                    Ok(None) => {
-                        // Still running. Drop lock and sleep.
-                    }
-                    Ok(Some(status)) => {
-                        transcode_success = status.success();
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("[player-bg] Error polling transcode process status: {:?}", e);
-                        break;
-                    }
-                }
-            } else {
-                // Child has been taken out by abort thread
-                break;
-            }
-            drop(lock);
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-
-        // Ensure we remove it from ACTIVE_DOWNLOAD_PROCS if it exited naturally
-        if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
-            active_procs.remove(&hash_clone);
-        }
-
-        if transcode_success {
-            println!("[player-bg] Transcode completed successfully for {}", hash_clone);
-            // Encrypt the temp file to cache path
-            if let Ok(bytes) = std::fs::read(&temp_path) {
-                let encrypted = crate::cloud::xor_cipher(&bytes);
-                if std::fs::write(&cache_path, encrypted).is_ok() {
-                    println!("[player-bg] Encrypted cache written successfully: {:?}", cache_path);
-                    // Clean up temp file
-                    let _ = std::fs::remove_file(&temp_path);
+            
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+            
+            if !is_hls && ytdlp_child.is_none() {
+                if let Some(stdin) = child.stdin.take() {
+                    pipe_url_to_stdin(resolved_url.clone(), stdin, is_youtube_stream);
                 }
             }
-        } else {
-            eprintln!("[player-bg] FFmpeg background transcode failed or was interrupted.");
-            // Kill and wait for child process to guarantee termination
+            
+            // Put the child in the child_ref mutex
             {
                 if let Ok(mut lock) = child_ref_clone.lock() {
-                    if let Some(mut child_proc) = lock.take() {
-                        let _ = child_proc.kill();
-                        let _ = child_proc.wait();
-                    }
+                    *lock = Some(child);
                 }
             }
-            // Clean up temp file
-            let _ = std::fs::remove_file(&temp_path);
+            
+            // Spawn a thread to read and discard stdout to prevent pipe buffer blocking
+            if let Some(mut out) = stdout {
+                std::thread::spawn(move || {
+                    use std::io::Read;
+                    let mut buf = [0u8; 4096];
+                    while let Ok(n) = out.read(&mut buf) {
+                        if n == 0 { break; }
+                    }
+                });
+            }
+            
+            // Spawn a thread to read and print stderr to prevent pipe buffer blocking and aid in debugging
+            if let Some(err) = stderr {
+                std::thread::spawn(move || {
+                    use std::io::{BufRead, BufReader};
+                    let reader = BufReader::new(err);
+                    for line in reader.lines().map_while(Result::ok) {
+                        eprintln!("[ffmpeg-bg-err] {}", line);
+                    }
+                });
+            }
+            
+            // Wait for transcoding completion using non-blocking try_wait loop
+            transcode_success = false;
+            loop {
+                // Check if the process has been aborted (drained from ACTIVE_DOWNLOAD_PROCS)
+                let is_aborted = {
+                    if let Ok(active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+                        !active_procs.contains_key(&hash_clone)
+                    } else {
+                        false
+                    }
+                };
+                if is_aborted {
+                    break;
+                }
+                
+                let mut lock = child_ref_clone.lock().unwrap();
+                if let Some(ref mut child_proc) = *lock {
+                    match child_proc.try_wait() {
+                        Ok(None) => {
+                            // Still running. Drop lock and sleep.
+                        }
+                        Ok(Some(status)) => {
+                            transcode_success = status.success();
+                            break;
+                        }
+                        Err(e) => {
+                            eprintln!("[player-bg] Error polling transcode process status: {:?}", e);
+                            break;
+                        }
+                    }
+                } else {
+                    // Child has been taken out by abort thread
+                    break;
+                }
+                drop(lock);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            
+            // Ensure we remove it from ACTIVE_DOWNLOAD_PROCS if it exited naturally
+            if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
+                active_procs.remove(&hash_clone);
+            }
+            
+            // Clean up both processes
+            let mut ytdlp_to_kill = ytdlp_child;
+            if let Some(mut ytdlp) = ytdlp_to_kill.take() {
+                let _ = ytdlp.kill();
+                let _ = ytdlp.wait();
+            }
+            
+            if transcode_success {
+                println!("[player-bg] Transcode completed successfully for {}", hash_clone);
+                // Encrypt the temp file to cache path
+                if let Ok(bytes) = std::fs::read(&temp_path) {
+                    let encrypted = crate::cloud::xor_cipher(&bytes);
+                    if std::fs::write(&cache_path, encrypted).is_ok() {
+                        println!("[player-bg] Encrypted cache written successfully: {:?}", cache_path);
+                        // Clean up temp file
+                        let _ = std::fs::remove_file(&temp_path);
+                    }
+                }
+                break; // Break the attempt loop on success!
+            } else {
+                let bytes_written = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
+                if use_ytdlp && bytes_written < 256 * 1024 {
+                    println!("[player-bg] yt-dlp background transcode failed early (written {} bytes). Retrying with direct reqwest stream...", bytes_written);
+                    
+                    let _ = app_handle_clone.emit("ui-toast", serde_json::json!({
+                        "message": "⚠ YouTube fast-buffering failed; falling back to standard stream.",
+                        "type": "warning"
+                    }));
+                    
+                    use_ytdlp = false;
+                    let _ = std::fs::remove_file(&temp_path);
+                    continue; // Retry with reqwest fallback
+                }
+                
+                eprintln!("[player-bg] FFmpeg background transcode failed or was interrupted.");
+                // Kill and wait for child process to guarantee termination
+                {
+                    if let Ok(mut lock) = child_ref_clone.lock() {
+                        if let Some(mut child_proc) = lock.take() {
+                            let _ = child_proc.kill();
+                            let _ = child_proc.wait();
+                        }
+                    }
+                }
+                // Clean up temp file
+                let _ = std::fs::remove_file(&temp_path);
+                break; // Break on complete failure
+            }
         }
     });
     
@@ -666,27 +775,73 @@ pub fn resolve_youtube_url(url: &str) -> String {
     url.to_string()
 }
 
-/// 🚀 Pre-resolve a YouTube watch URL in the background to eliminate initial play/transition latency.
-pub fn pre_resolve_youtube_url(url: String) {
+/// 🚀 Pre-resolve and pre-buffer a YouTube watch URL in the background to eliminate initial play/transition latency.
+pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
     if !url.contains("youtube.com") && !url.contains("youtu.be") {
         return;
     }
-    
-    std::thread::spawn(move || {
-        // If it's already in the cache, no need to resolve again!
-        {
-            let cache = safe_lock(&YOUTUBE_URL_CACHE);
-            if cache.contains_key(&url) {
+
+    let (cache_path, temp_path) = match get_cache_paths(&url) {
+        Some(paths) => paths,
+        None => return,
+    };
+
+    // If already fully cached, do nothing
+    if cache_path.exists() {
+        return;
+    }
+
+    let hash = format!("{:x}", md5::compute(url.as_bytes()));
+
+    // If already downloading, do nothing
+    {
+        if let Ok(active) = ACTIVE_DOWNLOADS.lock() {
+            if active.contains_key(&hash) {
                 return;
             }
         }
+    }
+    
+    std::thread::spawn(move || {
+        // Resolve the direct URL
+        let mut resolved_url = {
+            let cache = safe_lock(&YOUTUBE_URL_CACHE);
+            cache.get(&url).cloned()
+        };
         
-        println!("[player-bg] Pre-resolving direct stream URL in background for '{}'...", url);
-        let direct_url = resolve_youtube_url(&url);
-        if direct_url != url && direct_url.contains("googlevideo.com") {
-            println!("[player-bg] Background pre-resolve successful! Caching direct stream URL.");
-            let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-            cache.insert(url, direct_url);
+        if resolved_url.is_none() {
+            println!("[player-bg] Pre-resolving direct stream URL in background for '{}'...", url);
+            let direct = resolve_youtube_url(&url);
+            if direct != url && direct.contains("googlevideo.com") {
+                println!("[player-bg] Background pre-resolve successful! Caching direct stream URL.");
+                let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
+                cache.insert(url.clone(), direct.clone());
+                resolved_url = Some(direct);
+            }
+        }
+
+        if let Some(direct) = resolved_url {
+            let data_dir = match dirs::data_dir() {
+                Some(d) => d,
+                None => return,
+            };
+            let aideo_dir = data_dir.join("Aideo");
+            let ytdlp_path = aideo_dir.join("yt-dlp.exe");
+            let ffmpeg_path = aideo_dir.join("ffmpeg.exe");
+
+            if ytdlp_path.exists() && ffmpeg_path.exists() {
+                println!("[player-bg] Pre-buffering YouTube track in background for '{}'...", url);
+                spawn_youtube_downloader(
+                    url,
+                    direct,
+                    hash,
+                    temp_path,
+                    cache_path,
+                    ffmpeg_path.to_string_lossy().to_string(),
+                    ytdlp_path.to_string_lossy().to_string(),
+                    app_handle.clone(),
+                );
+            }
         }
     });
 }
@@ -827,11 +982,14 @@ fn prepare_decoder(
                     if let Some(direct) = resolved_url {
                         println!("[player] Spawning background transcoder for YouTube stream...");
                         spawn_youtube_downloader(
+                            path.to_string(),
                             direct,
                             hash.clone(),
                             temp_path.clone(),
                             cache_path.clone(),
                             ffmpeg_path.to_string(),
+                            ytdlp_path.to_string_lossy().to_string(),
+                            app_handle.clone(),
                         );
                     }
                 }
@@ -845,7 +1003,7 @@ fn prepare_decoder(
                     if file_size >= 256 * 1024 {
                         break;
                     }
-                    if start_time.elapsed().as_secs() > 12 {
+                    if start_time.elapsed().as_secs() > 20 {
                         return Err("Buffering timed out. Please check your internet connection and verify that the yt-dlp plugin is working.".to_string());
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1073,6 +1231,12 @@ fn prepare_decoder(
 
         let mut args = Vec::new();
         
+        // Insert -ss BEFORE -i for input-position seeking (avoids decoding entire stream from byte 0)
+        if use_ffmpeg_seek && start_pos > 0.0 {
+            args.push("-ss".to_string());
+            args.push(start_pos.to_string());
+        }
+
         if is_stream {
             args.extend([
                 "-loglevel".to_string(), "warning".to_string(),
@@ -1110,11 +1274,6 @@ fn prepare_decoder(
                 "-analyzeduration".to_string(), "100000".to_string(),
                 "-i".to_string(), resolved_url.clone(),
             ]);
-        }
-
-        if use_ffmpeg_seek && start_pos > 0.0 {
-            args.push("-ss".to_string());
-            args.push(start_pos.to_string());
         }
         
         if dsp_state.aideo_filter_enabled {
@@ -1834,7 +1993,7 @@ impl Player {
         let dev = Arc::clone(&target_device);
         let qt = Arc::clone(&queue);
         let app = app_handle.clone();
-        let ff = ffmpeg_path.clone();
+        // ffmpeg_path is now resolved dynamically at each play_file() call
 
         let dr = Arc::clone(&current_dev_rate);
         let ca = Arc::clone(&cache);
@@ -1860,6 +2019,46 @@ impl Player {
             }
         }
 
+        // Spawn network telemetry speed & latency monitor thread
+        let current_track_clone = Arc::clone(&current_track);
+        thread::Builder::new()
+            .name("network-monitor".into())
+            .spawn(move || {
+                let mut last_bytes = 0;
+                loop {
+                    thread::sleep(std::time::Duration::from_millis(1000));
+                    
+                    // 1. Calculate download speed
+                    let current_bytes = SESSION_DOWNLOADED_BYTES.load(Ordering::Relaxed);
+                    let delta = current_bytes.saturating_sub(last_bytes);
+                    CURRENT_DOWNLOAD_SPEED_BPS.store(delta as u32, Ordering::Relaxed);
+                    last_bytes = current_bytes;
+                    
+                    // 2. Measure ping latency if playing a stream
+                    let path_opt = {
+                        let track_lock = current_track_clone.lock().ok();
+                        track_lock.and_then(|t| t.clone())
+                    };
+                    
+                    if let Some(path) = path_opt {
+                        if path.starts_with("http://") || path.starts_with("https://") {
+                            if let Some(latency) = measure_latency(&path) {
+                                STREAM_LATENCY_MS.store(latency, Ordering::Relaxed);
+                            }
+                        } else {
+                            STREAM_LATENCY_MS.store(0, Ordering::Relaxed);
+                            ACTIVE_STREAM_BUFFERED_BYTES.store(0, Ordering::Relaxed);
+                            ACTIVE_STREAM_TOTAL_BYTES.store(0, Ordering::Relaxed);
+                        }
+                    } else {
+                        STREAM_LATENCY_MS.store(0, Ordering::Relaxed);
+                        ACTIVE_STREAM_BUFFERED_BYTES.store(0, Ordering::Relaxed);
+                        ACTIVE_STREAM_TOTAL_BYTES.store(0, Ordering::Relaxed);
+                    }
+                }
+            })
+            .expect("Failed to spawn network-monitor thread");
+
         let (fft_tx, fft_rx) = crossbeam_channel::bounded::<(Vec<f32>, f32)>(2);
         
         let analyzer_app = app_handle.clone();
@@ -1871,7 +2070,7 @@ impl Player {
         let cmd_tx_clone = cmd_tx.clone();
         thread::Builder::new()
             .name("player".into())
-            .spawn(move || player_loop(cmd_rx, cmd_tx_clone, s, c, p, v, exc, bp, dr, ca, dsp, dev, qt, cp, app, fft_tx, ff, ds, fr, fc, fmt))
+            .spawn(move || player_loop(cmd_rx, cmd_tx_clone, s, c, p, v, exc, bp, dr, ca, dsp, dev, qt, cp, app, fft_tx, ds, fr, fc, fmt))
             .expect("Failed to spawn player thread");
 
         Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache, decode_shutdown, file_rate, file_ch, file_format }
@@ -1895,7 +2094,6 @@ fn player_loop(
     current_process: Arc<Mutex<Option<std::process::Child>>>,
     app_handle: tauri::AppHandle,
     fft_tx: Sender<(Vec<f32>, f32)>,
-    ffmpeg_path: String,
     decode_shutdown: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     file_rate: Arc<AtomicU32>,
     file_ch: Arc<AtomicU8>,
@@ -1956,6 +2154,7 @@ fn player_loop(
                     position_secs.store(start_pos.to_bits(), Ordering::Relaxed);
                 }
 
+                let ffmpeg_path = find_ffmpeg_path();
                 next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queue), Arc::clone(&current_process), cmd_tx.clone(), &rx, &app_handle, &fft_tx, &ffmpeg_path, Arc::clone(&decode_shutdown), Arc::clone(&file_rate), Arc::clone(&file_ch), Arc::clone(&file_format));
 
                 if next_track.is_none() {
@@ -4113,13 +4312,39 @@ fn play_file(
                     chunk_planar
                 } else {
                     // Dynamic Clock Drift Correction (Milestone 5)
-                    let capacity = prod.capacity() as f64;
-                    let current_fill = prod.len() as f64;
-                    let fill_ratio = current_fill / capacity;
-                    let error = 0.5 - fill_ratio; // Positive if underfilled, negative if overfilled
-                    let adjustment = error * 0.002; // Max ±0.1% adjustment
-                    let rel_ratio = 1.0 + adjustment.clamp(-0.001, 0.001);
-                    let _ = resampler.set_resample_ratio_relative(rel_ratio, true);
+                    // In Exclusive Mode, there is only one hardware clock, so drift is impossible.
+                    // In Shared Mode, apply a 5% deadband to prevent constant micro-fluctuations from updating Rubato.
+                    let rel_ratio = if is_exclusive {
+                        1.0
+                    } else {
+                        let capacity = prod.capacity() as f64;
+                        let current_fill = prod.len() as f64;
+                        let fill_ratio = current_fill / capacity;
+                        let error = 0.5 - fill_ratio; // Positive if underfilled, negative if overfilled
+                        if error.abs() > 0.05 {
+                            let adjustment = error * 0.002; // Max ±0.1% adjustment
+                            1.0 + adjustment.clamp(-0.001, 0.001)
+                        } else {
+                            1.0
+                        }
+                    };
+
+                    // Thread-local cache to only call set_resample_ratio_relative when ratio changes significantly
+                    thread_local! {
+                        static LAST_RATIO: std::cell::Cell<f64> = std::cell::Cell::new(1.0);
+                    }
+                    let changed = LAST_RATIO.with(|last| {
+                        if (last.get() - rel_ratio).abs() > 0.0001 {
+                            last.set(rel_ratio);
+                            true
+                        } else {
+                            false
+                        }
+                    });
+
+                    if changed {
+                        let _ = resampler.set_resample_ratio_relative(rel_ratio, true);
+                    }
 
                     let refs: Vec<&[f32]> = chunk_planar.iter().map(|v| v.as_slice()).collect();
                     match resampler.process(&refs, None) {
@@ -4363,4 +4588,25 @@ fn decoded_frames(buf: &AudioBufferRef<'_>) -> usize {
         AudioBufferRef::F64(b) => b.frames(),
         _ => 0,
     }
+}
+
+fn measure_latency(url_str: &str) -> Option<u32> {
+    use std::net::ToSocketAddrs;
+    use std::time::Instant;
+    
+    let url = url::Url::parse(url_str).ok()?;
+    let host = url.host_str()?;
+    let port = url.port_or_known_default()?;
+    
+    let addr_str = format!("{}:{}", host, port);
+    let start = Instant::now();
+    
+    if let Ok(mut addrs) = addr_str.to_socket_addrs() {
+        if let Some(addr) = addrs.next() {
+            if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(1000)).is_ok() {
+                return Some(start.elapsed().as_millis() as u32);
+            }
+        }
+    }
+    None
 }

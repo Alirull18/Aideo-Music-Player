@@ -198,7 +198,8 @@ export function FullscreenView() {
       if (dsp.upsample_rate > 0) {
         return `TRANSCODED · ${dsp.upsample_rate / 1000}kHz`;
       }
-      return currentTrack.format.toUpperCase();
+      const upperFmt = currentTrack.format.toUpperCase();
+      return upperFmt === 'YOUTUBE DIRECT' ? 'WEB STREAM' : upperFmt;
     }
     return 'STANDARD AUDIO';
   }, [currentTrack, playback.bit_perfect, playback.dev_rate, currentDevice, dsp.upsample_rate]);

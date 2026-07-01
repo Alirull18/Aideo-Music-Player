@@ -135,15 +135,17 @@ where
 
             if test_client.is_supported(&format, &ShareMode::Exclusive).is_ok() {
                 let is_polling = timing_str == "polling";
-                let (def_period, _) = test_client.get_device_period().unwrap_or((100000, 30000));
+                let (def_period, min_period) = test_client.get_device_period().unwrap_or((100000, 30000));
+                // Enforce a stable period of at least 10ms (100,000 hns) to prevent starvation on low-latency DACs
+                let target_period = std::cmp::max(def_period, 100000).max(min_period);
+                
                 let mode = if is_polling {
-                    let target_period = def_period; 
                     StreamMode::PollingExclusive { 
                         buffer_duration_hns: target_period * 3, // Request 3 periods of buffer duration for safety margin
                         period_hns: target_period 
                     }
                 } else {
-                    StreamMode::EventsExclusive { period_hns: def_period }
+                    StreamMode::EventsExclusive { period_hns: target_period }
                 };
 
                 if test_client.initialize_client(&format, &Direction::Render, &mode).is_ok() {

@@ -309,7 +309,7 @@ const TrackRow = memo(({
                 : undefined
             }}
           >
-            {t.format.toUpperCase()}
+            {t.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'WEB STREAM' : t.format.toUpperCase()}
           </span>
         )}
       </td>

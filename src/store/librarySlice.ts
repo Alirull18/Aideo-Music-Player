@@ -153,8 +153,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         }
         if (item && typeof item === 'object') {
           if (item.title === 'Watch (youtube.com)') {
-            item.title = 'YouTube Audio';
-            item.artist = 'YouTube Music';
+            item.title = 'Web Audio Stream';
+            item.artist = 'Web Stream';
           }
         }
         return item;
@@ -381,10 +381,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         }
       }
 
-      // 🚀 Background Pre-resolve the very next track in the queue for seamless transition
+      // 🚀 Background Pre-resolve the very next track for seamless transition
       setTimeout(() => {
-        const nextTrack = get().queue[0];
-        if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://'))) {
+        const nextTrack = get().getNextTrackToPlay();
+        if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://') || nextTrack.format === 'YouTube Direct')) {
           if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
             invoke('pre_resolve_youtube_url', { url: nextTrack.path }).catch(() => {});
           }
@@ -520,10 +520,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         await fetchTrackMetadataAndLyrics(track, set, get, isOnline);
         get().triggerAutoplayRadio(track, false);
 
-        // 🚀 Background Pre-resolve the very next track in the queue for seamless transition
+        // 🚀 Background Pre-resolve the very next track for seamless transition
         setTimeout(() => {
-          const nextTrack = get().queue[0];
-          if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://'))) {
+          const nextTrack = get().getNextTrackToPlay();
+          if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://') || nextTrack.format === 'YouTube Direct')) {
             if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
               invoke('pre_resolve_youtube_url', { url: nextTrack.path }).catch(() => {});
             }
@@ -707,6 +707,39 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     await playTrack(activeTracks[nextIndex % activeTracks.length]);
   },
 
+  getNextTrackToPlay: () => {
+    const { tracks, currentTrackIndex, shuffle, repeat, queue, currentTrack } = get();
+
+    if (repeat === 'one' && currentTrack) {
+      return currentTrack;
+    }
+
+    if (queue.length > 0) {
+      return queue[0];
+    }
+
+    const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC' || currentTrack?.format === 'YouTube Direct';
+    const activeTracks = isCurrentOnline
+      ? tracks.filter(t => isStreamTrack(t.path, t.format))
+      : tracks.filter(t => !isStreamTrack(t.path, t.format));
+
+    if (activeTracks.length === 0) return null;
+
+    const currentActiveIdx = activeTracks.findIndex(t => pathsEqual(t.path, currentTrack?.path || ''));
+
+    if (shuffle) {
+      return null;
+    }
+
+    const nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) + 1;
+
+    if (repeat === 'none' && nextIndex >= activeTracks.length) {
+      return null;
+    }
+
+    return activeTracks[nextIndex % activeTracks.length];
+  },
+
   playPrev: async () => {
     const state = get();
     const { playHistory, tracks, currentTrackIndex, currentTrack } = state;
@@ -783,7 +816,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         
         const artistPlayCounts: Record<string, number> = {};
         tracksState.forEach(t => {
-          if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio') {
+          if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio' && t.artist !== 'Web Audio Stream') {
             const count = playCountsState[t.path] || 0;
             if (count > 0) {
               artistPlayCounts[t.artist] = (artistPlayCounts[t.artist] || 0) + count;
@@ -799,7 +832,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         if (topArtists.length === 0) {
           const artistFrequencies: Record<string, number> = {};
           tracksState.forEach(t => {
-            if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio') {
+            if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio' && t.artist !== 'Web Audio Stream') {
               artistFrequencies[t.artist] = (artistFrequencies[t.artist] || 0) + 1;
             }
           });
@@ -813,7 +846,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         const libraryArtists = Array.from(new Set(
           tracksState
             .map(t => t.artist)
-            .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio')
+            .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio' && a !== 'Web Audio Stream')
         ));
 
         const discoveryLevel = get().autoplayDiscoveryLevel;
@@ -1238,11 +1271,11 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       let searchArtist = track.artist || '';
       
       // Smart parsing for YouTube downloads
-      if (searchArtist === 'YouTube Audio' && searchTitle.includes(' - ')) {
+      if ((searchArtist === 'YouTube Audio' || searchArtist === 'Web Audio Stream') && searchTitle.includes(' - ')) {
         const parts = searchTitle.split(' - ');
         searchArtist = parts[0].trim();
         searchTitle = parts.slice(1).join(' - ').trim();
-      } else if (searchArtist === 'YouTube Audio') {
+      } else if (searchArtist === 'YouTube Audio' || searchArtist === 'Web Audio Stream') {
         searchArtist = '';
       }
       

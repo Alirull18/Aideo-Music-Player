@@ -109,6 +109,11 @@ export interface DSPState {
   aideo_filter_room_size: number;
   aideo_filter_bass_thump: number;
   aideo_filter_dampening: number;
+  auto_headroom: boolean;
+  saturation_enabled: boolean;
+  saturation_drive: number;
+  crossfade_transition_enabled: boolean;
+  crossfade_transition_duration: number;
 }
 
 
@@ -141,8 +146,17 @@ export interface CustomPromptState {
   onSubmit: (val: string) => void;
 }
 
+export interface NetworkTelemetry {
+  session_downloaded_bytes: number;
+  current_download_rate_bps: number;
+  latency_ms: number;
+  active_stream_buffered_bytes: number;
+  active_stream_total_bytes: number;
+}
+
 export interface PlayerState {
   view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams';
+  networkTelemetry: NetworkTelemetry | null;
   tracks: Track[];
   queue: Track[];
   currentTrackIndex: number;
@@ -243,6 +257,7 @@ export interface PlayerState {
   fetchQueue: () => Promise<void>;
   handleTrackTransition: (path: string) => Promise<void>;
   playNext: () => Promise<void>;
+  getNextTrackToPlay: () => Track | null;
   playPrev: () => Promise<void>;
   toggleShuffle: () => void;
   toggleRepeat: () => void;

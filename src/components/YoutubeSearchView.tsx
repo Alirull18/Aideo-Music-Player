@@ -46,7 +46,7 @@ export function YoutubeSearchView() {
       setResults(tracks);
     } catch (err) {
       console.error("Search error", err);
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `YouTube search failed: ${err}`, type: 'error' } }));
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Web stream search failed: ${err}`, type: 'error' } }));
     } finally {
       setIsSearching(false);
     }
@@ -145,8 +145,8 @@ export function YoutubeSearchView() {
               boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.2)'
             }}
           >
-            <option value="music" style={{ background: '#0c0c14' }}>YT Music (Official)</option>
-            <option value="video" style={{ background: '#0c0c14' }}>YT Video (Standard)</option>
+            <option value="music" style={{ background: '#0c0c14' }}>Web Stream (Music)</option>
+            <option value="video" style={{ background: '#0c0c14' }}>Web Stream (Video)</option>
           </select>
         </form>
       </div>

@@ -865,6 +865,11 @@ fn get_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(player.bit_perfect.load(Ordering::Relaxed))
 }
 
+#[tauri::command]
+fn get_network_telemetry() -> player::NetworkTelemetry {
+    player::get_network_telemetry()
+}
+
 // ── Playback commands ─────────────────────────────────────────────────────────
 #[tauri::command]
 fn update_media_metadata(
@@ -1156,8 +1161,8 @@ fn seek_track(secs: f64, state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn pre_resolve_youtube_url(url: String) {
-    player::pre_resolve_youtube_url(url);
+fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
+    player::pre_resolve_youtube_url(url, app_handle);
 }
 
 #[tauri::command]
@@ -1514,6 +1519,7 @@ pub fn run() {
             get_exclusive_mode,
             toggle_bit_perfect_mode,
             get_bit_perfect_mode,
+            get_network_telemetry,
             search_lyrics_online,
             get_netease_lrc,
             translate_lyric_line,

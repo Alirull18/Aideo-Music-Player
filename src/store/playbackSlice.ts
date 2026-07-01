@@ -21,6 +21,7 @@ const performDspInvoke = async (dsp: any) => {
 };
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
+  networkTelemetry: null,
   playback: {
     status: 'Stopped',
     current_track: (() => {
@@ -307,6 +308,17 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
 
       set(s => ({ playback: { ...s.playback, ...status } }));
+
+      if (status.current_track && (status.current_track.startsWith('http://') || status.current_track.startsWith('https://'))) {
+        try {
+          const telemetry: any = await invoke('get_network_telemetry');
+          set({ networkTelemetry: telemetry });
+        } catch (e) {
+          console.error('Failed to get network telemetry:', e);
+        }
+      } else if (get().networkTelemetry !== null) {
+        set({ networkTelemetry: null });
+      }
 
       if (!status.current_track && get().coverArt) {
         set({ coverArt: null, accentColor: '#8b5cf6', lyrics: [], lyricStatus: 'idle' });
@@ -873,7 +885,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
         // 3. Fallback: Construct a high-fidelity virtual Track object for online/streaming paths
         const isOnline = p.startsWith('http://') || p.startsWith('https://');
-        const meta = isOnline ? parseStreamMetadata(p) : { title: baseName(p), artist: 'YouTube Music' };
+        const meta = isOnline ? parseStreamMetadata(p) : { title: baseName(p), artist: 'Web Stream' };
         const virtualTrack: Track = {
           id: -1000 - idx, // ensure a unique negative ID to prevent conflicts with database IDs
           path: p,

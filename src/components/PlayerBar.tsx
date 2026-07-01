@@ -90,7 +90,7 @@ export function PlayerBar() {
                     : undefined
                 }}
               >
-                {current.format.toUpperCase()}
+                {current.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'WEB STREAM' : current.format.toUpperCase()}
               </span>
             )}
             {playback.current_track?.startsWith('http') && !duration && (

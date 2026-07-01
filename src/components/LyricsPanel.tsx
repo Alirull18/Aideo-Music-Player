@@ -387,7 +387,7 @@ export function LyricsPanel() {
               <div className="modal-header">
                 <div>
                   <h3 style={{ margin: 0 }}>Lyric Studio</h3>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Paste your LRC text or AI-generated lyrics below.</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Paste your LRC text or synchronized lyrics below.</div>
                 </div>
                 <button className="modal-close" onClick={() => setShowEditor(false)}>✕</button>
               </div>
