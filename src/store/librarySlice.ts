@@ -383,6 +383,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       // 🚀 Background Pre-resolve the very next track for seamless transition
       setTimeout(() => {
+        const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
+        if (!lookaheadEnabled) return;
         const nextTrack = get().getNextTrackToPlay();
         if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://') || nextTrack.format === 'YouTube Direct')) {
           if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
@@ -522,6 +524,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
         // 🚀 Background Pre-resolve the very next track for seamless transition
         setTimeout(() => {
+          const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
+          if (!lookaheadEnabled) return;
           const nextTrack = get().getNextTrackToPlay();
           if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://') || nextTrack.format === 'YouTube Direct')) {
             if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
@@ -966,10 +970,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       // 🚀 Background Pre-resolve: Fetch direct streaming URLs in the background
       // for the next 2 tracks in the queue to make playback transitions instantaneous!
-      for (const t of newQueue.slice(0, 2)) {
-        if (t.path.startsWith('http://') || t.path.startsWith('https://')) {
-          if (t.path.includes("youtube.com") || t.path.includes("youtu.be")) {
-            invoke('pre_resolve_youtube_url', { url: t.path }).catch(() => {});
+      const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
+      if (lookaheadEnabled) {
+        for (const t of newQueue.slice(0, 2)) {
+          if (t.path.startsWith('http://') || t.path.startsWith('https://')) {
+            if (t.path.includes("youtube.com") || t.path.includes("youtu.be")) {
+              invoke('pre_resolve_youtube_url', { url: t.path }).catch(() => {});
+            }
           }
         }
       }

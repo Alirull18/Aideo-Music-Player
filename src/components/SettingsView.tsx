@@ -1799,6 +1799,72 @@ export function SettingsView() {
       )
     },
     {
+      id: 'stream-engine-settings',
+      title: 'Web Stream Engine & Pre-Buffering',
+      description: 'Configure the default streaming engine and look-ahead gapless background caching.',
+      keywords: 'stream engine youtube direct web stream yt-dlp reqwest fallback pre-buffer cache look-ahead seamless gapless',
+      tab: 'system',
+      element: (
+        <div className="settings-ctrl-card">
+          <div className="settings-two-col-row">
+            {/* Stream Engine Selection */}
+            <div style={{ flex: 1, borderRight: '1px solid var(--glass-border)', paddingRight: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div>
+                  <div className="settings-ctrl-title">Default Streaming Engine</div>
+                  <div className="settings-ctrl-desc">
+                    Choose the download method for Web Streams. yt-dlp offers fast unthrottled downloading, while Direct HTTP is lightweight.
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', background: 'rgba(255, 255, 255, 0.02)', padding: 3, borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.04)', gap: 4 }}>
+                {[
+                  { id: 'yt-dlp', label: 'Web Downloader (yt-dlp)', desc: 'Fast, unthrottled downloads' },
+                  { id: 'reqwest', label: 'Direct HTTP (reqwest)', desc: 'Lightweight direct audio streaming' }
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setDSP({ stream_engine: opt.id as any })}
+                    title={opt.desc}
+                    style={{
+                      flex: 1,
+                      background: dsp.stream_engine === opt.id ? 'rgba(255, 255, 255, 0.07)' : 'transparent',
+                      border: 'none',
+                      color: dsp.stream_engine === opt.id ? 'white' : 'var(--text-dim)',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Gapless Pre-buffering */}
+            <div style={{ flex: 1, paddingLeft: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div className="settings-ctrl-title">Look-Ahead Gapless Pre-Buffering</div>
+                  <div className="settings-ctrl-desc">
+                    Seamlessly resolves and pre-downloads the next tracks in your queue while the current track is playing.
+                  </div>
+                </div>
+                <SlidingSwitch 
+                  checked={dsp.lookahead_prebuffer_enabled} 
+                  onChange={() => { setDSP({ lookahead_prebuffer_enabled: !dsp.lookahead_prebuffer_enabled }); }} 
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
       id: 'aideo-connect',
       title: 'Aideo Connect Remote Control',
       description: 'Control your playback from any phone, tablet, or web browser on your local network.',

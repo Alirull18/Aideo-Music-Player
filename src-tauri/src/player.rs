@@ -16,7 +16,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::units::TimeBase;
 use symphonia::default::{get_codecs, get_probe};
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[allow(dead_code)]
 pub enum ActiveStream {
@@ -382,10 +382,20 @@ fn spawn_youtube_downloader(
             complete: complete_clone,
         };
         
+        let stream_engine = {
+            if let Some(state) = app_handle.try_state::<crate::AppState>() {
+                let player = safe_lock(&state.player);
+                let d = safe_lock(&player.dsp_state);
+                d.stream_engine.clone()
+            } else {
+                "yt-dlp".to_string()
+            }
+        };
+
         let is_youtube_stream = original_url.contains("youtube.com") || original_url.contains("googlevideo.com") || original_url.contains("youtu.be");
         let is_hls = original_url.contains("hls_playlist") || original_url.contains(".m3u8");
         
-        let mut use_ytdlp = is_youtube_stream && !is_hls && std::path::Path::new(&ytdlp_path).exists();
+        let mut use_ytdlp = is_youtube_stream && !is_hls && std::path::Path::new(&ytdlp_path).exists() && stream_engine == "yt-dlp";
         let mut transcode_success;
 
         for attempt in 0..2 {
@@ -1570,6 +1580,13 @@ pub struct DSPState {
     pub aideo_filter_room_size: f32,
     pub aideo_filter_bass_thump: f32,
     pub aideo_filter_dampening: f32,
+    pub auto_headroom: bool,
+    pub saturation_enabled: bool,
+    pub saturation_drive: f32,
+    pub crossfade_transition_enabled: bool,
+    pub crossfade_transition_duration: f32,
+    pub stream_engine: String,
+    pub lookahead_prebuffer_enabled: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1969,6 +1986,13 @@ impl Player {
             aideo_filter_room_size: 0.85,
             aideo_filter_bass_thump: 6.0,
             aideo_filter_dampening: 0.5,
+            auto_headroom: false,
+            saturation_enabled: false,
+            saturation_drive: 0.0,
+            crossfade_transition_enabled: false,
+            crossfade_transition_duration: 5.0,
+            stream_engine: "yt-dlp".to_string(),
+            lookahead_prebuffer_enabled: true,
         }));
         let target_device = Arc::new(Mutex::new(None::<String>));
         let queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -2397,7 +2421,61 @@ impl AudioNode for PreampNode {
     }
     fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
         self.enabled = dsp.enabled;
-        self.gain_linear = 10.0f32.powf(dsp.preamp_gain / 20.0);
+        let mut gain_db = dsp.preamp_gain;
+        if dsp.auto_headroom && dsp.eq_enabled {
+            let mut max_boost = 0.0f32;
+            if dsp.eq_parametric {
+                for band in &dsp.eq_parametric_bands {
+                    if band.gain > 0.0 {
+                        max_boost = max_boost.max(band.gain);
+                    }
+                }
+            } else {
+                for &g in &dsp.eq_graphic_gains {
+                    if g > 0.0 {
+                        max_boost = max_boost.max(g);
+                    }
+                }
+            }
+            gain_db -= max_boost;
+        }
+        self.gain_linear = 10.0f32.powf(gain_db / 20.0);
+    }
+}
+
+pub struct SaturationNode {
+    enabled: bool,
+    drive: f32,
+}
+
+impl SaturationNode {
+    pub fn new() -> Self {
+        Self { enabled: false, drive: 0.0 }
+    }
+}
+
+impl AudioNode for SaturationNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || self.drive <= 0.01 || samples.is_empty() {
+            return;
+        }
+        let drive = self.drive;
+        let bias = 0.05 * drive;
+        let drive_factor = 1.0 + drive * 2.0;
+        let bias_out = (bias * drive_factor) / (1.0 + (bias * drive_factor).abs());
+
+        for ch in 0..samples.len() {
+            for sample in samples[ch].iter_mut() {
+                let x = *sample + bias;
+                let x_driven = x * drive_factor;
+                let saturated = x_driven / (1.0 + x_driven.abs());
+                *sample = saturated - bias_out;
+            }
+        }
+    }
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.saturation_enabled;
+        self.drive = dsp.saturation_drive;
     }
 }
 
@@ -4064,6 +4142,7 @@ fn play_file(
     // Create persistent DSP filter and delay line instances
     let mut nodes: Vec<Box<dyn AudioNode>> = vec![
         Box::new(PreampNode::new()),
+        Box::new(SaturationNode::new()),
         Box::new(PhaseResponseNode::new()),
         Box::new(EqNode::new()),
         Box::new(SubsonicNode::new()),
@@ -4136,6 +4215,15 @@ fn play_file(
 
     // RAM BUFFER CURSOR
     let mut ram_cursor = (start_pos * file_rate as f64) as usize;
+
+    // Crossfade State Variables
+    let mut next_track_path: Option<String> = None;
+    let mut next_decoder_rx: Option<std::sync::mpsc::Receiver<Result<DecoderInfo, String>>> = None;
+    let mut next_decoder_info: Option<DecoderInfo> = None;
+    let mut next_resampler: Option<SincFixedIn<f32>> = None;
+    let mut next_pending: Vec<VecDeque<f32>> = Vec::new();
+    let mut crossfade_frame_counter = 0usize;
+    let mut crossfade_triggered = false;
 
     while running {
         loop {
@@ -4214,6 +4302,98 @@ fn play_file(
             break;
         }
 
+        // Calculate true position
+        let p_len = pending[0].len() as f64;
+        let mut r_len = prod.len() as f64 / (dev_ch as f64);
+        if flush_signal.load(Ordering::Relaxed) {
+            r_len = 0.0;
+        }
+        let delay_secs = (p_len / file_rate as f64) + (r_len / dev_rate as f64);
+        let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
+        let true_pos = true_pos.max(0.0);
+
+        if dsp_now.crossfade_transition_enabled && duration_secs > dsp_now.crossfade_transition_duration as f64 {
+            let crossfade_trigger_pos = duration_secs - dsp_now.crossfade_transition_duration as f64;
+            if true_pos >= crossfade_trigger_pos && !crossfade_triggered {
+                crossfade_triggered = true;
+                let next_path_opt = {
+                    let mut q = safe_lock(&queue);
+                    q.pop_front()
+                };
+                if let Some(next_path) = next_path_opt {
+                    println!("[player-crossfade] Triggering crossfade to next track: {}", next_path);
+                    let app_h = app_handle.clone();
+                    let ffmpeg_p = ffmpeg_path.to_string();
+                    let process_c = Arc::clone(&current_process);
+                    let quality = last_ffmpeg_quality.clone();
+                    let dsp_c = dsp_now.clone();
+                    let next_path_c = next_path.clone();
+
+                    let (tx, rx_next_decoder) = std::sync::mpsc::channel();
+                    std::thread::spawn(move || {
+                        let res = prepare_decoder(
+                            &next_path_c,
+                            0.0,
+                            &app_h,
+                            &ffmpeg_p,
+                            &process_c,
+                            &quality,
+                            &dsp_c,
+                        );
+                        let _ = tx.send(res);
+                    });
+                    next_decoder_rx = Some(rx_next_decoder);
+                    next_track_path = Some(next_path);
+                }
+            }
+        }
+
+        // Poll for next track decoder
+        if let Some(ref rx_chan) = next_decoder_rx {
+            if let Ok(res) = rx_chan.try_recv() {
+                match res {
+                    Ok(info) => {
+                        println!("[player-crossfade] Next track decoder prepared successfully for: {}", info.resolved_path);
+                        next_pending = vec![VecDeque::new(); info.file_ch];
+                        
+                        let sinc_len = dsp_now.resampler_sinc_len as usize;
+                        let oversampling = dsp_now.resampler_oversampling as usize;
+                        let interp_type = match dsp_now.resampler_interpolation.as_str() {
+                            "linear" => rubato::SincInterpolationType::Linear,
+                            _ => rubato::SincInterpolationType::Cubic,
+                        };
+                        let f_cutoff = if sinc_len <= 64 { 0.96f32 } else { 0.985f32 };
+                        
+                        match SincFixedIn::<f32>::new(
+                            dev_rate as f64 / info.file_rate as f64,
+                            2.0,
+                            SincInterpolationParameters {
+                                sinc_len,
+                                f_cutoff,
+                                interpolation: interp_type,
+                                oversampling_factor: oversampling,
+                                window: rubato::WindowFunction::BlackmanHarris2,
+                            },
+                            chunk_size,
+                            info.file_ch
+                        ) {
+                            Ok(r) => {
+                                next_resampler = Some(r);
+                                next_decoder_info = Some(info);
+                            }
+                            Err(e) => {
+                                eprintln!("[player-crossfade] Failed to create resampler for next track: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[player-crossfade] Failed to prepare next track decoder: {}", e);
+                    }
+                }
+                next_decoder_rx = None;
+            }
+        }
+
         // FILL PENDING BUFFER
         if pending[0].len() < chunk_size * 4 {
             if let Some(samples_arc) = &decoded_samples {
@@ -4229,10 +4409,14 @@ fn play_file(
                 } else if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
                     // Only break the loop if there are no more samples in pending to resample!
                     if pending[0].len() < chunk_size {
-                        // RAM EOF - Check queue
-                        let next_queued = safe_lock(&queue).pop_front();
-                        if let Some(npath) = next_queued {
-                            next_track_info = Some((npath, 0.0));
+                        if crossfade_triggered && next_track_path.is_some() {
+                            let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
+                            next_track_info = Some((next_track_path.take().unwrap(), played_secs));
+                        } else {
+                            let next_queued = safe_lock(&queue).pop_front();
+                            if let Some(npath) = next_queued {
+                                next_track_info = Some((npath, 0.0));
+                            }
                         }
                         break;
                     }
@@ -4246,7 +4430,14 @@ fn play_file(
                 // FALLBACK TO CHUNKED (STREAMS)
                 let packet = match format.next_packet() {
                     Ok(p) => p,
-                    Err(_) => break,
+                    Err(_) => {
+                        if crossfade_triggered && next_track_path.is_some() {
+                            let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
+                            next_track_info = Some((next_track_path.take().unwrap(), played_secs));
+                            running = false;
+                        }
+                        break;
+                    }
                 };
                 if packet.track_id() == track_id {
                     if let Some(_tb) = time_base {
@@ -4266,6 +4457,32 @@ fn play_file(
                                  _ => vec![0.0; decoded_frames(&decoded)],
                              };
                             buf.extend(src);
+                        }
+                    }
+                }
+            }
+        }
+
+        // FILL PENDING BUFFER FOR NEXT TRACK
+        if let Some(ref mut info) = next_decoder_info {
+            while next_pending[0].len() < chunk_size * 4 {
+                let packet = match info.format.next_packet() {
+                    Ok(p) => p,
+                    Err(_) => break, // Next track EOF
+                };
+                if packet.track_id() == info.track_id {
+                    if let Ok(decoded) = info.decoder.decode(&packet) {
+                        for ch in 0..info.file_ch {
+                            let src: Vec<f32> = match &decoded {
+                                 AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
+                                 AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| s as f32 / i16::MAX as f32).collect(),
+                                 AudioBufferRef::S32(b) => b.chan(ch).iter().map(|&s| s as f32 / i32::MAX as f32).collect(),
+                                 AudioBufferRef::U8(b)  => b.chan(ch).iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
+                                 AudioBufferRef::S24(b) => b.chan(ch).iter().map(|&s| s.inner() as f32 / 8_388_607.0).collect(),
+                                 AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
+                                 _ => vec![0.0; decoded_frames(&decoded)],
+                            };
+                            next_pending[ch].extend(src);
                         }
                     }
                 }
@@ -4305,7 +4522,7 @@ fn play_file(
 
             let is_bp = bp_now && file_rate == dev_rate && file_ch == dev_ch && !current_dsp.enabled;
             
-            let (out_planar, n_out) = if is_bp {
+            let (mut out_planar, n_out) = if is_bp {
                 (chunk_planar, chunk_size)
             } else {
                 let mut processed = if file_rate == dev_rate {
@@ -4353,6 +4570,52 @@ fn play_file(
                     }
                 };
                 
+                if let (Some(ref mut next_res), Some(ref info)) = (&mut next_resampler, &next_decoder_info) {
+                    if next_pending[0].len() >= chunk_size {
+                        let mut next_chunk_planar = vec![vec![0.0; chunk_size]; info.file_ch];
+                        for ch in 0..info.file_ch {
+                            for val in next_chunk_planar[ch].iter_mut().take(chunk_size) {
+                                if let Some(s) = next_pending[ch].pop_front() {
+                                    *val = s;
+                                }
+                            }
+                        }
+                        
+                        let refs_next: Vec<&[f32]> = next_chunk_planar.iter().map(|v| v.as_slice()).collect();
+                        let next_processed = match next_res.process(&refs_next, None) {
+                            Ok(o) => o,
+                            Err(_) => vec![vec![0.0; chunk_size]; dev_ch],
+                        };
+                        
+                        let crossfade_duration_secs = current_dsp.crossfade_transition_duration as f64;
+                        let crossfade_frames = (crossfade_duration_secs * dev_rate as f64) as usize;
+                        
+                        let len = processed[0].len();
+                        let next_len = next_processed[0].len();
+                        let mix_len = len.min(next_len);
+                        
+                        for i in 0..mix_len {
+                            let global_idx = crossfade_frame_counter + i;
+                            let next_gain = (global_idx as f32 / crossfade_frames as f32).clamp(0.0, 1.0);
+                            let current_gain = 1.0 - next_gain;
+                            
+                            for ch in 0..processed.len() {
+                                let current_sample = processed[ch][i];
+                                let next_sample = if ch < next_processed.len() { next_processed[ch][i] } else { 0.0 };
+                                processed[ch][i] = current_sample * current_gain + next_sample * next_gain;
+                            }
+                        }
+                        crossfade_frame_counter += mix_len;
+                        
+                        if crossfade_frame_counter >= crossfade_frames {
+                            let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
+                            next_track_info = Some((next_track_path.clone().unwrap_or_default(), played_secs));
+                            running = false;
+                            break 'resample;
+                        }
+                    }
+                }
+                
                 if current_dsp.enabled {
                     for node in &mut nodes {
                         node.process(&mut processed, dev_rate as f32);
@@ -4361,6 +4624,15 @@ fn play_file(
                 let len = processed[0].len();
                 (processed, len)
             };
+
+            // Subtle +1.15x (+1.2dB) gain boost in Exclusive Mode to psychoacoustically enhance detail perception.
+            if is_exclusive {
+                for ch in 0..out_planar.len() {
+                    for val in out_planar[ch].iter_mut().take(n_out) {
+                        *val *= 1.15;
+                    }
+                }
+            }
 
             let mut interleaved = Vec::with_capacity(n_out * dev_ch);
             let mut out_idx = 0;

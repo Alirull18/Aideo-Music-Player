@@ -404,6 +404,7 @@ export function AideoView() {
   const [activeSource, setActiveSource] = useState('Library History');
   const [generatingMix, setGeneratingMix] = useState(false);
   const [visibleRecsCount, setVisibleRecsCount] = useState(15);
+  const [selectedMood, setSelectedMood] = useState<'all' | 'chill' | 'energy' | 'acoustic'>('all');
   
   // YouTube Music / Web Search states
   const [searchQuery, setSearchQuery] = useState('');
@@ -602,11 +603,77 @@ export function AideoView() {
     };
   }, []);
 
+  const getFilteredRecommendations = () => {
+    const recs = discoveryData?.recommendations || [];
+    if (selectedMood === 'all') return recs;
+
+    return recs.filter((track: any) => {
+      const title = (track.title || '').toLowerCase();
+      const artist = (track.artist || '').toLowerCase();
+      
+      // If it's a local track fallback (starts with local_), check its sonic profile if available!
+      if (track.id?.startsWith('local_')) {
+        const localId = parseInt(track.id.replace('local_', ''), 10);
+        const localTrack = tracks.find(t => t.id === localId);
+        if (localTrack) {
+          const energy = localTrack.energy ?? 0.5;
+          const bpm = localTrack.bpm ?? 120;
+          const bass = localTrack.bass_ratio ?? 0.33;
+          const treble = localTrack.treble_ratio ?? 0.33;
+
+          if (selectedMood === 'chill') {
+            return energy < 0.45 || bass > 0.4;
+          }
+          if (selectedMood === 'energy') {
+            return energy > 0.55 || bpm > 125;
+          }
+          if (selectedMood === 'acoustic') {
+            return treble > 0.4 || bpm < 95;
+          }
+        }
+      }
+
+      // Keyword matching fallback for online / general tracks
+      if (selectedMood === 'chill') {
+        const terms = ['chill', 'lofi', 'relax', 'ambient', 'soft', 'slow', 'sleep', 'jazz', 'night', 'lo-fi', 'lullaby', 'calm', 'bedtime'];
+        return terms.some(t => title.includes(t) || artist.includes(t));
+      }
+      if (selectedMood === 'energy') {
+        const terms = ['energy', 'dance', 'club', 'electro', 'house', 'beat', 'remix', 'workout', 'rock', 'synthwave', 'pop', 'party', 'fast', 'edm', 'drum', 'bass', 'rap', 'hip-hop', 'hard'];
+        return terms.some(t => title.includes(t) || artist.includes(t));
+      }
+      if (selectedMood === 'acoustic') {
+        const terms = ['acoustic', 'unplugged', 'vocal', 'live', 'piano', 'solo', 'acapella', 'session', 'guitar', 'plugged', 'ballad', 'indie'];
+        return terms.some(t => title.includes(t) || artist.includes(t));
+      }
+      return true;
+    });
+  };
+
   const fetchRecommendations = async () => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setIsLoadingRecs(true);
     setVisibleRecsCount(15);
+
+    // Load cached discovery hub data first (offline-first instant load)
+    try {
+      const cached = await invoke<any>('get_cached_discovery_hub');
+      if (cached) {
+        setDiscoveryData(cached);
+        setIsLoadingRecs(false);
+        if (cached.mixed_for_you && cached.mixed_for_you.length > 0) {
+          setActiveDiscoveryTab('mixed');
+        } else if (cached.recommendations && cached.recommendations.length > 0) {
+          setActiveDiscoveryTab('recommendations');
+        } else if (cached.global_charts && cached.global_charts.length > 0) {
+          setActiveDiscoveryTab('charts');
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load cached discovery hub:', e);
+    }
+
     try {
       // 1. Fetch freshest state directly from store to prevent React closure/stale-state bugs
       let currentStore = useStore.getState();
@@ -2222,42 +2289,85 @@ export function AideoView() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
                 >
-                  {(activeDiscoveryTab === 'recommendations' || activeDiscoveryTab === 'mixed') && (
-                    <>
-                      {renderTrackCarousel(discoveryData.recommendations.slice(0, visibleRecsCount))}
-                      {discoveryData.recommendations.length > visibleRecsCount && (
-                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
-                          <button
-                            onClick={() => setVisibleRecsCount(prev => prev + 15)}
-                            style={{
-                              background: 'rgba(255, 255, 255, 0.03)',
-                              border: '1px solid rgba(255, 255, 255, 0.08)',
-                              color: '#fff',
-                              padding: '10px 24px',
-                              borderRadius: 20,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              transition: 'all 0.2s',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
-                              e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-                            }}
-                          >
-                            Load More Recommendations
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  )}
+                  {(activeDiscoveryTab === 'recommendations' || activeDiscoveryTab === 'mixed') && (() => {
+                    const filteredRecs = activeDiscoveryTab === 'recommendations' ? getFilteredRecommendations() : (discoveryData.recommendations || []);
+                    return (
+                      <>
+                        {activeDiscoveryTab === 'recommendations' && (
+                          <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+                            {[
+                              { id: 'all', label: '✨ All Tracks' },
+                              { id: 'chill', label: '☕ Relaxed & Chill' },
+                              { id: 'energy', label: '⚡ High Energy' },
+                              { id: 'acoustic', label: '🎸 Acoustic & Vocal' }
+                            ].map(mood => (
+                              <button
+                                key={mood.id}
+                                onClick={() => { setSelectedMood(mood.id as any); setVisibleRecsCount(15); }}
+                                style={{
+                                  padding: '6px 14px',
+                                  borderRadius: 16,
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                                  background: selectedMood === mood.id ? 'var(--accent)' : 'rgba(255, 255, 255, 0.02)',
+                                  color: selectedMood === mood.id ? 'white' : 'var(--text-dim)',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s',
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (selectedMood !== mood.id) e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (selectedMood !== mood.id) e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+                                }}
+                              >
+                                {mood.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {filteredRecs.length > 0 ? renderTrackCarousel(filteredRecs.slice(0, visibleRecsCount)) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', background: 'rgba(255,255,255,0.01)', borderRadius: 12, border: '1px dashed rgba(255,255,255,0.05)' }}>
+                            <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>
+                              No tracks matched this category in your current recommendations.
+                            </span>
+                          </div>
+                        )}
+                        {filteredRecs.length > visibleRecsCount && (
+                          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                            <button
+                              onClick={() => setVisibleRecsCount(prev => prev + 15)}
+                              style={{
+                                background: 'rgba(255, 255, 255, 0.03)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                color: '#fff',
+                                padding: '10px 24px',
+                                borderRadius: 20,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                                e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                              }}
+                            >
+                              Load More Recommendations
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   {activeDiscoveryTab === 'charts' && renderTrackCarousel(discoveryData.global_charts)}
                 </motion.div>
               </div>

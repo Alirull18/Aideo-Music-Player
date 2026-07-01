@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{State, Manager};
 use crate::AppState;
 use crate::safe_lock;
 
@@ -253,7 +253,8 @@ pub async fn search_youtube_internal(
                 "gl": "US"
             }
         },
-        "query": query
+        "query": query,
+        "params": "EgWKAQIIAWoKEAkQChADEAQQCg=="
     });
 
     let res = client.post(&search_url)
@@ -298,6 +299,24 @@ pub async fn search_youtube_internal(
                     let mut artist_parts = Vec::new();
                     // Skip type prefix ("Song"/"Video") and separator bullet " • " (first 2 runs)
                     for run in runs_arr.iter().skip(2) {
+                        if let Some(text) = run.get("text").and_then(|t| t.as_str()) {
+                            if text == " • " {
+                                break;
+                            }
+                            artist_parts.push(text);
+                        }
+                    }
+                    if !artist_parts.is_empty() {
+                        artist = artist_parts.join("");
+                    }
+                } else if first_run_text != "Album" && first_run_text != "Artist" && first_run_text != "Playlist" && first_run_text != "Station" && first_run_text != "EP" && first_run_text != "Single" {
+                    // Filtered Songs search format: starts directly with Artist name!
+                    // Since it has no prefix, we are guaranteed it's a song because of the query params filter.
+                    is_track = true;
+                    is_song_type = true;
+                    
+                    let mut artist_parts = Vec::new();
+                    for run in runs_arr {
                         if let Some(text) = run.get("text").and_then(|t| t.as_str()) {
                             if text == " • " {
                                 break;
@@ -2495,6 +2514,7 @@ pub async fn get_personalized_discovery_hub(
     listenbrainz_recs: Vec<String>,
     app_mode: String,
     is_online: bool,
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DiscoveryHubData, String> {
     // A. Query SQLite Top Genre
@@ -2693,9 +2713,9 @@ pub async fn get_personalized_discovery_hub(
     let chart_loaded = !chart_candidates.is_empty();
 
     if chart_loaded {
-        // Cap at 12 searches to keep latency reasonable
+        // Cap at 5 searches to keep latency and network traffic minimal
         let mut chart_search_tasks = Vec::new();
-        for (title, artist, source) in chart_candidates.iter().take(12) {
+        for (title, artist, source) in chart_candidates.iter().take(5) {
             let query = format!("{} {}", artist, title);
             let client_c = client.clone();
             let api_key_c = api_key.clone();
@@ -2706,21 +2726,17 @@ pub async fn get_personalized_discovery_hub(
         }
         let chart_results = futures::future::join_all(chart_search_tasks).await;
 
-        // Pick a random track from top-3 of each YTM result for extra variety
-        let mut rng = rand::rng();
         for (res, source) in chart_results {
-            if let Ok(mut tracks) = res {
-                tracks.truncate(3);
-                if tracks.is_empty() { continue; }
-                let pick = rng.random_range(0..tracks.len());
-                let mut t = tracks.remove(pick);
-                if is_third_party_or_instrumental(&t.title, &t.artist) || is_compilation_channel(&t.artist) {
-                    continue;
-                }
-                t.recommendation_source = Some(source);
-                if !seen_ids.contains(&t.id) {
-                    seen_ids.insert(t.id.clone());
-                    global_charts.push(t);
+            if let Ok(tracks) = res {
+                for mut t in tracks.into_iter().take(5) {
+                    if is_third_party_or_instrumental(&t.title, &t.artist) || is_compilation_channel(&t.artist) {
+                        continue;
+                    }
+                    t.recommendation_source = Some(source.clone());
+                    if !seen_ids.contains(&t.id) {
+                        seen_ids.insert(t.id.clone());
+                        global_charts.push(t);
+                    }
                 }
             }
         }
@@ -2998,7 +3014,7 @@ pub async fn get_personalized_discovery_hub(
     }
     
     let mut search_tasks = Vec::new();
-    for (query, source) in search_queries.iter().take(22) {
+    for (query, source) in search_queries.iter().take(8) {
         let client_c = client.clone();
         let api_key_c = api_key.clone();
         let source_c = source.clone();
@@ -3035,8 +3051,8 @@ pub async fn get_personalized_discovery_hub(
     let mut cand_tracks = Vec::new();
     for (res, source) in search_results {
         if let Ok(tracks) = res {
-            // Take only the top 5 tracks from each search query's result list to keep recommendations premium and focused
-            for mut track in tracks.into_iter().take(5) {
+            // Take up to the top 12 tracks from each search query's result list
+            for mut track in tracks.into_iter().take(12) {
                 // Hard-reject third-party, instrumental, remix, and compilation tracks
                 // unless the user demonstrably listens to such content (>30% of history).
                 if is_third_party_or_instrumental(&track.title, &track.artist) && !user_likes_remixes {
@@ -3118,10 +3134,14 @@ pub async fn get_personalized_discovery_hub(
     let artist_skip_stats: std::collections::HashMap<String, (i64, i64)> = {
         let mut stats = std::collections::HashMap::new();
         let conn = safe_lock(&state.db);
+        let thirty_days_ago = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64 - 2_592_000)
+            .unwrap_or(0);
         if let Ok(mut stmt) = conn.prepare(
-            "SELECT artist, COUNT(*), SUM(skipped) FROM playback_history GROUP BY artist"
+            "SELECT artist, COUNT(*), SUM(skipped) FROM playback_history WHERE timestamp >= ?1 GROUP BY artist"
         ) {
-            if let Ok(mut rows) = stmt.query([]) {
+            if let Ok(mut rows) = stmt.query(rusqlite::params![thirty_days_ago]) {
                 while let Some(row) = rows.next().unwrap_or(None) {
                     if let (Ok(art), Ok(total), Ok(skipped)) = (row.get::<_, String>(0), row.get::<_, i64>(1), row.get::<_, i64>(2)) {
                         stats.insert(art.to_lowercase(), (total, skipped));
@@ -3326,11 +3346,37 @@ pub async fn get_personalized_discovery_hub(
         }
     };
 
-    Ok(DiscoveryHubData {
+    let hub_data = DiscoveryHubData {
         recommendations: final_recs,
         global_charts,
         mixed_for_you,
-    })
+    };
+
+    // Cache the resolved discovery hub data to disk for offline-first instant loading!
+    if let Ok(app_data) = app_handle.path().app_data_dir() {
+        let cache_file = app_data.join("discovery_cache.json");
+        if let Ok(json_str) = serde_json::to_string(&hub_data) {
+            let _ = std::fs::create_dir_all(&app_data);
+            let _ = std::fs::write(cache_file, json_str);
+        }
+    }
+
+    Ok(hub_data)
+}
+
+#[tauri::command]
+pub fn get_cached_discovery_hub(app_handle: tauri::AppHandle) -> Result<Option<DiscoveryHubData>, String> {
+    if let Ok(app_data) = app_handle.path().app_data_dir() {
+        let cache_file = app_data.join("discovery_cache.json");
+        if cache_file.exists() {
+            if let Ok(data_str) = std::fs::read_to_string(cache_file) {
+                if let Ok(cached) = serde_json::from_str::<DiscoveryHubData>(&data_str) {
+                    return Ok(Some(cached));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

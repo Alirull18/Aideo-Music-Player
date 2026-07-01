@@ -11,6 +11,10 @@ export interface Track {
   is_autoplay?: boolean;
   loved?: number;
   path_hash?: string | null;
+  bpm?: number | null;
+  energy?: number | null;
+  bass_ratio?: number | null;
+  treble_ratio?: number | null;
 }
 
 export interface CloudTrack {
@@ -114,6 +118,8 @@ export interface DSPState {
   saturation_drive: number;
   crossfade_transition_enabled: boolean;
   crossfade_transition_duration: number;
+  stream_engine: 'yt-dlp' | 'reqwest';
+  lookahead_prebuffer_enabled: boolean;
 }
 
 

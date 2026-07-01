@@ -1571,6 +1571,7 @@ pub fn run() {
             youtube::check_and_download_ytdlp,
             youtube::get_youtube_autoplay_recommendations,
             youtube::get_personalized_discovery_hub,
+            youtube::get_cached_discovery_hub,
             tidal::tidal_login_start,
             tidal::tidal_login_poll_status,
             tidal::tidal_search,

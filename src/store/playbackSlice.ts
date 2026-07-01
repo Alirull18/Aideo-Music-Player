@@ -81,7 +81,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     aideo_filter_enabled: localStorage.getItem('aideo_filter_enabled') === 'true',
     aideo_filter_room_size: Number(localStorage.getItem('aideo_filter_room_size') || 0.85),
     aideo_filter_bass_thump: Number(localStorage.getItem('aideo_filter_bass_thump') || 6.0),
-    aideo_filter_dampening: Number(localStorage.getItem('aideo_filter_dampening') || 0.5)
+    aideo_filter_dampening: Number(localStorage.getItem('aideo_filter_dampening') || 0.5),
+    auto_headroom: localStorage.getItem('aideo_auto_headroom') === 'true',
+    saturation_enabled: localStorage.getItem('aideo_saturation_enabled') === 'true',
+    saturation_drive: Number(localStorage.getItem('aideo_saturation_drive') || 0.0),
+    crossfade_transition_enabled: localStorage.getItem('aideo_crossfade_enabled') === 'true',
+    crossfade_transition_duration: Number(localStorage.getItem('aideo_crossfade_duration') || 5.0),
+    stream_engine: (localStorage.getItem('aideo_stream_engine') || 'yt-dlp') as 'yt-dlp' | 'reqwest',
+    lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false'
   },
   devices: [],
   currentDevice: null,
@@ -132,7 +139,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (state.playback.status === 'Stopped') {
         const targetPath = state.playback.current_track || state.playback.last_played_track;
         if (targetPath) {
-          const t = state.tracks.find(x => pathsEqual(x.path, targetPath));
+          let t = state.tracks.find(x => pathsEqual(x.path, targetPath));
+          if (!t) {
+            t = state.queue.find(x => pathsEqual(x.path, targetPath));
+          }
+          if (!t && state.currentTrack && pathsEqual(state.currentTrack.path, targetPath)) {
+            t = state.currentTrack;
+          }
+          
           if (t) {
             get().playTrack(t);
             return;
@@ -399,7 +413,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       'spatial_wet', 'subsonic_enabled', 'night_mode_enabled', 
       'r128_enabled', 'width', 'upsample_rate', 'dither',
       'aideo_filter_enabled', 'aideo_filter_room_size', 'aideo_filter_bass_thump', 
-      'aideo_filter_dampening', 'preamp_gain', 'limiter_threshold', 'resampler_phase_mode'
+      'aideo_filter_dampening', 'preamp_gain', 'limiter_threshold', 'resampler_phase_mode',
+      'auto_headroom', 'saturation_enabled', 'saturation_drive', 
+      'crossfade_transition_enabled', 'crossfade_transition_duration',
+      'stream_engine', 'lookahead_prebuffer_enabled'
     ];
     const isActivatingDSP = dspKeys.some(key => {
       if (key === 'upsample_rate') {
@@ -479,6 +496,13 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_preamp_gain', String(full.preamp_gain));
     localStorage.setItem('aideo_limiter_threshold', String(full.limiter_threshold));
     localStorage.setItem('aideo_resampler_phase_mode', full.resampler_phase_mode);
+    localStorage.setItem('aideo_auto_headroom', String(full.auto_headroom));
+    localStorage.setItem('aideo_saturation_enabled', String(full.saturation_enabled));
+    localStorage.setItem('aideo_saturation_drive', String(full.saturation_drive));
+    localStorage.setItem('aideo_crossfade_enabled', String(full.crossfade_transition_enabled));
+    localStorage.setItem('aideo_crossfade_duration', String(full.crossfade_transition_duration));
+    localStorage.setItem('aideo_stream_engine', full.stream_engine);
+    localStorage.setItem('aideo_lookahead_prebuffer', String(full.lookahead_prebuffer_enabled));
 
     // 1. Update React Zustand state instantly for fluid 60fps UI
     set({ dsp: full });

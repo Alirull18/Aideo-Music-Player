@@ -1419,6 +1419,30 @@ export function AideoLabView() {
                     />
                   </div>
 
+                  {/* Auto-Headroom Guard */}
+                  <div style={{ marginBottom: 18, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Auto-Headroom Guard</span>
+                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                          Automatically attenuates preamp gain based on positive EQ boosts to prevent digital clipping.
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setDSP({ auto_headroom: !dsp.auto_headroom, enabled: !dsp.auto_headroom ? true : dsp.enabled })}
+                        className="settings-btn"
+                        style={{
+                          fontSize: 10,
+                          padding: '4px 10px',
+                          background: dsp.auto_headroom ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                          color: dsp.auto_headroom ? '#34d399' : 'var(--text-dim)'
+                        }}
+                      >
+                        {dsp.auto_headroom ? 'ENABLED' : 'DISABLED'}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Limiter Threshold */}
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -1480,6 +1504,46 @@ export function AideoLabView() {
                         {opt.label}
                       </button>
                     ))}
+                  </div>
+                </div>
+
+                {/* Crossfade Transitions */}
+                <div className="settings-ctrl-card" style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <div>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Seamless Crossfade Transitions</h4>
+                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                        Fades out the current track while fading in the next track to eliminate gaps.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setDSP({ crossfade_transition_enabled: !dsp.crossfade_transition_enabled, enabled: !dsp.crossfade_transition_enabled ? true : dsp.enabled })}
+                      className="settings-btn"
+                      style={{
+                        fontSize: 10,
+                        padding: '4px 10px',
+                        background: dsp.crossfade_transition_enabled ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                        color: dsp.crossfade_transition_enabled ? '#a78bfa' : 'var(--text-dim)'
+                      }}
+                    >
+                      {dsp.crossfade_transition_enabled ? 'ENABLED' : 'DISABLED'}
+                    </button>
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Crossfade Duration</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
+                        {dsp.crossfade_transition_duration.toFixed(1)} seconds
+                      </span>
+                    </div>
+                    <input
+                      type="range" min="2.0" max="10.0" step="0.5"
+                      value={dsp.crossfade_transition_duration}
+                      disabled={!dsp.crossfade_transition_enabled}
+                      onChange={e => setDSP({ crossfade_transition_duration: parseFloat(e.target.value) })}
+                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.crossfade_transition_enabled ? 'pointer' : 'default', opacity: dsp.crossfade_transition_enabled ? 1 : 0.5 }}
+                    />
                   </div>
                 </div>
               </div>
@@ -1628,6 +1692,56 @@ export function AideoLabView() {
                 }}>
                   <span style={{ color: 'var(--accent)', fontWeight: 700 }}>💡 Real-time Notice:</span>
                   <span>Adjustments will apply on the next track play, or automatically within a second on seek or track skip.</span>
+                </div>
+              </div>
+
+              {/* Vacuum Tube Saturation Card */}
+              <div className="settings-ctrl-card" style={{ padding: 28, marginTop: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <div>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Power size={18} style={{ color: 'var(--accent)' }} />
+                      Vacuum Tube Analog Saturation
+                    </h3>
+                    <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>
+                      Simulate the warm harmonic characteristics of high-end triode vacuum tube pre-amplifiers.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setDSP({ saturation_enabled: !dsp.saturation_enabled, enabled: !dsp.saturation_enabled ? true : dsp.enabled })}
+                    className="settings-btn"
+                    style={{
+                      fontSize: 11,
+                      padding: '6px 12px',
+                      background: dsp.saturation_enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: dsp.saturation_enabled ? '#34d399' : '#f87171',
+                      border: 'none',
+                      fontWeight: 700
+                    }}
+                  >
+                    Tube Simulation: {dsp.saturation_enabled ? 'ACTIVE' : 'BYPASSED'}
+                  </button>
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Harmonic Drive & Warmth Intensity</span>
+                      <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                        Increasing drive generates pleasant 2nd-order harmonics and soft-compresses peaks.
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
+                      {Math.round(dsp.saturation_drive * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range" min="0.0" max="1.0" step="0.01"
+                    value={dsp.saturation_drive}
+                    disabled={!dsp.saturation_enabled}
+                    onChange={e => setDSP({ saturation_drive: parseFloat(e.target.value) })}
+                    style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.saturation_enabled ? 'pointer' : 'default', opacity: dsp.saturation_enabled ? 1 : 0.5 }}
+                  />
                 </div>
               </div>
             </motion.div>

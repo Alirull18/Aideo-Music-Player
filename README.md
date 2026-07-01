@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.8.9
+# 💎 Aideo Music Player v0.9.0
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,14 +61,11 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New in v0.8.9 (Randomized Mixes, Connect & Cast Hub, Now Playing Layout)
+## 📢 What's New in v0.9.0 (Web Stream Songs Filter, App Restart Metadata Fix & Latency Optimizations)
 
-* **🎲 Randomized Artist Mixes**: The Discovery Hub now picks a random artist from your entire local library and online seed profiles for the Artist Mix card — every refresh gives you a completely different artist.
-* **📡 Unified Connect & Cast Popover**: Merged the Aideo Connect remote control (QR code + URL) and Google Cast device discovery into a single popover accessible directly from the playback bar.
-* **🎵 Separated Mixed for You Shelf**: The Mixed for You section is now permanently displayed at the top of the Discovery Hub, independent of the tab switcher.
-* **🎶 Now Playing Title Fix**: Song title and metadata tags (format, bit-perfect, autoplay) are now on separate rows, preventing long titles from being truncated.
-* **🔊 Chromaprint Audio Fingerprinting**: Added a native Chromaprint FFI engine for acoustic fingerprint-based track identification and duplicate detection.
-* **🎛️ Signal Path Detail**: The Audio Control Center signal path now shows detailed routing information.
+* **🎵 Web Stream Songs Filter**: Fixed the YouTube Music Song-only search parser layout to correctly extract artist names and titles when the `"Song •"` subtitle prefix is omitted.
+* **🔄 App Restart Metadata Preservation**: Resolved a metadata-wipe bug causing streaming track titles to fall back to generic `"Watch (youtube.com)"` and `"Online Stream"` names after resuming/playing online tracks on app start.
+* **⚡ Discovery Hub Latency Optimizations**: Optimized concurrent background search requests from 34 down to 13 (speeding up background refreshing by over **2.5x**) and enabled instant cached recommendations rendering to clear the loading spinner immediately.
 
 ---
 
@@ -84,8 +81,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.8.9 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.8.9_x64_en-US.msi`).
+1. **Download**: Get the latest v0.9.0 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.9.0_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---
