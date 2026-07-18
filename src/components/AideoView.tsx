@@ -151,7 +151,7 @@ const PopularTrackRow = memo(({
 
       {/* Title and metadata */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {track.name}
         </span>
         <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
@@ -289,12 +289,12 @@ const PopularTrackRow = memo(({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: 'white',
+              color: 'var(--text)',
               cursor: 'pointer',
               transition: 'all 0.2s'
             }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-h)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--glass)'}
             title="Download song offline"
           >
             <Download size={14} />
@@ -1559,10 +1559,10 @@ export function AideoView() {
                 width: '100%',
                 padding: searchQuery ? '14px 44px 14px 48px' : '14px 20px 14px 48px',
                 borderRadius: 14,
-                border: '1px solid rgba(255,255,255,0.08)',
-                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid var(--glass-border)',
+                background: 'var(--glass)',
                 backdropFilter: 'blur(12px)',
-                color: 'white',
+                color: 'var(--text)',
                 fontSize: 14,
                 fontWeight: 500,
                 outline: 'none',
@@ -1780,7 +1780,7 @@ export function AideoView() {
                         </div>
                       )}
                       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {track.title}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1810,9 +1810,9 @@ export function AideoView() {
                 setArtistProfile(null);
               }}
               style={{
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                color: 'white',
+                background: 'var(--glass)',
+                border: '1px solid var(--glass-border)',
+                color: 'var(--text)',
                 padding: '8px 16px',
                 borderRadius: 12,
                 fontSize: 13,
@@ -1991,17 +1991,17 @@ export function AideoView() {
                         borderRadius: 12,
                         fontSize: 13,
                         fontWeight: 700,
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        color: 'white',
+                        background: 'var(--glass)',
+                        border: '1px solid var(--glass-border)',
+                        color: 'var(--text)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
                         cursor: 'pointer',
                         transition: 'background 0.2s'
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-h)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--glass)'}
                     >
                       Shuffle
                     </button>
@@ -2013,17 +2013,17 @@ export function AideoView() {
                         borderRadius: 12,
                         fontSize: 13,
                         fontWeight: 700,
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        color: 'white',
+                        background: 'var(--glass)',
+                        border: '1px solid var(--glass-border)',
+                        color: 'var(--text)',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
                         cursor: 'pointer',
                         transition: 'background 0.2s'
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-h)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'var(--glass)'}
                     >
                       {resolvingTrackId === 'artist-radio' ? (
                         <Loader2 className="spin" size={16} />
@@ -2038,7 +2038,7 @@ export function AideoView() {
 
               {/* Popular Tracks Section */}
               <div>
-                <h3 style={{ fontSize: 20, fontWeight: 800, color: 'white', marginBottom: 16 }}>Popular Songs</h3>
+                <h3 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', marginBottom: 16 }}>Popular Songs</h3>
                 <div style={{
                   background: 'var(--glass)',
                   border: '1px solid var(--glass-border)',
@@ -2125,7 +2125,7 @@ export function AideoView() {
                 <button 
                   onClick={() => setDiscoveryViewMode(prev => prev === 'list' ? 'grid' : 'list')}
                   style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-                  onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text)'}
                   onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
                   title={discoveryViewMode === 'list' ? "Switch to Grid view" : "Switch to List view"}
                 >
@@ -2136,7 +2136,7 @@ export function AideoView() {
                   onClick={fetchRecommendations} 
                   disabled={isLoadingRecs}
                   style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-                  onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
+                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text)'}
                   onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
                 >
                   <RefreshCw size={12} className={isLoadingRecs ? "spin" : ""} />
@@ -2494,18 +2494,18 @@ export function AideoView() {
                         key={m}
                         onClick={() => setActiveMood(m)}
                         style={{
-                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+                          background: active ? 'var(--accent)' : 'var(--glass)',
                           border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
                           borderRadius: 10,
                           padding: '8px 14px',
-                          color: 'white',
+                          color: active ? 'white' : 'var(--text)',
                           fontSize: 13,
                           fontWeight: 600,
                           cursor: 'pointer',
                           transition: 'all 0.2s',
                         }}
-                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
+                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass)'; }}
                       >
                         {emoji} {m}
                       </button>
@@ -2526,18 +2526,18 @@ export function AideoView() {
                         key={s}
                         onClick={() => setActiveSource(s)}
                         style={{
-                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+                          background: active ? 'var(--accent)' : 'var(--glass)',
                           border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
                           borderRadius: 10,
                           padding: '8px 14px',
-                          color: 'white',
+                          color: active ? 'white' : 'var(--text)',
                           fontSize: 13,
                           fontWeight: 600,
                           cursor: 'pointer',
                           transition: 'all 0.2s',
                         }}
-                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
+                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass)'; }}
                       >
                         {icon} {s}
                       </button>

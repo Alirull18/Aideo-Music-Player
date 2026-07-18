@@ -49,10 +49,10 @@ export function AideoPrompt({ title, placeholder, initialValue = '', actionLabel
               fontSize: 14,
               borderRadius: 12,
               border: '1px solid var(--glass-border)',
-              background: 'rgba(0,0,0,0.3)',
-              color: 'white',
+              background: 'var(--glass)',
+              color: 'var(--text)',
               outline: 'none',
-              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)'
+              boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.1)'
             }}
           />
         </div>

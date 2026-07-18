@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 
-import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles, Wifi, Globe, Gauge, Database } from 'lucide-react';
+import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles, Wifi, Globe, Gauge, Database, Clock } from 'lucide-react';
 
 export function AudioControlCenter() {
-  const { dsp, setDSP, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry } = useStore();
+  const { dsp, setDSP, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry, sleepTimer, startSleepTimer, stopSleepTimer } = useStore();
   const [devOpen, setDevOpen] = useState(false);
 
   const fileRate = playback.file_rate || 44100;
@@ -242,6 +242,65 @@ export function AudioControlCenter() {
                 </div>
               </div>
 
+              {/* Sleep Timer */}
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Sleep Timer</div>
+                <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: sleepTimer.active ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Clock size={14} /> Timer Control
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: sleepTimer.active ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: sleepTimer.active ? '#fff' : 'var(--text-dim)' }}>
+                      {sleepTimer.active ? `ACTIVE · ${Math.floor(sleepTimer.remaining / 60)}m ${sleepTimer.remaining % 60}s` : 'OFF'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+                    {[15, 30, 45, 60].map(mins => (
+                      <button
+                        key={mins}
+                        className={`rate-chip ${sleepTimer.active && sleepTimer.duration === mins ? 'active' : ''}`}
+                        style={{
+                          fontSize: 10,
+                          padding: '4px 8px',
+                          borderRadius: 4,
+                          border: '1px solid var(--glass-border)',
+                          background: sleepTimer.active && sleepTimer.duration === mins ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                          color: sleepTimer.active && sleepTimer.duration === mins ? 'white' : 'var(--text-dim)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          flex: 1
+                        }}
+                        onClick={() => startSleepTimer(mins)}
+                      >
+                        {mins}m
+                      </button>
+                    ))}
+                    {sleepTimer.active && (
+                      <button
+                        className="rate-chip"
+                        style={{
+                          fontSize: 10,
+                          padding: '4px 8px',
+                          borderRadius: 4,
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          background: 'rgba(239, 68, 68, 0.1)',
+                          color: '#f87171',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          flex: 1
+                        }}
+                        onClick={() => stopSleepTimer()}
+                      >
+                        Stop
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10, lineHeight: 1.4 }}>
+                    Automatically pause playback when the timer counts down to zero.
+                  </div>
+                </div>
+              </div>
+
               {/* Stream Telemetry & Connection Monitor */}
               <div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1, marginTop: 16 }}>Stream Telemetry</div>
@@ -263,7 +322,7 @@ export function AudioControlCenter() {
                         <Gauge size={14} style={{ color: networkTelemetry.current_download_rate_bps > 0 ? 'var(--accent)' : '#6b7280' }} />
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 8, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Speed</div>
-                          <div style={{ fontSize: 12, fontWeight: 'bold', color: 'white' }}>
+                          <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text)' }}>
                             {(() => {
                               const bps = networkTelemetry.current_download_rate_bps * 8; // Convert bytes to bits
                               if (bps >= 1000000) return `${(bps / 1000000).toFixed(2)} Mbps`;
@@ -320,7 +379,7 @@ export function AudioControlCenter() {
                         <Database size={14} style={{ color: 'var(--text-dim)' }} />
                         <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-dim)' }}>Session Data Used</span>
                       </div>
-                      <span style={{ fontSize: 12, fontWeight: 'bold', color: 'white' }}>
+                      <span style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text)' }}>
                         {(() => {
                           const bytes = networkTelemetry.session_downloaded_bytes;
                           if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(2)} GB`;
@@ -335,7 +394,7 @@ export function AudioControlCenter() {
                   <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Wifi size={16} style={{ color: '#10b981', opacity: 0.8 }} />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Local Audio Active</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Local Audio Active</div>
                       <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>Offline source (0ms network latency).</div>
                     </div>
                   </div>

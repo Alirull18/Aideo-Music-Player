@@ -238,7 +238,7 @@ export function NowPlayingView() {
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: current.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.45)',
+                    color: current.loved === 1 ? '#ef4444' : 'var(--text-dim)',
                     cursor: 'pointer',
                     padding: 4,
                     display: 'flex',
@@ -252,7 +252,7 @@ export function NowPlayingView() {
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = 'scale(1.0)';
-                    if (current.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.45)';
+                    if (current.loved !== 1) e.currentTarget.style.color = 'var(--text-dim)';
                   }}
                   title={current.loved === 1 ? "Remove from Loved Streams" : "Add to Loved Streams"}
                 >
@@ -266,7 +266,7 @@ export function NowPlayingView() {
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: current.disliked === 1 ? '#f43f5e' : 'rgba(255, 255, 255, 0.45)',
+                    color: current.disliked === 1 ? '#f43f5e' : 'var(--text-dim)',
                     cursor: 'pointer',
                     padding: 4,
                     display: 'flex',
@@ -280,7 +280,7 @@ export function NowPlayingView() {
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = 'scale(1.0)';
-                    if (current.disliked !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.45)';
+                    if (current.disliked !== 1) e.currentTarget.style.color = 'var(--text-dim)';
                   }}
                   title={current.disliked === 1 ? "Undislike track" : "Dislike track"}
                 >

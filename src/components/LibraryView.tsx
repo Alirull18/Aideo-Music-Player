@@ -261,7 +261,7 @@ const TrackRow = memo(({
             style={{
               background: 'transparent',
               border: 'none',
-              color: t.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.25)',
+              color: t.loved === 1 ? '#ef4444' : 'var(--text-dim)',
               cursor: 'pointer',
               padding: 4,
               display: 'flex',
@@ -275,7 +275,7 @@ const TrackRow = memo(({
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'scale(1.0)';
-              if (t.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.25)';
+              if (t.loved !== 1) e.currentTarget.style.color = 'var(--text-dim)';
             }}
             title={t.loved === 1 ? "Unlove track" : "Love track"}
           >
@@ -289,7 +289,7 @@ const TrackRow = memo(({
             style={{
               background: 'transparent',
               border: 'none',
-              color: t.disliked === 1 ? '#f43f5e' : 'rgba(255, 255, 255, 0.25)',
+              color: t.disliked === 1 ? '#f43f5e' : 'var(--text-dim)',
               cursor: 'pointer',
               padding: 4,
               display: 'flex',
@@ -303,7 +303,7 @@ const TrackRow = memo(({
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'scale(1.0)';
-              if (t.disliked !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.25)';
+              if (t.disliked !== 1) e.currentTarget.style.color = 'var(--text-dim)';
             }}
             title={t.disliked === 1 ? "Undislike track" : "Dislike track"}
           >

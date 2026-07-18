@@ -8,7 +8,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { 
   Settings, Library, Radio, FolderSearch, RefreshCw, DownloadCloud, 
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
-  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User
+  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard
 } from 'lucide-react';
 
 interface PresetTheme {
@@ -104,11 +104,46 @@ export function SettingsView() {
     setShowOnboarding, setOnboardingCompleted,
     cacheSizeLimit, setCacheSizeLimit,
     discoverCastDevices,
-    resetDislikedTracks
+    resetDislikedTracks,
+    colorScheme, setColorScheme, shortcuts, setShortcut
   } = useStore();
 
   // Tab navigation State
-  const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account'>('appearance');
+  const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account' | 'shortcuts'>('appearance');
+
+  const [recordingAction, setRecordingAction] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!recordingAction) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const keyName = e.key === ' ' ? 'Space' : e.key;
+      setShortcut(recordingAction, keyName);
+      setRecordingAction(null);
+
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Shortcut bound to ${keyName}`, type: 'success' } 
+      }));
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [recordingAction, setShortcut]);
+
+  const resetShortcuts = () => {
+    localStorage.removeItem('aideo-keyboard-shortcuts');
+    setShortcut('playPause', 'Space');
+    setShortcut('next', 'ArrowRight');
+    setShortcut('prev', 'ArrowLeft');
+    setShortcut('volumeUp', 'ArrowUp');
+    setShortcut('volumeDown', 'ArrowDown');
+    window.dispatchEvent(new CustomEvent('ui-toast', { 
+      detail: { message: 'Keyboard shortcuts restored to defaults', type: 'info' } 
+    }));
+  };
   const [searchQuery, setSearchQuery] = useState('');
 
   // Subsonic / Navidrome local input states
@@ -461,6 +496,110 @@ export function SettingsView() {
       )
     },
     {
+      id: 'dark-light-mode',
+      title: 'Dark / Light / System Mode',
+      description: 'Switch the player theme between the default glassmorphic dark mode, a clean light mode, or synchronize it with your operating system color scheme preferences.',
+      keywords: 'dark light system theme toggle mode appearance white black transparent glass',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div className="settings-ctrl-header-row">
+            <div>
+              <div className="settings-ctrl-title">Interface Theme Mode</div>
+              <div className="settings-ctrl-desc">Choose dark theme, light theme, or automatic OS matching.</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                className={`btn ${colorScheme === 'dark' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '6px 12px' }}
+                onClick={() => setColorScheme('dark')}
+              >
+                Dark
+              </button>
+              <button 
+                className={`btn ${colorScheme === 'light' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '6px 12px' }}
+                onClick={() => setColorScheme('light')}
+              >
+                Light
+              </button>
+              <button 
+                className={`btn ${colorScheme === 'system' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '6px 12px' }}
+                onClick={() => setColorScheme('system')}
+              >
+                System
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'keyboard-shortcuts-config',
+      title: 'Keyboard Shortcuts Remapper',
+      description: 'Remap custom keys to control player operations like Play/Pause, Next Track, Previous Track, Volume Up, and Volume Down.',
+      keywords: 'keyboard shortcuts hotkeys customization bind keys control play pause next prev volume',
+      tab: 'shortcuts',
+      element: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {[
+            { id: 'playPause', label: 'Play / Pause' },
+            { id: 'next', label: 'Next Track' },
+            { id: 'prev', label: 'Previous Track' },
+            { id: 'volumeUp', label: 'Volume Up' },
+            { id: 'volumeDown', label: 'Volume Down' }
+          ].map(action => {
+            const isRecording = recordingAction === action.id;
+            return (
+              <div 
+                key={action.id} 
+                className="settings-ctrl-card" 
+                style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  background: isRecording ? 'rgba(var(--accent-rgb), 0.05)' : '',
+                  borderColor: isRecording ? 'var(--accent)' : '',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{action.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    Trigger action when you press the key.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div 
+                    style={{ 
+                      padding: '6px 12px', 
+                      background: 'rgba(0,0,0,0.3)', 
+                      border: '1px solid var(--glass-border)', 
+                      borderRadius: 6, 
+                      fontSize: 12, 
+                      fontWeight: 700, 
+                      fontFamily: 'monospace',
+                      color: isRecording ? 'var(--accent)' : 'var(--text)'
+                    }}
+                  >
+                    {isRecording ? 'Press any key...' : shortcuts[action.id] || 'None'}
+                  </div>
+                  <button 
+                    className={`btn ${isRecording ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: 11, padding: '6px 12px' }}
+                    onClick={() => setRecordingAction(isRecording ? null : action.id)}
+                  >
+                    {isRecording ? 'Cancel' : 'Record'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )
+    },
+    {
       id: 'sidebar-visibility',
       title: 'Sidebar Layout Configuration',
       description: 'Choose which scrobbling services or pages are displayed in the main sidebar. Main features like Library, Aideo, Search, and Now Playing are locked for persistent navigation.',
@@ -477,7 +616,7 @@ export function SettingsView() {
             {/* Core Locked Features Info (Excluded) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, background: 'rgba(255,255,255,0.02)', padding: '12px 16px', borderRadius: 10, border: '1px solid var(--glass-border)', marginBottom: 6 }}>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                <strong style={{ color: 'white', display: 'block', marginBottom: 4 }}>Locked Core Views:</strong>
+                <strong style={{ color: 'var(--text)', display: 'block', marginBottom: 4 }}>Locked Core Views:</strong>
                 Library, Aideo, Aideo Search, Now Playing
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontStyle: 'italic' }}>
@@ -488,7 +627,7 @@ export function SettingsView() {
             {/* Last.fm Visibility Switch */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px' }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Last.fm Stats Tab</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Last.fm Stats Tab</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show/hide your Last.fm statistics dashboard in the sidebar.</div>
               </div>
               <SlidingSwitch 
@@ -500,7 +639,7 @@ export function SettingsView() {
             {/* ListenBrainz Visibility Switch */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>ListenBrainz Tab</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>ListenBrainz Tab</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show/hide your ListenBrainz scrobbling feed and recommendations.</div>
               </div>
               <div style={{ marginTop: 8 }}>
@@ -514,7 +653,7 @@ export function SettingsView() {
             {/* Smart Mix Builder Visibility Switch */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Smart Mix Builder</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Smart Mix Builder</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show or hide the smart playlist builder card in the Aideo tab.</div>
               </div>
               <div style={{ marginTop: 8 }}>
@@ -545,7 +684,7 @@ export function SettingsView() {
             {/* Notifications Enabled Toggle */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px' }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>System Overlay Toasts</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>System Overlay Toasts</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                   Show real-time toast alerts for actions, uploads, updates, and errors.
                 </div>
@@ -570,7 +709,7 @@ export function SettingsView() {
               }}
             >
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Developer Diagnostics Mode</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Developer Diagnostics Mode</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                   Prepend active file domains, internal function context, and raw telemetry to error messages.
                 </div>
@@ -775,7 +914,7 @@ export function SettingsView() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontWeight: 800, fontSize: 12, color: 'white' 
                   }}>S</div>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: 'white' }}>Subsonic / Navidrome</span>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>Subsonic / Navidrome</span>
                 </div>
 
                 {subsonicConnected ? (
@@ -789,7 +928,7 @@ export function SettingsView() {
                       Connected to {subsonicUrl}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                      Active User: <strong style={{ color: 'white' }}>{subsonicUser}</strong>
+                      Active User: <strong style={{ color: 'var(--text)' }}>{subsonicUser}</strong>
                     </div>
                   </div>
                 ) : (
@@ -894,7 +1033,7 @@ export function SettingsView() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontWeight: 800, fontSize: 12, color: 'white' 
                   }}>J</div>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: 'white' }}>Jellyfin Media Server</span>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>Jellyfin Media Server</span>
                 </div>
 
                 {jellyfinConnected ? (
@@ -908,7 +1047,7 @@ export function SettingsView() {
                       Connected to {jellyfinUrl}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                      Connection Mode: <strong style={{ color: 'white' }}>Token (API Key)</strong>
+                      Connection Mode: <strong style={{ color: 'var(--text)' }}>Token (API Key)</strong>
                     </div>
                   </div>
                 ) : (
@@ -999,7 +1138,7 @@ export function SettingsView() {
                 fm
               </div>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: 'white' }}>Last.fm Integration</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>Last.fm Integration</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Synchronize listening counts, hearts, and histories.</div>
               </div>
             </div>
@@ -1127,7 +1266,7 @@ export function SettingsView() {
                 LB
               </div>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: 'white' }}>ListenBrainz Integration</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>ListenBrainz Integration</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Submit your listens to an open, non-profit community catalog.</div>
               </div>
             </div>
@@ -1137,7 +1276,7 @@ export function SettingsView() {
                 <div className="settings-lfm-connected-header">
                   <div className="settings-status-indicator connected">
                     <span className="settings-status-dot pulse" style={{ backgroundColor: 'rgba(235, 116, 59, 0.95)' }}></span>
-                    <span>Connected as <strong style={{ color: 'white' }}>{listenbrainzUsername}</strong></span>
+                    <span>Connected as <strong style={{ color: 'var(--text)' }}>{listenbrainzUsername}</strong></span>
                   </div>
                   <button
                     className="btn btn-secondary"
@@ -1150,7 +1289,7 @@ export function SettingsView() {
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)' }}>
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Automatic Scrobbling</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Automatic Scrobbling</div>
                     <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>Send playback listens to ListenBrainz servers in real-time.</div>
                   </div>
                   <SlidingSwitch 
@@ -2421,6 +2560,15 @@ export function SettingsView() {
             <span>Account & Sync</span>
             {activeTab === 'account' && <motion.div layoutId="active-tab-line" className="settings-active-tab-line" />}
           </button>
+
+          <button 
+            className={`settings-tab-btn ${activeTab === 'shortcuts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('shortcuts')}
+          >
+            <Keyboard size={14} />
+            <span>Shortcuts</span>
+            {activeTab === 'shortcuts' && <motion.div layoutId="active-tab-line" className="settings-active-tab-line" />}
+          </button>
         </div>
       )}
 
@@ -2446,7 +2594,7 @@ export function SettingsView() {
               marginBottom: 10
             }}>
               <div>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'white', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                   {activeTab} calibration panel
                 </span>
                 <span style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
@@ -2460,6 +2608,7 @@ export function SettingsView() {
                   else if (activeTab === 'scrobbling') resetScrobbling();
                   else if (activeTab === 'audio') resetAudio();
                   else if (activeTab === 'system') resetSystem();
+                  else if (activeTab === 'shortcuts') resetShortcuts();
                 }}
                 className="settings-btn settings-btn-danger"
                 style={{ fontSize: 11, padding: '8px 16px' }}
@@ -2493,7 +2642,7 @@ export function SettingsView() {
               {filteredItems.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-dim)' }}>
                   <HelpCircle size={40} style={{ margin: '0 auto 16px', display: 'block', opacity: 0.5 }} />
-                  <div style={{ fontSize: 15, fontWeight: 600, color: 'white', marginBottom: 4 }}>No settings found</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>No settings found</div>
                   <div>No settings matched your query "{searchQuery}". Try a different keyword.</div>
                 </div>
               )}

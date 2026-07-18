@@ -1,5 +1,25 @@
 import { StateCreator } from 'zustand';
 import { PlayerState } from './types';
+import { invoke } from '@tauri-apps/api/core';
+
+let sleepTimerInterval: any = null;
+
+const getSavedShortcuts = () => {
+  const raw = localStorage.getItem('aideo-keyboard-shortcuts');
+  const defaults = {
+    playPause: 'Space',
+    next: 'ArrowRight',
+    prev: 'ArrowLeft',
+    volumeUp: 'ArrowUp',
+    volumeDown: 'ArrowDown'
+  };
+  if (raw) {
+    try {
+      return { ...defaults, ...JSON.parse(raw) };
+    } catch (_) {}
+  }
+  return defaults;
+};
 
 export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   view: 'aideo',
@@ -30,6 +50,11 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     actionLabel: '',
     onSubmit: () => { }
   },
+
+  miniPlayerMode: false,
+  shortcuts: getSavedShortcuts(),
+  sleepTimer: { duration: 0, remaining: 0, active: false },
+  colorScheme: (localStorage.getItem('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
 
   setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }
@@ -146,5 +171,76 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
       night_mode_enabled: false,
       r128_enabled: false
     });
+  },
+
+  setMiniPlayerMode: async (mini: boolean) => {
+    try {
+      await invoke('set_mini_player_mode', { mini });
+      set({ miniPlayerMode: mini });
+    } catch (e) {
+      console.error('Failed to toggle mini player mode:', e);
+    }
+  },
+
+  setShortcut: (action: string, binding: string) => {
+    const nextShortcuts = { ...get().shortcuts, [action]: binding };
+    localStorage.setItem('aideo-keyboard-shortcuts', JSON.stringify(nextShortcuts));
+    set({ shortcuts: nextShortcuts });
+  },
+
+  startSleepTimer: (durationMinutes: number) => {
+    if (sleepTimerInterval) {
+      clearInterval(sleepTimerInterval);
+      sleepTimerInterval = null;
+    }
+    const durationSeconds = durationMinutes * 60;
+    set({
+      sleepTimer: {
+        duration: durationMinutes,
+        remaining: durationSeconds,
+        active: true
+      }
+    });
+    sleepTimerInterval = setInterval(() => {
+      const current = get().sleepTimer;
+      if (!current.active) {
+        if (sleepTimerInterval) {
+          clearInterval(sleepTimerInterval);
+          sleepTimerInterval = null;
+        }
+        return;
+      }
+      if (current.remaining <= 1) {
+        clearInterval(sleepTimerInterval);
+        sleepTimerInterval = null;
+        set({
+          sleepTimer: { duration: 0, remaining: 0, active: false }
+        });
+        get().pauseTrack();
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sleep timer finished. Playback paused.', type: 'info' } }));
+      } else {
+        set({
+          sleepTimer: {
+            ...current,
+            remaining: current.remaining - 1
+          }
+        });
+      }
+    }, 1000);
+  },
+
+  stopSleepTimer: () => {
+    if (sleepTimerInterval) {
+      clearInterval(sleepTimerInterval);
+      sleepTimerInterval = null;
+    }
+    set({
+      sleepTimer: { duration: 0, remaining: 0, active: false }
+    });
+  },
+
+  setColorScheme: (mode: 'dark' | 'light' | 'system') => {
+    localStorage.setItem('aideo-color-scheme', mode);
+    set({ colorScheme: mode });
   },
 });

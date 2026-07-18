@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
 
 export function Sidebar() {
   const { 
@@ -87,6 +87,10 @@ export function Sidebar() {
       <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')} title={sidebarCollapsed ? "Now Playing" : undefined}>
         <Headphones size={18} />
         {!sidebarCollapsed && <span>Now Playing</span>}
+      </div>
+      <div className={`nav-item ${view === 'insights' ? 'active' : ''}`} onClick={() => setView('insights')} title={sidebarCollapsed ? "Aideo Insights" : undefined}>
+        <BarChart3 size={18} />
+        {!sidebarCollapsed && <span>Aideo Insights</span>}
       </div>
       {lastfmSessionKey && sidebarLastfmVisible && (
         <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')} title={sidebarCollapsed ? "Last.fm Stats" : undefined}>

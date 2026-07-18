@@ -58,6 +58,7 @@ export function QueueView() {
 
           {/* Queue Panel */}
           <motion.div
+            className="queue-panel"
             initial={{ y: '100%', opacity: 0.5 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: '100%', opacity: 0.5 }}
@@ -68,18 +69,16 @@ export function QueueView() {
               right: 24,
               width: 400,
               maxHeight: '60vh',
-              background: 'rgba(26, 26, 36, 0.95)',
               backdropFilter: 'blur(16px)',
               border: '1px solid var(--glass-border)',
               borderRadius: 12,
-              boxShadow: '0 -8px 32px rgba(0,0,0,0.5)',
               zIndex: 4001,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--glass-border)', background: 'var(--glass)' }}>
               <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Up Next</h2>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                 {queue.length > 0 && (
@@ -123,7 +122,7 @@ export function QueueView() {
                           alignItems: 'center',
                           gap: 16,
                           padding: '8px 12px',
-                          background: draggedIdx === i ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.2)',
+                          background: draggedIdx === i ? 'var(--glass-h)' : 'var(--glass)',
                           borderRadius: 8,
                           cursor: 'grab',
                           transition: 'background 0.2s',

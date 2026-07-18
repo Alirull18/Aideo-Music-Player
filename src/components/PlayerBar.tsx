@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
-import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2, Heart, ThumbsDown } from 'lucide-react';
+import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2, Minimize2, Heart, ThumbsDown } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { CastSelector } from './CastSelector';
 import { fmt, baseName, getStreamName } from '../utils';
@@ -23,7 +23,8 @@ export function PlayerBar() {
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
     dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
-    autoplayEnabled, toggleAutoplay, toggleLoveTrack, toggleDislikeTrack
+    autoplayEnabled, toggleAutoplay, toggleLoveTrack, toggleDislikeTrack,
+    setMiniPlayerMode
   } = useStore();
 
   const activeLyric = useMemo(() => {
@@ -128,7 +129,7 @@ export function PlayerBar() {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: current.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.35)',
+                color: current.loved === 1 ? '#ef4444' : 'var(--text-dim)',
                 cursor: 'pointer',
                 padding: 6,
                 display: 'flex',
@@ -142,7 +143,7 @@ export function PlayerBar() {
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = 'scale(1.0)';
-                if (current.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.35)';
+                if (current.loved !== 1) e.currentTarget.style.color = 'var(--text-dim)';
               }}
               title={current.loved === 1 ? "Remove from Loved Streams" : "Add to Loved Streams"}
             >
@@ -156,7 +157,7 @@ export function PlayerBar() {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: current.disliked === 1 ? '#f43f5e' : 'rgba(255, 255, 255, 0.35)',
+                color: current.disliked === 1 ? '#f43f5e' : 'var(--text-dim)',
                 cursor: 'pointer',
                 padding: 6,
                 display: 'flex',
@@ -170,7 +171,7 @@ export function PlayerBar() {
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = 'scale(1.0)';
-                if (current.disliked !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.35)';
+                if (current.disliked !== 1) e.currentTarget.style.color = 'var(--text-dim)';
               }}
               title={current.disliked === 1 ? "Undislike track" : "Dislike track"}
             >
@@ -259,6 +260,9 @@ export function PlayerBar() {
         <CastSelector />
         <button className="pb-btn" onClick={toggleControlCenter} title="Audio Engine Settings">
           <SlidersHorizontal size={18} />
+        </button>
+        <button className="pb-btn" onClick={() => setMiniPlayerMode(true)} title="Mini Player">
+          <Minimize2 size={18} />
         </button>
         <button className="pb-btn" onClick={() => setView('fullscreen')} title="Enter Theater Fullscreen">
           <Maximize2 size={18} />

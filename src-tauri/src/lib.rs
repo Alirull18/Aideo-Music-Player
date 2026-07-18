@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, PlatformConfig, MediaPosition};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
-use tauri::{AppHandle, Emitter, Manager, State, Listener};
+use tauri::{AppHandle, Emitter, Manager, State, Listener, Window};
 
 mod artwork;
 mod db;
@@ -1034,6 +1034,240 @@ fn mark_history_synced(ids: Vec<i64>, state: State<'_, AppState>) -> Result<(), 
     Ok(())
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct TopSong {
+    pub title: String,
+    pub artist: String,
+    pub track_path: String,
+    pub play_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct TopArtist {
+    pub artist: String,
+    pub play_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct TopGenre {
+    pub genre: String,
+    pub play_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct HourActivity {
+    pub hour: i32,
+    pub play_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct DayActivity {
+    pub day: i32,
+    pub play_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ListeningInsightsPayload {
+    pub total_listening_time_secs: f64,
+    pub total_plays: i64,
+    pub skip_count: i64,
+    pub skip_rate: f64,
+    pub top_songs: Vec<TopSong>,
+    pub top_artists: Vec<TopArtist>,
+    pub top_genres: Vec<TopGenre>,
+    pub hourly_activity: Vec<HourActivity>,
+    pub daily_activity: Vec<DayActivity>,
+}
+
+#[tauri::command]
+fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<ListeningInsightsPayload, String> {
+    let conn = safe_lock(&state.db);
+    
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    let filter_timestamp = match range.as_str() {
+        "today" => now - 86400,
+        "last_7_days" => now - 7 * 86400,
+        "last_30_days" => now - 30 * 86400,
+        _ => 0, // all_time
+    };
+
+    // 1. Fetch total time, plays, and skips
+    let mut stmt = conn.prepare(
+        "SELECT 
+            COALESCE(SUM(duration_played), 0.0),
+            COUNT(id),
+            COALESCE(SUM(CASE WHEN skipped = 1 THEN 1 ELSE 0 END), 0)
+         FROM playback_history
+         WHERE timestamp >= ?1"
+    ).map_err(|e| e.to_string())?;
+
+    let mut rows = stmt.query(rusqlite::params![filter_timestamp]).map_err(|e| e.to_string())?;
+    
+    let mut total_listening_time_secs = 0.0;
+    let mut total_plays = 0;
+    let mut skip_count = 0;
+    
+    if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        total_listening_time_secs = row.get(0).map_err(|e| e.to_string())?;
+        total_plays = row.get(1).map_err(|e| e.to_string())?;
+        skip_count = row.get(2).map_err(|e| e.to_string())?;
+    }
+    
+    let skip_rate = if total_plays > 0 {
+        (skip_count as f64 / total_plays as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    // 2. Fetch top songs
+    let mut stmt = conn.prepare(
+        "SELECT 
+            COALESCE(title, ''),
+            COALESCE(artist, ''),
+            track_path,
+            COUNT(*) as play_count
+         FROM playback_history
+         WHERE timestamp >= ?1
+         GROUP BY track_path, title, artist
+         ORDER BY play_count DESC
+         LIMIT 10"
+    ).map_err(|e| e.to_string())?;
+    
+    let song_rows = stmt.query_map(rusqlite::params![filter_timestamp], |row| {
+        Ok(TopSong {
+            title: row.get(0)?,
+            artist: row.get(1)?,
+            track_path: row.get(2)?,
+            play_count: row.get(3)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut top_songs = Vec::new();
+    for r in song_rows {
+        if let Ok(item) = r {
+            top_songs.push(item);
+        }
+    }
+
+    // 3. Fetch top artists
+    let mut stmt = conn.prepare(
+        "SELECT 
+            COALESCE(artist, ''),
+            COUNT(*) as play_count
+         FROM playback_history
+         WHERE timestamp >= ?1 AND artist IS NOT NULL AND artist != ''
+         GROUP BY artist
+         ORDER BY play_count DESC
+         LIMIT 10"
+    ).map_err(|e| e.to_string())?;
+    
+    let artist_rows = stmt.query_map(rusqlite::params![filter_timestamp], |row| {
+        Ok(TopArtist {
+            artist: row.get(0)?,
+            play_count: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut top_artists = Vec::new();
+    for r in artist_rows {
+        if let Ok(item) = r {
+            top_artists.push(item);
+        }
+    }
+
+    // 4. Fetch top genres
+    let mut stmt = conn.prepare(
+        "SELECT 
+            COALESCE(genre, ''),
+            COUNT(*) as play_count
+         FROM playback_history
+         WHERE timestamp >= ?1 AND genre IS NOT NULL AND genre != ''
+         GROUP BY genre
+         ORDER BY play_count DESC
+         LIMIT 10"
+    ).map_err(|e| e.to_string())?;
+    
+    let genre_rows = stmt.query_map(rusqlite::params![filter_timestamp], |row| {
+        Ok(TopGenre {
+            genre: row.get(0)?,
+            play_count: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut top_genres = Vec::new();
+    for r in genre_rows {
+        if let Ok(item) = r {
+            top_genres.push(item);
+        }
+    }
+
+    // 5. Fetch hourly activity
+    let mut stmt = conn.prepare(
+        "SELECT 
+            CAST(strftime('%H', datetime(timestamp, 'unixepoch', 'localtime')) as INTEGER) as hr,
+            COUNT(*)
+         FROM playback_history
+         WHERE timestamp >= ?1
+         GROUP BY hr
+         ORDER BY hr ASC"
+    ).map_err(|e| e.to_string())?;
+    
+    let hour_rows = stmt.query_map(rusqlite::params![filter_timestamp], |row| {
+        Ok(HourActivity {
+            hour: row.get(0)?,
+            play_count: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut hourly_activity = Vec::new();
+    for r in hour_rows {
+        if let Ok(item) = r {
+            hourly_activity.push(item);
+        }
+    }
+
+    // 6. Fetch daily activity
+    let mut stmt = conn.prepare(
+        "SELECT 
+            CAST(strftime('%w', datetime(timestamp, 'unixepoch', 'localtime')) as INTEGER) as dy,
+            COUNT(*)
+         FROM playback_history
+         WHERE timestamp >= ?1
+         GROUP BY dy
+         ORDER BY dy ASC"
+    ).map_err(|e| e.to_string())?;
+    
+    let day_rows = stmt.query_map(rusqlite::params![filter_timestamp], |row| {
+        Ok(DayActivity {
+            day: row.get(0)?,
+            play_count: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut daily_activity = Vec::new();
+    for r in day_rows {
+        if let Ok(item) = r {
+            daily_activity.push(item);
+        }
+    }
+
+    Ok(ListeningInsightsPayload {
+        total_listening_time_secs,
+        total_plays,
+        skip_count,
+        skip_rate,
+        top_songs,
+        top_artists,
+        top_genres,
+        hourly_activity,
+        daily_activity,
+    })
+}
+
 #[tauri::command]
 fn play_track(path: String, start_pos: Option<f64>, state: State<'_, AppState>) -> Result<(), String> {
     let player = safe_lock(&state.player);
@@ -1281,6 +1515,22 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
 #[tauri::command]
 fn log_error(msg: String) {
     println!("[frontend-error] {}", msg);
+}
+
+#[tauri::command]
+async fn set_mini_player_mode(window: Window, mini: bool) -> Result<(), String> {
+    if mini {
+        window.set_decorations(false).map_err(|e| e.to_string())?;
+        window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(340.0, 180.0))).map_err(|e| e.to_string())?;
+        window.set_always_on_top(true).map_err(|e| e.to_string())?;
+        window.set_resizable(false).map_err(|e| e.to_string())?;
+    } else {
+        window.set_decorations(true).map_err(|e| e.to_string())?;
+        window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(1000.0, 700.0))).map_err(|e| e.to_string())?;
+        window.set_always_on_top(false).map_err(|e| e.to_string())?;
+        window.set_resizable(true).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1538,6 +1788,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_oauth_window,
             log_error,
+            set_mini_player_mode,
             scan_and_save,
             get_library,
             play_track,
@@ -1605,6 +1856,7 @@ pub fn run() {
             log_playback_end,
             get_unsynced_history,
             mark_history_synced,
+            get_listening_insights,
             youtube::search_youtube,
             youtube::get_search_suggestions,
             youtube::download_track,

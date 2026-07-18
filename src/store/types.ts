@@ -168,7 +168,7 @@ export interface NetworkTelemetry {
 }
 
 export interface PlayerState {
-  view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams';
+  view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights';
   networkTelemetry: NetworkTelemetry | null;
   tracks: Track[];
   queue: Track[];
@@ -226,7 +226,7 @@ export interface PlayerState {
   setCoverArtModalTrack: (track: Track | null) => void;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams') => void;
+  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights') => void;
   setAppMode: (mode: 'local' | 'hybrid') => void;
   setOnboardingCompleted: (completed: boolean) => void;
   setShowOnboarding: (show: boolean) => void;
@@ -392,6 +392,23 @@ export interface PlayerState {
   discoverCastDevices: () => Promise<void>;
   connectCastDevice: (device: { name: string; ip: string; port: number }) => Promise<void>;
   disconnectCastDevice: () => Promise<void>;
+
+  // Mini Player
+  miniPlayerMode: boolean;
+  setMiniPlayerMode: (mini: boolean) => Promise<void>;
+
+  // Keyboard Shortcuts
+  shortcuts: Record<string, string>;
+  setShortcut: (action: string, binding: string) => void;
+
+  // Sleep Timer
+  sleepTimer: { duration: number; remaining: number; active: boolean };
+  startSleepTimer: (duration: number) => void;
+  stopSleepTimer: () => void;
+
+  // Color Scheme Theme Mode
+  colorScheme: 'dark' | 'light' | 'system';
+  setColorScheme: (mode: 'dark' | 'light' | 'system') => void;
 }
 
 function rgbToHsl(r: number, g: number, b: number) {

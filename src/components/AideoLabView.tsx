@@ -91,9 +91,21 @@ const getSourceStyle = (source: string) => {
 
 export function AideoLabView() {
   const { 
-    dsp, setDSP, accentColor, lowSpecMode
+    dsp, setDSP, accentColor, lowSpecMode, colorScheme
   } = useStore();
   const [activeTab, setActiveTab] = useState<'eq' | 'spatial' | 'dynamics' | 'aideo_filter'>('eq');
+  const [systemIsLight, setSystemIsLight] = useState(() => 
+    typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: light)').matches : false
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const listener = (e: MediaQueryListEvent) => setSystemIsLight(e.matches);
+    media.addEventListener('change', listener);
+    return () => media.removeEventListener('change', listener);
+  }, []);
+
+  const isLightTheme = colorScheme === 'light' || (colorScheme === 'system' && systemIsLight);
 
   // Custom Preset States
   const [customPresets, setCustomPresets] = useState<{ name: string; dsp: any }[]>(() => {
@@ -302,7 +314,7 @@ export function AideoLabView() {
       }
       
       // Clear top row
-      ctx.fillStyle = 'rgba(9, 9, 14, 0.05)';
+      ctx.fillStyle = isLightTheme ? 'rgba(243, 243, 249, 0.05)' : 'rgba(9, 9, 14, 0.05)';
       ctx.fillRect(0, 0, w, 1);
 
       const bands = spectrumRef.current;
@@ -324,7 +336,7 @@ export function AideoLabView() {
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [activeTab, lowSpecMode]);
+  }, [activeTab, lowSpecMode, isLightTheme]);
 
   // Real-time audio-reactive Soundstage arena pulse engine
   useEffect(() => {
@@ -744,15 +756,15 @@ export function AideoLabView() {
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: 'rgba(9, 9, 14, 0.98)',
-      color: 'white',
+      background: 'var(--bg)',
+      color: 'var(--text)',
       padding: '30px 40px',
       overflowY: 'auto'
     }}>
       {/* Header */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: 'white', letterSpacing: -0.5 }}>Aideo Lab</h1>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text)', letterSpacing: -0.5 }}>Aideo Lab</h1>
           <p style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>
             Visual Acoustic Laboratory — Professional DSP Engineering & Psychoacoustics.
           </p>
@@ -786,10 +798,10 @@ export function AideoLabView() {
           {/* Tab Selection */}
           <div style={{
             display: 'flex',
-            background: 'rgba(255, 255, 255, 0.03)',
+            background: 'var(--glass)',
             padding: 3,
             borderRadius: 10,
-            border: '1px solid rgba(255, 255, 255, 0.05)',
+            border: '1px solid var(--glass-border)',
             gap: 4
           }}>
             {[
@@ -805,9 +817,9 @@ export function AideoLabView() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  background: activeTab === tab.id ? 'rgba(255, 255, 255, 0.07)' : 'transparent',
+                  background: activeTab === tab.id ? 'var(--glass-h)' : 'transparent',
                   border: 'none',
-                  color: activeTab === tab.id ? 'white' : 'var(--text-dim)',
+                  color: activeTab === tab.id ? 'var(--text)' : 'var(--text-dim)',
                   padding: '8px 16px',
                   borderRadius: 8,
                   fontSize: 12,
@@ -840,7 +852,7 @@ export function AideoLabView() {
               <div className="settings-ctrl-card" style={{ padding: 24, position: 'relative' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <div>
-                    <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white' }}>Logarithmic EQ Spline & Waterfall</h3>
+                    <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Logarithmic EQ Spline & Waterfall</h3>
                     <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                       Click and drag handles to adjust precise frequency responses. Translucent real-time waterfall active underneath.
                     </p>
@@ -916,8 +928,8 @@ export function AideoLabView() {
                       const y = getY(db, 200);
                       return (
                         <g key={db}>
-                          <line x1="0" y1={y} x2="100%" y2={y} stroke="rgba(255, 255, 255, 0.04)" strokeDasharray="3" />
-                          <text x="6" y={y - 4} fill="rgba(255, 255, 255, 0.25)" fontSize="9" fontWeight="600">{db > 0 ? `+${db}` : db}dB</text>
+                          <line x1="0" y1={y} x2="100%" y2={y} stroke="var(--glass-border)" strokeDasharray="3" />
+                          <text x="6" y={y - 4} fill="var(--text-dim)" fontSize="9" fontWeight="600">{db > 0 ? `+${db}` : db}dB</text>
                         </g>
                       );
                     })}
@@ -927,8 +939,8 @@ export function AideoLabView() {
                       const x = `${(Math.log10(f) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20)) * 100}%`;
                       return (
                         <g key={f}>
-                          <line x1={x} y1="0" x2={x} y2="100%" stroke="rgba(255, 255, 255, 0.04)" />
-                          <text x={x} y="194" dx="4" fill="rgba(255, 255, 255, 0.25)" fontSize="8" fontWeight="600">
+                          <line x1={x} y1="0" x2={x} y2="100%" stroke="var(--glass-border)" />
+                          <text x={x} y="194" dx="4" fill="var(--text-dim)" fontSize="8" fontWeight="600">
                             {f >= 1000 ? `${f / 1000}kHz` : `${f}Hz`}
                           </text>
                         </g>
@@ -1005,7 +1017,7 @@ export function AideoLabView() {
 
               {/* DSP Preset Manager Card */}
               <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
                   <Sliders size={15} />
                   DSP & Equalizer Presets
                 </h4>
@@ -1015,7 +1027,7 @@ export function AideoLabView() {
                     onChange={(e) => handleLoadPreset(e.target.value)}
                     style={{
                       background: 'rgba(0, 0, 0, 0.3)',
-                      color: 'white',
+                      color: 'var(--text)',
                       border: '1px solid var(--glass-border)',
                       borderRadius: 6,
                       padding: '6px 12px',
@@ -1050,7 +1062,7 @@ export function AideoLabView() {
                       onChange={(e) => setNewPresetName(e.target.value)}
                       style={{
                         background: 'rgba(0, 0, 0, 0.3)',
-                        color: 'white',
+                        color: 'var(--text)',
                         border: '1px solid var(--glass-border)',
                         borderRadius: 6,
                         padding: '6px 10px',
@@ -1083,7 +1095,7 @@ export function AideoLabView() {
               <div className="settings-ctrl-card" style={{ padding: 20 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Headphones size={15} />
                       Import AutoEQ Headphone Profile
                     </h4>
@@ -1119,7 +1131,7 @@ export function AideoLabView() {
                           placeholder="Search headphone models (e.g. Sony WH-1000XM4, HD600)..."
                           value={dbSearchQuery}
                           onChange={e => setDbSearchQuery(e.target.value)}
-                          style={{ flex: 1, border: 'none', background: 'transparent', color: 'white', fontSize: 12, outline: 'none' }}
+                          style={{ flex: 1, border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 12, outline: 'none' }}
                         />
                         {isFetchingDb && <Loader2 size={14} className="spinning" style={{ alignSelf: 'center' }} />}
                       </div>
@@ -1153,7 +1165,7 @@ export function AideoLabView() {
                               }}
                               className="aideo-carousel-card-hover"
                             >
-                              <span style={{ fontSize: 12, fontWeight: 500, color: 'white' }}>{item.name}</span>
+                              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>{item.name}</span>
                               <span style={{
                                 fontSize: 9,
                                 fontWeight: 700,
@@ -1192,7 +1204,7 @@ export function AideoLabView() {
               <div className="settings-ctrl-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
                 <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
                   <div>
-                    <h4 style={{ fontSize: 14, fontWeight: 700, color: 'white', marginBottom: 4 }}>3D Visual Spatial Arena</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>3D Visual Spatial Arena</h4>
                     <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: 0 }}>
                       Top-down view representing concentric loudspeaker shadow reflections and ear mixing.
                     </p>
@@ -1211,9 +1223,9 @@ export function AideoLabView() {
                   position: 'relative',
                   width: 200,
                   height: 200,
-                  background: 'rgba(0,0,0,0.18)',
+                  background: 'var(--glass)',
                   borderRadius: 100,
-                  border: '1px solid rgba(255,255,255,0.03)',
+                  border: '1px solid var(--glass-border)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -1361,7 +1373,7 @@ export function AideoLabView() {
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Linkwitz Headphone Crossfeed</h4>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Linkwitz Headphone Crossfeed</h4>
                       <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Simulate dynamic speaker positioning in headphones.</p>
                     </div>
                     <button
@@ -1383,7 +1395,7 @@ export function AideoLabView() {
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
                           <span style={{ color: 'var(--text-dim)' }}>Crossfeed Level</span>
-                          <span style={{ color: 'white', fontWeight: 600 }}>{dsp.crossfeed_level}dB</span>
+                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{dsp.crossfeed_level}dB</span>
                         </div>
                         <input
                           type="range" min="-12" max="-3" step="0.5"
@@ -1400,7 +1412,7 @@ export function AideoLabView() {
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Haas Soundstage Expander</h4>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Haas Soundstage Expander</h4>
                       <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Width expansion using micro-second reflections.</p>
                     </div>
                     <button
@@ -1422,7 +1434,7 @@ export function AideoLabView() {
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
                           <span style={{ color: 'var(--text-dim)' }}>Precedence delay (Haas)</span>
-                          <span style={{ color: 'white', fontWeight: 600 }}>{dsp.spatial_haas_delay}ms</span>
+                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{dsp.spatial_haas_delay}ms</span>
                         </div>
                         <input
                           type="range" min="5" max="25" step="0.5"
@@ -1434,7 +1446,7 @@ export function AideoLabView() {
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
                           <span style={{ color: 'var(--text-dim)' }}>Haas expansion intensity (Wet)</span>
-                          <span style={{ color: 'white', fontWeight: 600 }}>{Math.round(dsp.spatial_wet * 100)}%</span>
+                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{Math.round(dsp.spatial_wet * 100)}%</span>
                         </div>
                         <input
                           type="range" min="0.0" max="1.0" step="0.05"
@@ -1463,7 +1475,7 @@ export function AideoLabView() {
               <div className="settings-ctrl-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
                   <div>
-                    <h4 style={{ fontSize: 14, fontWeight: 700, color: 'white', marginBottom: 4 }}>Acoustic XY Space Pad</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Acoustic XY Space Pad</h4>
                     <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: 0 }}>
                       Drag the glowing node to smoothly morph between spatial curves, compressed warm dynamics, or pure flats.
                     </p>
@@ -1488,16 +1500,16 @@ export function AideoLabView() {
                     position: 'relative',
                     width: 220,
                     height: 220,
-                    background: 'rgba(0,0,0,0.22)',
+                    background: 'var(--glass)',
                     borderRadius: 14,
-                    border: '1px solid rgba(255,255,255,0.06)',
+                    border: '1px solid var(--glass-border)',
                     cursor: isDraggingXY ? 'grabbing' : 'grab',
                     overflow: 'hidden'
                   }}
                 >
                   {/* Grid quadrants lines */}
-                  <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.03)' }} />
-                  <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.03)' }} />
+                  <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--glass-border)' }} />
+                  <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, background: 'var(--glass-border)' }} />
 
                   {/* Corner Labels */}
                   <div style={{ position: 'absolute', top: 10, left: 10, fontSize: 9, color: 'var(--text-dim)', fontWeight: 700 }}>SPATIAL & BRIGHT</div>
@@ -1528,7 +1540,7 @@ export function AideoLabView() {
                   marginTop: 18,
                   fontSize: 12,
                   fontWeight: 700,
-                  color: 'white',
+                  color: 'var(--text)',
                   background: 'rgba(255,255,255,0.03)',
                   padding: '6px 14px',
                   borderRadius: 20,
@@ -1544,7 +1556,7 @@ export function AideoLabView() {
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Butterworth Subsonic Filter</h4>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Butterworth Subsonic Filter</h4>
                       <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Cuts inaudible sub-18Hz rumble to save amplifier headroom.</p>
                     </div>
                     <button
@@ -1566,7 +1578,7 @@ export function AideoLabView() {
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Night Mode Dynamic Compressor</h4>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Night Mode Dynamic Compressor</h4>
                       <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>High ratio compression protecting ears from volume spikes.</p>
                     </div>
                     <button
@@ -1588,7 +1600,7 @@ export function AideoLabView() {
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>EBU R128 Loudness Normalizer</h4>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>EBU R128 Loudness Normalizer</h4>
                       <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Slow Automatic Gain Control to match uniform track loudness.</p>
                     </div>
                     <button
@@ -1608,13 +1620,13 @@ export function AideoLabView() {
 
                 {/* Digital Preamp & Peak Limiter Headroom */}
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white', marginBottom: 16 }}>Preamp & Safety Limiter</h4>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 16 }}>Preamp & Safety Limiter</h4>
                   
                   {/* Preamp Gain */}
                   <div style={{ marginBottom: 18 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <div>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Digital Preamp Gain</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Digital Preamp Gain</span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                           Attenuates signal to create digital headroom, avoiding clipping before EQ processing.
                         </span>
@@ -1636,7 +1648,7 @@ export function AideoLabView() {
                   <div style={{ marginBottom: 18, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Auto-Headroom Guard</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Auto-Headroom Guard</span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                           Automatically attenuates preamp gain based on positive EQ boosts to prevent digital clipping.
                         </span>
@@ -1660,7 +1672,7 @@ export function AideoLabView() {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <div>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Limiter Threshold</span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Limiter Threshold</span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                           Dynamic lookahead threshold to prevent clipping while maximizing analog output.
                         </span>
@@ -1683,7 +1695,7 @@ export function AideoLabView() {
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Resampler Phase Response</h4>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Resampler Phase Response</h4>
                       <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                         Controls pre/post-ringing filtering characteristics during high-resolution upsampling.
                       </p>
@@ -1724,7 +1736,7 @@ export function AideoLabView() {
                 <div className="settings-ctrl-card" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Seamless Crossfade Transitions</h4>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Seamless Crossfade Transitions</h4>
                       <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                         Fades out the current track while fading in the next track to eliminate gaps.
                       </p>
@@ -1745,7 +1757,7 @@ export function AideoLabView() {
 
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>Crossfade Duration</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Crossfade Duration</span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
                         {dsp.crossfade_transition_duration.toFixed(1)} seconds
                       </span>
@@ -1777,7 +1789,7 @@ export function AideoLabView() {
               <div className="settings-ctrl-card" style={{ padding: 28, position: 'relative' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                   <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Sparkles size={18} style={{ color: 'var(--accent)' }} />
                       Aideo Filter: Live Arena Sound Simulator
                     </h3>
@@ -1826,7 +1838,7 @@ export function AideoLabView() {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <div>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Arena Scale & Reflection Delay</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Arena Scale & Reflection Delay</span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                           Controls the physical size of the room and the delay times of early wall reflections.
                         </span>
@@ -1848,7 +1860,7 @@ export function AideoLabView() {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <div>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Subwoofer Intensity (Chest Thump)</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Subwoofer Intensity (Chest Thump)</span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                           Boosts sub-bass frequencies around 55Hz to simulate the chest-vibrating impact of stadium subwoofers.
                         </span>
@@ -1870,7 +1882,7 @@ export function AideoLabView() {
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <div>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Acoustic Absorption & Crowd Dampening</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Acoustic Absorption & Crowd Dampening</span>
                         <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                           Simulates how packed the stadium is. Higher values model more absorption (warmer sound, shorter decay).
                         </span>
@@ -1912,7 +1924,7 @@ export function AideoLabView() {
               <div className="settings-ctrl-card" style={{ padding: 28, marginTop: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                   <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Power size={18} style={{ color: 'var(--accent)' }} />
                       Vacuum Tube Analog Saturation
                     </h3>
@@ -1939,7 +1951,7 @@ export function AideoLabView() {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <div>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Harmonic Drive & Warmth Intensity</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Harmonic Drive & Warmth Intensity</span>
                       <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
                         Increasing drive generates pleasant 2nd-order harmonics and soft-compresses peaks.
                       </span>

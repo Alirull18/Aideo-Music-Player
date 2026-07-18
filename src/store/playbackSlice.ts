@@ -328,6 +328,16 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       set(s => ({ playback: { ...s.playback, ...status } }));
 
+      // Periodically sync media progress with OS Media Control Center (once every 1 second, or 5 ticks of 200ms)
+      if (status.status === 'Playing') {
+        const tickCount = (get() as any).mediaControlTickCount || 0;
+        const nextTickCount = (tickCount + 1) % 5;
+        (get() as any).mediaControlTickCount = nextTickCount;
+        if (nextTickCount === 0) {
+          invoke('update_media_playback', { playing: true }).catch(() => {});
+        }
+      }
+
       if (status.network_telemetry && status.current_track && (status.current_track.startsWith('http://') || status.current_track.startsWith('https://'))) {
         set({ networkTelemetry: status.network_telemetry });
       } else if (get().networkTelemetry !== null) {

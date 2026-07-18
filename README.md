@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.9.0
+# 💎 Aideo Music Player v0.9.1
 
 **A Studio-Grade, Audiophile Music Engine with Dynamic Aesthetics, YTM AI Discovery & Real-Time Social Presence.**
 
@@ -61,6 +61,15 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
+## 📢 What's New in v0.9.1 (Local Playback Insights, Wrapped Slideshow & Theme Contrast Overhauls)
+
+* **📊 Local Listening Insights Dashboard**: Introduced a completely local, privacy-centric listening analytics dashboard (Aideo Insights). Track total listening time, play count, skip rates, top tracks, top artists, and top genres fully offline with zero cloud dependency.
+* **✨ Spotify-Style "Aideo Wrapped" Slideshow**: Launch an interactive, animated fullscreen slideshow summarizing your musical milestones, highlighting top listening stats, and awarding a custom Music Personality badge based on scrobbler telemetry.
+* **📈 SVG Activity Peak Heatmaps**: Integrated responsive, lightweight SVG-rendered bar charts visualizing your hourly listening peaks and weekly heatmap distributions.
+* **🎨 Ambient Visual & Stacking Fixes**: Fixed a canvas stacking context bug causing Now Playing visualizers to hide behind solid backgrounds in fullscreen theater panels. Corrected text and border contrast ratios under Light Mode in settings, Now Playing, library, Aideo Lab, and media bar controls.
+
+---
+
 ## 📢 What's New in v0.9.0 (Web Stream Songs Filter, App Restart Metadata Fix & Latency Optimizations)
 
 * **🎵 Web Stream Songs Filter**: Fixed the YouTube Music Song-only search parser layout to correctly extract artist names and titles when the `"Song •"` subtitle prefix is omitted.
@@ -81,8 +90,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.9.0 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.9.0_x64_en-US.msi`).
+1. **Download**: Get the latest v0.9.1 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.9.1_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---

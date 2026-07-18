@@ -17,6 +17,7 @@ const ListenbrainzView = lazy(() => import('./components/ListenbrainzView').then
 const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
 const AideoLabView = lazy(() => import('./components/AideoLabView').then(m => ({ default: m.AideoLabView })));
 const FullscreenView = lazy(() => import('./components/FullscreenView').then(m => ({ default: m.FullscreenView })));
+const ListeningInsightsView = lazy(() => import('./components/ListeningInsightsView').then(m => ({ default: m.ListeningInsightsView })));
 
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
@@ -27,6 +28,7 @@ import { OnboardingWizard } from './components/OnboardingWizard';
 import { CoverArtModal } from './components/CoverArtModal';
 import { BrowserCallbackLanding } from './components/BrowserCallbackLanding';
 import { OauthChildCallback } from './components/OauthChildCallback';
+import { MiniPlayer } from './components/MiniPlayer';
 
 // Global Error Logging to Backend Terminal
 if (typeof window !== 'undefined') {
@@ -63,8 +65,22 @@ function AideoApp() {
     lowSpecMode,
     onboardingCompleted,
     showOnboarding,
-    sidebarCollapsed
+    sidebarCollapsed,
+    miniPlayerMode,
+    colorScheme,
+    coverArtModalTrack
   } = useStore();
+  const [systemIsLight, setSystemIsLight] = useState(window.matchMedia('(prefers-color-scheme: light)').matches);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
+    const listener = (e: MediaQueryListEvent) => setSystemIsLight(e.matches);
+    mediaQuery.addEventListener('change', listener);
+    return () => mediaQuery.removeEventListener('change', listener);
+  }, []);
+
+  const isLightTheme = colorScheme === 'light' || (colorScheme === 'system' && systemIsLight);
+
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -259,16 +275,28 @@ function AideoApp() {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-      const key = e.keyCode || e.which;
-      if (key === 32) { // Space
+      const state = useStore.getState();
+      const userShortcuts = state.shortcuts || {};
+      const keyName = e.key === ' ' ? 'Space' : e.key;
+
+      if (keyName === userShortcuts.playPause) {
         e.preventDefault();
-        const state = useStore.getState();
         if (state.playback.status === 'Playing') state.pauseTrack();
         else state.resumeTrack();
-      } else if (key === 39) { // Right
-        useStore.getState().playNext();
-      } else if (key === 37) { // Left
-        useStore.getState().playPrev();
+      } else if (keyName === userShortcuts.next) {
+        e.preventDefault();
+        state.playNext();
+      } else if (keyName === userShortcuts.prev) {
+        e.preventDefault();
+        state.playPrev();
+      } else if (keyName === userShortcuts.volumeUp) {
+        e.preventDefault();
+        const currentVol = state.playback.volume;
+        state.setVolume(Math.min(currentVol + 0.05, 1));
+      } else if (keyName === userShortcuts.volumeDown) {
+        e.preventDefault();
+        const currentVol = state.playback.volume;
+        state.setVolume(Math.max(currentVol - 0.05, 0));
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -311,9 +339,20 @@ function AideoApp() {
     };
   }, [setPlaybackSuccess, setPlaybackError]);
 
+  if (miniPlayerMode) {
+    return (
+      <MotionConfig reducedMotion={lowSpecMode ? "always" : "user"}>
+        <div className={`mini-player-outer-wrapper ${isLightTheme ? 'light-theme' : ''}`}>
+          <MiniPlayer />
+          <ToastContainer />
+        </div>
+      </MotionConfig>
+    );
+  }
+
   return (
     <MotionConfig reducedMotion={lowSpecMode ? "always" : "user"}>
-      <div className={`${lowSpecMode ? "app low-spec" : "app"} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <div className={`${lowSpecMode ? "app low-spec" : "app"} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${isLightTheme ? "light-theme" : ""}`}>
         <Sidebar />
       <main className="app-main">
         {/* Keep the core heavy AideoView and LibraryView mounted to ensure buttery-smooth instant transitions */}
@@ -378,6 +417,19 @@ function AideoApp() {
                 </div>
               }>
                 <SettingsView />
+              </Suspense>
+            </motion.div>
+          )}
+
+          {view === 'insights' && (
+            <motion.div key="insights" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Insights...</span>
+                </div>
+              }>
+                <ListeningInsightsView />
               </Suspense>
             </motion.div>
           )}
@@ -571,7 +623,7 @@ function AideoApp() {
         </AnimatePresence>
 
         <AnimatePresence>
-          {useStore(s => s.coverArtModalTrack) && <CoverArtModal />}
+          {coverArtModalTrack && <CoverArtModal />}
         </AnimatePresence>
       </AnimatePresence>
 
