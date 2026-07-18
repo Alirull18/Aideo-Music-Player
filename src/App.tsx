@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { useStore } from './store';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -11,18 +11,19 @@ import { Sidebar } from './components/Sidebar';
 import { LibraryView } from './components/LibraryView';
 import { AideoView } from './components/AideoView';
 import { NowPlayingView } from './components/NowPlayingView';
-import { LastfmView } from './components/LastfmView';
-import { ListenbrainzView } from './components/ListenbrainzView';
+
+const LastfmView = lazy(() => import('./components/LastfmView').then(m => ({ default: m.LastfmView })));
+const ListenbrainzView = lazy(() => import('./components/ListenbrainzView').then(m => ({ default: m.ListenbrainzView })));
+const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
+const AideoLabView = lazy(() => import('./components/AideoLabView').then(m => ({ default: m.AideoLabView })));
+const FullscreenView = lazy(() => import('./components/FullscreenView').then(m => ({ default: m.FullscreenView })));
 
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
-import { SettingsView } from './components/SettingsView';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
-import { AideoLabView } from './components/AideoLabView';
 import { OnboardingWizard } from './components/OnboardingWizard';
-import { FullscreenView } from './components/FullscreenView';
 import { CoverArtModal } from './components/CoverArtModal';
 import { BrowserCallbackLanding } from './components/BrowserCallbackLanding';
 import { OauthChildCallback } from './components/OauthChildCallback';
@@ -333,34 +334,64 @@ function AideoApp() {
           {view === 'lastfm' && (
             <motion.div key="lfm" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <LastfmView />
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Last.fm...</span>
+                </div>
+              }>
+                <LastfmView />
+              </Suspense>
             </motion.div>
           )}
           {view === 'listenbrainz' && (
             <motion.div key="listenbrainz" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <ListenbrainzView />
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading ListenBrainz...</span>
+                </div>
+              }>
+                <ListenbrainzView />
+              </Suspense>
             </motion.div>
           )}
 
           {view === 'aideo_lab' && (
             <motion.div key="aideo_lab" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <AideoLabView />
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Aideo Lab...</span>
+                </div>
+              }>
+                <AideoLabView />
+              </Suspense>
             </motion.div>
           )}
 
           {view === 'settings' && (
             <motion.div key="settings" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <SettingsView />
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Settings...</span>
+                </div>
+              }>
+                <SettingsView />
+              </Suspense>
             </motion.div>
           )}
 
           {view === 'fullscreen' && (
             <motion.div key="fullscreen" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <FullscreenView />
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Fullscreen...</span>
+                </div>
+              }>
+                <FullscreenView />
+              </Suspense>
             </motion.div>
           )}
         </AnimatePresence>

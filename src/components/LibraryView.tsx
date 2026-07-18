@@ -5,6 +5,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { Track, Playlist } from '../store/types';
+import { useVirtualList } from '../utils/useVirtualList';
+import { useRef } from 'react';
+
 
 const isStreamTrack = (path: string, format?: string | null) => {
   return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
@@ -692,12 +695,7 @@ export function LibraryView() {
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [visibleLocalCount, setVisibleLocalCount] = useState(150);
-
-  // Reset local pagination count when search filters or sectors change
-  useEffect(() => {
-    setVisibleLocalCount(150);
-  }, [searchQuery, view, currentPlaylist, activeSector]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   
   // Deferred rendering for large libraries to prevent initial load jank
   const [libraryReady, setLibraryReady] = useState(tracks.length < 200);
@@ -915,6 +913,36 @@ export function LibraryView() {
     return (t.title?.toLowerCase().includes(q) || t.artist?.toLowerCase().includes(q) || t.path.toLowerCase().includes(q));
   });
 
+  const {
+    visibleItems: virtualLocalTracks,
+    topSpacerHeight: topLocalSpacer,
+    bottomSpacerHeight: bottomLocalSpacer,
+    startIndex: localStartIndex,
+  } = useVirtualList(filteredTracks, {
+    itemHeight: 52,
+    scrollContainer: scrollRef.current,
+  });
+
+  const {
+    visibleItems: virtualSubsonicTracks,
+    topSpacerHeight: topSubsonicSpacer,
+    bottomSpacerHeight: bottomSubsonicSpacer,
+    startIndex: subsonicStartIndex,
+  } = useVirtualList(subsonicTracks, {
+    itemHeight: 52,
+    scrollContainer: scrollRef.current,
+  });
+
+  const {
+    visibleItems: virtualJellyfinTracks,
+    topSpacerHeight: topJellyfinSpacer,
+    bottomSpacerHeight: bottomJellyfinSpacer,
+    startIndex: jellyfinStartIndex,
+  } = useVirtualList(jellyfinTracks, {
+    itemHeight: 52,
+    scrollContainer: scrollRef.current,
+  });
+
   const applyMatch = async () => {
     if (!matchData) return;
     const { track, match } = matchData;
@@ -952,17 +980,12 @@ export function LibraryView() {
 
   return (
     <div 
+      ref={scrollRef}
       className="library-wrap" 
       onClick={() => setMenuOpenFor(null)}
       onScroll={(e) => {
         const target = e.currentTarget;
-        if (activeSector === 'local') {
-          if (target.scrollHeight - target.scrollTop - target.clientHeight < 250) {
-            setVisibleLocalCount(prev => Math.min(prev + 150, filteredTracks.length));
-          }
-          return;
-        }
-        if (target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
+        if (activeSector !== 'local' && target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
           if (activeSector === 'subsonic') {
             loadMoreSubsonic();
           } else if (activeSector === 'jellyfin') {
@@ -1210,7 +1233,9 @@ export function LibraryView() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTracks.slice(0, visibleLocalCount).map((t: any, i: number) => {
+                {topLocalSpacer > 0 && <tr style={{ height: topLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
+                {virtualLocalTracks.map((t: any, idx: number) => {
+                  const i = localStartIndex + idx;
                   const active = playback.current_track === t.path;
                   const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
 
@@ -1244,6 +1269,7 @@ export function LibraryView() {
                     />
                   );
                 })}
+                {bottomLocalSpacer > 0 && <tr style={{ height: bottomLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
               </tbody>
             </table>
           )}
@@ -1271,7 +1297,9 @@ export function LibraryView() {
                 </tr>
               </thead>
               <tbody>
-                {subsonicTracks.map((t: CloudTrack, i: number) => {
+                {topSubsonicSpacer > 0 && <tr style={{ height: topSubsonicSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
+                {virtualSubsonicTracks.map((t: CloudTrack, idx: number) => {
+                  const i = subsonicStartIndex + idx;
                   const active = playback.current_track === t.stream_url;
                   return (
                     <CloudTrackRow
@@ -1290,6 +1318,7 @@ export function LibraryView() {
                     />
                   );
                 })}
+                {bottomSubsonicSpacer > 0 && <tr style={{ height: bottomSubsonicSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
               </tbody>
             </table>
           )}
@@ -1323,7 +1352,9 @@ export function LibraryView() {
                 </tr>
               </thead>
               <tbody>
-                {jellyfinTracks.map((t: CloudTrack, i: number) => {
+                {topJellyfinSpacer > 0 && <tr style={{ height: topJellyfinSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
+                {virtualJellyfinTracks.map((t: CloudTrack, idx: number) => {
+                  const i = jellyfinStartIndex + idx;
                   const active = playback.current_track === t.stream_url;
                   return (
                     <CloudTrackRow
@@ -1342,6 +1373,7 @@ export function LibraryView() {
                     />
                   );
                 })}
+                {bottomJellyfinSpacer > 0 && <tr style={{ height: bottomJellyfinSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
               </tbody>
             </table>
           )}

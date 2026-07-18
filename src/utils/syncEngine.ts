@@ -46,6 +46,8 @@ export async function syncToCloud(): Promise<void> {
     // 2. Sync liked tracks
     const lovedTracks = state.tracks.filter(t => t.loved === 1);
     console.log('[Sync] Found liked tracks in state.tracks:', lovedTracks.length, lovedTracks.map(t => t.path));
+    
+    // First, sync local loved tracks
     if (lovedTracks.length > 0) {
       const payload = lovedTracks.map(t => ({
         user_id: userId,
@@ -69,6 +71,34 @@ export async function syncToCloud(): Promise<void> {
       }
     } else {
       console.log('[Sync] No liked tracks to sync to Supabase.');
+    }
+
+    // Next, check if there are liked tracks on the cloud that we need to delete because they are unloved locally
+    try {
+      const { data: cloudLikes, error: getLikesError } = await supabase
+        .from('liked_tracks')
+        .select('track_path')
+        .eq('user_id', userId);
+
+      if (!getLikesError && cloudLikes && cloudLikes.length > 0) {
+        const cloudPaths = cloudLikes.map((t: any) => t.track_path);
+        const lovedPaths = new Set(lovedTracks.map(t => t.path));
+        const pathsToDelete = cloudPaths.filter((path: string) => !lovedPaths.has(path));
+
+        if (pathsToDelete.length > 0) {
+          console.log(`[Sync] Deleting ${pathsToDelete.length} unliked tracks from Supabase...`);
+          const { error: deleteError } = await supabase
+            .from('liked_tracks')
+            .delete()
+            .eq('user_id', userId)
+            .in('track_path', pathsToDelete);
+          if (deleteError) {
+            console.error('[Sync] Error deleting unliked tracks:', deleteError.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Sync] Failed to process unliked tracks cleanup:', err);
     }
 
     // 3. Sync Playlists
@@ -184,12 +214,15 @@ export async function syncFromCloud(options?: {
       console.log('[Sync] Retrieved liked tracks from Supabase:', cloudLikes?.length, cloudLikes, likesError);
 
       if (!likesError && cloudLikes) {
+        const cloudPaths = new Set(cloudLikes.map((t: any) => t.track_path));
+        const currentTracks = useStore.getState().tracks;
+
+        // 1. If liked in cloud but not locally, make it liked locally
         for (const t of cloudLikes) {
-          const currentTracks = useStore.getState().tracks;
           const localTrack = currentTracks.find(lt => lt.path === t.track_path);
           console.log('[Sync] Restoring liked track:', t.track_path, 'Local match:', localTrack);
           if (!localTrack || localTrack.loved !== 1) {
-            console.log('[Sync] Invoking toggle_love_track for:', t.track_path);
+            console.log('[Sync] Invoking toggle_love_track (love) for:', t.track_path);
             await invoke('toggle_love_track', {
               path: t.track_path,
               loved: true,
@@ -199,6 +232,23 @@ export async function syncFromCloud(options?: {
               duration: t.duration || null,
               format: t.format || null,
               coverUrl: t.cover_url || null
+            });
+          }
+        }
+
+        // 2. If liked locally but not in cloud, unlike it locally
+        for (const lt of currentTracks) {
+          if (lt.loved === 1 && !cloudPaths.has(lt.path)) {
+            console.log('[Sync] Invoking toggle_love_track (unlike) for local track:', lt.path);
+            await invoke('toggle_love_track', {
+              path: lt.path,
+              loved: false,
+              title: lt.title || null,
+              artist: lt.artist || null,
+              album: lt.album || null,
+              duration: lt.duration || null,
+              format: lt.format || null,
+              coverUrl: lt.cover_url || null
             });
           }
         }
@@ -248,15 +298,10 @@ export async function syncFromCloud(options?: {
           let localPl = currentPlaylists.find(p => p.name === pl.name);
 
           if (localPl) {
-            await invoke('delete_playlist', { id: localPl.id });
-          }
+            // Get local tracks to check for duplicates
+            const localTracks = await invoke<any[]>('get_playlist_tracks', { playlistId: localPl.id });
+            const localPaths = new Set(localTracks.map(t => t.path));
 
-          await invoke('create_playlist', { name: pl.name });
-          
-          currentPlaylists = await invoke<any[]>('get_playlists');
-          const newLocalPl = currentPlaylists.find(p => p.name === pl.name);
-
-          if (newLocalPl) {
             const { data: cloudTracks, error: tracksError } = await supabase
               .from('playlist_tracks')
               .select('*')
@@ -265,7 +310,28 @@ export async function syncFromCloud(options?: {
 
             if (!tracksError && cloudTracks) {
               for (const ct of cloudTracks) {
-                await invoke('add_to_playlist', { playlistId: newLocalPl.id, path: ct.track_path });
+                if (!localPaths.has(ct.track_path)) {
+                  await invoke('add_to_playlist', { playlistId: localPl.id, path: ct.track_path });
+                }
+              }
+            }
+          } else {
+            // Create new playlist locally
+            await invoke('create_playlist', { name: pl.name });
+            currentPlaylists = await invoke<any[]>('get_playlists');
+            const newLocalPl = currentPlaylists.find(p => p.name === pl.name);
+
+            if (newLocalPl) {
+              const { data: cloudTracks, error: tracksError } = await supabase
+                .from('playlist_tracks')
+                .select('*')
+                .eq('playlist_id', pl.id)
+                .order('position', { ascending: true });
+
+              if (!tracksError && cloudTracks) {
+                for (const ct of cloudTracks) {
+                  await invoke('add_to_playlist', { playlistId: newLocalPl.id, path: ct.track_path });
+                }
               }
             }
           }

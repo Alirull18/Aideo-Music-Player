@@ -3,11 +3,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Trash2, GripVertical } from 'lucide-react';
 import { useState } from 'react';
 import { fmt } from '../utils';
+import { useVirtualList } from '../utils/useVirtualList';
+
 
 export function QueueView() {
   const { queue, showQueue, toggleQueue, playFromQueue, removeFromQueue, clearQueue, reorderQueue } = useStore();
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  const {
+    containerRef,
+    visibleItems: virtualQueue,
+    topSpacerHeight: topQueueSpacer,
+    bottomSpacerHeight: bottomQueueSpacer,
+    startIndex: queueStartIndex,
+  } = useVirtualList(queue, {
+    itemHeight: 58,
+  });
 
   const handleDragStart = (e: React.DragEvent, idx: number) => {
     setDraggedIdx(idx);
@@ -85,58 +97,67 @@ export function QueueView() {
               </div>
             </div>
 
-            <div className="queue-wrap" style={{ padding: '16px', flex: 1, overflowY: 'auto' }}>
+            <div 
+              ref={containerRef}
+              className="queue-wrap" 
+              style={{ padding: '16px', flex: 1, overflowY: 'auto', position: 'relative' }}
+            >
               {queue.length === 0 ? (
                 <p style={{ color: 'var(--text-dim)', textAlign: 'center', padding: '32px 0' }}>Queue is empty. Add songs to the queue or let auto-play take over.</p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {queue.map((t, i) => (
-                    <div
-                      key={`${t.path}-${i}`}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, i)}
-                      onDragOver={handleDragOver}
-                      onDrop={(e) => handleDrop(e, i)}
-                      onMouseEnter={() => setHoveredIdx(i)}
-                      onMouseLeave={() => setHoveredIdx(null)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 16,
-                        padding: '8px 12px',
-                        background: draggedIdx === i ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.2)',
-                        borderRadius: 8,
-                        cursor: 'grab',
-                        transition: 'background 0.2s',
-                        border: draggedIdx === i ? '1px dashed var(--text-dim)' : '1px solid transparent'
-                      }}
-                      onDoubleClick={() => playFromQueue(i)}
-                    >
-                      <div style={{ color: 'var(--text-dim)', cursor: 'grab', display: 'flex', alignItems: 'center' }}>
-                        <GripVertical size={14} style={{ opacity: hoveredIdx === i ? 1 : 0.3, transition: 'opacity 0.2s' }} />
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {t.title || t.path.split(/[\\/]/).pop()}
+                  {topQueueSpacer > 0 && <div style={{ height: topQueueSpacer }} />}
+                  {virtualQueue.map((t, idx) => {
+                    const i = queueStartIndex + idx;
+                    return (
+                      <div
+                        key={`${t.path}-${i}`}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, i)}
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, i)}
+                        onMouseEnter={() => setHoveredIdx(i)}
+                        onMouseLeave={() => setHoveredIdx(null)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 16,
+                          padding: '8px 12px',
+                          background: draggedIdx === i ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.2)',
+                          borderRadius: 8,
+                          cursor: 'grab',
+                          transition: 'background 0.2s',
+                          border: draggedIdx === i ? '1px dashed var(--text-dim)' : '1px solid transparent'
+                        }}
+                        onDoubleClick={() => playFromQueue(i)}
+                      >
+                        <div style={{ color: 'var(--text-dim)', cursor: 'grab', display: 'flex', alignItems: 'center' }}>
+                          <GripVertical size={14} style={{ opacity: hoveredIdx === i ? 1 : 0.3, transition: 'opacity 0.2s' }} />
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {t.artist || 'Unknown Artist'}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {t.title || t.path.split(/[\\/]/).pop()}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {t.artist || 'Unknown Artist'}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                          {hoveredIdx === i ? (
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); removeFromQueue(i); }}
+                              style={{ background: 'rgba(255,50,50,0.2)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: '#ff6b6b', display: 'flex' }}
+                            >
+                              <X size={14} />
+                            </button>
+                          ) : (
+                            <span>{fmt(t.duration)}</span>
+                          )}
                         </div>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {hoveredIdx === i ? (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); removeFromQueue(i); }}
-                            style={{ background: 'rgba(255,50,50,0.2)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: '#ff6b6b', display: 'flex' }}
-                          >
-                            <X size={14} />
-                          </button>
-                        ) : (
-                          <span>{fmt(t.duration)}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
+                  {bottomQueueSpacer > 0 && <div style={{ height: bottomQueueSpacer }} />}
                 </div>
               )}
             </div>
