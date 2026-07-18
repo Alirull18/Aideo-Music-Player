@@ -54,3 +54,12 @@ ytdlp.exe
 *.exe
 *.msi
 *.sig
+
+# Audit & build artifacts
+test.wav
+*.wav
+patch_player.py
+patch_player.ps1
+build_errors.txt
+Untitled-1.txt
+

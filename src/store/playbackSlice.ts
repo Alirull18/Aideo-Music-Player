@@ -1,13 +1,18 @@
 import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache } from '../utils';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl } from '../utils';
 
 let isPolling = false;
 let dspThrottleTimeout: any = null;
 let lastDspInvokeTime = 0;
 let pendingDspState: any = null;
 let chromecastTickCount = 0;
+let queueOperationPromise = Promise.resolve();
+export const chainQueueOperation = (op: () => Promise<any>): Promise<any> => {
+  queueOperationPromise = queueOperationPromise.then(op);
+  return queueOperationPromise;
+};
 
 const THROTTLE_MS = 50; // 20Hz update rate — imperceptibly fast for DSP but prevents IPC flooding on slower machines
 
@@ -323,13 +328,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       set(s => ({ playback: { ...s.playback, ...status } }));
 
-      if (status.current_track && (status.current_track.startsWith('http://') || status.current_track.startsWith('https://'))) {
-        try {
-          const telemetry: any = await invoke('get_network_telemetry');
-          set({ networkTelemetry: telemetry });
-        } catch (e) {
-          console.error('Failed to get network telemetry:', e);
-        }
+      if (status.network_telemetry && status.current_track && (status.current_track.startsWith('http://') || status.current_track.startsWith('https://'))) {
+        set({ networkTelemetry: status.network_telemetry });
       } else if (get().networkTelemetry !== null) {
         set({ networkTelemetry: null });
       }
@@ -599,6 +599,27 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       return;
     }
     try {
+      // De-duplicate / consume track from queue when starting playback
+      const currentQueue = get().queue;
+      const matchingIndices: number[] = [];
+      currentQueue.forEach((t, i) => {
+        if (pathsEqual(t.path, url)) {
+          matchingIndices.push(i);
+        }
+      });
+
+      if (matchingIndices.length > 0) {
+        const newQueue = currentQueue.filter(t => !pathsEqual(t.path, url));
+        set({ queue: newQueue });
+        localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+        
+        // Remove from the Rust backend queue in reverse order
+        for (let i = matchingIndices.length - 1; i >= 0; i--) {
+          const indexToRemove = matchingIndices[i];
+          invoke('remove_from_queue', { index: indexToRemove }).catch(console.error);
+        }
+      }
+
       const streamName = metadata?.title || getStreamName(url);
       const isYoutube = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('googlevideo.com');
       const formatStr = isYoutube ? 'YouTube Direct' : 'URL';
@@ -627,7 +648,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (metadata?.cover_url) {
         if (metadata.cover_url.startsWith('http://') || metadata.cover_url.startsWith('https://')) {
           invoke('get_cover_art', { path: metadata.cover_url }).then(async (art: any) => {
-            if (get().playback.current_track !== url) return;
+             if (!pathsEqual(get().playback.current_track, url)) return;
             if (art && typeof art === 'string') {
               set({ coverArt: art });
               try {
@@ -725,21 +746,33 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // Prevent duplicates: skip if track already exists in queue
       const existsInQueue = get().queue.some(t => pathsEqual(t.path, track.path));
       if (existsInQueue) {
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Track is already in the queue', type: 'warning' } }));
+        if (!track.is_autoplay) {
+          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Track is already in the queue', type: 'warning' } }));
+        }
         return;
       }
 
       let finalPath = track.path;
       if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
-          finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
-          resolvedPathMap.set(finalPath, track.path);
+          const cachedResolved = trackIdToStreamUrl.get(track.path);
+          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+            finalPath = cachedResolved.url;
+            console.log('[Tidal] Using pre-resolved stream URL for track in addToQueue:', track.title);
+          } else {
+            finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+            trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
+            resolvedPathMap.set(finalPath, track.path);
+          }
         } catch (err) {
           console.error('Failed to resolve Tidal stream in addToQueue:', err);
         }
       }
 
-      await invoke('add_to_queue', { path: finalPath });
+      await chainQueueOperation(async () => {
+        await invoke('add_to_queue', { path: finalPath });
+      });
+
       const newQueue = [...get().queue, track];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
@@ -758,14 +791,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       let finalPath = track.path;
       if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
-          finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
-          resolvedPathMap.set(finalPath, track.path);
+          const cachedResolved = trackIdToStreamUrl.get(track.path);
+          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+            finalPath = cachedResolved.url;
+            console.log('[Tidal] Using pre-resolved stream URL for track in playNextInQueue:', track.title);
+          } else {
+            finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+            trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
+            resolvedPathMap.set(finalPath, track.path);
+          }
         } catch (err) {
           console.error('Failed to resolve Tidal stream in playNextInQueue:', err);
         }
       }
 
-      await invoke('queue_next', { path: finalPath });
+      await chainQueueOperation(async () => {
+        await invoke('queue_next', { path: finalPath });
+      });
+
       const newQueue = [track, ...get().queue];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
@@ -784,24 +827,25 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ queue: newQueue });
     localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
     
-    // Fire-and-forget the Rust IPC calls so we don't block the UI
-    (async () => {
+    await chainQueueOperation(async () => {
         await invoke('remove_from_queue', { index }).catch(() => {});
-    })();
+    });
     
-    get().playTrack(trackToPlay, undefined, false);
+    await get().playTrack(trackToPlay, undefined, false);
   },
 
   removeFromQueue: async (index: number) => {
     const { queue } = get();
     if (index < 0 || index >= queue.length) return;
-    try {
-      await invoke('remove_from_queue', { index });
-      const newQueue = [...queue];
-      newQueue.splice(index, 1);
-      set({ queue: newQueue });
-      localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
-    } catch (e) { console.error(e); }
+    
+    const newQueue = [...queue];
+    newQueue.splice(index, 1);
+    set({ queue: newQueue });
+    localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+
+    await chainQueueOperation(async () => {
+      await invoke('remove_from_queue', { index }).catch(() => {});
+    });
   },
 
   clearQueue: async () => {
@@ -822,7 +866,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         set({ recentlyClearedAutoplayPaths: newCleared });
       }
 
-      await invoke('clear_queue');
+      await chainQueueOperation(async () => {
+        await invoke('clear_queue');
+      });
+
       set({ queue: [] });
       localStorage.setItem('aideo_queue', JSON.stringify([]));
 
@@ -843,10 +890,13 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (from < 0 || from >= queue.length || to < 0 || to >= queue.length) return;
     
     try {
-      await invoke('reorder_queue', { from, to });
+      await chainQueueOperation(async () => {
+        await invoke('reorder_queue', { from, to });
+      });
+
       const newQueue = [...queue];
-      const [item] = newQueue.splice(from, 1);
-      newQueue.splice(to, 0, item);
+      const [moved] = newQueue.splice(from, 1);
+      newQueue.splice(to, 0, moved);
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
     } catch (e) { console.error(e); }

@@ -648,6 +648,19 @@ input[type=range] {
   transform: scale(1.04);
 }
 
+.lyric-word {
+  display: inline-block;
+  white-space: pre-wrap;
+  background: linear-gradient(
+    to right,
+    #ffffff var(--word-progress, 0%),
+    rgba(255, 255, 255, 0.3) var(--word-progress, 0%)
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  transition: background-position 0.05s linear;
+}
+
 .lyric-romaji {
   font-size: 13px;
   color: var(--accent);

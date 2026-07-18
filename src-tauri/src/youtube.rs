@@ -1755,6 +1755,7 @@ async fn add_downloaded_track_to_library(
                     .map(|s| s.to_uppercase()),
                 lyric_offset: 0,
                 loved: Some(0),
+                disliked: Some(0),
                 cover_url: None,
                 path_hash: None,
                 bpm: None,

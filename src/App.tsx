@@ -94,10 +94,13 @@ function AideoApp() {
     }).catch(e => console.error("Update check failed:", e));
 
     // Fix #7: Use async IIFE to ensure unlisten is assigned before cleanup runs
+    let isCancelled = false;
     let unlistenOAuth: (() => void) | undefined;
     let unlistenOAuthCallback: (() => void) | undefined;
+
     const setupOAuthListener = async () => {
-      unlistenOAuth = await listen<any>('oauth-success', (event) => {
+      const u1 = await listen<any>('oauth-success', (event) => {
+        if (isCancelled) return;
         const session = event.payload;
         if (session) {
           useStore.setState({ 
@@ -110,8 +113,14 @@ function AideoApp() {
           }));
         }
       });
+      if (isCancelled) {
+        u1();
+        return;
+      }
+      unlistenOAuth = u1;
 
-      unlistenOAuthCallback = await listen<string>('oauth-callback-url', async (event) => {
+      const u2 = await listen<string>('oauth-callback-url', async (event) => {
+        if (isCancelled) return;
         const url = event.payload;
         try {
           const hash = url.split('#')[1];
@@ -146,10 +155,16 @@ function AideoApp() {
           }));
         }
       });
+      if (isCancelled) {
+        u2();
+        return;
+      }
+      unlistenOAuthCallback = u2;
     };
     setupOAuthListener();
 
     return () => {
+      isCancelled = true;
       if (unlistenOAuth) unlistenOAuth();
       if (unlistenOAuthCallback) unlistenOAuthCallback();
     };
@@ -163,35 +178,80 @@ function AideoApp() {
   }, [playbackError, setPlaybackError]);
 
   useEffect(() => {
-    const id = setInterval(pollStatus, 200);
+    let isCancelled = false;
+    const cleanups: (() => void)[] = [];
+    let intervalId: any;
 
-    let unlistenEnded: (() => void) | undefined;
-    listen('track-ended', () => {
-      useStore.getState().playNext();
-    }).then(f => unlistenEnded = f);
+    const startPolling = (ms: number) => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(pollStatus, ms);
+    };
 
-    let unlistenLibraryUpdated: (() => void) | undefined;
-    listen('library-updated', () => {
-      useStore.getState().loadLibrary();
-    }).then(f => unlistenLibraryUpdated = f);
+    // Initial polling frequency based on page visibility state
+    startPolling(document.visibilityState === 'visible' ? 200 : 2000);
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        startPolling(200);
+      } else {
+        startPolling(2000);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    const setupListeners = async () => {
+      const uEnded = await listen('track-ended', () => {
+        if (isCancelled) return;
+        useStore.getState().playNext();
+      });
+      if (isCancelled) { uEnded(); return; }
+      cleanups.push(uEnded);
 
-    // OS Media Controls (souvlaki)
-    let unlistenPlay: (() => void) | undefined;
-    listen('media-play', () => useStore.getState().resumeTrack()).then(f => unlistenPlay = f);
-    let unlistenPause: (() => void) | undefined;
-    listen('media-pause', () => useStore.getState().pauseTrack()).then(f => unlistenPause = f);
-    let unlistenToggle: (() => void) | undefined;
-    listen('media-toggle', () => {
-      const state = useStore.getState();
-      if (state.playback.status === 'Playing') state.pauseTrack();
-      else state.resumeTrack();
-    }).then(f => unlistenToggle = f);
-    let unlistenNext: (() => void) | undefined;
-    listen('media-next', () => useStore.getState().playNext()).then(f => unlistenNext = f);
-    let unlistenPrev: (() => void) | undefined;
-    listen('media-prev', () => useStore.getState().playPrev()).then(f => unlistenPrev = f);
+      const uLib = await listen('library-updated', () => {
+        if (isCancelled) return;
+        useStore.getState().loadLibrary();
+      });
+      if (isCancelled) { uLib(); return; }
+      cleanups.push(uLib);
+
+      const uPlay = await listen('media-play', () => {
+        if (isCancelled) return;
+        useStore.getState().resumeTrack();
+      });
+      if (isCancelled) { uPlay(); return; }
+      cleanups.push(uPlay);
+
+      const uPause = await listen('media-pause', () => {
+        if (isCancelled) return;
+        useStore.getState().pauseTrack();
+      });
+      if (isCancelled) { uPause(); return; }
+      cleanups.push(uPause);
+
+      const uToggle = await listen('media-toggle', () => {
+        if (isCancelled) return;
+        const state = useStore.getState();
+        if (state.playback.status === 'Playing') state.pauseTrack();
+        else state.resumeTrack();
+      });
+      if (isCancelled) { uToggle(); return; }
+      cleanups.push(uToggle);
+
+      const uNext = await listen('media-next', () => {
+        if (isCancelled) return;
+        useStore.getState().playNext();
+      });
+      if (isCancelled) { uNext(); return; }
+      cleanups.push(uNext);
+
+      const uPrev = await listen('media-prev', () => {
+        if (isCancelled) return;
+        useStore.getState().playPrev();
+      });
+      if (isCancelled) { uPrev(); return; }
+      cleanups.push(uPrev);
+    };
+    setupListeners();
 
     // Global Keyboard Shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -213,29 +273,38 @@ function AideoApp() {
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      clearInterval(id);
+      isCancelled = true;
+      if (intervalId) clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('keydown', handleKeyDown);
-      if (unlistenEnded) unlistenEnded();
-      if (unlistenLibraryUpdated) unlistenLibraryUpdated();
-
-      if (unlistenPlay) unlistenPlay();
-      if (unlistenPause) unlistenPause();
-      if (unlistenToggle) unlistenToggle();
-      if (unlistenNext) unlistenNext();
-      if (unlistenPrev) unlistenPrev();
+      cleanups.forEach(f => f());
     };
   }, []);
 
   useEffect(() => {
-    let unlistenSuccess: any;
-    let unlistenError: any;
-    listen<string>('playback-success', (event) => {
-      setPlaybackSuccess(event.payload);
-    }).then(u => unlistenSuccess = u);
-    listen<string>('playback-error', (event) => {
-      setPlaybackError(event.payload);
-    }).then(u => unlistenError = u);
+    let isCancelled = false;
+    let unlistenSuccess: (() => void) | undefined;
+    let unlistenError: (() => void) | undefined;
+
+    const setup = async () => {
+      const u1 = await listen<string>('playback-success', (event) => {
+        if (isCancelled) return;
+        setPlaybackSuccess(event.payload);
+      });
+      if (isCancelled) { u1(); return; }
+      unlistenSuccess = u1;
+
+      const u2 = await listen<string>('playback-error', (event) => {
+        if (isCancelled) return;
+        setPlaybackError(event.payload);
+      });
+      if (isCancelled) { u2(); return; }
+      unlistenError = u2;
+    };
+    setup();
+
     return () => {
+      isCancelled = true;
       if (unlistenSuccess) unlistenSuccess();
       if (unlistenError) unlistenError();
     };

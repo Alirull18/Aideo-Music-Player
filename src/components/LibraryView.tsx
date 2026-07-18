@@ -2,7 +2,7 @@ import { useState, useEffect, memo } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { MoreVertical, RefreshCw, Activity, Loader2, Heart, DownloadCloud, Check, Trash2 } from 'lucide-react';
+import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { Track, Playlist } from '../store/types';
 
@@ -227,6 +227,7 @@ interface TrackRowProps {
   setPlaylistModalFor: (track: Track | null) => void;
   setEditModalFor: (track: Track | null) => void;
   toggleLoveTrack: (path: string) => Promise<void> | void;
+  toggleDislikeTrack: (path: string, metadata?: Partial<Track>) => Promise<void> | void;
   setCoverArtModalTrack: (track: Track | null) => void;
   cacheCloudTrack: (track: Track) => Promise<void> | void;
   deleteCachedTrack: (streamUrl: string) => Promise<void> | void;
@@ -237,7 +238,7 @@ const TrackRow = memo(({
   t, i, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
   playTrack, setView, setMenuOpenFor, playNextInQueue, addToQueue, matchMetadata, 
   setMatchData, setIsMatching, removeFromPlaylist, setPlaylistModalFor, setEditModalFor,
-  toggleLoveTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
+  toggleLoveTrack, toggleDislikeTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
 }: TrackRowProps) => {
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
 
@@ -247,34 +248,65 @@ const TrackRow = memo(({
       <td style={{ textAlign: 'center', color: active ? 'var(--accent)' : 'var(--text-dim)', fontSize: 12 }}>
         {active ? '▶' : i + 1}
       </td>
-      <td style={{ textAlign: 'center', width: 36 }}>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleLoveTrack(t.path);
-          }}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: t.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.25)',
-            cursor: 'pointer',
-            padding: 4,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s ease',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'scale(1.2)';
-            if (t.loved !== 1) e.currentTarget.style.color = '#ef4444';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1.0)';
-            if (t.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.25)';
-          }}
-        >
-          <Heart size={16} fill={t.loved === 1 ? '#ef4444' : 'transparent'} />
-        </button>
+      <td style={{ textAlign: 'center', width: 68 }}>
+        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleLoveTrack(t.path);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: t.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.25)',
+              cursor: 'pointer',
+              padding: 4,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.2)';
+              if (t.loved !== 1) e.currentTarget.style.color = '#ef4444';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1.0)';
+              if (t.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.25)';
+            }}
+            title={t.loved === 1 ? "Unlove track" : "Love track"}
+          >
+            <Heart size={14} fill={t.loved === 1 ? '#ef4444' : 'transparent'} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleDislikeTrack(t.path, t);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: t.disliked === 1 ? '#f43f5e' : 'rgba(255, 255, 255, 0.25)',
+              cursor: 'pointer',
+              padding: 4,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.2)';
+              if (t.disliked !== 1) e.currentTarget.style.color = '#f43f5e';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1.0)';
+              if (t.disliked !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.25)';
+            }}
+            title={t.disliked === 1 ? "Undislike track" : "Dislike track"}
+          >
+            <ThumbsDown size={14} fill={t.disliked === 1 ? '#f43f5e' : 'transparent'} />
+          </button>
+        </div>
       </td>
       <td>
         <TrackThumbnail path={t.path} coverUrl={t.cover_url} />
@@ -642,7 +674,7 @@ export function LibraryView() {
     view, tracks, playback, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
     matchMetadata, addToQueue, playNextInQueue, playlists, addToPlaylist,
     subsonicUrl, subsonicUser, subsonicConnected, subsonicPass,
-    jellyfinUrl, jellyfinConnected, toggleLoveTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
+    jellyfinUrl, jellyfinConnected, toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
     setCoverArtModalTrack
   } = useStore();
 
@@ -1169,7 +1201,7 @@ export function LibraryView() {
               <thead>
                 <tr>
                   <th style={{ width: 48, textAlign: 'center' }}>#</th>
-                  <th style={{ width: 36 }}></th>
+                  <th style={{ width: 68 }}></th>
                   <th style={{ width: 48 }}></th>
                   <th>Title</th>
                   <th>Artist</th>
@@ -1204,6 +1236,7 @@ export function LibraryView() {
                       setPlaylistModalFor={setPlaylistModalFor}
                       setEditModalFor={setEditModalFor}
                       toggleLoveTrack={toggleLoveTrack}
+                      toggleDislikeTrack={toggleDislikeTrack}
                       setCoverArtModalTrack={setCoverArtModalTrack}
                       cacheCloudTrack={cacheCloudTrack}
                       deleteCachedTrack={deleteCachedTrack}

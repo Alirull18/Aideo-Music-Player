@@ -282,8 +282,9 @@ async fn get_netease_lrc(id: String) -> Result<String, String> {
         .json::<serde_json::Value>()
         .await
         .map_err(|e| e.to_string())?;
-    let lrc = data["lrc"]["lyric"]
+    let lrc = data["klyric"]["lyric"]
         .as_str()
+        .or_else(|| data["lrc"]["lyric"].as_str())
         .ok_or("No lyric found")?
         .to_string();
     Ok(lrc)
@@ -603,6 +604,7 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
                     .map(|s| s.to_uppercase()),
                 lyric_offset: 0,
                 loved: Some(0),
+                disliked: Some(0),
                 cover_url: None,
                 path_hash: None,
                 bpm: None,
@@ -655,14 +657,14 @@ fn delete_cached_track(stream_url: String, state: State<'_, AppState>) -> Result
         let _ = std::fs::remove_file(temp_path);
     }
 
-    // Only delete from DB if loved is 0 or NULL
+    // Only delete from DB if loved is 0 and disliked is 0
     let conn = safe_lock(&state.db);
-    let loved: i32 = conn.query_row(
-        "SELECT COALESCE(loved, 0) FROM tracks WHERE path = ?1",
+    let (loved, disliked): (i32, i32) = conn.query_row(
+        "SELECT COALESCE(loved, 0), COALESCE(disliked, 0) FROM tracks WHERE path = ?1",
         rusqlite::params![stream_url],
-        |row| row.get(0),
-    ).unwrap_or(0);
-    if loved == 0 {
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap_or((0, 0));
+    if loved == 0 && disliked == 0 {
         let _ = db::delete_track(&conn, &stream_url);
     }
     Ok(())
@@ -1207,6 +1209,40 @@ fn toggle_love_track(
 }
 
 #[tauri::command]
+fn toggle_dislike_track(
+    path: String,
+    disliked: bool,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: Option<f64>,
+    format: Option<String>,
+    cover_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let conn = safe_lock(&state.db);
+    db::toggle_dislike_track(
+        &conn,
+        &path,
+        disliked,
+        title.as_deref(),
+        artist.as_deref(),
+        album.as_deref(),
+        duration,
+        format.as_deref(),
+        cover_url.as_deref(),
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn reset_disliked_tracks(state: State<'_, AppState>) -> Result<(), String> {
+    let conn = safe_lock(&state.db);
+    db::reset_disliked_tracks(&conn).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let player = safe_lock(&state.player);
     let is_asio = safe_lock(&player.target_device)
@@ -1223,6 +1259,7 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
     
     let position_val = f64::from_bits(player.position_secs.load(Ordering::Relaxed));
     let volume_val = f32::from_bits(player.volume.load(Ordering::Relaxed));
+    let telemetry = player::get_network_telemetry();
     
     Ok(serde_json::json!({
         "status": status_enum,
@@ -1237,6 +1274,7 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "file_rate": player.file_rate.load(Ordering::Relaxed),
         "file_ch": player.file_ch.load(Ordering::Relaxed),
         "file_format": *safe_lock(&player.file_format),
+        "network_telemetry": telemetry,
     }))
 }
 
@@ -1354,7 +1392,8 @@ fn get_local_ip() -> Option<String> {
 fn get_remote_connection_url() -> Result<String, String> {
     let port = crate::remote_server::ACTIVE_PORT.get().copied().ok_or_else(|| "Remote server not active".to_string())?;
     let ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-    Ok(format!("http://{}:{}", ip, port))
+    let pin = crate::remote_server::get_or_init_pin();
+    Ok(format!("http://{}:{}?pin={}", ip, port, pin))
 }
 
 #[tauri::command]
@@ -1533,6 +1572,8 @@ pub fn run() {
             update_track_metadata,
             update_track_offset,
             toggle_love_track,
+            toggle_dislike_track,
+            reset_disliked_tracks,
             add_to_queue,
             remove_from_queue,
             remove_from_queue_bulk,
@@ -1600,6 +1641,7 @@ pub fn run() {
             cloud::cache_cloud_track,
             cloud::prune_cache_to_limit,
             cloud::get_all_cached_cloud_hashes,
+            cloud::check_url_is_cached,
             cloud::get_url_hash,
             get_windows_accent_color,
             clear_application_cache,

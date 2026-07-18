@@ -94,6 +94,142 @@ export function AideoLabView() {
     dsp, setDSP, accentColor, lowSpecMode
   } = useStore();
   const [activeTab, setActiveTab] = useState<'eq' | 'spatial' | 'dynamics' | 'aideo_filter'>('eq');
+
+  // Custom Preset States
+  const [customPresets, setCustomPresets] = useState<{ name: string; dsp: any }[]>(() => {
+    try {
+      const saved = localStorage.getItem('aideo_dsp_presets');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newPresetName, setNewPresetName] = useState('');
+  const [selectedPresetName, setSelectedPresetName] = useState('');
+
+  const handleSavePreset = () => {
+    if (!newPresetName.trim()) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Preset name cannot be empty', type: 'warning' } }));
+      return;
+    }
+    const name = newPresetName.trim();
+    const systemNames = ['Flat', 'Bass Boost', 'Vocal Booster', 'Treble Booster', 'Audiophile Hi-Res'];
+    if (systemNames.includes(name)) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Cannot overwrite system presets', type: 'warning' } }));
+      return;
+    }
+
+    const updated = [...customPresets.filter(p => p.name !== name), { name, dsp }];
+    setCustomPresets(updated);
+    localStorage.setItem('aideo_dsp_presets', JSON.stringify(updated));
+    setSelectedPresetName(name);
+    setNewPresetName('');
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Preset "${name}" saved successfully!`, type: 'success' } }));
+  };
+
+  const handleDeletePreset = (name: string) => {
+    const updated = customPresets.filter(p => p.name !== name);
+    setCustomPresets(updated);
+    localStorage.setItem('aideo_dsp_presets', JSON.stringify(updated));
+    setSelectedPresetName('');
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Preset "${name}" deleted.`, type: 'info' } }));
+  };
+
+  const handleLoadPreset = (name: string) => {
+    setSelectedPresetName(name);
+    
+    if (name === 'Flat') {
+      const defaultBands = dsp.eq_parametric_bands.map((_: any, idx: number) => {
+        let freq = 1000;
+        if (idx === 0) freq = 31;
+        else if (idx === 1) freq = 62;
+        else if (idx === 2) freq = 125;
+        else if (idx === 3) freq = 250;
+        else if (idx === 4) freq = 500;
+        else if (idx === 5) freq = 1000;
+        else if (idx === 6) freq = 2000;
+        else if (idx === 7) freq = 4000;
+        else if (idx === 8) freq = 8000;
+        else if (idx === 9) freq = 16000;
+        return { freq, gain: 0, q: 0.7, band_type: idx === 0 ? 'lowshelf' : idx === 8 ? 'highshelf' : 'peaking' };
+      });
+      setDSP({
+        eq_enabled: false,
+        eq_parametric: true,
+        eq_graphic_gains: new Array(10).fill(0),
+        eq_parametric_bands: defaultBands,
+        preamp_gain: 0,
+        subsonic_enabled: false,
+        night_mode_enabled: false,
+        limiter_threshold: 0,
+        saturation_enabled: false
+      });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Flat bypass preset.', type: 'info' } }));
+    } 
+    else if (name === 'Bass Boost') {
+      const bassBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
+        if (idx === 0) return { ...b, freq: 31, gain: 5.5, band_type: 'lowshelf' };
+        if (idx === 1) return { ...b, freq: 62, gain: 4.0, band_type: 'peaking' };
+        if (idx === 2) return { ...b, freq: 125, gain: 2.0, band_type: 'peaking' };
+        return { ...b, gain: 0 };
+      });
+      const bassGraphic = [6.0, 4.5, 3.0, 1.0, 0, 0, 0, 0, 0, 0];
+      setDSP({
+        eq_enabled: true,
+        eq_graphic_gains: bassGraphic,
+        eq_parametric_bands: bassBands,
+        preamp_gain: -3.5
+      });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Bass Boost preset.', type: 'info' } }));
+    }
+    else if (name === 'Vocal Booster') {
+      const vocalBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
+        if (idx === 4) return { ...b, freq: 500, gain: 2.0, band_type: 'peaking' };
+        if (idx === 5) return { ...b, freq: 1000, gain: 3.5, band_type: 'peaking' };
+        if (idx === 6) return { ...b, freq: 2000, gain: 2.0, band_type: 'peaking' };
+        return { ...b, gain: 0 };
+      });
+      const vocalGraphic = [0, 0, 0, 0, 1.5, 3.0, 2.0, 0, 0, 0];
+      setDSP({
+        eq_enabled: true,
+        eq_graphic_gains: vocalGraphic,
+        eq_parametric_bands: vocalBands,
+        preamp_gain: -2.0
+      });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Vocal Booster preset.', type: 'info' } }));
+    }
+    else if (name === 'Treble Booster') {
+      const trebleBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
+        if (idx === 7) return { ...b, freq: 4000, gain: 2.0, band_type: 'peaking' };
+        if (idx === 8) return { ...b, freq: 8000, gain: 4.5, band_type: 'highshelf' };
+        if (idx === 9) return { ...b, freq: 16000, gain: 5.5, band_type: 'peaking' };
+        return { ...b, gain: 0 };
+      });
+      const trebleGraphic = [0, 0, 0, 0, 0, 0, 1.5, 3.0, 4.5, 5.0];
+      setDSP({
+        eq_enabled: true,
+        eq_graphic_gains: trebleGraphic,
+        eq_parametric_bands: trebleBands,
+        preamp_gain: -3.0
+      });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Treble Booster preset.', type: 'info' } }));
+    }
+    else if (name === 'Audiophile Hi-Res') {
+      setDSP({
+        audio_profile: 'high',
+        dither: true,
+        low_spec_mode: false
+      });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Audiophile Hi-Res preset.', type: 'info' } }));
+    }
+    else {
+      const custom = customPresets.find(p => p.name === name);
+      if (custom) {
+        setDSP(custom.dsp);
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Loaded preset "${name}".`, type: 'info' } }));
+      }
+    }
+  };
   
   // AutoEQ States
   const [dbSearchQuery, setDbSearchQuery] = useState('');
@@ -380,7 +516,8 @@ export function AideoLabView() {
       setDSP({
         eq_enabled: true,
         eq_parametric: true,
-        eq_parametric_bands: bandsToApply
+        eq_parametric_bands: bandsToApply,
+        preamp_gain: preamp
       });
 
       window.dispatchEvent(new CustomEvent('ui-toast', { 
@@ -863,6 +1000,82 @@ export function AideoLabView() {
                       )
                     )}
                   </svg>
+                </div>
+              </div>
+
+              {/* DSP Preset Manager Card */}
+              <div className="settings-ctrl-card" style={{ padding: 20 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                  <Sliders size={15} />
+                  DSP & Equalizer Presets
+                </h4>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <select
+                    value={selectedPresetName}
+                    onChange={(e) => handleLoadPreset(e.target.value)}
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.3)',
+                      color: 'white',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: 6,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      outline: 'none',
+                      cursor: 'pointer',
+                      minWidth: 150
+                    }}
+                  >
+                    <option value="" disabled>Select Preset...</option>
+                    <optgroup label="System Presets">
+                      <option value="Flat">Flat / Bypass</option>
+                      <option value="Bass Boost">Bass Boost</option>
+                      <option value="Vocal Booster">Vocal Booster</option>
+                      <option value="Treble Booster">Treble Booster</option>
+                      <option value="Audiophile Hi-Res">Audiophile Hi-Res</option>
+                    </optgroup>
+                    {customPresets.length > 0 && (
+                      <optgroup label="Your Presets">
+                        {customPresets.map(p => (
+                          <option key={p.name} value={p.name}>{p.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Preset name..."
+                      value={newPresetName}
+                      onChange={(e) => setNewPresetName(e.target.value)}
+                      style={{
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        color: 'white',
+                        border: '1px solid var(--glass-border)',
+                        borderRadius: 6,
+                        padding: '6px 10px',
+                        fontSize: 12,
+                        outline: 'none',
+                        width: 150
+                      }}
+                    />
+                    <button
+                      onClick={handleSavePreset}
+                      className="settings-btn"
+                      style={{ fontSize: 11, padding: '6px 12px' }}
+                    >
+                      Save Preset
+                    </button>
+                    {customPresets.some(p => p.name === selectedPresetName) && (
+                      <button
+                        onClick={() => handleDeletePreset(selectedPresetName)}
+                        className="settings-btn settings-btn-danger"
+                        style={{ fontSize: 11, padding: '6px 12px' }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 

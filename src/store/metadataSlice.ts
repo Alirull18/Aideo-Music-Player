@@ -20,7 +20,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (path) {
       invoke('update_track_offset', { path, offset: newOffset }).catch(() => { });
       set(s => ({
-        tracks: s.tracks.map(t => t.path === path ? { ...t, lyric_offset: newOffset } : t)
+        tracks: s.tracks.map(t => pathsEqual(t.path, path) ? { ...t, lyric_offset: newOffset } : t)
       }));
     }
   },
@@ -31,7 +31,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (path) {
       invoke('update_track_offset', { path, offset: ms }).catch(() => { });
       set(s => ({
-        tracks: s.tracks.map(t => t.path === path ? { ...t, lyric_offset: ms } : t)
+        tracks: s.tracks.map(t => pathsEqual(t.path, path) ? { ...t, lyric_offset: ms } : t)
       }));
     }
   },
@@ -197,7 +197,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
   applyOnlineCover: async (path: string, url: string) => {
     try {
       await invoke('apply_online_cover', { path, url });
-      if (get().playback.current_track === path) {
+      if (pathsEqual(get().playback.current_track, path)) {
         invoke('get_cover_art', { path }).then(async (art: any) => {
           if (art && typeof art === 'string') {
             set({ coverArt: art });

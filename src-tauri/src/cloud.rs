@@ -728,4 +728,15 @@ pub async fn prune_cache_to_limit(app_handle: tauri::AppHandle, limit_gb: f64) -
     prune_cache_to_limit_internal(&app_handle)
 }
 
+#[tauri::command]
+pub fn check_url_is_cached(url: String) -> bool {
+    let hash = format!("{:x}", md5::compute(url.as_bytes()));
+    if let Some(data_dir) = dirs::data_dir() {
+        let cache_path = data_dir.join("Aideo").join("CloudCache").join(format!("{}.cache", hash));
+        return cache_path.exists();
+    }
+    false
+}
+
+
 

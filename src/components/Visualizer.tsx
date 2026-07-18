@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store';
 
@@ -6,10 +6,39 @@ interface VisualizerProps {
   mode?: 'baseline' | 'circle' | 'wave';
 }
 
-export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
+export function Visualizer({ mode: propMode }: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { accentColor, playback, lowSpecMode } = useStore();
   const spectrumRef = useRef<number[]>(new Array(64).fill(0));
+
+  const [internalMode, setInternalMode] = useState<'baseline' | 'circle' | 'wave'>(() => {
+    if (propMode) return propMode;
+    const saved = localStorage.getItem('aideo_visualizer_mode');
+    return (saved as any) || 'baseline';
+  });
+
+  useEffect(() => {
+    if (propMode) {
+      setInternalMode(propMode);
+    }
+  }, [propMode]);
+
+  const currentMode = propMode || internalMode;
+
+  const handleCanvasClick = () => {
+    if (propMode) return;
+    const nextModeMap = {
+      baseline: 'circle',
+      circle: 'wave',
+      wave: 'baseline'
+    } as const;
+    const next = nextModeMap[internalMode];
+    setInternalMode(next);
+    localStorage.setItem('aideo_visualizer_mode', next);
+    window.dispatchEvent(new CustomEvent('ui-toast', { 
+      detail: { message: `Visualizer mode set to ${next.toUpperCase()}`, type: 'info' } 
+    }));
+  };
 
   useEffect(() => {
     const unlisten = listen<number[]>('audio-spectrum', (event) => {
@@ -42,7 +71,6 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
       canvas.width = width * dpr;
       canvas.height = height * dpr;
       
-      // Reset context transform then scale to DPR
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
     };
@@ -67,7 +95,7 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
 
       const bands = spectrumRef.current;
 
-      if (mode === 'baseline') {
+      if (currentMode === 'baseline') {
         const barWidth = (width / bands.length) * 0.8;
         const gap = (width / bands.length) * 0.2;
 
@@ -75,7 +103,6 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
           ctx.shadowBlur = 15;
           ctx.shadowColor = accentColor;
         }
-        ctx.fillStyle = accentColor;
 
         for (let i = 0; i < bands.length; i++) {
           smoothedBands[i] += (bands[i] - smoothedBands[i]) * 0.2;
@@ -83,12 +110,17 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
           const x = i * (barWidth + gap);
           const y = height - val;
 
+          const grad = ctx.createLinearGradient(x, y, x, height);
+          grad.addColorStop(0, '#ffffff');
+          grad.addColorStop(0.2, accentColor);
+          grad.addColorStop(1, 'rgba(139, 92, 246, 0.05)');
+          ctx.fillStyle = grad;
+
           ctx.beginPath();
           ctx.roundRect(x, y, barWidth, val, [4, 4, 0, 0]);
           ctx.fill();
         }
 
-        // Draw subtle glowing baseline to anchor the visualizer
         ctx.beginPath();
         ctx.moveTo(0, height - 1);
         ctx.lineTo(width, height - 1);
@@ -97,7 +129,7 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
         ctx.globalAlpha = 0.4;
         ctx.stroke();
         ctx.globalAlpha = 1.0;
-      } else if (mode === 'circle') {
+      } else if (currentMode === 'circle') {
         const centerX = width / 2;
         const centerY = height / 2;
         const baseRadius = Math.min(width, height) * 0.32;
@@ -107,7 +139,6 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
           ctx.shadowBlur = 12;
           ctx.shadowColor = accentColor;
         }
-        ctx.strokeStyle = accentColor;
         ctx.lineWidth = 4;
         ctx.lineCap = 'round';
 
@@ -120,6 +151,12 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
           const y1 = centerY + Math.sin(angle) * baseRadius;
           const x2 = centerX + Math.cos(angle) * (baseRadius + val);
           const y2 = centerY + Math.sin(angle) * (baseRadius + val);
+
+          const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+          grad.addColorStop(0, accentColor);
+          grad.addColorStop(0.8, '#c084fc');
+          grad.addColorStop(1, '#ffffff');
+          ctx.strokeStyle = grad;
 
           ctx.beginPath();
           ctx.moveTo(x1, y1);
@@ -134,13 +171,18 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
         ctx.globalAlpha = 0.3;
         ctx.stroke();
         ctx.globalAlpha = 1.0;
-      } else if (mode === 'wave') {
+      } else if (currentMode === 'wave') {
         ctx.beginPath();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 4;
+
+        const grad = ctx.createLinearGradient(0, height / 2, width, height / 2);
+        grad.addColorStop(0, '#c084fc');
+        grad.addColorStop(0.5, accentColor);
+        grad.addColorStop(1, '#f472b6');
+        ctx.strokeStyle = grad;
 
         if (!lowSpecMode) {
-          ctx.shadowBlur = 15;
+          ctx.shadowBlur = 20;
           ctx.shadowColor = accentColor;
         }
 
@@ -182,12 +224,19 @@ export function Visualizer({ mode = 'baseline' }: VisualizerProps) {
       cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
     };
-  }, [accentColor, playback.status, lowSpecMode, mode]);
+  }, [accentColor, playback.status, lowSpecMode, currentMode]);
 
   return (
     <canvas 
       ref={canvasRef} 
-      style={{ width: '100%', height: '100%', opacity: 0.8, display: 'block' }} 
+      style={{
+        width: '100%',
+        height: '100%',
+        opacity: 0.8,
+        display: 'block',
+        cursor: propMode ? 'default' : 'pointer'
+      }} 
+      onClick={handleCanvasClick}
     />
   );
 }

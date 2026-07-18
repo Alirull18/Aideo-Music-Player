@@ -1,8 +1,15 @@
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LyricWord {
+    pub time_secs: f64,
+    pub text: String,
+}
+
 /// Parses .lrc lyric files and returns timestamped lines.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LyricLine {
     pub time_secs: f64,
     pub text: String,
+    pub words: Option<Vec<LyricWord>>,
 }
 
 pub fn clean_url_for_lyrics(url_str: &str) -> String {
@@ -52,6 +59,81 @@ pub fn get_lyrics_for_track(audio_path: &str) -> Vec<LyricLine> {
     parse_lrc(&content)
 }
 
+fn parse_line_words(line_start_secs: f64, text: &str) -> (String, Option<Vec<LyricWord>>) {
+    // 1. Check if it's NetEase / QQ Music style with parenthesis: (offset_ms, duration_ms, ...)
+    if text.contains('(') && text.contains(')') {
+        let mut words = Vec::new();
+        let mut clean_text_parts = Vec::new();
+        
+        let parts: Vec<&str> = text.split('(').collect();
+        for part in parts {
+            if part.is_empty() {
+                continue;
+            }
+            if let Some(close_idx) = part.find(')') {
+                let meta_str = &part[..close_idx];
+                let word_text = &part[close_idx + 1..];
+                
+                let nums: Vec<&str> = meta_str.split(',').collect();
+                if nums.len() >= 2 {
+                    if let (Ok(offset_ms), Ok(_duration_ms)) = (nums[0].trim().parse::<f64>(), nums[1].trim().parse::<f64>()) {
+                        let abs_time = line_start_secs + (offset_ms / 1000.0);
+                        if !word_text.is_empty() {
+                            words.push(LyricWord {
+                                time_secs: abs_time,
+                                text: word_text.to_string(),
+                            });
+                            clean_text_parts.push(word_text.to_string());
+                        }
+                    }
+                }
+            } else if !part.trim().is_empty() {
+                clean_text_parts.push(part.to_string());
+            }
+        }
+        
+        if !words.is_empty() {
+            let joined = clean_text_parts.join("").trim().to_string();
+            return (joined, Some(words));
+        }
+    }
+    
+    // 2. Check if it is Enhanced LRC format with angle brackets: <mm:ss.xx> or <ss.xx>
+    if text.contains('<') && text.contains('>') {
+        let mut words = Vec::new();
+        let mut clean_text_parts = Vec::new();
+        
+        let parts: Vec<&str> = text.split('<').collect();
+        for part in parts {
+            if part.is_empty() {
+                continue;
+            }
+            if let Some(close_idx) = part.find('>') {
+                let ts_str = &part[..close_idx];
+                let word_text = &part[close_idx + 1..];
+                if let Some(ts) = parse_timestamp(ts_str) {
+                    if !word_text.is_empty() {
+                        words.push(LyricWord {
+                            time_secs: ts,
+                            text: word_text.to_string(),
+                        });
+                        clean_text_parts.push(word_text.to_string());
+                    }
+                }
+            } else if !part.trim().is_empty() {
+                clean_text_parts.push(part.to_string());
+            }
+        }
+        
+        if !words.is_empty() {
+            let joined = clean_text_parts.join("").trim().to_string();
+            return (joined, Some(words));
+        }
+    }
+    
+    (text.to_string(), None)
+}
+
 pub fn parse_lrc(content: &str) -> Vec<LyricLine> {
     let mut lines = Vec::new();
     for line in content.lines() {
@@ -72,12 +154,19 @@ pub fn parse_lrc(content: &str) -> Vec<LyricLine> {
                 break;
             }
         }
-        let text = rest.trim().to_string();
-        if text.contains(':') && timestamps.is_empty() {
+        
+        let line_start = timestamps.first().copied().unwrap_or(0.0);
+        let (clean_text, words) = parse_line_words(line_start, rest);
+        
+        if clean_text.contains(':') && timestamps.is_empty() {
             continue;
         }
         for ts in timestamps {
-            lines.push(LyricLine { time_secs: ts, text: text.clone() });
+            lines.push(LyricLine {
+                time_secs: ts,
+                text: clean_text.clone(),
+                words: words.clone(),
+            });
         }
     }
     lines.sort_by(|a, b| a.time_secs.partial_cmp(&b.time_secs)
@@ -86,8 +175,12 @@ pub fn parse_lrc(content: &str) -> Vec<LyricLine> {
 }
 
 fn parse_timestamp(ts: &str) -> Option<f64> {
-    let colon = ts.find(':')?;
-    let minutes: f64 = ts[..colon].parse().ok()?;
-    let seconds: f64 = ts[colon + 1..].parse().ok()?;
-    Some(minutes * 60.0 + seconds)
+    let ts = ts.trim();
+    if let Some(colon) = ts.find(':') {
+        let minutes: f64 = ts[..colon].parse().ok()?;
+        let seconds: f64 = ts[colon + 1..].parse().ok()?;
+        Some(minutes * 60.0 + seconds)
+    } else {
+        ts.parse::<f64>().ok()
+    }
 }

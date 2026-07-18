@@ -7,8 +7,21 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 pub static ACTIVE_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+pub static REMOTE_PIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn get_or_init_pin() -> &'static str {
+    REMOTE_PIN.get_or_init(|| {
+        let pin = rand::random::<u16>() % 9000 + 1000;
+        let pin_str = pin.to_string();
+        println!("[Aideo Connect] Generated new remote authorization PIN: {}", pin_str);
+        pin_str
+    })
+}
 
 pub async fn start_remote_server(app_handle: AppHandle, app_state: Arc<crate::AppState>) {
+    // Ensure PIN is initialized on startup
+    let _ = get_or_init_pin();
+
     let mut port = 38562;
     let listener = loop {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -55,24 +68,57 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, app_handle: AppH
     
     let request_str = String::from_utf8_lossy(&buf[..bytes_read]);
     if request_str.contains("Upgrade: websocket") {
-        let ws_stream = match tokio_tungstenite::accept_async(stream).await {
+        let mut pin_valid = false;
+        let callback = |req: &tokio_tungstenite::tungstenite::handshake::server::Request, response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+            let uri = req.uri();
+            let query = uri.query().unwrap_or("");
+            let expected_pin = get_or_init_pin();
+            
+            if query.contains(&format!("pin={}", expected_pin)) {
+                pin_valid = true;
+                Ok(response)
+            } else {
+                let err_response = tokio_tungstenite::tungstenite::http::Response::builder()
+                    .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
+                    .body(Some("Forbidden - Invalid or missing PIN".to_string()))
+                    .unwrap();
+                Err(err_response)
+            }
+        };
+
+        let ws_stream = match tokio_tungstenite::accept_hdr_async(stream, callback).await {
             Ok(ws) => ws,
             Err(e) => {
-                eprintln!("[Aideo Connect] WebSocket handshake failed: {}", e);
+                eprintln!("[Aideo Connect] WebSocket handshake rejected or failed: {}", e);
                 return;
             }
         };
-        handle_websocket(ws_stream, addr, app_handle, state).await;
+        
+        if pin_valid {
+            handle_websocket(ws_stream, addr, app_handle, state).await;
+        }
     } else {
         handle_http(stream, request_str).await;
     }
 }
 
-async fn handle_http(mut stream: TcpStream, request: std::borrow::Cow<'_, str>) {
+async fn handle_http(mut stream: TcpStream, request_str: std::borrow::Cow<'_, str>) {
     let mut buffer = vec![0; 4096];
     let _ = stream.read(&mut buffer).await;
 
-    let (status_line, content) = if request.starts_with("GET /") {
+    // Validate the PIN
+    let expected_pin = get_or_init_pin();
+    let has_valid_pin = request_str.contains(&format!("pin={}", expected_pin));
+
+    let (status_line, content) = if !has_valid_pin {
+        ("HTTP/1.1 403 FORBIDDEN\r\nContent-Type: text/html; charset=utf-8\r\n",
+         format!(
+             "<!DOCTYPE html><html><head><title>403 Forbidden</title></head>\
+             <body style=\"background-color:#09090e;color:#f3f4f6;font-family:sans-serif;text-align:center;padding:50px;\">\
+             <h1>403 Forbidden</h1><p>Invalid or missing PIN. Please scan the QR code in Aideo Settings.</p>\
+             </body></html>"
+         ))
+    } else if request_str.starts_with("GET /") {
         ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n", get_remote_html())
     } else {
         ("HTTP/1.1 404 NOT FOUND\r\n", "Not Found".to_string())
@@ -572,7 +618,8 @@ fn get_remote_html() -> String {
         function connect() {
             const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host;
-            ws = new WebSocket(`${proto}//${host}`);
+            const search = window.location.search; // Contains "?pin=XXXX"
+            ws = new WebSocket(`${proto}//${host}/${search}`);
 
             ws.onopen = () => {
                 statusBadge.textContent = 'Connected';

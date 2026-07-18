@@ -12,6 +12,7 @@ pub struct Track {
     pub format: Option<String>,
     pub lyric_offset: i32,
     pub loved: Option<i32>,
+    pub disliked: Option<i32>,
     pub cover_url: Option<String>,
     pub path_hash: Option<String>,
     pub bpm: Option<f64>,
@@ -24,6 +25,25 @@ pub struct Track {
 pub struct Playlist {
     pub id: i32,
     pub name: String,
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    let mut stmt = match conn.prepare(&format!("PRAGMA table_info({})", table)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let mut rows = match stmt.query([]) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    while let Ok(Some(row)) = rows.next() {
+        if let Ok(name) = row.get::<_, String>(1) {
+            if name == column {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn init_db(db_path: &str) -> Result<Connection> {
@@ -46,22 +66,43 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     )?;
 
     // Migration: Add format column if it doesn't exist
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN format TEXT", []);
+    if !column_exists(&conn, "tracks", "format") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN format TEXT", [])?;
+    }
     
     // Migration: Add lyric_offset column if it doesn't exist
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN lyric_offset INTEGER DEFAULT 0", []);
+    if !column_exists(&conn, "tracks", "lyric_offset") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN lyric_offset INTEGER DEFAULT 0", [])?;
+    }
 
     // Migration: Add loved column if it doesn't exist
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN loved INTEGER DEFAULT 0", []);
+    if !column_exists(&conn, "tracks", "loved") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN loved INTEGER DEFAULT 0", [])?;
+    }
+
+    // Migration: Add disliked column if it doesn't exist
+    if !column_exists(&conn, "tracks", "disliked") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN disliked INTEGER DEFAULT 0", [])?;
+    }
 
     // Migration: Add cover_url column if it doesn't exist
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN cover_url TEXT", []);
+    if !column_exists(&conn, "tracks", "cover_url") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN cover_url TEXT", [])?;
+    }
 
     // Migration: Add sonic profile columns if they don't exist
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL DEFAULT 120.0", []);
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN energy REAL DEFAULT 0.5", []);
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN bass_ratio REAL DEFAULT 0.33", []);
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN treble_ratio REAL DEFAULT 0.33", []);
+    if !column_exists(&conn, "tracks", "bpm") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL DEFAULT 120.0", [])?;
+    }
+    if !column_exists(&conn, "tracks", "energy") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN energy REAL DEFAULT 0.5", [])?;
+    }
+    if !column_exists(&conn, "tracks", "bass_ratio") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN bass_ratio REAL DEFAULT 0.33", [])?;
+    }
+    if !column_exists(&conn, "tracks", "treble_ratio") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN treble_ratio REAL DEFAULT 0.33", [])?;
+    }
 
     // Create playlist tables
     conn.execute(
@@ -317,7 +358,7 @@ pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energ
 }
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, cover_url, bpm, energy, bass_ratio, treble_ratio FROM tracks")?;
+    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio FROM tracks")?;
     let track_iter = stmt.query_map([], |row| {
         let path: String = row.get(1)?;
         let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
@@ -331,12 +372,13 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             format: row.get(6)?,
             lyric_offset: row.get(7).unwrap_or(0),
             loved: Some(row.get(8).unwrap_or(0)),
-            cover_url: row.get(9).ok(),
+            disliked: Some(row.get(9).unwrap_or(0)),
+            cover_url: row.get(10).ok(),
             path_hash,
-            bpm: row.get(10).ok(),
-            energy: row.get(11).ok(),
-            bass_ratio: row.get(12).ok(),
-            treble_ratio: row.get(13).ok(),
+            bpm: row.get(11).ok(),
+            energy: row.get(12).ok(),
+            bass_ratio: row.get(13).ok(),
+            treble_ratio: row.get(14).ok(),
         })
     })?;
 
@@ -396,7 +438,7 @@ pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &st
 
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio 
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio 
          FROM playlist_tracks pt
          LEFT JOIN tracks t ON t.path = pt.track_path 
          WHERE pt.playlist_id = ?1 
@@ -420,12 +462,13 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
             format: row.get(6)?,
             lyric_offset: row.get(7).unwrap_or(0),
             loved: Some(row.get(8).unwrap_or(0)),
-            cover_url: row.get(9).ok(),
+            disliked: Some(row.get(9).unwrap_or(0)),
+            cover_url: row.get(10).ok(),
             path_hash,
-            bpm: row.get(10).ok(),
-            energy: row.get(11).ok(),
-            bass_ratio: row.get(12).ok(),
-            treble_ratio: row.get(13).ok(),
+            bpm: row.get(11).ok(),
+            energy: row.get(12).ok(),
+            bass_ratio: row.get(13).ok(),
+            treble_ratio: row.get(14).ok(),
         })
     })?;
 
@@ -510,5 +553,64 @@ pub fn toggle_love_track(
         )?;
     }
 
+    Ok(())
+}
+
+pub fn toggle_dislike_track(
+    conn: &Connection,
+    path: &str,
+    disliked: bool,
+    title: Option<&str>,
+    artist: Option<&str>,
+    album: Option<&str>,
+    duration: Option<f64>,
+    format: Option<&str>,
+    cover_url: Option<&str>,
+) -> Result<()> {
+    let disliked_int = if disliked { 1 } else { 0 };
+
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tracks WHERE path = ?1)",
+        rusqlite::params![path],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if !exists && disliked {
+        conn.execute(
+            "INSERT INTO tracks (path, title, artist, album, duration, format, disliked, loved, cover_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)",
+            rusqlite::params![path, title, artist, album, duration, format, disliked_int, cover_url],
+        )?;
+    } else {
+        if disliked {
+            conn.execute(
+                "UPDATE tracks SET disliked = ?1, loved = 0 WHERE path = ?2",
+                rusqlite::params![disliked_int, path],
+            )?;
+            
+            // Delete from Favorite Songs playlist if it was there
+            if let Ok(playlist_id) = conn.query_row(
+                "SELECT id FROM playlists WHERE name = 'Favorite Songs'",
+                [],
+                |row| row.get::<_, i32>(0),
+            ) {
+                let _ = conn.execute(
+                    "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
+                    rusqlite::params![playlist_id, path],
+                );
+            }
+        } else {
+            conn.execute(
+                "UPDATE tracks SET disliked = ?1 WHERE path = ?2",
+                rusqlite::params![disliked_int, path],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn reset_disliked_tracks(conn: &Connection) -> Result<()> {
+    conn.execute("UPDATE tracks SET disliked = 0", [])?;
     Ok(())
 }

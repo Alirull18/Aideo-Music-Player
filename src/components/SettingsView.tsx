@@ -103,7 +103,8 @@ export function SettingsView() {
     autoplayDiscoveryLevel, setAutoplayDiscoveryLevel,
     setShowOnboarding, setOnboardingCompleted,
     cacheSizeLimit, setCacheSizeLimit,
-    discoverCastDevices
+    discoverCastDevices,
+    resetDislikedTracks
   } = useStore();
 
   // Tab navigation State
@@ -701,6 +702,41 @@ export function SettingsView() {
               {scanStatus}
             </div>
           )}
+        </div>
+      )
+    },
+    {
+      id: 'disliked-songs',
+      title: 'Disliked Tracks Manager',
+      description: 'Manage and reset tracks you have disliked to restore them to autoplay recommendations and the Discovery Hub.',
+      keywords: 'dislike disliked hate hated clear reset remove recommendations discovery',
+      tab: 'library',
+      element: (
+        <div className="settings-ctrl-card">
+          <div className="settings-ctrl-title">Disliked Tracks</div>
+          <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
+            Tracks marked as disliked are hidden from autoplay recommendations, radio seeds, and Discovery Hub shelves.
+          </div>
+          
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button 
+              className="btn btn-secondary" 
+              onClick={resetDislikedTracks}
+              style={{ 
+                flex: 1, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                gap: 6, 
+                padding: '10px 16px',
+                border: '1px solid rgba(244, 63, 94, 0.2)',
+                background: 'rgba(244, 63, 94, 0.05)',
+                color: '#f43f5e'
+              }}
+            >
+              <Trash2 size={14} /> Reset All Disliked Tracks
+            </button>
+          </div>
         </div>
       )
     },

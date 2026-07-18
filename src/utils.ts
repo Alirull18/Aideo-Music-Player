@@ -29,6 +29,7 @@ export function getStreamName(url: string | null) {
 
 export const resolvedPathMap = new Map<string, string>();
 export const onlineTrackCache = new Map<string, any>();
+export const trackIdToStreamUrl = new Map<string, { url: string; resolvedAt: number }>();
 
 export function pathsEqual(p1: string | null | undefined, p2: string | null | undefined): boolean {
   if (!p1 || !p2) return false;

@@ -605,9 +605,12 @@ export function AideoView() {
 
   const getFilteredRecommendations = () => {
     const recs = discoveryData?.recommendations || [];
-    if (selectedMood === 'all') return recs;
+    const dislikedPaths = new Set(tracks.filter(t => t.disliked === 1).map(t => t.path));
+    const filteredByDislike = recs.filter((track: any) => !dislikedPaths.has(track.url || track.path));
+    
+    if (selectedMood === 'all') return filteredByDislike;
 
-    return recs.filter((track: any) => {
+    return filteredByDislike.filter((track: any) => {
       const title = (track.title || '').toLowerCase();
       const artist = (track.artist || '').toLowerCase();
       
@@ -2368,7 +2371,11 @@ export function AideoView() {
                       </>
                     );
                   })()}
-                  {activeDiscoveryTab === 'charts' && renderTrackCarousel(discoveryData.global_charts)}
+                  {activeDiscoveryTab === 'charts' && (() => {
+                    const dislikedPaths = new Set(tracks.filter(t => t.disliked === 1).map(t => t.path));
+                    const chartsFiltered = (discoveryData.global_charts || []).filter((t: any) => !dislikedPaths.has(t.url || t.path));
+                    return renderTrackCarousel(chartsFiltered);
+                  })()}
                 </motion.div>
               </div>
             ) : null}

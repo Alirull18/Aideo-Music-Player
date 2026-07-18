@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
-import { MessageSquare, Activity, Maximize2, Heart } from 'lucide-react';
+import { MessageSquare, Activity, Maximize2, Heart, ThumbsDown } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
@@ -24,7 +24,7 @@ export function NowPlayingView() {
   const { 
     playback, currentDevice, coverArt, accentColor, dsp, 
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
-    setView, toggleLoveTrack, toggleControlCenter
+    setView, toggleLoveTrack, toggleDislikeTrack, toggleControlCenter
   } = useStore();
   const current = currentTrack;
 
@@ -229,35 +229,64 @@ export function NowPlayingView() {
               {current?.title || (playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : baseName(playback.current_track))}
             </span>
             {current && !isRadioStream(current) && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleLoveTrack(current.path);
-                }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: current.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.45)',
-                  cursor: 'pointer',
-                  padding: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.2s ease',
-                  flexShrink: 0
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'scale(1.2)';
-                  if (current.loved !== 1) e.currentTarget.style.color = '#ef4444';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'scale(1.0)';
-                  if (current.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.45)';
-                }}
-                title={current.loved === 1 ? "Remove from Loved Streams" : "Add to Loved Streams"}
-              >
-                <Heart size={18} fill={current.loved === 1 ? '#ef4444' : 'transparent'} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleLoveTrack(current.path);
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: current.loved === 1 ? '#ef4444' : 'rgba(255, 255, 255, 0.45)',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.2)';
+                    if (current.loved !== 1) e.currentTarget.style.color = '#ef4444';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.0)';
+                    if (current.loved !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.45)';
+                  }}
+                  title={current.loved === 1 ? "Remove from Loved Streams" : "Add to Loved Streams"}
+                >
+                  <Heart size={18} fill={current.loved === 1 ? '#ef4444' : 'transparent'} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleDislikeTrack(current.path, current);
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: current.disliked === 1 ? '#f43f5e' : 'rgba(255, 255, 255, 0.45)',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.2)';
+                    if (current.disliked !== 1) e.currentTarget.style.color = '#f43f5e';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.0)';
+                    if (current.disliked !== 1) e.currentTarget.style.color = 'rgba(255, 255, 255, 0.45)';
+                  }}
+                  title={current.disliked === 1 ? "Undislike track" : "Dislike track"}
+                >
+                  <ThumbsDown size={18} fill={current.disliked === 1 ? '#f43f5e' : 'transparent'} />
+                </button>
+              </div>
             )}
           </div>
 

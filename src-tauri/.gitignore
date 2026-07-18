@@ -15,3 +15,8 @@ tauri.key.password
 
 # Handover
 handler.md
+
+# Audit & build artifacts
+build_errors.txt
+Untitled-1.txt
+

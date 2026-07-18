@@ -249,9 +249,8 @@ fn pipe_url_to_stdin(
 
         while retry_count < max_retries {
             let client = reqwest::blocking::Client::builder()
-                .danger_accept_invalid_certs(true)
                 .connect_timeout(std::time::Duration::from_secs(15))
-                .timeout(std::time::Duration::from_secs(120))
+                .tcp_keepalive(std::time::Duration::from_secs(15))
                 .build()
                 .unwrap_or_else(|_| reqwest::blocking::Client::new());
 
@@ -3317,7 +3316,7 @@ fn play_file(
                             if !cache_path.exists() {
                                 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
                                 let client = reqwest::blocking::Client::builder()
-                                    .timeout(std::time::Duration::from_secs(30))
+                                    .timeout(std::time::Duration::from_secs(600))
                                     .connect_timeout(std::time::Duration::from_secs(10))
                                     .build()
                                     .unwrap_or_else(|_| reqwest::blocking::Client::new());

@@ -10,6 +10,36 @@ interface SearchResult { id: string; title: string; artist: string; source: stri
 export function LyricsPanel() {
   const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, setLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, setCustomPrompt } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  // Interpolated timer for smooth 60fps word-by-word sweeping
+  const [smoothedTime, setSmoothedTime] = useState(playback.position_secs);
+  const lastPositionRef = useRef(playback.position_secs);
+  const lastTimeRef = useRef(performance.now());
+
+  useEffect(() => {
+    lastPositionRef.current = playback.position_secs;
+    lastTimeRef.current = performance.now();
+    setSmoothedTime(playback.position_secs);
+  }, [playback.position_secs]);
+
+  useEffect(() => {
+    if (playback.status !== 'Playing') return;
+
+    let frameId: number;
+    const update = () => {
+      const now = performance.now();
+      const delta = (now - lastTimeRef.current) / 1000;
+      const interpolated = lastPositionRef.current + Math.min(0.25, delta);
+      setSmoothedTime(interpolated);
+      frameId = requestAnimationFrame(update);
+    };
+
+    frameId = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(frameId);
+  }, [playback.status]);
+
+  const currentTime = smoothedTime + lyricOffset / 1000;
+
   const [lyricMode, setLyricMode] = useState<'lrc' | 'text'>(() => {
     return (localStorage.getItem('aideo-lyric-mode') as 'lrc' | 'text') || 'lrc';
   });
@@ -320,7 +350,35 @@ export function LyricsPanel() {
                   }
                 }}
               >
-                <div>{l.text || '♪'}</div>
+                <div>
+                  {lyricMode === 'lrc' && i === activeIdx && l.words && l.words.length > 0 ? (
+                    l.words.map((word, wordIdx) => {
+                      const nextWord = l.words![wordIdx + 1];
+                      const duration = nextWord ? (nextWord.time_secs - word.time_secs) : 0.8;
+                      const isStarted = currentTime >= word.time_secs;
+                      const isFinished = nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration);
+                      
+                      let progress = 0;
+                      if (isFinished) {
+                        progress = 100;
+                      } else if (isStarted) {
+                        progress = Math.min(100, ((currentTime - word.time_secs) / duration) * 100);
+                      }
+
+                      return (
+                        <span 
+                          key={wordIdx} 
+                          className="lyric-word"
+                          style={{ '--word-progress': `${progress}%` } as React.CSSProperties}
+                        >
+                          {word.text}
+                        </span>
+                      );
+                    })
+                  ) : (
+                    l.text || '♪'
+                  )}
+                </div>
                 {showRomaji && l.romaji && l.romaji !== l.text && <div className="lyric-romaji">{l.romaji}</div>}
                 {l.translation && <div className="lyric-translation">{l.translation}</div>}
               </div>

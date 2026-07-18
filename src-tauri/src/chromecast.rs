@@ -28,12 +28,65 @@ fn get_local_ip() -> Option<String> {
 }
 
 // Local HTTP server task to stream audio files to Chromecast devices
-async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver<bool>) {
+fn is_path_safe(app_state: &crate::AppState, filepath: &str) -> bool {
+    let path = Path::new(filepath);
+    let canonical = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    
+    if !canonical.is_file() {
+        return false;
+    }
+
+    if let Some(data_dir) = dirs::data_dir() {
+        let cache_dir = data_dir.join("Aideo").join("CloudCache");
+        if let Ok(canonical_cache) = cache_dir.canonicalize() {
+            if canonical.starts_with(canonical_cache) {
+                return true;
+            }
+        }
+    }
+
+    let is_in_db = {
+        let conn = crate::safe_lock(&app_state.db);
+        let mut stmt = match conn.prepare("SELECT 1 FROM tracks WHERE path = ?1 OR cover_url = ?1") {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        stmt.exists([filepath]).unwrap_or(false)
+    };
+    if is_in_db {
+        return true;
+    }
+
+    if let Some(parent) = canonical.parent() {
+        let parent_str = parent.to_string_lossy().to_string();
+        let conn = crate::safe_lock(&app_state.db);
+        let mut stmt = match conn.prepare("SELECT 1 FROM tracks WHERE path LIKE ?1 LIMIT 1") {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let pattern = format!("{}%", parent_str);
+        stmt.exists([pattern]).unwrap_or(false)
+    } else {
+        false
+    }
+}
+
+// Local HTTP server task to stream audio files to Chromecast devices
+async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver<bool>, app_state: crate::AppState) {
     loop {
         tokio::select! {
             accept_res = listener.accept() => {
                 if let Ok((mut socket, addr)) = accept_res {
                     println!("[chromecast-http] Connection accepted from {}", addr);
+                    let app_state_clone = crate::AppState {
+                        player: app_state.player.clone(),
+                        db: app_state.db.clone(),
+                        media_controls: app_state.media_controls.clone(),
+                        cached_devices: app_state.cached_devices.clone(),
+                    };
                     tokio::spawn(async move {
                         let mut buf = [0u8; 4096];
                         let mut bytes_read = 0;
@@ -99,6 +152,12 @@ async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver
                                     return;
                                 }
                             };
+                            
+                            if !is_path_safe(&app_state_clone, &filepath) {
+                                println!("[chromecast-http] 403 Forbidden: file path not in library or unauthorized: {}", filepath);
+                                let _ = socket.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await;
+                                return;
+                            }
                             
                             let file_path = Path::new(&filepath);
                             println!("[chromecast-http] Resolving file '{}', exists: {}", filepath, file_path.exists());
@@ -222,13 +281,13 @@ async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver
     }
 }
 
-async fn start_local_server() -> Option<(u16, watch::Sender<bool>)> {
+async fn start_local_server(app_state: crate::AppState) -> Option<(u16, watch::Sender<bool>)> {
     let listener = TcpListener::bind("0.0.0.0:0").await.ok()?;
     let port = listener.local_addr().ok()?.port();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     
     tokio::spawn(async move {
-        run_http_server(listener, shutdown_rx).await;
+        run_http_server(listener, shutdown_rx, app_state).await;
     });
     
     Some((port, shutdown_tx))
@@ -251,7 +310,7 @@ pub async fn chromecast_discover() -> Result<Vec<DiscoveredDevice>, String> {
 }
 
 #[command]
-pub async fn chromecast_connect(ip: String, port: u16) -> Result<(), String> {
+pub async fn chromecast_connect(ip: String, port: u16, state: tauri::State<'_, crate::AppState>) -> Result<(), String> {
     println!("[chromecast] Connecting to device at {}:{}...", ip, port);
     let client = CastClient::connect(&ip, port)
         .await
@@ -268,7 +327,13 @@ pub async fn chromecast_connect(ip: String, port: u16) -> Result<(), String> {
     // Start local server if not already running
     let mut port_lock = LOCAL_SERVER_PORT.lock().await;
     if port_lock.is_none() {
-        if let Some((port, shutdown_tx)) = start_local_server().await {
+        let app_state_inner = crate::AppState {
+            player: state.player.clone(),
+            db: state.db.clone(),
+            media_controls: state.media_controls.clone(),
+            cached_devices: state.cached_devices.clone(),
+        };
+        if let Some((port, shutdown_tx)) = start_local_server(app_state_inner).await {
             *port_lock = Some(port);
             let mut shutdown_lock = LOCAL_SERVER_SHUTDOWN.lock().await;
             *shutdown_lock = Some(shutdown_tx);

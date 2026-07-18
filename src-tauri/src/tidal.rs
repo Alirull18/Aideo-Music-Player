@@ -55,12 +55,37 @@ pub struct TidalState {
 impl TidalState {
     // Load dynamic client credentials
     pub fn load_credentials(app_handle: &AppHandle) -> TidalCredentials {
+        // First try to load from keyring
+        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
+            if let Ok(content) = entry.get_password() {
+                if let Ok(cred) = serde_json::from_str::<TidalCredentials>(&content) {
+                    if !cred.client_id.trim().is_empty() && !cred.client_secret.trim().is_empty() {
+                        // Also cleanup old file if it exists
+                        if let Ok(app_data) = app_handle.path().app_data_dir() {
+                            let cred_file = app_data.join("tidal_credentials.json");
+                            if cred_file.exists() {
+                                let _ = std::fs::remove_file(cred_file);
+                            }
+                        }
+                        return cred;
+                    }
+                }
+            }
+        }
+
+        // If not in keyring, check if there is an old file to migrate
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             let cred_file = app_data.join("tidal_credentials.json");
             if cred_file.exists() {
                 if let Ok(content) = std::fs::read_to_string(&cred_file) {
                     if let Ok(cred) = serde_json::from_str::<TidalCredentials>(&content) {
                         if !cred.client_id.trim().is_empty() && !cred.client_secret.trim().is_empty() {
+                            // Migrate to keyring
+                            if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
+                                if entry.set_password(&content).is_ok() {
+                                    let _ = std::fs::remove_file(cred_file);
+                                }
+                            }
                             return cred;
                         } else {
                             let _ = std::fs::remove_file(cred_file);
@@ -89,28 +114,59 @@ impl TidalState {
     }
 
     pub fn save_credentials(app_handle: &AppHandle, client_id: &str, client_secret: &str) {
+        let cred = TidalCredentials {
+            client_id: client_id.to_string(),
+            client_secret: client_secret.to_string(),
+        };
+        if let Ok(content) = serde_json::to_string_pretty(&cred) {
+            if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
+                let _ = entry.set_password(&content);
+            }
+        }
+        
+        // Cleanup old file if it exists
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             let cred_file = app_data.join("tidal_credentials.json");
-            let _ = std::fs::create_dir_all(&app_data);
-            let cred = TidalCredentials {
-                client_id: client_id.to_string(),
-                client_secret: client_secret.to_string(),
-            };
-            if let Ok(content) = serde_json::to_string_pretty(&cred) {
-                let _ = std::fs::write(cred_file, content);
+            if cred_file.exists() {
+                let _ = std::fs::remove_file(cred_file);
             }
         }
     }
 
     // Check local session file on startup
     pub fn load_cached_session(app_handle: &AppHandle) -> Option<TidalSession> {
-        let app_data = app_handle.path().app_data_dir().ok()?;
-        let session_file = app_data.join("tidal_session.json");
-        if session_file.exists() {
-            if let Ok(content) = std::fs::read_to_string(session_file) {
+        // First try to load from keyring
+        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
+            if let Ok(content) = entry.get_password() {
                 if let Ok(session) = serde_json::from_str::<TidalSession>(&content) {
-                    println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] Loaded cached OAuth session successfully!{RESET}");
+                    // Cleanup old file if it exists
+                    if let Ok(app_data) = app_handle.path().app_data_dir() {
+                        let session_file = app_data.join("tidal_session.json");
+                        if session_file.exists() {
+                            let _ = std::fs::remove_file(session_file);
+                        }
+                    }
+                    println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] Loaded cached OAuth session from keyring successfully!{RESET}");
                     return Some(session);
+                }
+            }
+        }
+
+        // Migration from old file
+        if let Ok(app_data) = app_handle.path().app_data_dir() {
+            let session_file = app_data.join("tidal_session.json");
+            if session_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&session_file) {
+                    if let Ok(session) = serde_json::from_str::<TidalSession>(&content) {
+                        // Migrate to keyring
+                        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
+                            if entry.set_password(&content).is_ok() {
+                                let _ = std::fs::remove_file(session_file);
+                            }
+                        }
+                        println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] Migrated and loaded cached OAuth session successfully!{RESET}");
+                        return Some(session);
+                    }
                 }
             }
         }
@@ -118,19 +174,32 @@ impl TidalState {
     }
 
     pub fn save_session(app_handle: &AppHandle, session: &TidalSession) {
+        if let Ok(content) = serde_json::to_string_pretty(session) {
+            if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
+                let _ = entry.set_password(&content);
+            }
+        }
+
+        // Cleanup old file if it exists
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             let session_file = app_data.join("tidal_session.json");
-            let _ = std::fs::create_dir_all(&app_data);
-            if let Ok(content) = serde_json::to_string_pretty(session) {
-                let _ = std::fs::write(session_file, content);
+            if session_file.exists() {
+                let _ = std::fs::remove_file(session_file);
             }
         }
     }
 
     pub fn clear_session(app_handle: &AppHandle) {
+        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
+            let _ = entry.delete_credential();
+        }
+
+        // Cleanup old file if it exists
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             let session_file = app_data.join("tidal_session.json");
-            let _ = std::fs::remove_file(session_file);
+            if session_file.exists() {
+                let _ = std::fs::remove_file(session_file);
+            }
         }
     }
 }
@@ -145,6 +214,9 @@ pub async fn tidal_save_credentials(
     let secret_trimmed = client_secret.trim();
 
     if id_trimmed.is_empty() || secret_trimmed.is_empty() {
+        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
+            let _ = entry.delete_credential();
+        }
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             let cred_file = app_data.join("tidal_credentials.json");
             if cred_file.exists() {
@@ -759,6 +831,7 @@ pub async fn tidal_download(
                                 format: Some(format_str_clone),
                                 lyric_offset: 0,
                                 loved: Some(0),
+                                disliked: Some(0),
                                 cover_url: None,
                                 path_hash: None,
                                 bpm: None,

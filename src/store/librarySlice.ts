@@ -2,7 +2,8 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, onlineTrackCache } from '../utils';
+import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl } from '../utils';
+import { chainQueueOperation } from './playbackSlice';
 
 let isTransitioning = false;
 
@@ -274,7 +275,21 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     if (!track) return;
     
     const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
-    if (isOnline && typeof navigator !== 'undefined' && !navigator.onLine) {
+    let isCached = false;
+    if (isOnline) {
+      try {
+        let lookupUrl = track.path;
+        if (track.format === 'Tidal FLAC') {
+          const cachedResolved = trackIdToStreamUrl.get(track.path);
+          if (cachedResolved) lookupUrl = cachedResolved.url;
+        }
+        isCached = await invoke<boolean>('check_url_is_cached', { url: lookupUrl });
+      } catch (err) {
+        console.error('Failed to check if track is cached:', err);
+      }
+    }
+
+    if (isOnline && !isCached && typeof navigator !== 'undefined' && !navigator.onLine) {
       window.dispatchEvent(new CustomEvent('ui-toast', { 
         detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
       }));
@@ -283,6 +298,31 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
     try {
       await get().recordPlaybackTransition(track, playbackSource);
+
+      // De-duplicate / consume track from queue when starting playback
+      const currentQueue = get().queue;
+      const matchingIndices: number[] = [];
+      currentQueue.forEach((t, i) => {
+        if (pathsEqual(t.path, track.path)) {
+          matchingIndices.push(i);
+        }
+      });
+
+      if (matchingIndices.length > 0) {
+        const newQueue = currentQueue.filter(t => !pathsEqual(t.path, track.path));
+        set({ queue: newQueue });
+        localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+        
+        // Remove from the Rust backend queue in reverse order sequentially
+        for (let i = matchingIndices.length - 1; i >= 0; i--) {
+          const indexToRemove = matchingIndices[i];
+          chainQueueOperation(async () => {
+            await invoke('remove_from_queue', { index: indexToRemove }).catch(console.error);
+          });
+        }
+        await chainQueueOperation(async () => {});
+      }
+
       const index = get().tracks.findIndex(t => pathsEqual(t.path, track.path));
       const prevTrack = get().currentTrack;
       const history = prevTrack && !isHistory ? [...get().playHistory, prevTrack].slice(-50) : get().playHistory;
@@ -316,8 +356,15 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       let finalPath = track.path;
       if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
-          finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
-          resolvedPathMap.set(finalPath, track.path);
+          const cachedResolved = trackIdToStreamUrl.get(track.path);
+          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+            finalPath = cachedResolved.url;
+            console.log('[Tidal] Using pre-resolved stream URL for track:', track.title);
+          } else {
+            finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+            trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
+            resolvedPathMap.set(finalPath, track.path);
+          }
         } catch (e) {
           console.error('Failed to resolve Tidal stream in playTrack:', e);
         }
@@ -381,16 +428,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         }
       }
 
-      // 🚀 Background Pre-resolve the very next track for seamless transition
+      // 🚀 Background Pre-caching manager for the next 2 tracks
       setTimeout(() => {
-        const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
-        if (!lookaheadEnabled) return;
-        const nextTrack = get().getNextTrackToPlay();
-        if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://') || nextTrack.format === 'YouTube Direct')) {
-          if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
-            invoke('pre_resolve_youtube_url', { url: nextTrack.path }).catch(() => {});
-          }
-        }
+        get().preCacheNextTracks().catch(console.error);
       }, 500);
 
       await fetchTrackMetadataAndLyrics(track, set, get, isOnline || track.format === 'Tidal FLAC');
@@ -522,16 +562,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         await fetchTrackMetadataAndLyrics(track, set, get, isOnline);
         get().triggerAutoplayRadio(track, false);
 
-        // 🚀 Background Pre-resolve the very next track for seamless transition
+        // 🚀 Background Pre-caching manager for the next 2 tracks
         setTimeout(() => {
-          const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
-          if (!lookaheadEnabled) return;
-          const nextTrack = get().getNextTrackToPlay();
-          if (nextTrack && (nextTrack.path.startsWith('http://') || nextTrack.path.startsWith('https://') || nextTrack.format === 'YouTube Direct')) {
-            if (nextTrack.path.includes("youtube.com") || nextTrack.path.includes("youtu.be")) {
-              invoke('pre_resolve_youtube_url', { url: nextTrack.path }).catch(() => {});
-            }
-          }
+          get().preCacheNextTracks().catch(console.error);
         }, 500);
       }
 
@@ -654,9 +687,49 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
             }));
           }
 
-          // Filter out previously played tracks
+          // Filter out previously played tracks, currently playing track, already queued tracks, and disliked tracks
           const playedSet = new Set(get().playHistory.map(t => t.path));
-          let finalRecommended = recommendedTracks.filter(t => !playedSet.has(t.path));
+          const queuedSet = new Set(get().queue.map(t => t.path));
+          const dislikedSet = new Set(get().tracks.filter(t => t.disliked === 1).map(t => t.path));
+          const currentTrackPath = currentTrack?.path;
+
+          const cleanText = (str: string | null) => {
+            if (!str) return '';
+            let val = str.toLowerCase();
+            val = val.replace(/[\(\[][^\)\]]+[\)\]]/g, '');
+            val = val.replace(/\s+(feat|ft|featuring|official\s+audio|official\s+video).*$/i, '');
+            return val.trim();
+          };
+
+          const playedTitleArtistSet = new Set(
+            get().playHistory.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
+          );
+
+          const queuedTitleArtistSet = new Set(
+            get().queue.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
+          );
+
+          let finalRecommended = recommendedTracks.filter(t => 
+            !playedSet.has(t.path) && 
+            !queuedSet.has(t.path) && 
+            !dislikedSet.has(t.path) &&
+            t.path !== currentTrackPath &&
+            !playedTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
+            !queuedTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`)
+          );
+
+          if (finalRecommended.length === 0) {
+            finalRecommended = recommendedTracks.filter(t => 
+              !queuedSet.has(t.path) && 
+              !dislikedSet.has(t.path) &&
+              t.path !== currentTrackPath
+            );
+          }
+
+          if (finalRecommended.length === 0) {
+            finalRecommended = recommendedTracks.filter(t => !dislikedSet.has(t.path));
+          }
+
           if (finalRecommended.length === 0) {
             finalRecommended = recommendedTracks;
           }
@@ -742,6 +815,91 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
 
     return activeTracks[nextIndex % activeTracks.length];
+  },
+
+  getNextTracksToPlay: (count = 2) => {
+    const { tracks, currentTrackIndex, shuffle, repeat, queue, currentTrack } = get();
+    const result: Track[] = [];
+
+    // 1. First take from the active queue
+    if (queue.length > 0) {
+      result.push(...queue.slice(0, count));
+    }
+
+    // 2. If we need more tracks, calculate what would play next in sequence
+    let remaining = count - result.length;
+    if (remaining > 0) {
+      if (repeat === 'one' && currentTrack) {
+        for (let i = 0; i < remaining; i++) {
+          result.push(currentTrack);
+        }
+      } else {
+        const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC' || currentTrack?.format === 'YouTube Direct';
+        const activeTracks = isCurrentOnline
+          ? tracks.filter(t => isStreamTrack(t.path, t.format))
+          : tracks.filter(t => !isStreamTrack(t.path, t.format));
+
+        if (activeTracks.length > 0) {
+          const currentActiveIdx = activeTracks.findIndex(t => pathsEqual(t.path, currentTrack?.path || ''));
+          let nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) + 1;
+
+          for (let i = 0; i < remaining; i++) {
+            if (shuffle) {
+              break;
+            }
+            if (repeat === 'none' && nextIndex >= activeTracks.length) {
+              break;
+            }
+            result.push(activeTracks[nextIndex % activeTracks.length]);
+            nextIndex++;
+          }
+        }
+      }
+    }
+    return result;
+  },
+
+  preCacheNextTracks: async () => {
+    const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
+    if (!lookaheadEnabled) return;
+
+    const nextTracks = get().getNextTracksToPlay(2);
+    for (const track of nextTracks) {
+      if (!track) continue;
+      
+      const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
+      if (!isOnline) continue;
+
+      if (track.path.includes("youtube.com") || track.path.includes("youtu.be") || track.format === 'YouTube Direct') {
+        console.log('[Pre-Cache] Pre-resolving YouTube track:', track.title);
+        invoke('pre_resolve_youtube_url', { url: track.path }).catch(() => {});
+      } 
+      else if (track.format === 'Tidal FLAC') {
+        console.log('[Pre-Cache] Pre-caching Tidal track:', track.title);
+        (async () => {
+          try {
+            const cachedResolved = trackIdToStreamUrl.get(track.path);
+            let finalUrl = '';
+            if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+              finalUrl = cachedResolved.url;
+            } else {
+              finalUrl = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+              trackIdToStreamUrl.set(track.path, { url: finalUrl, resolvedAt: Date.now() });
+              resolvedPathMap.set(finalUrl, track.path);
+            }
+            if (finalUrl) {
+              invoke('cache_cloud_track', { streamUrl: finalUrl }).catch(() => {});
+            }
+          } catch (e) {
+            console.error('[Pre-Cache] Failed to pre-cache Tidal track:', e);
+          }
+        })();
+      } 
+      else if (track.path.startsWith('http://') || track.path.startsWith('https://')) {
+        console.log('[Pre-Cache] Pre-caching Cloud/Subsonic track:', track.title);
+        invoke('cache_cloud_track', { streamUrl: track.path }).catch(() => {});
+      }
+    }
   },
 
   playPrev: async () => {
@@ -922,25 +1080,32 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       ]);
 
       const clearedSet = new Set(get().recentlyClearedAutoplayPaths || []);
+      const dislikedSet = new Set(get().tracks.filter(t => t.disliked === 1).map(t => t.path));
       let finalRecommended = recommendedTracks.filter(t => 
         !playedSet.has(t.path) && 
         !playedTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
         !existingPaths.has(t.path) && 
         !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
-        !clearedSet.has(t.path)
+        !clearedSet.has(t.path) &&
+        !dislikedSet.has(t.path)
       );
       if (finalRecommended.length === 0) {
         finalRecommended = recommendedTracks.filter(t => 
           !existingPaths.has(t.path) && 
           !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
-          !clearedSet.has(t.path)
+          !clearedSet.has(t.path) &&
+          !dislikedSet.has(t.path)
         );
       }
       if (finalRecommended.length === 0) {
         finalRecommended = recommendedTracks.filter(t => 
           !existingPaths.has(t.path) &&
-          !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`)
+          !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
+          !dislikedSet.has(t.path)
         );
+      }
+      if (finalRecommended.length === 0) {
+        finalRecommended = recommendedTracks.filter(t => !dislikedSet.has(t.path));
       }
 
       const needed = Math.max(0, 5 - existingAutoplay.length);
@@ -968,18 +1133,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         await invoke('add_to_queue_bulk', { paths });
       }
 
-      // 🚀 Background Pre-resolve: Fetch direct streaming URLs in the background
-      // for the next 2 tracks in the queue to make playback transitions instantaneous!
-      const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
-      if (lookaheadEnabled) {
-        for (const t of newQueue.slice(0, 2)) {
-          if (t.path.startsWith('http://') || t.path.startsWith('https://')) {
-            if (t.path.includes("youtube.com") || t.path.includes("youtu.be")) {
-              invoke('pre_resolve_youtube_url', { url: t.path }).catch(() => {});
-            }
-          }
-        }
-      }
+      // 🚀 Background Pre-caching manager for the next 2 tracks
+      get().preCacheNextTracks().catch(console.error);
 
       console.log('[autoplay] Dynamically populated upcoming queue with recommendations!');
     } catch (err) {
@@ -1067,8 +1222,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
   toggleLoveTrack: async (path: string, metadata?: Partial<Track>) => {
     try {
-      const track = get().tracks.find(t => t.path === path)
-        || (get().currentTrack?.path === path ? get().currentTrack : null)
+      const track = get().tracks.find(t => pathsEqual(t.path, path))
+        || (pathsEqual(get().currentTrack?.path, path) ? get().currentTrack : null)
         || (metadata ? { path, ...metadata } as Track : null);
 
       if (!track) return;
@@ -1085,11 +1240,23 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         coverUrl: track.cover_url || null
       });
 
-      // Reload the library from SQLite to pick up the newly inserted/updated track
-      await get().loadLibrary();
+      // Update tracks array in-place
+      const updatedTracks = get().tracks.map(t => {
+        if (pathsEqual(t.path, path)) {
+          return { ...t, loved: isLovedNow };
+        }
+        return t;
+      });
+      set({ tracks: updatedTracks });
+
+      // Update currentTrack in-place if it matches
+      const current = get().currentTrack;
+      if (current && pathsEqual(current.path, path)) {
+        set({ currentTrack: { ...current, loved: isLovedNow } });
+      }
 
       const updatedQueue = get().queue.map(q => {
-        if (q.path === path) {
+        if (pathsEqual(q.path, path)) {
           return { ...q, loved: isLovedNow };
         }
         return q;
@@ -1104,6 +1271,101 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
     } catch (e) {
       console.error('toggleLoveTrack:', e);
+    }
+  },
+
+  toggleDislikeTrack: async (path: string, metadata?: Partial<Track>) => {
+    try {
+      const track = get().tracks.find(t => pathsEqual(t.path, path))
+        || (pathsEqual(get().currentTrack?.path, path) ? get().currentTrack : null)
+        || (metadata ? { path, ...metadata } as Track : null);
+
+      if (!track) return;
+      const isDislikedNow = track.disliked === 1 ? 0 : 1;
+
+      await invoke('toggle_dislike_track', {
+        path,
+        disliked: isDislikedNow === 1,
+        title: track.title || null,
+        artist: track.artist || null,
+        album: track.album || null,
+        duration: track.duration || null,
+        format: track.format || null,
+        coverUrl: track.cover_url || null
+      });
+
+      // Update tracks array in-place
+      const updatedTracks = get().tracks.map(t => {
+        if (pathsEqual(t.path, path)) {
+          return { ...t, disliked: isDislikedNow, loved: isDislikedNow === 1 ? 0 : t.loved };
+        }
+        return t;
+      });
+      set({ tracks: updatedTracks });
+
+      // Update currentTrack in-place if it matches
+      const current = get().currentTrack;
+      if (current && pathsEqual(current.path, path)) {
+        set({ currentTrack: { ...current, disliked: isDislikedNow, loved: isDislikedNow === 1 ? 0 : current.loved } });
+      }
+
+      // If disliking, also remove it from the active queue!
+      if (isDislikedNow === 1) {
+        const currentQueue = get().queue;
+        const matchingIndices: number[] = [];
+        currentQueue.forEach((t, i) => {
+          if (pathsEqual(t.path, path)) {
+            matchingIndices.push(i);
+          }
+        });
+
+        if (matchingIndices.length > 0) {
+          const newQueue = currentQueue.filter(t => !pathsEqual(t.path, path));
+          set({ queue: newQueue });
+          localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+          
+          for (let i = matchingIndices.length - 1; i >= 0; i--) {
+            await invoke('remove_from_queue', { index: matchingIndices[i] }).catch(console.error);
+          }
+        }
+      }
+
+      const updatedQueue = get().queue.map(q => {
+        if (pathsEqual(q.path, path)) {
+          // If disliking, loved must be 0!
+          return { ...q, disliked: isDislikedNow, loved: isDislikedNow === 1 ? 0 : q.loved };
+        }
+        return q;
+      });
+      set({ queue: updatedQueue });
+
+      await get().fetchPlaylists();
+
+      const playlist = get().currentPlaylist;
+      if (playlist) {
+        await get().loadPlaylistTracks(playlist.id);
+      }
+      
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: isDislikedNow === 1 ? 'Added to disliked tracks' : 'Removed from disliked tracks', type: 'info' } 
+      }));
+    } catch (e) {
+      console.error('toggleDislikeTrack:', e);
+    }
+  },
+
+  resetDislikedTracks: async () => {
+    try {
+      await invoke('reset_disliked_tracks');
+      await get().loadLibrary();
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: 'Reset all disliked tracks successfully', type: 'success' } 
+      }));
+    } catch (e) {
+      console.error('resetDislikedTracks:', e);
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Failed to reset dislikes: ${e}`, type: 'error' } 
+      }));
     }
   },
 

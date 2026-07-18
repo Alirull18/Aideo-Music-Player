@@ -10,6 +10,7 @@ export interface Track {
   cover_url?: string | null;
   is_autoplay?: boolean;
   loved?: number;
+  disliked?: number;
   path_hash?: string | null;
   bpm?: number | null;
   energy?: number | null;
@@ -57,11 +58,17 @@ export interface Playlist {
   name: string;
 }
 
+export interface LyricWord {
+  time_secs: number;
+  text: string;
+}
+
 export interface LyricLine {
   time_secs: number;
   text: string;
   romaji?: string;
   translation?: string;
+  words?: LyricWord[];
 }
 
 export interface EQBand {
@@ -264,6 +271,8 @@ export interface PlayerState {
   handleTrackTransition: (path: string) => Promise<void>;
   playNext: () => Promise<void>;
   getNextTrackToPlay: () => Track | null;
+  getNextTracksToPlay: (count?: number) => Track[];
+  preCacheNextTracks: () => Promise<void>;
   playPrev: () => Promise<void>;
   toggleShuffle: () => void;
   toggleRepeat: () => void;
@@ -298,6 +307,8 @@ export interface PlayerState {
   removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
   loadPlaylistTracks: (playlistId: number) => Promise<void>;
   toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
+  toggleDislikeTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
+  resetDislikedTracks: () => Promise<void>;
   cachedCloudHashes: string[];
   fetchCachedCloudHashes: () => Promise<void>;
   cacheCloudTrack: (track: any) => Promise<void>;
