@@ -2149,13 +2149,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
-#[allow(dead_code)]
-fn test_chromaprint_api() {
-    let mut fp = chromaprint::Fingerprinter::new(chromaprint::Algorithm::default());
-    let _ = fp.start(44100, 2);
-    let chunk: Vec<i16> = vec![0; 1024];
-    let _ = fp.feed(&chunk);
-    let _ = fp.finish();
-    let _encoded: String = fp.encode();
-}

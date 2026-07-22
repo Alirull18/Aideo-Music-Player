@@ -1,4 +1,21 @@
-# Logs
+# Dependencies & Build Output
+node_modules
+dist
+dist-ssr
+*.local
+src-tauri/target
+src-tauri/bin/
+src-tauri/gen/
+
+# Database & Storage
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+src-tauri/*.db
+src-tauri/*.db-journal
+
+# Logs & Diagnostics
 logs
 *.log
 npm-debug.log*
@@ -6,62 +23,55 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+build_errors.txt
 
-node_modules
-dist
-dist-ssr
-*.local
+# Environment & Sensitive Keys
+.env
+*.env
+*.env.local
+*.env.*.local
+src-tauri/.env
+tauri.key*
+*.key*
+tauri.key.password
+final_aideo.key
 
-# Editor directories and files
+# Editor & OS Files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-# Tauri
-src-tauri/target
-src-tauri/bin/
-src-tauri/*.db
-src-tauri/*.db-journal
-
-# Scratch
-scratch/
-
-# Sensitive data
-.env
-*.env
-tauri.key*
-*.key*
-tauri.key.password
-# Handover
-handler.md
-final_aideo.key
-
-# AI Handbooks
-docs/AI_CONTEXT.md
-docs/ARCHITECTURE.md
-yagnirule.md
-
-
-# Binaries
+# Executables & Binaries
 ffmpeg.exe
+yt-dlp.exe
 ytdlp.exe
 *.exe
 *.msi
 *.sig
+*.dll
+*.dylib
+*.so
 
-# Audit & build artifacts
+# Temporary & Test Audio/Scripts
+scratch/
 test.wav
 *.wav
 patch_player.py
 patch_player.ps1
-build_errors.txt
 Untitled-1.txt
 
-# Added by code-review-graph
+# Agent & Graph Caches
+.agents/
+handler.md
+docs/AI_CONTEXT.md
+docs/ARCHITECTURE.md
+yagnirule.md
 .code-review-graph/
+ponytail/

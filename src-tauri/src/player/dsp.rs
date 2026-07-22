@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 #[derive(Clone, Debug, Default)]
 pub struct BiquadFilter {
     pub b0: f32,

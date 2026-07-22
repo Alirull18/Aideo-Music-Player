@@ -395,6 +395,7 @@ export function AideoView() {
   const [greeting, setGreeting] = useState('Good morning');
   const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
   const isFetchingRef = useRef(false);
+  const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -659,28 +660,33 @@ export function AideoView() {
     });
   };
 
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = async (forceRefresh = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
+    setIsRefreshingRecs(true);
     setIsLoadingRecs(true);
     setVisibleRecsCount(15);
 
-    // Load cached discovery hub data first (offline-first instant load)
-    try {
-      const cached = await invoke<any>('get_cached_discovery_hub');
-      if (cached) {
-        setDiscoveryData(cached);
-        setIsLoadingRecs(false);
-        if (cached.mixed_for_you && cached.mixed_for_you.length > 0) {
-          setActiveDiscoveryTab('mixed');
-        } else if (cached.recommendations && cached.recommendations.length > 0) {
-          setActiveDiscoveryTab('recommendations');
-        } else if (cached.global_charts && cached.global_charts.length > 0) {
-          setActiveDiscoveryTab('charts');
+    if (forceRefresh) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Refreshing recommendations...', type: 'info' } }));
+    } else {
+      // Load cached discovery hub data first (offline-first instant load)
+      try {
+        const cached = await invoke<any>('get_cached_discovery_hub');
+        if (cached) {
+          setDiscoveryData(cached);
+          setIsLoadingRecs(false);
+          if (cached.mixed_for_you && cached.mixed_for_you.length > 0) {
+            setActiveDiscoveryTab('mixed');
+          } else if (cached.recommendations && cached.recommendations.length > 0) {
+            setActiveDiscoveryTab('recommendations');
+          } else if (cached.global_charts && cached.global_charts.length > 0) {
+            setActiveDiscoveryTab('charts');
+          }
         }
+      } catch (e) {
+        console.warn('Failed to load cached discovery hub:', e);
       }
-    } catch (e) {
-      console.warn('Failed to load cached discovery hub:', e);
     }
 
     try {
@@ -813,6 +819,7 @@ export function AideoView() {
       console.error('Failed to load personalized discovery recommendations:', err);
     } finally {
       setIsLoadingRecs(false);
+      setIsRefreshingRecs(false);
       isFetchingRef.current = false;
     }
   };
@@ -2140,14 +2147,14 @@ export function AideoView() {
                   {discoveryViewMode === 'list' ? "Grid View" : "List View"}
                 </button>
                 <button 
-                  onClick={fetchRecommendations} 
-                  disabled={isLoadingRecs}
-                  style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text)'}
-                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+                  onClick={() => fetchRecommendations(true)} 
+                  disabled={isRefreshingRecs || isLoadingRecs}
+                  style={{ background: 'none', border: 'none', color: isRefreshingRecs ? 'var(--accent)' : 'var(--text-dim)', cursor: isRefreshingRecs ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
+                  onMouseEnter={(e) => { if (!isRefreshingRecs) e.currentTarget.style.color = 'var(--text)'; }}
+                  onMouseLeave={(e) => { if (!isRefreshingRecs) e.currentTarget.style.color = 'var(--text-dim)'; }}
                 >
-                  <RefreshCw size={12} className={isLoadingRecs ? "spin" : ""} />
-                  Refresh Recommendations
+                  <RefreshCw size={12} className={isRefreshingRecs || isLoadingRecs ? "spin" : ""} />
+                  {isRefreshingRecs ? "Refreshing..." : "Refresh Recommendations"}
                 </button>
               </div>
             </div>

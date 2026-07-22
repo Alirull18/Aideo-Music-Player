@@ -206,7 +206,7 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
 
   return (
     <div className="lib-thumb-mini">
-      <img src={art || defaultCover} alt="" loading="lazy" />
+      <img src={art || defaultCover} alt="" loading="lazy" decoding="async" />
     </div>
   );
 }
@@ -698,7 +698,13 @@ export function LibraryView() {
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedSearchQuery(searchQuery), 120);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
   
   // Deferred rendering for large libraries to prevent initial load jank
   const [libraryReady, setLibraryReady] = useState(tracks.length < 200);
@@ -911,8 +917,8 @@ export function LibraryView() {
       );
 
   const filteredTracks = sourceTracks.filter((t: any) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
+    if (!debouncedSearchQuery) return true;
+    const q = debouncedSearchQuery.toLowerCase();
     return (t.title?.toLowerCase().includes(q) || t.artist?.toLowerCase().includes(q) || t.path.toLowerCase().includes(q));
   });
 

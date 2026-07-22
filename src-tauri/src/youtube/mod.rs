@@ -2,10 +2,6 @@ pub mod parser;
 pub mod client;
 pub mod ytdlp;
 
-pub use parser::*;
-pub use client::*;
-pub use ytdlp::*;
-
 
 use serde::{Deserialize, Serialize};
 use tauri::{State, Manager};
@@ -452,6 +448,7 @@ pub async fn search_youtube_internal_impl(
  
         let duration_raw = extract_duration_safe(&item).unwrap_or_else(|| "0:00".to_string());
  
+        // Primary path: musicThumbnailRenderer
         let thumbnail_url = item.get("thumbnail")
             .and_then(|t| t.get("musicThumbnailRenderer"))
             .and_then(|mt| mt.get("thumbnail"))
@@ -459,7 +456,18 @@ pub async fn search_youtube_internal_impl(
             .and_then(|arr| arr.as_array())
             .and_then(|arr| arr.last())
             .and_then(|t| t.get("url"))
-            .and_then(|u| u.as_str());
+            .and_then(|u| u.as_str())
+            // Fallback: croppedSquareThumbnailRenderer
+            .or_else(|| {
+                item.get("thumbnail")
+                    .and_then(|t| t.get("croppedSquareThumbnailRenderer"))
+                    .and_then(|mt| mt.get("thumbnail"))
+                    .and_then(|t| t.get("thumbnails"))
+                    .and_then(|arr| arr.as_array())
+                    .and_then(|arr| arr.last())
+                    .and_then(|t| t.get("url"))
+                    .and_then(|u| u.as_str())
+            });
  
         let cover_url = thumbnail_url.map(|url| {
             if let Some(pos) = url.find("=w") {
@@ -469,6 +477,9 @@ pub async fn search_youtube_internal_impl(
             } else {
                 url.to_string()
             }
+        }).or_else(|| {
+            // Ultimate fallback: use YouTube video thumbnail via videoId
+            Some(format!("https://i.ytimg.com/vi/{}/mqdefault.jpg", video_id))
         });
  
         let url = format!("https://www.youtube.com/watch?v={}", video_id);
@@ -1174,6 +1185,8 @@ pub async fn get_youtube_autoplay_recommendations(
                     } else {
                         url.to_string()
                     }
+                }).or_else(|| {
+                    Some(format!("https://i.ytimg.com/vi/{}/mqdefault.jpg", id))
                 });
 
                 let duration_raw = item.get("lengthText")

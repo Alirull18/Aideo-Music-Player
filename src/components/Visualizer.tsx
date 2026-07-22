@@ -8,7 +8,9 @@ interface VisualizerProps {
 
 export function Visualizer({ mode: propMode }: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { accentColor, playback, lowSpecMode } = useStore();
+  const accentColor = useStore((s) => s.accentColor);
+  const playbackStatus = useStore((s) => s.playback.status);
+  const lowSpecMode = useStore((s) => s.lowSpecMode);
   const spectrumRef = useRef<number[]>(new Array(64).fill(0));
 
   const [internalMode, setInternalMode] = useState<'baseline' | 'circle' | 'wave'>(() => {
@@ -88,7 +90,7 @@ export function Visualizer({ mode: propMode }: VisualizerProps) {
     const render = () => {
       ctx.clearRect(0, 0, width, height);
 
-      if (playback.status !== 'Playing') {
+      if (playbackStatus !== 'Playing') {
         animationId = requestAnimationFrame(render);
         return;
       }
@@ -224,7 +226,7 @@ export function Visualizer({ mode: propMode }: VisualizerProps) {
       cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
     };
-  }, [accentColor, playback.status, lowSpecMode, currentMode]);
+  }, [accentColor, playbackStatus, lowSpecMode, currentMode]);
 
   return (
     <canvas 

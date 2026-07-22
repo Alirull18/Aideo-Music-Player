@@ -1,6 +1,6 @@
 [package]
 name = "aideo"
-version = "0.9.1"
+version = "0.9.2"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
@@ -71,3 +71,11 @@ zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 keyring = "3.0.0"
 chromaprint-next = "0.1.0"
 tokio-tungstenite = "0.29.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+

@@ -50,7 +50,9 @@ pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> boo
 pub fn init_db(db_path: &str) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
     
-    // Enable Foreign Key support in SQLite
+    // Performance Tuning: Enable WAL (Write-Ahead Logging) and Foreign Keys
+    let _ = conn.execute("PRAGMA journal_mode = WAL", []);
+    let _ = conn.execute("PRAGMA synchronous = NORMAL", []);
     conn.execute("PRAGMA foreign_keys = ON", [])?;
     
     // Create base table if missing
@@ -303,6 +305,13 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             }
         }
     }
+
+    // Add high-performance indexes for library filtering and analytics
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_loved ON tracks(loved)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON playback_history(timestamp)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position)", []);
 
     Ok(conn)
 }

@@ -72,6 +72,8 @@ function AlbumThumbnail({ sampleTrack, title }: { sampleTrack: any; title: strin
     <img
       src={art || defaultCover}
       alt={title}
+      loading="lazy"
+      decoding="async"
       style={{
         width: '100%',
         height: '100%',

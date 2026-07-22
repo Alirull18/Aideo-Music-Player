@@ -61,6 +61,42 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
+## 📢 Release Notes: Version 0.9.2
+
+Welcome to **v0.9.2**! This release brings a major visual upgrade to your music library, deeper artist exploration tools, smoother controls, and a smarter radio autoplay experience designed to make listening effortless.
+
+---
+
+### 🎵 Cleaner, Smoother Music Library
+* **Simplified Header & Controls**: Enjoy a single clean top header with the search bar, sort menu, and `[ 🎵 Tracks | 💿 Albums ]` view switcher all grouped neatly together.
+* **Double Scrollbar Fix**: Removed duplicate scrollbars so scrolling through your library feels completely smooth and natural.
+* **Instant Navigation**: Switching to your Loved Songs or Playlists instantly shows your track list without extra clicks.
+* **Polished Menus**: Pop-up menus on album cards now open cleanly on top without getting cut off or overlapping neighboring items.
+
+### 🎨 Artist Hub 
+* **Interactive Artist Drawer**: Click on any artist's name to open a sleek side panel featuring their full discography, your personal play stats, top tracks, and instant Play/Shuffle buttons.
+* **Dynamic Artwork Color Tinting**: When viewing album details, the backdrop dynamically samples the album cover colors to create a beautiful, glowing ambient color gradient.
+* **Favorite Albums ("Loved Albums")**: Click the Heart ❤️ icon on any album card or header to bookmark your favorite albums, then filter them anytime using the `[ All Albums | Loved Albums ❤️ ]` toggle.
+* **Cloud & Local Album Covers**: Your album cover art loads instantly, whether streaming from Subsonic / Jellyfin cloud servers or playing local files from your disk.
+
+### 💎 Translucent Glass Design & Instant Edits
+* **Glass Search & Sort Bar**: Search inputs and sort menus have been redesigned into translucent glass pills with instant search clearing (`X`) and sleek dropdown animations.
+* **Instant Deleting & Organizing**: Deleting a song or album instantly removes it from your view—no manual refresh or page switching required.
+
+### 📻 Smarter Autoplay & Reliable Online Search
+* **Vibe-Locked Radio Autoplay**: Radio and autoplay recommendations now stay locked to the vibe of the song you started with, so your listening session won't drift off-genre over time.
+* **No More Duplicate Songs**: Radio sessions remember what you've heard to prevent repeating songs, automatically resetting whenever you pick a new track.
+* **Audio Stalling & Freeze Prevention**: Resolved background playback conflicts to prevent music stuttering, visualizer freezes, or random pauses mid-song.
+* **Reliable Cover Art & Stream Search**: Online search result ranking has been refined to prioritize official studio tracks over live/fan covers, ensuring album covers display reliably for every song.
+
+### 🧠 Smart Recommendation Engine (Under the Hood)
+* **Hybrid Personalization**: Aideo's algorithm analyzes your local scrobbler history, play counts, and top genres locally on your machine—delivering 100% private, customized recommendations without sending personal listening data to cloud servers.
+* **Dynamic "Mixed for You" Shelves**: Automatically generates genre-tailored mixes (e.g., *Chill Mix*, *Synthwave Mix*) based on your listening habits, with smart fallback seeds for new users.
+* **Balanced Local + Online Blending**: Blends high-fidelity local library tracks with fresh online discoveries in a balanced 1:1 ratio.
+* **Quality & Fake Artist Safeguards**: Filters out low-quality fan edits, sped-up/reverb remixes, and corrupt artist profiles using Last.fm listener validation thresholds (`>= 200` listeners).
+
+---
+
 ## 📢 What's New in v0.9.1 (Local Playback Insights, Wrapped Slideshow & Theme Contrast Overhauls)
 
 * **📊 Local Listening Insights Dashboard**: Introduced a completely local, privacy-centric listening analytics dashboard (Aideo Insights). Track total listening time, play count, skip rates, top tracks, top artists, and top genres fully offline with zero cloud dependency.
@@ -90,8 +126,8 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ## ⚡ Quick Start (For Users)
 
-1. **Download**: Get the latest v0.9.1 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the Windows installer (`Aideo_0.9.1_x64_en-US.msi`).
+1. **Download**: Get the latest v0.9.2 installer from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+2. **Install**: Run the Windows installer (`Aideo_0.9.2_x64_en-US.msi`).
 3. **Launch**: Add your music folder and experience bit-perfect sound!
 
 ---

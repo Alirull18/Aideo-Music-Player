@@ -9,9 +9,9 @@ import './App.css';
 
 import { Sidebar } from './components/Sidebar';
 import { LibraryView } from './components/LibraryView';
-import { AideoView } from './components/AideoView';
 import { NowPlayingView } from './components/NowPlayingView';
 
+const AideoView = lazy(() => import('./components/AideoView').then(m => ({ default: m.AideoView })));
 const LastfmView = lazy(() => import('./components/LastfmView').then(m => ({ default: m.LastfmView })));
 const ListenbrainzView = lazy(() => import('./components/ListenbrainzView').then(m => ({ default: m.ListenbrainzView })));
 const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
