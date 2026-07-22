@@ -155,7 +155,7 @@ Aideo stands on the shoulders of giants. We express our deepest gratitude to the
 
 ## 👨‍💻 Note from the Developer
 
-> This project is a labor of love, developed as an educational journey into high-performance desktop application architecture and digital signal processing. As a Computer Science student, I built Aideo to explore the intersection of Rust's safety/performance and modern UI design. It is 100% AI-assisted , serving as a testament to how modern tools can accelerate specialized software development.
+> This project is a labor of love, developed as an educational journey into high-performance desktop application architecture and digital signal processing. As a Computer Science student, I built Aideo to explore the intersection of Rust's safety/performance and modern UI design. It is  AI-assisted , serving as a testament to how modern tools can accelerate specialized software development.
 > 
 > — **Alirul**
 

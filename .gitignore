@@ -63,3 +63,5 @@ patch_player.ps1
 build_errors.txt
 Untitled-1.txt
 
+# Added by code-review-graph
+.code-review-graph/

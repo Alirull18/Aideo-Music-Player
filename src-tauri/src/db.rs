@@ -27,7 +27,8 @@ pub struct Playlist {
     pub name: String,
 }
 
-fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+
     let mut stmt = match conn.prepare(&format!("PRAGMA table_info({})", table)) {
         Ok(s) => s,
         Err(_) => return false,
@@ -614,3 +615,5 @@ pub fn reset_disliked_tracks(conn: &Connection) -> Result<()> {
     conn.execute("UPDATE tracks SET disliked = 0", [])?;
     Ok(())
 }
+
+

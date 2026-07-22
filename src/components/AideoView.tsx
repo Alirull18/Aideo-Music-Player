@@ -518,9 +518,15 @@ export function AideoView() {
         try {
           const profile = await invoke<any>('get_artist_profile', { artist: q.trim() });
           if (profile && profile.name) {
-            setArtistProfile(profile);
-            setIsSearching(false);
-            return;
+            const listeners = parseInt(profile.listeners || '0', 10);
+            const playcount = parseInt(profile.playcount || '0', 10);
+            if (listeners >= 200 || playcount >= 500) {
+              setArtistProfile(profile);
+              setIsSearching(false);
+              return;
+            } else {
+              console.log(`[Aideo] Skipping low-popularity Last.fm artist profile "${profile.name}" (listeners: ${listeners}, playcount: ${playcount}) to prevent false matches.`);
+            }
           }
         } catch (e) {
           console.log("Failed to fetch artist profile:", e);
@@ -792,6 +798,7 @@ export function AideoView() {
         listenbrainzRecs: lbTracks,
         appMode,
         isOnline: navigator.onLine,
+        autoplayAlgorithm: currentStore.autoplayAlgorithm || 'v2',
       });
 
       setDiscoveryData(resolved);

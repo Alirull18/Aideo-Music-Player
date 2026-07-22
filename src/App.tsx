@@ -18,6 +18,7 @@ const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({
 const AideoLabView = lazy(() => import('./components/AideoLabView').then(m => ({ default: m.AideoLabView })));
 const FullscreenView = lazy(() => import('./components/FullscreenView').then(m => ({ default: m.FullscreenView })));
 const ListeningInsightsView = lazy(() => import('./components/ListeningInsightsView').then(m => ({ default: m.ListeningInsightsView })));
+const AlbumsView = lazy(() => import('./components/AlbumsView').then(m => ({ default: m.AlbumsView })));
 
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
@@ -364,6 +365,18 @@ function AideoApp() {
         </div>
 
         <AnimatePresence mode="wait">
+          {view === 'albums' && (
+            <motion.div key="albums" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Albums...</span>
+                </div>
+              }>
+                <AlbumsView />
+              </Suspense>
+            </motion.div>
+          )}
           {view === 'nowplaying' && (
             <motion.div key="np" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

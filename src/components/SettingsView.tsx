@@ -101,6 +101,7 @@ export function SettingsView() {
     jellyfinUrl, jellyfinConnected, jellyfinLoading,
     connectSubsonic, disconnectSubsonic, connectJellyfin, disconnectJellyfin,
     autoplayDiscoveryLevel, setAutoplayDiscoveryLevel,
+    autoplayAlgorithm, setAutoplayAlgorithm,
     setShowOnboarding, setOnboardingCompleted,
     cacheSizeLimit, setCacheSizeLimit,
     discoverCastDevices,
@@ -2201,6 +2202,75 @@ export function SettingsView() {
                   </span>
                   <span style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.3, display: 'block', opacity: active ? 0.9 : 0.6 }}>
                     {level.desc}
+                  </span>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'autoplay-algorithm',
+      title: 'Recommendation & Autoplay Engine Version',
+      description: 'Choose between the legacy rule-based recommendation algorithm and the new smart vector-similarity algorithm.',
+      keywords: 'recommendation algorithm autoplay engine version v1 v2 smart legacy vector similarity settings',
+      tab: 'system',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ marginBottom: 16 }}>
+            <div className="settings-ctrl-title">Autoplay & Recommendation Engine</div>
+            <div className="settings-ctrl-desc">
+              Select which recommendation algorithm Aideo should use for Autoplay Radio and Discovery Hub curation.
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', gap: 10, background: 'rgba(0,0,0,0.12)', padding: 6, borderRadius: 12, border: '1px solid var(--glass-border)' }}>
+            {[
+              { 
+                id: 'v1', 
+                label: 'Legacy (v1)', 
+                desc: 'Simple rule-based heuristic search. Relies on basic text matching.'
+              },
+              { 
+                id: 'v2', 
+                label: 'Smart Vector (v2)', 
+                desc: 'Uses Jaccard, Laplace-smoothed Token Love Ratio (TF-IDF), and acoustic feature matching (BPM, Energy).'
+              }
+            ].map(algo => {
+              const active = autoplayAlgorithm === algo.id;
+              return (
+                <motion.div
+                  key={algo.id}
+                  onClick={() => {
+                    setAutoplayAlgorithm(algo.id as any);
+                    window.dispatchEvent(new CustomEvent('ui-toast', { 
+                      detail: { message: `Recommendation Engine set to: ${algo.label}`, type: 'success' } 
+                    }));
+                  }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  style={{
+                    flex: 1,
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    background: active ? 'rgba(var(--accent-rgb), 0.1)' : 'transparent',
+                    border: active ? '1.5px solid var(--accent)' : '1px solid transparent',
+                    transition: 'all 0.25s ease',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: active ? '0 4px 20px rgba(var(--accent-rgb), 0.15)' : 'none'
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 700, color: active ? 'white' : 'var(--text-dim)', transition: 'color 0.2s' }}>
+                    {algo.label}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.3, display: 'block', opacity: active ? 0.9 : 0.6 }}>
+                    {algo.desc}
                   </span>
                 </motion.div>
               );

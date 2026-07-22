@@ -168,7 +168,7 @@ export interface NetworkTelemetry {
 }
 
 export interface PlayerState {
-  view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights';
+  view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights';
   networkTelemetry: NetworkTelemetry | null;
   tracks: Track[];
   queue: Track[];
@@ -210,6 +210,9 @@ export interface PlayerState {
   currentHistoryId: number | null;
   autoplayEnabled: boolean;
   autoplayDiscoveryLevel: 'familiarity' | 'balanced' | 'discovery';
+  autoplayAlgorithm: 'v1' | 'v2';
+  autoplaySeedTrack: Track | null;
+  autoplaySessionHistory: Track[];
   recentlyClearedAutoplayPaths: string[];
   appMode: 'local' | 'hybrid';
   onboardingCompleted: boolean;
@@ -226,7 +229,7 @@ export interface PlayerState {
   setCoverArtModalTrack: (track: Track | null) => void;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights') => void;
+  setView: (view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights') => void;
   setAppMode: (mode: 'local' | 'hybrid') => void;
   setOnboardingCompleted: (completed: boolean) => void;
   setShowOnboarding: (show: boolean) => void;
@@ -257,6 +260,7 @@ export interface PlayerState {
   setShowRomaji: (val: boolean) => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
+  deleteTrack: (path: string) => Promise<void>;
   recordPlaybackTransition: (newTrack: Track | null, playbackSource?: string) => Promise<void>;
   playTrack: (track: Track, isHistory?: boolean, forceResetAutoplay?: boolean, playbackSource?: string, startPos?: number) => Promise<void>;
   playDynamicMix: (mixType: 'supermix' | 'recap' | 'discovery' | 'chill') => Promise<void>;
@@ -278,6 +282,7 @@ export interface PlayerState {
   toggleRepeat: () => void;
   toggleAutoplay: () => Promise<void>;
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => void;
+  setAutoplayAlgorithm: (algo: 'v1' | 'v2') => void;
   triggerAutoplayRadio: (track: Track, forceReset?: boolean) => Promise<void>;
   pauseTrack: () => Promise<void>;
   resumeTrack: () => Promise<void>;

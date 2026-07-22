@@ -3,8 +3,13 @@ use std::io::BufRead;
 use std::thread;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+
+pub mod dsp;
+pub use dsp::*;
+
 use ringbuf::RingBuffer;
 use crossbeam_channel::{Receiver, Sender};
+
 use rustfft::{FftPlanner, num_complex::Complex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use symphonia::core::audio::{AudioBufferRef, Signal};
@@ -664,22 +669,57 @@ fn run_ytdlp_resolve(ytdlp_path: &std::path::Path, args: &[String]) -> Option<St
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
-    match cmd.output() {
-        Ok(out) => {
-            if out.status.success() {
-                let stdout_str = String::from_utf8_lossy(&out.stdout);
-                let direct_url = stdout_str.trim().to_string();
-                if direct_url.starts_with("http") {
-                    return Some(direct_url);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[player] Failed to spawn yt-dlp resolve: {}", e);
+            return None;
+        }
+    };
+
+    let timeout = std::time::Duration::from_secs(10);
+    let start = std::time::Instant::now();
+
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                break Some(status);
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    println!("[player] yt-dlp resolve timed out after 10s. Killing process...");
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
                 }
-            } else {
-                let stderr_str = String::from_utf8_lossy(&out.stderr);
-                eprintln!("[player] yt-dlp resolve failed: {}", stderr_str.trim());
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                eprintln!("[player] Error waiting for yt-dlp resolve process: {}", e);
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
             }
         }
-        Err(e) => {
-            eprintln!("[player] Failed to execute yt-dlp resolve: {}", e);
+    }?;
+    if status.success() {
+        let mut stdout_str = String::new();
+        if let Some(mut stdout) = child.stdout {
+            let _ = std::io::Read::read_to_string(&mut stdout, &mut stdout_str);
         }
+        let direct_url = stdout_str.trim().to_string();
+        if direct_url.starts_with("http") {
+            return Some(direct_url);
+        }
+    } else {
+        let mut stderr_str = String::new();
+        if let Some(mut stderr) = child.stderr {
+            let _ = std::io::Read::read_to_string(&mut stderr, &mut stderr_str);
+        }
+        eprintln!("[player] yt-dlp resolve failed: {}", stderr_str.trim());
     }
     None
 }
@@ -781,6 +821,16 @@ pub fn resolve_youtube_url(url: &str) -> String {
     }
     
     println!("[player] Failed to resolve YouTube stream URL through all attempts.");
+    // Invalidate the cached YouTube InnerTube API key so it will be re-fetched on next attempt/request
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(crate::youtube::invalidate_innertube_key());
+    } else {
+        std::thread::spawn(|| {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                rt.block_on(crate::youtube::invalidate_innertube_key());
+            }
+        });
+    }
     url.to_string()
 }
 
@@ -804,14 +854,17 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
 
     // If already downloading, do nothing
     {
-        if let Ok(active) = ACTIVE_DOWNLOADS.lock() {
+        if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
             if active.contains_key(&hash) {
                 return;
             }
+            // Mark as active immediately to prevent race conditions during URL resolution!
+            active.insert(hash.clone(), Arc::new(AtomicBool::new(false)));
         }
     }
     
     std::thread::spawn(move || {
+        let mut success = false;
         // Resolve the direct URL
         let mut resolved_url = {
             let cache = safe_lock(&YOUTUBE_URL_CACHE);
@@ -832,7 +885,12 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
         if let Some(direct) = resolved_url {
             let data_dir = match dirs::data_dir() {
                 Some(d) => d,
-                None => return,
+                None => {
+                    if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+                        active.remove(&hash);
+                    }
+                    return;
+                }
             };
             let aideo_dir = data_dir.join("Aideo");
             let ytdlp_path = aideo_dir.join("yt-dlp.exe");
@@ -840,16 +898,23 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
 
             if ytdlp_path.exists() && ffmpeg_path.exists() {
                 println!("[player-bg] Pre-buffering YouTube track in background for '{}'...", url);
+                success = true;
                 spawn_youtube_downloader(
                     url,
                     direct,
-                    hash,
+                    hash.clone(),
                     temp_path,
                     cache_path,
                     ffmpeg_path.to_string_lossy().to_string(),
                     ytdlp_path.to_string_lossy().to_string(),
                     app_handle.clone(),
                 );
+            }
+        }
+        
+        if !success {
+            if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+                active.remove(&hash);
             }
         }
     });
@@ -961,16 +1026,18 @@ fn prepare_decoder(
             
             if !use_cache {
                 let hash = format!("{:x}", md5::compute(path.as_bytes()));
-                let mut complete_flag = None;
+                let mut already_downloading = false;
                 {
-                    if let Ok(active) = ACTIVE_DOWNLOADS.lock() {
-                        if let Some(flag) = active.get(&hash) {
-                            complete_flag = Some(flag.clone());
+                    if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+                        if active.contains_key(&hash) {
+                            already_downloading = true;
+                        } else {
+                            active.insert(hash.clone(), Arc::new(AtomicBool::new(false)));
                         }
                     }
                 }
 
-                if complete_flag.is_none() {
+                if !already_downloading {
                     let mut resolved_url = {
                         let cache = safe_lock(&YOUTUBE_URL_CACHE);
                         cache.get(path).cloned()
@@ -984,6 +1051,9 @@ fn prepare_decoder(
                             cache.insert(path.to_string(), direct.clone());
                             resolved_url = Some(direct);
                         } else {
+                            if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+                                active.remove(&hash);
+                            }
                             return Err("Failed to resolve YouTube stream URL. Please check your internet connection.".to_string());
                         }
                     }
@@ -1587,187 +1657,8 @@ pub struct DSPState {
     pub stream_engine: String,
     pub lookahead_prebuffer_enabled: bool,
 }
-
-#[derive(Clone, Debug, Default)]
-pub struct BiquadFilter {
-    pub b0: f32,
-    pub b1: f32,
-    pub b2: f32,
-    pub a1: f32,
-    pub a2: f32,
-    pub x1: f32,
-    pub x2: f32,
-    pub y1: f32,
-    pub y2: f32,
-}
-
-impl BiquadFilter {
-    pub fn new() -> Self {
-        Self {
-            b0: 1.0, b1: 0.0, b2: 0.0,
-            a1: 0.0, a2: 0.0,
-            x1: 0.0, x2: 0.0,
-            y1: 0.0, y2: 0.0,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn reset_state(&mut self) {
-        self.x1 = 0.0;
-        self.x2 = 0.0;
-        self.y1 = 0.0;
-        self.y2 = 0.0;
-    }
-
-    pub fn set_peaking(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
-        let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * q);
-
-        let b0 = 1.0 + alpha * a;
-        let b1 = -2.0 * cos_w0;
-        let b2 = 1.0 - alpha * a;
-        let a0 = 1.0 + alpha / a;
-        let a1 = -2.0 * cos_w0;
-        let a2 = 1.0 - alpha / a;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    pub fn set_lowshelf(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
-        let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * q);
-        let sqrt_a = a.sqrt();
-
-        let b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
-        let b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
-        let b2 = a * ((a + 1.0) - (a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
-        let a0 = (a + 1.0) + (a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
-        let a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0);
-        let a2 = (a + 1.0) + (a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    pub fn set_highshelf(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
-        let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * q);
-        let sqrt_a = a.sqrt();
-
-        let b0 = a * ((a + 1.0) + (a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha);
-        let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0);
-        let b2 = a * ((a + 1.0) + (a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha);
-        let a0 = (a + 1.0) - (a - 1.0) * cos_w0 + 2.0 * sqrt_a * alpha;
-        let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos_w0);
-        let a2 = (a + 1.0) - (a - 1.0) * cos_w0 - 2.0 * sqrt_a * alpha;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    pub fn set_highpass(&mut self, fs: f32, f0: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * q);
-
-        let b0 = (1.0 + cos_w0) / 2.0;
-        let b1 = -(1.0 + cos_w0);
-        let b2 = (1.0 + cos_w0) / 2.0;
-        let a0 = 1.0 + alpha;
-        let a1 = -2.0 * cos_w0;
-        let a2 = 1.0 - alpha;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    pub fn set_lowpass(&mut self, fs: f32, f0: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * q);
-
-        let b0 = (1.0 - cos_w0) / 2.0;
-        let b1 = 1.0 - cos_w0;
-        let b2 = (1.0 - cos_w0) / 2.0;
-        let a0 = 1.0 + alpha;
-        let a1 = -2.0 * cos_w0;
-        let a2 = 1.0 - alpha;
-
-        self.b0 = b0 / a0;
-        self.b1 = b1 / a0;
-        self.b2 = b2 / a0;
-        self.a1 = a1 / a0;
-        self.a2 = a2 / a0;
-    }
-
-    #[inline]
-    pub fn process(&mut self, x: f32) -> f32 {
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
-        self.x2 = self.x1;
-        self.x1 = x;
-        self.y2 = self.y1;
-        self.y1 = y;
-        y
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct CircularDelayLine {
-    buffer: Vec<f32>,
-    write_ptr: usize,
-}
-
-impl CircularDelayLine {
-    pub fn new(max_delay_samples: usize) -> Self {
-        Self {
-            buffer: vec![0.0; max_delay_samples.max(16)],
-            write_ptr: 0,
-        }
-    }
-
-    pub fn push(&mut self, sample: f32) {
-        self.buffer[self.write_ptr] = sample;
-        self.write_ptr = (self.write_ptr + 1) % self.buffer.len();
-    }
-
-    pub fn read_delayed(&self, delay_samples: usize) -> f32 {
-        let len = self.buffer.len();
-        let delay_samples = delay_samples.clamp(0, len - 1);
-        let read_ptr = (self.write_ptr + len - delay_samples) % len;
-        self.buffer[read_ptr]
-    }
-}
-
 fn find_ffmpeg_path() -> String {
+
     // 1. Check Aideo AppData directory (where dynamic installs are placed)
     let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     let aideo_dir = data_dir.join("Aideo");
@@ -4881,3 +4772,6 @@ fn measure_latency(url_str: &str) -> Option<u32> {
     }
     None
 }
+
+mod dsp_tests;
+

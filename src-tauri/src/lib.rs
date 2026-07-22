@@ -17,7 +17,10 @@ use tauri::{AppHandle, Emitter, Manager, State, Listener, Window};
 
 mod artwork;
 mod db;
+#[cfg(test)]
+mod db_tests;
 mod lyrics;
+
 mod player;
 mod taskbar;
 use crate::player::PlayerCommand;
@@ -1977,71 +1980,7 @@ pub fn run() {
                 }
             };
 
-            // Spawn background task to heal cover art for YouTube/online tracks with high-res square thumbnails
-            let app_handle_clone = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                use tauri::Manager;
-                let state = app_handle_clone.state::<AppState>();
-                let tracks_to_heal = {
-                    let conn = crate::safe_lock(&state.db);
-                    let mut stmt = match conn.prepare(
-                        "SELECT path, title, artist 
-                         FROM tracks 
-                         WHERE (cover_url IS NULL OR cover_url LIKE '%ytimg.com%') 
-                           AND (path LIKE 'http%' OR format = 'YouTube Direct')"
-                    ) {
-                        Ok(s) => s,
-                        Err(_) => return,
-                    };
-                    let rows = stmt.query_map([], |row| {
-                        let path: String = row.get(0)?;
-                        let title: Option<String> = row.get(1)?;
-                        let artist: Option<String> = row.get(2)?;
-                        Ok((path, title, artist))
-                    });
-                    match rows {
-                        Ok(r) => r.filter_map(|x| x.ok()).collect::<Vec<_>>(),
-                        Err(_) => return,
-                    }
-                };
 
-                if !tracks_to_heal.is_empty() {
-                    println!("[system] Found {} online tracks with missing or low-res cover art. Healing in the background...", tracks_to_heal.len());
-                    let api_key = crate::youtube::fetch_innertube_key().await;
-                    let client = reqwest::Client::builder()
-                        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                        .connect_timeout(std::time::Duration::from_secs(10))
-                        .timeout(std::time::Duration::from_secs(30))
-                        .build()
-                        .unwrap_or_default();
-
-                    for (path, title_opt, artist_opt) in tracks_to_heal {
-                        let title = title_opt.unwrap_or_default();
-                        let artist = artist_opt.unwrap_or_default();
-                        if title.is_empty() {
-                            continue;
-                        }
-                        let query = format!("{} {}", title, artist);
-                        if let Ok(results) = crate::youtube::search_youtube_internal(&client, &api_key, &query, false).await {
-                            if let Some(matched_track) = results.first() {
-                                if let Some(ref cover) = matched_track.cover_url {
-                                    let conn = crate::safe_lock(&state.db);
-                                    let _ = conn.execute(
-                                        "UPDATE tracks SET cover_url = ?1 WHERE path = ?2",
-                                        rusqlite::params![cover, path]
-                                    );
-                                    println!("[system] Successfully healed cover art for '{}' by '{}' with high-res square URL.", title, artist);
-                                    
-                                    // Proactively notify the frontend to reload the library so changes reflect immediately!
-                                    let _ = app_handle_clone.emit("library-updated", ());
-                                }
-                            }
-                        }
-                        // Small sleep to avoid throttling
-                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                    }
-                }
-            });
 
             #[cfg(target_os = "windows")]
             {
@@ -2128,6 +2067,72 @@ pub fn run() {
             let app_handle_for_server = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 crate::remote_server::start_remote_server(app_handle_for_server, app_state_clone).await;
+            });
+
+            // Spawn background task to heal cover art for YouTube/online tracks with high-res square thumbnails
+            let app_handle_clone = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri::Manager;
+                let state = app_handle_clone.state::<AppState>();
+                let tracks_to_heal = {
+                    let conn = crate::safe_lock(&state.db);
+                    let mut stmt = match conn.prepare(
+                        "SELECT path, title, artist 
+                         FROM tracks 
+                         WHERE (cover_url IS NULL OR cover_url LIKE '%ytimg.com%') 
+                           AND (path LIKE 'http%' OR format = 'YouTube Direct')"
+                    ) {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+                    let rows = stmt.query_map([], |row| {
+                        let path: String = row.get(0)?;
+                        let title: Option<String> = row.get(1)?;
+                        let artist: Option<String> = row.get(2)?;
+                        Ok((path, title, artist))
+                    });
+                    match rows {
+                        Ok(r) => r.filter_map(|x| x.ok()).collect::<Vec<_>>(),
+                        Err(_) => return,
+                    }
+                };
+
+                if !tracks_to_heal.is_empty() {
+                    println!("[system] Found {} online tracks with missing or low-res cover art. Healing in the background...", tracks_to_heal.len());
+                    let api_key = crate::youtube::fetch_innertube_key().await;
+                    let client = reqwest::Client::builder()
+                        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .connect_timeout(std::time::Duration::from_secs(10))
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build()
+                        .unwrap_or_default();
+
+                    for (path, title_opt, artist_opt) in tracks_to_heal {
+                        let title = title_opt.unwrap_or_default();
+                        let artist = artist_opt.unwrap_or_default();
+                        if title.is_empty() {
+                            continue;
+                        }
+                        let query = format!("{} {}", title, artist);
+                        if let Ok(results) = crate::youtube::search_youtube_internal(&client, &api_key, &query, false).await {
+                            if let Some(matched_track) = results.first() {
+                                if let Some(ref cover) = matched_track.cover_url {
+                                    let conn = crate::safe_lock(&state.db);
+                                    let _ = conn.execute(
+                                        "UPDATE tracks SET cover_url = ?1 WHERE path = ?2",
+                                        rusqlite::params![cover, path]
+                                    );
+                                    println!("[system] Successfully healed cover art for '{}' by '{}' with high-res square URL.", title, artist);
+                                    
+                                    // Proactively notify the frontend to reload the library so changes reflect immediately!
+                                    let _ = app_handle_clone.emit("library-updated", ());
+                                }
+                            }
+                        }
+                        // Small sleep to avoid throttling
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    }
+                }
             });
 
             #[cfg(target_os = "windows")]

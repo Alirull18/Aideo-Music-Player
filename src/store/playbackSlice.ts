@@ -200,11 +200,13 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   setVolume: async (vol: number) => {
+    const clampedVol = Math.max(0, Math.min(1, vol));
     try {
-      await invoke('set_volume', { volume: vol });
-      set(s => ({ playback: { ...s.playback, volume: vol } }));
+      await invoke('set_volume', { volume: clampedVol });
+      set(s => ({ playback: { ...s.playback, volume: clampedVol } }));
     } catch (e) { console.error(e); }
   },
+
 
   seek: async (secs: number) => {
     const now = Date.now();

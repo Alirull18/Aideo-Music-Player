@@ -1,7 +1,17 @@
+pub mod parser;
+pub mod client;
+pub mod ytdlp;
+
+pub use parser::*;
+pub use client::*;
+pub use ytdlp::*;
+
+
 use serde::{Deserialize, Serialize};
 use tauri::{State, Manager};
 use crate::AppState;
 use crate::safe_lock;
+use futures::StreamExt;
 
 lazy_static::lazy_static! {
     static ref RE_INNERTUBE_1: regex::Regex = regex::Regex::new(r#""INNERTUBE_API_KEY"\s*:\s*"([^"]+)""#).unwrap();
@@ -101,19 +111,35 @@ fn extract_duration(val: &serde_json::Value) -> Option<String> {
     None
 }
 
-fn find_video_id(val: &serde_json::Value) -> Option<String> {
+fn extract_duration_safe(item: &serde_json::Value) -> Option<String> {
+    if let Some(cols) = item.get("flexColumns").and_then(|c| c.as_array()) {
+        for col in cols.iter().skip(1) {
+            if let Some(dur) = extract_duration(col) {
+                return Some(dur);
+            }
+        }
+        None
+    } else {
+        extract_duration(item)
+    }
+}
+
+fn find_video_id_safe(val: &serde_json::Value) -> Option<String> {
     if let serde_json::Value::Object(obj) = val {
         if let Some(serde_json::Value::String(vid)) = obj.get("videoId") {
             return Some(vid.clone());
         }
-        for (_, v) in obj {
-            if let Some(vid) = find_video_id(v) {
+        for (k, v) in obj {
+            if k == "menu" {
+                continue;
+            }
+            if let Some(vid) = find_video_id_safe(v) {
                 return Some(vid);
             }
         }
     } else if let serde_json::Value::Array(arr) = val {
         for v in arr {
-            if let Some(vid) = find_video_id(v) {
+            if let Some(vid) = find_video_id_safe(v) {
                 return Some(vid);
             }
         }
@@ -143,10 +169,26 @@ fn get_fallback_innertube_key() -> String {
     format!("{}{}", p1, p2)
 }
 
-static INNERTUBE_KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+lazy_static::lazy_static! {
+    static ref INNERTUBE_KEY: tokio::sync::RwLock<Option<String>> = tokio::sync::RwLock::new(None);
+}
+
+pub async fn invalidate_innertube_key() {
+    let mut w = INNERTUBE_KEY.write().await;
+    *w = None;
+    println!("[youtube] InnerTube API key invalidated.");
+}
 
 pub async fn fetch_innertube_key() -> String {
-    if let Some(cached) = INNERTUBE_KEY.get() {
+    {
+        let r = INNERTUBE_KEY.read().await;
+        if let Some(ref cached) = *r {
+            return cached.clone();
+        }
+    }
+
+    let mut w = INNERTUBE_KEY.write().await;
+    if let Some(ref cached) = *w {
         return cached.clone();
     }
 
@@ -181,7 +223,7 @@ pub async fn fetch_innertube_key() -> String {
         }
     };
 
-    let _ = INNERTUBE_KEY.set(final_key.clone());
+    *w = Some(final_key.clone());
     final_key
 }
 
@@ -242,9 +284,19 @@ pub async fn search_youtube_internal(
     query: &str,
     resolve_durations: bool,
 ) -> Result<Vec<YoutubeTrack>, String> {
+    search_youtube_internal_impl(client, api_key, query, resolve_durations, true).await
+}
+
+pub async fn search_youtube_internal_impl(
+    client: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+    resolve_durations: bool,
+    use_params: bool,
+) -> Result<Vec<YoutubeTrack>, String> {
     let search_url = format!("https://music.youtube.com/youtubei/v1/search?key={}&prettyPrint=false", api_key);
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "context": {
             "client": {
                 "clientName": "WEB_REMIX",
@@ -254,8 +306,13 @@ pub async fn search_youtube_internal(
             }
         },
         "query": query,
-        "params": "EgWKAQIIAWoKEAkQChADEAQQCg=="
     });
+
+    if use_params {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("params".to_string(), serde_json::json!("EgWKAQIIAWoKEAkQChADEAQQCg=="));
+        }
+    }
 
     let res = client.post(&search_url)
         .header("Content-Type", "application/json")
@@ -332,7 +389,7 @@ pub async fn search_youtube_internal(
             for run in runs_arr {
                 if let Some(text) = run.get("text").and_then(|t| t.as_str()) {
                     let text_lower = text.to_lowercase();
-                    if text_lower.contains("topic") {
+                    if text_lower.ends_with(" - topic") || (text_lower == "topic" && artist != "Topic") {
                         is_official_topic = true;
                     }
                     if let Some(caps) = RE_VIEWS.captures(&text_lower) {
@@ -369,7 +426,7 @@ pub async fn search_youtube_internal(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
             })
-            .or_else(|| find_video_id(&item));
+            .or_else(|| find_video_id_safe(&item));
  
         let video_id = match video_id {
             Some(id) => id,
@@ -393,7 +450,7 @@ pub async fn search_youtube_internal(
             .unwrap_or("Unknown Title")
             .to_string();
  
-        let duration_raw = extract_duration(&item).unwrap_or_else(|| "0:00".to_string());
+        let duration_raw = extract_duration_safe(&item).unwrap_or_else(|| "0:00".to_string());
  
         let thumbnail_url = item.get("thumbnail")
             .and_then(|t| t.get("musicThumbnailRenderer"))
@@ -440,8 +497,11 @@ pub async fn search_youtube_internal(
             ("cover art", -4.0),
         ];
  
+        let artist_lower = artist.to_lowercase();
         for (term, penalty) in negative_terms {
-            if title_lower.contains(term) && !query_lower.contains(term) {
+            let in_title = title_lower.contains(term);
+            let in_artist = artist_lower.contains(term);
+            if (in_title || in_artist) && !query_lower.contains(term) {
                 title_score += penalty;
             }
         }
@@ -459,6 +519,22 @@ pub async fn search_youtube_internal(
             if title_lower.contains(term) {
                 title_score += boost;
             }
+        }
+
+        let query_cleaned = query_lower.replace(" song", "")
+            .replace(" audio", "")
+            .replace(" video", "")
+            .replace(" mv", "")
+            .replace(" m/v", "")
+            .trim()
+            .to_string();
+
+        if title_lower == query_cleaned {
+            title_score += 6.0;
+        } else if title_lower.starts_with(&query_cleaned) && title_lower.len() <= query_cleaned.len() + 5 {
+            title_score += 4.0;
+        } else if query_cleaned.contains(&title_lower) && title_lower.len() >= 4 {
+            title_score += 2.0;
         }
  
         let mut priority_score = 0.0;
@@ -509,9 +585,9 @@ pub async fn search_youtube_internal(
     }
 
     if resolve_durations && !duration_tasks.is_empty() {
-        println!("[youtube] Resolving {} missing track durations concurrently...", duration_tasks.len());
-        let results = futures::future::join_all(duration_tasks).await;
-        for (i, dur) in results {
+        println!("[youtube] Resolving {} missing track durations in batches of 4...", duration_tasks.len());
+        let mut stream = futures::stream::iter(duration_tasks).buffer_unordered(4);
+        while let Some((i, dur)) = stream.next().await {
             if dur != "0:00" {
                 tracks[i].duration_raw = dur;
             }
@@ -527,7 +603,27 @@ pub async fn search_youtube(query: String) -> Result<Vec<YoutubeTrack>, String> 
     println!("[youtube] Searching YouTube Music via InnerTube with key: {}", api_key);
 
     let client = crate::get_http_client();
-    search_youtube_internal(client, &api_key, &query, true).await
+    
+    let query_lower = query.to_lowercase();
+    let clean_query = query_lower.trim();
+    
+    let is_simple_query = !clean_query.contains("song") 
+        && !clean_query.contains("video") 
+        && !clean_query.contains("live") 
+        && !clean_query.contains("cover")
+        && !clean_query.contains("remix")
+        && !clean_query.contains("mv")
+        && !clean_query.contains("m/v")
+        && !clean_query.contains("official")
+        && !clean_query.contains("karaoke");
+
+    let final_query = if is_simple_query {
+        format!("{} song", query)
+    } else {
+        query
+    };
+
+    search_youtube_internal_impl(&client, &api_key, &final_query, true, false).await
 }
 
 #[tauri::command]
@@ -677,9 +773,9 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
     }
 
     if !duration_tasks.is_empty() {
-        println!("[youtube] Resolving {} missing track durations for final recommendations concurrently...", duration_tasks.len());
-        let results = futures::future::join_all(duration_tasks).await;
-        for (i, dur) in results {
+        println!("[youtube] Resolving {} missing track durations for final recommendations in batches of 4...", duration_tasks.len());
+        let mut stream = futures::stream::iter(duration_tasks).buffer_unordered(4);
+        while let Some((i, dur)) = stream.next().await {
             if dur != "0:00" {
                 final_tracks[i].duration_raw = dur;
             }
@@ -3386,65 +3482,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_ytm_search() {
-        let api_key = fetch_innertube_key().await;
-        let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap();
-
-        let search_url = format!("https://music.youtube.com/youtubei/v1/search?key={}&prettyPrint=false", api_key);
-        let payload = serde_json::json!({
-            "context": {
-                "client": {
-                    "clientName": "WEB_REMIX",
-                    "clientVersion": "1.20240101.01.00",
-                    "hl": "en",
-                    "gl": "US"
-                }
-            },
-            "query": "roar"
+        let results = search_youtube("heavy serenade".to_string()).await.unwrap();
+        
+        let has_nmixx_heavy_serenade = results.iter().any(|t| {
+            t.title.to_lowercase() == "heavy serenade" && t.artist.to_lowercase().contains("nmixx")
         });
 
-        let res = client.post(&search_url)
-            .header("Content-Type", "application/json")
-            .header("Referer", "https://music.youtube.com/")
-            .json(&payload)
-            .send()
-            .await
-            .unwrap();
-
-        let json_res: serde_json::Value = res.json().await.unwrap();
-        let mut items = Vec::new();
-        find_list_items(&json_res, &mut items);
-
-        let mut matches = Vec::new();
-        for item in &items {
-            let title = item.get("flexColumns")
-                .and_then(|cols| cols.as_array())
-                .and_then(|cols| cols.first())
-                .and_then(|col| col.get("musicResponsiveListItemFlexColumnRenderer"))
-                .and_then(|renderer| renderer.get("text"))
-                .and_then(|text| text.get("runs"))
-                .and_then(|runs| runs.as_array())
-                .and_then(|runs| runs.first())
-                .and_then(|run| run.get("text"))
-                .and_then(|t| t.as_str())
-                .unwrap_or("");
-            if title.eq_ignore_ascii_case("Roar") {
-                matches.push(item.clone());
-            }
-        }
-        
-        let path = std::env::temp_dir().join("roar_items_test.json");
-        std::fs::write(&path, serde_json::to_string_pretty(&matches).unwrap()).unwrap();
-        println!("SAVED {} MATCHES TO SCRATCH FILE", matches.len());
+        assert!(
+            has_nmixx_heavy_serenade,
+            "Should find NMIXX's 'Heavy Serenade' track in the search results using fallback general search"
+        );
     }
 
     #[tokio::test]
     async fn test_search_youtube_integration() {
-        let results = search_youtube("roar".to_string()).await.unwrap();
+        let results = search_youtube("heavy serenade".to_string()).await.unwrap();
         println!("TOTAL PARSED TRACKS: {}", results.len());
         for (i, t) in results.iter().enumerate() {
             println!("Track {}: ID={}, Title='{}', Artist='{}', Duration='{}', Cover='{:?}'",
