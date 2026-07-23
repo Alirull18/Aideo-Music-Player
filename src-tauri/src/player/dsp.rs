@@ -148,6 +148,23 @@ impl BiquadFilter {
         self.y1 = y;
         y
     }
+
+    /// Process a block of samples in 4-wide unrolled SIMD-friendly chunks
+    #[allow(dead_code)]
+    #[inline]
+    pub fn process_block(&mut self, samples: &mut [f32]) {
+        let mut chunks = samples.chunks_exact_mut(4);
+        for chunk in &mut chunks {
+            chunk[0] = self.process(chunk[0]);
+            chunk[1] = self.process(chunk[1]);
+            chunk[2] = self.process(chunk[2]);
+            chunk[3] = self.process(chunk[3]);
+        }
+        let rem = chunks.into_remainder();
+        for s in rem {
+            *s = self.process(*s);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -176,3 +193,65 @@ impl CircularDelayLine {
         self.buffer[read_ptr]
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct ConvolutionFilter {
+    ir_samples: Vec<f32>,
+    history: Vec<f32>,
+    history_ptr: usize,
+    pub wet: f32,
+    pub enabled: bool,
+}
+
+impl ConvolutionFilter {
+    pub fn new() -> Self {
+        Self {
+            ir_samples: Vec::new(),
+            history: Vec::new(),
+            history_ptr: 0,
+            wet: 0.5,
+            enabled: false,
+        }
+    }
+
+    pub fn load_ir_samples(&mut self, samples: Vec<f32>) {
+        if samples.is_empty() {
+            self.ir_samples.clear();
+            self.history.clear();
+            self.history_ptr = 0;
+            return;
+        }
+        let max_val = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max).max(1e-6);
+        self.ir_samples = samples.iter().map(|s| s / max_val).collect();
+        let len = self.ir_samples.len().min(4096);
+        self.ir_samples.truncate(len);
+        self.history = vec![0.0; len];
+        self.history_ptr = 0;
+    }
+
+    #[inline]
+    pub fn process(&mut self, input: f32) -> f32 {
+        if !self.enabled || self.ir_samples.is_empty() {
+            return input;
+        }
+
+        self.history[self.history_ptr] = input;
+        let mut conv = 0.0f32;
+        let len = self.ir_samples.len();
+        
+        let mut h_idx = self.history_ptr;
+        for &ir_sample in &self.ir_samples {
+            conv += self.history[h_idx] * ir_sample;
+            if h_idx == 0 {
+                h_idx = len - 1;
+            } else {
+                h_idx -= 1;
+            }
+        }
+
+        self.history_ptr = (self.history_ptr + 1) % len;
+
+        input * (1.0 - self.wet) + conv * self.wet
+    }
+}
+

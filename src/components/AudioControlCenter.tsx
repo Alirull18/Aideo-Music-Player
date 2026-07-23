@@ -135,20 +135,24 @@ export function AudioControlCenter() {
                       initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                       style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1200, background: '#1a1a24', border: '1px solid var(--glass-border)', borderRadius: 8, marginTop: 4, overflow: 'hidden', maxHeight: 200, overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
                       {devices.length === 0 && <div style={{ padding: 12, fontSize: 11, color: 'var(--text-dim)' }}>No devices found</div>}
-                      {devices.map(d => (
-                        <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
-                          style={{
-                            padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
-                            color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.1)' : '',
-                            display: 'flex', alignItems: 'center', gap: 8
-                          }}>
-                          {d.startsWith('[ASIO]') && <span style={{ fontSize: 8, background: '#ef4444', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>ASIO</span>}
-                          {d.startsWith('[WASAPI]') && <span style={{ fontSize: 8, background: '#3b82f6', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>WASAPI</span>}
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
-                          </span>
-                        </div>
-                      ))}
+                      {devices.map(d => {
+                        const isSelected = (!currentDevice && d === '[System Default Device]') || currentDevice === d;
+                        return (
+                          <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
+                            style={{
+                              padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
+                              color: isSelected ? 'var(--accent)' : 'var(--text)', background: isSelected ? 'rgba(var(--accent-rgb),0.1)' : '',
+                              display: 'flex', alignItems: 'center', gap: 8
+                            }}>
+                            {d === '[System Default Device]' && <span style={{ fontSize: 8, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '2px 6px', borderRadius: 4, fontWeight: 900, flexShrink: 0, border: '1px solid rgba(34, 197, 94, 0.3)' }}>DEFAULT</span>}
+                            {d.startsWith('[ASIO]') && <span style={{ fontSize: 8, background: '#ef4444', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>ASIO</span>}
+                            {d.startsWith('[WASAPI]') && <span style={{ fontSize: 8, background: '#3b82f6', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>WASAPI</span>}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {d === '[System Default Device]' ? 'System Default Device' : d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </motion.div>
                   )}
                 </AnimatePresence>

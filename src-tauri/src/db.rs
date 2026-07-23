@@ -19,6 +19,7 @@ pub struct Track {
     pub energy: Option<f64>,
     pub bass_ratio: Option<f64>,
     pub treble_ratio: Option<f64>,
+    pub replaygain_gain: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -105,6 +106,9 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     }
     if !column_exists(&conn, "tracks", "treble_ratio") {
         conn.execute("ALTER TABLE tracks ADD COLUMN treble_ratio REAL DEFAULT 0.33", [])?;
+    }
+    if !column_exists(&conn, "tracks", "replaygain_gain") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN replaygain_gain REAL DEFAULT 0.0", [])?;
     }
 
     // Create playlist tables
@@ -368,7 +372,7 @@ pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energ
 }
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio FROM tracks")?;
+    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain FROM tracks")?;
     let track_iter = stmt.query_map([], |row| {
         let path: String = row.get(1)?;
         let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
@@ -389,6 +393,7 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             energy: row.get(12).ok(),
             bass_ratio: row.get(13).ok(),
             treble_ratio: row.get(14).ok(),
+            replaygain_gain: row.get(15).ok(),
         })
     })?;
 
@@ -448,7 +453,7 @@ pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &st
 
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio 
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain 
          FROM playlist_tracks pt
          LEFT JOIN tracks t ON t.path = pt.track_path 
          WHERE pt.playlist_id = ?1 
@@ -479,6 +484,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
             energy: row.get(12).ok(),
             bass_ratio: row.get(13).ok(),
             treble_ratio: row.get(14).ok(),
+            replaygain_gain: row.get(15).ok(),
         })
     })?;
 

@@ -258,3 +258,79 @@ pub async fn get_artist_info(artist: &str) -> Result<Value, String> {
     Ok(json.get("artist").cloned().unwrap_or(Value::Null))
 }
 
+/// 🏆 Fetch genre specific top tracks from Last.fm with limit
+pub async fn get_genre_top_tracks_page(genre: &str, limit: u32) -> Result<Vec<Value>, String> {
+    if genre.is_empty() || genre == "global" || genre == "all" {
+        return get_global_top_tracks_page(1).await;
+    }
+    let client = Client::new();
+    let api_key = get_api_key();
+    let limit_str = limit.to_string();
+
+    let res = client.get(API_URL)
+        .query(&[
+            ("method", "tag.gettoptracks"),
+            ("tag", genre),
+            ("api_key", &api_key),
+            ("format", "json"),
+            ("limit", &limit_str),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: Value = res.json().await.map_err(|e| e.to_string())?;
+
+    if let Some(err_code) = json.get("error") {
+        let msg = json.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown Last.fm error");
+        return Err(format!("Last.fm API error {}: {}", err_code, msg));
+    }
+
+    let mut tracks = Vec::new();
+    if let Some(top_tracks) = json.get("tracks").and_then(|tt| tt.get("track")).and_then(|t| t.as_array()) {
+        for t in top_tracks {
+            tracks.push(t.clone());
+        }
+    }
+
+    Ok(tracks)
+}
+
+/// 🌍 Fetch country specific top tracks from Last.fm (e.g. "united states", "japan", "malaysia")
+pub async fn get_geo_top_tracks_page(country: &str, limit: u32) -> Result<Vec<Value>, String> {
+    if country.is_empty() || country == "global" || country == "worldwide" {
+        return get_global_top_tracks_page(1).await;
+    }
+    let client = Client::new();
+    let api_key = get_api_key();
+    let limit_str = limit.to_string();
+
+    let res = client.get(API_URL)
+        .query(&[
+            ("method", "geo.gettoptracks"),
+            ("country", country),
+            ("api_key", &api_key),
+            ("format", "json"),
+            ("limit", &limit_str),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let json: Value = res.json().await.map_err(|e| e.to_string())?;
+
+    if let Some(err_code) = json.get("error") {
+        let msg = json.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown Last.fm error");
+        return Err(format!("Last.fm API error {}: {}", err_code, msg));
+    }
+
+    let mut tracks = Vec::new();
+    if let Some(top_tracks) = json.get("tracks").and_then(|tt| tt.get("track")).and_then(|t| t.as_array()) {
+        for t in top_tracks {
+            tracks.push(t.clone());
+        }
+    }
+
+    Ok(tracks)
+}
+

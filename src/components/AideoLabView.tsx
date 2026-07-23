@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-dialog';
 import { 
   Sliders, Activity, Loader2, Search, 
-  Compass, Headphones, Power, Sparkles
+  Compass, Headphones, Power, Sparkles, FolderOpen, Disc
 } from 'lucide-react';
 
 const GRAPHIC_FREQS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -1198,10 +1199,10 @@ export function AideoLabView() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.2 }}
-              style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 }}
+              style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24, alignItems: 'start' }}
             >
               {/* Left Column: 3D Soundstage Arena Vector */}
-              <div className="settings-ctrl-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
+              <div className="settings-ctrl-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
                 <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
                   <div>
                     <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>3D Visual Spatial Arena</h4>
@@ -1458,6 +1459,88 @@ export function AideoLabView() {
                     </div>
                   )}
                 </div>
+
+                {/* Impulse Response (IR) Convolution Panel */}
+                <div className="settings-ctrl-card" style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Disc size={15} style={{ color: '#10b981' }} />
+                        Impulse Response (IR) Convolution Engine
+                      </h4>
+                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Load custom room acoustics & HRTF cabinet impulse profiles (.wav).</p>
+                    </div>
+                    <button
+                      onClick={() => setDSP({ convolution_enabled: !dsp.convolution_enabled, enabled: !dsp.convolution_enabled ? true : dsp.enabled })}
+                      className="settings-btn"
+                      style={{
+                        fontSize: 10,
+                        padding: '4px 10px',
+                        background: dsp.convolution_enabled ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                        color: dsp.convolution_enabled ? '#10b981' : 'var(--text-dim)'
+                      }}
+                    >
+                      {dsp.convolution_enabled ? 'ENABLED' : 'DISABLED'}
+                    </button>
+                  </div>
+
+                  {dsp.convolution_enabled && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
+                          <span style={{ color: 'var(--text-dim)' }}>Active IR File</span>
+                          <span style={{ color: dsp.convolution_ir_path ? '#10b981' : 'var(--text-dim)', fontWeight: 600, fontSize: 10 }}>
+                            {dsp.convolution_ir_path ? dsp.convolution_ir_path.split(/[/\\]/).pop() : 'No File Selected'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const selected = await open({
+                                multiple: false,
+                                filters: [{ name: 'Audio Impulse Response', extensions: ['wav', 'flac'] }]
+                              });
+                              if (selected && typeof selected === 'string') {
+                                setDSP({ convolution_ir_path: selected });
+                              }
+                            } catch (e) {
+                              console.error('Failed to select IR file:', e);
+                            }
+                          }}
+                          className="settings-btn"
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8,
+                            padding: '8px 14px',
+                            fontSize: 11,
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px dashed rgba(255,255,255,0.15)',
+                            borderRadius: 6
+                          }}
+                        >
+                          <FolderOpen size={14} />
+                          {dsp.convolution_ir_path ? 'Change Impulse Response (.wav)' : 'Browse & Load IR File (.wav)'}
+                        </button>
+                      </div>
+
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                          <span style={{ color: 'var(--text-dim)' }}>Convolution Blend (Wet Mix)</span>
+                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{Math.round(dsp.convolution_wet * 100)}%</span>
+                        </div>
+                        <input
+                          type="range" min="0.0" max="1.0" step="0.05"
+                          value={dsp.convolution_wet}
+                          onChange={e => setDSP({ convolution_wet: parseFloat(e.target.value) })}
+                          style={{ width: '100%', accentColor: '#10b981' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -1469,7 +1552,7 @@ export function AideoLabView() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.2 }}
-              style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24 }}
+              style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24, alignItems: 'start' }}
             >
               {/* Left Column: Draggable XY Morphing space */}
               <div className="settings-ctrl-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>

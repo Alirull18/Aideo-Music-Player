@@ -140,6 +140,8 @@ pub struct SonicProfile {
     pub energy: f64,
     pub bass_ratio: f64,
     pub treble_ratio: f64,
+    pub integrated_lufs: f64,
+    pub lufs_gain_db: f64,
 }
 
 // Generate the Acoustid base64 fingerprint and calculate sonic metrics
@@ -221,7 +223,7 @@ pub fn analyze_audio_file(path: &str) -> Result<(String, f64, SonicProfile), Str
 
 fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile {
     if samples.is_empty() {
-        return SonicProfile { bpm: 120.0, energy: 0.5, bass_ratio: 0.33, treble_ratio: 0.33 };
+        return SonicProfile { bpm: 120.0, energy: 0.5, bass_ratio: 0.33, treble_ratio: 0.33, integrated_lufs: -14.0, lufs_gain_db: 0.0 };
     }
 
     // 1. RMS Energy
@@ -322,10 +324,20 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile 
         }
     }
 
+    // 4. EBU R128 Integrated LUFS & ReplayGain dB Calculation
+    let integrated_lufs = if rms > 1e-6 {
+        (20.0 * (rms as f64).log10() - 0.69).max(-70.0)
+    } else {
+        -70.0
+    };
+    let lufs_gain_db = (-14.0 - integrated_lufs).clamp(-12.0, 12.0);
+
     SonicProfile {
         bpm,
         energy,
         bass_ratio,
         treble_ratio,
+        integrated_lufs,
+        lufs_gain_db,
     }
 }

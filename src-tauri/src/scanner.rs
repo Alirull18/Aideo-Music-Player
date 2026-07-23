@@ -180,6 +180,7 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
         energy: None,
         bass_ratio: None,
         treble_ratio: None,
+        replaygain_gain: None,
     })
 }
 
@@ -248,6 +249,7 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
         energy: None,
         bass_ratio: None,
         treble_ratio: None,
+        replaygain_gain: None,
     })
 }
 
@@ -334,5 +336,6 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
         energy: None,
         bass_ratio: None,
         treble_ratio: None,
+        replaygain_gain: None,
     })
 }

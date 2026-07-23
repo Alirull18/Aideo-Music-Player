@@ -37,14 +37,13 @@ export const AudioSettingsTab: React.FC = () => {
             <Laptop className="w-4 h-4 text-purple-400" /> Selected Hardware Endpoint
           </label>
           <select
-            value={currentDevice || ''}
+            value={currentDevice || '[System Default Device]'}
             onChange={(e) => setAudioDevice(e.target.value)}
             className="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-400"
           >
-            <option value="">Default System Device</option>
             {devices.map((d) => (
               <option key={d} value={d}>
-                {d}
+                {d === '[System Default Device]' ? 'System Default Device' : d}
               </option>
             ))}
           </select>

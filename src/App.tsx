@@ -19,6 +19,7 @@ const AideoLabView = lazy(() => import('./components/AideoLabView').then(m => ({
 const FullscreenView = lazy(() => import('./components/FullscreenView').then(m => ({ default: m.FullscreenView })));
 const ListeningInsightsView = lazy(() => import('./components/ListeningInsightsView').then(m => ({ default: m.ListeningInsightsView })));
 const AlbumsView = lazy(() => import('./components/AlbumsView').then(m => ({ default: m.AlbumsView })));
+const ChartsView = lazy(() => import('./components/ChartsView').then(m => ({ default: m.ChartsView })));
 
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
@@ -443,6 +444,19 @@ function AideoApp() {
                 </div>
               }>
                 <ListeningInsightsView />
+              </Suspense>
+            </motion.div>
+          )}
+
+          {view === 'charts' && (
+            <motion.div key="charts" style={{ height: '100%' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Top Charts...</span>
+                </div>
+              }>
+                <ChartsView />
               </Suspense>
             </motion.div>
           )}

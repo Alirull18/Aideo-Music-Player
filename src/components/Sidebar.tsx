@@ -69,6 +69,12 @@ export function Sidebar() {
           {!sidebarCollapsed && <span>Aideo</span>}
         </div>
       )}
+      {appMode === 'hybrid' && (
+        <div className={`nav-item ${view === 'charts' ? 'active' : ''}`} onClick={() => setView('charts')} title={sidebarCollapsed ? "Top Charts" : undefined}>
+          <BarChart3 size={18} style={{ color: '#f59e0b' }} />
+          {!sidebarCollapsed && <span>Top Charts</span>}
+        </div>
+      )}
 
       <div className={`nav-item ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView('aideo_lab')} title={sidebarCollapsed ? "Aideo Lab" : undefined}>
         <Activity size={18} />

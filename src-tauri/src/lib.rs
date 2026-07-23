@@ -500,15 +500,40 @@ fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> 
         }
     }
 
-    *cache = all_names.clone();
-    Ok(all_names)
+    // Deduplicate identical device names so every dropdown item has a unique string key
+    let mut unique_names = Vec::new();
+    let mut name_counts = std::collections::HashMap::new();
+
+    for name in all_names {
+        let count = name_counts.entry(name.clone()).or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            unique_names.push(format!("{} #{}", name, count));
+        } else {
+            unique_names.push(name);
+        }
+    }
+
+    let mut final_devices = vec!["[System Default Device]".to_string()];
+    for u in unique_names {
+        if u != "[System Default Device]" {
+            final_devices.push(u);
+        }
+    }
+
+    *cache = final_devices.clone();
+    Ok(final_devices)
 }
 
 #[tauri::command]
 fn set_audio_device(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let player = safe_lock(&state.player);
     let mut target_device = safe_lock(&player.target_device);
-    *target_device = Some(name);
+    if name == "[System Default Device]" || name.is_empty() || name == "Default Device" || name == "System Default Device" {
+        *target_device = None;
+    } else {
+        *target_device = Some(name);
+    }
     let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
     Ok(())
 }
@@ -614,6 +639,7 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
                 energy: None,
                 bass_ratio: None,
                 treble_ratio: None,
+                replaygain_gain: None,
             }
         }
     };
@@ -1686,6 +1712,69 @@ fn clear_application_cache() -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_cache_size_info() -> Result<serde_json::Value, String> {
+    let mut total_bytes: u64 = 0;
+    let mut file_count: usize = 0;
+
+    if let Some(data_dir) = dirs::data_dir() {
+        let cloud_cache = data_dir.join("Aideo").join("CloudCache");
+        if let Ok(entries) = std::fs::read_dir(&cloud_cache) {
+            for entry in entries.flatten() {
+                if let Ok(m) = entry.metadata() {
+                    if m.is_file() {
+                        total_bytes += m.len();
+                        file_count += 1;
+                    }
+                }
+            }
+        }
+
+        let ytdlp_cache = data_dir.join("Aideo").join("cache");
+        if let Ok(entries) = std::fs::read_dir(&ytdlp_cache) {
+            for entry in entries.flatten() {
+                if let Ok(m) = entry.metadata() {
+                    if m.is_file() {
+                        total_bytes += m.len();
+                        file_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    if filename.starts_with("aideo_cache_") {
+                        if let Ok(m) = path.metadata() {
+                            total_bytes += m.len();
+                            file_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let gb = total_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+    let mb = total_bytes as f64 / (1024.0 * 1024.0);
+    let formatted = if gb >= 1.0 {
+        format!("{:.2} GB", gb)
+    } else {
+        format!("{:.1} MB", mb)
+    };
+
+    Ok(serde_json::json!({
+        "bytes": total_bytes,
+        "formatted": formatted,
+        "count": file_count,
+        "limit_gb": 5.0
+    }))
+}
+
+#[tauri::command]
 fn open_cache_folder() -> Result<(), String> {
     let data_dir = dirs::data_dir().ok_or("Could not locate AppData directory")?;
     let cache_dir = data_dir.join("Aideo").join("CloudCache");
@@ -1868,6 +1957,7 @@ pub fn run() {
             youtube::get_youtube_autoplay_recommendations,
             youtube::get_personalized_discovery_hub,
             youtube::get_cached_discovery_hub,
+            youtube::get_worldwide_leaderboard,
             tidal::tidal_login_start,
             tidal::tidal_login_poll_status,
             tidal::tidal_search,
@@ -1900,6 +1990,7 @@ pub fn run() {
             cloud::get_url_hash,
             get_windows_accent_color,
             clear_application_cache,
+            get_cache_size_info,
             acoustid_identify_track,
             get_similar_tracks,
             get_remote_connection_url,

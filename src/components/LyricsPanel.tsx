@@ -8,8 +8,22 @@ import { fmt, baseName, cleanSearchQuery } from '../utils';
 interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; duration?: number; }
 
 export function LyricsPanel() {
-  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, setLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, setCustomPrompt } = useStore();
+  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, seek, adjustLyricOffset, setLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, showTranslation, setShowTranslation, setCustomPrompt } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleTranslateClick = async () => {
+    const hasTranslation = lyrics.some(l => l.translation);
+    if (!hasTranslation && lyrics.length > 0) {
+      try {
+        await translateLyrics();
+        setShowTranslation(true);
+      } catch (err) {
+        console.error('Translation error:', err);
+      }
+    } else {
+      setShowTranslation(!showTranslation);
+    }
+  };
   
   // Interpolated timer for smooth 60fps word-by-word sweeping
   const [smoothedTime, setSmoothedTime] = useState(playback.position_secs);
@@ -251,16 +265,20 @@ export function LyricsPanel() {
           }} />
           {lyricStatus === 'loading' ? 'Searching...' : lyricStatus === 'found' ? 'Synced' : lyricStatus === 'not_found' ? 'No Lyrics' : ''}
         </div>
-        <button className={`lyric-btn ${isTranslating ? 'active' : ''}`} onClick={translateLyrics} disabled={isTranslating}>
-          {isTranslating ? 'Working…' : '🌐 Translate'}
+        <button className={`lyric-btn ${showTranslation && lyrics.some(l => l.translation) ? 'active' : ''}`} onClick={handleTranslateClick} disabled={isTranslating}>
+          {isTranslating ? 'Working…' : showTranslation && lyrics.some(l => l.translation) ? '🌐 Hide Translation' : '🌐 Translate'}
         </button>
         <button
           className={`lyric-btn ${showRomaji ? 'active' : ''}`}
           disabled={isTranslating}
           onClick={async () => {
             const hasRomaji = lyrics.some(l => l.romaji);
-            if (!hasRomaji && lyrics.length > 0) await getRomaji();
-            setShowRomaji(!showRomaji);
+            if (!hasRomaji && lyrics.length > 0) {
+              await getRomaji();
+              setShowRomaji(true);
+            } else {
+              setShowRomaji(!showRomaji);
+            }
           }}
         >
           {isTranslating ? 'Working…' : 'Romaji'}
@@ -380,7 +398,7 @@ export function LyricsPanel() {
                   )}
                 </div>
                 {showRomaji && l.romaji && l.romaji !== l.text && <div className="lyric-romaji">{l.romaji}</div>}
-                {l.translation && <div className="lyric-translation">{l.translation}</div>}
+                {showTranslation && l.translation && <div className="lyric-translation">{l.translation}</div>}
               </div>
             ))
           )}

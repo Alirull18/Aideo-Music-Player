@@ -10,8 +10,10 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
   coverArt: null,
   isTranslating: false,
   showRomaji: true,
+  showTranslation: true,
 
   setShowRomaji: (val: boolean) => set({ showRomaji: val }),
+  setShowTranslation: (val: boolean) => set({ showTranslation: val }),
 
   adjustLyricOffset: (ms: number) => {
     const newOffset = get().lyricOffset + ms;
@@ -168,7 +170,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         })
       );
       if (pathsEqual(get().playback.current_track, trackPath)) {
-        set({ lyrics: translated });
+        set({ lyrics: translated, showTranslation: true });
       }
     } catch (e) { console.error(e); } finally { set({ isTranslating: false }); }
   },
@@ -189,7 +191,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         })
       );
       if (pathsEqual(get().playback.current_track, trackPath)) {
-        set({ lyrics: withRomaji });
+        set({ lyrics: withRomaji, showRomaji: true });
       }
     } catch (e) { console.error(e); } finally { set({ isTranslating: false }); }
   },

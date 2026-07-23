@@ -46,6 +46,8 @@ export function FullscreenView() {
     toggleLiquidBackground,
     showRomaji,
     setShowRomaji,
+    showTranslation,
+    setShowTranslation,
     translateLyrics,
     isTranslating,
     getRomaji
@@ -89,11 +91,6 @@ export function FullscreenView() {
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(true);
   const [isHUDHidden, setIsHUDHidden] = useState(false);
 
-  // Persistent Translation Preference
-  const [showTranslation, setShowTranslation] = useState(() => {
-    return localStorage.getItem('aideo-fullscreen-translate') === 'true';
-  });
-
   // Persistent Visualizer Mode Preference
   const [vizMode, setVizMode] = useState<'baseline' | 'circle' | 'wave'>(() => {
     return (localStorage.getItem('aideo-fullscreen-viz-mode') as 'baseline' | 'circle' | 'wave') || 'baseline';
@@ -106,11 +103,6 @@ export function FullscreenView() {
   useEffect(() => {
     localStorage.setItem('aideo-fullscreen-layout', layout);
   }, [layout]);
-
-  // Sync Translation preference
-  useEffect(() => {
-    localStorage.setItem('aideo-fullscreen-translate', String(showTranslation));
-  }, [showTranslation]);
 
   // Sync Visualizer preference
   useEffect(() => {
@@ -277,33 +269,31 @@ export function FullscreenView() {
 
   // Romaji toggle handler
   const handleRomajiToggle = async () => {
-    const nextVal = !showRomaji;
-    setShowRomaji(nextVal);
-    if (nextVal) {
-      const hasRomaji = lyrics.some(l => l.romaji);
-      if (!hasRomaji && lyrics.length > 0) {
-        try {
-          await getRomaji();
-        } catch (err) {
-          console.error("Failed to fetch Romaji:", err);
-        }
+    const hasRomaji = lyrics.some(l => l.romaji);
+    if (!hasRomaji && lyrics.length > 0) {
+      try {
+        await getRomaji();
+        setShowRomaji(true);
+      } catch (err) {
+        console.error("Failed to fetch Romaji:", err);
       }
+    } else {
+      setShowRomaji(!showRomaji);
     }
   };
 
   // Translate toggle handler
   const handleTranslate = async () => {
-    const nextVal = !showTranslation;
-    setShowTranslation(nextVal);
-    if (nextVal) {
-      const hasTranslation = lyrics.some(l => l.translation);
-      if (!hasTranslation && lyrics.length > 0) {
-        try {
-          await translateLyrics();
-        } catch (err) {
-          console.error("Translation failed:", err);
-        }
+    const hasTranslation = lyrics.some(l => l.translation);
+    if (!hasTranslation && lyrics.length > 0) {
+      try {
+        await translateLyrics();
+        setShowTranslation(true);
+      } catch (err) {
+        console.error("Translation failed:", err);
       }
+    } else {
+      setShowTranslation(!showTranslation);
     }
   };
 
@@ -446,7 +436,7 @@ export function FullscreenView() {
                         {showRomaji && l.romaji && l.romaji !== l.text && (
                           <div className="fullscreen-lyric-romaji">{l.romaji}</div>
                         )}
-                        {l.translation && (
+                        {showTranslation && l.translation && (
                           <div className="fullscreen-lyric-translation">{l.translation}</div>
                         )}
                       </div>
@@ -549,7 +539,7 @@ export function FullscreenView() {
                         {showRomaji && l.romaji && l.romaji !== l.text && (
                           <div className="fullscreen-lyric-romaji">{l.romaji}</div>
                         )}
-                        {l.translation && (
+                        {showTranslation && l.translation && (
                           <div className="fullscreen-lyric-translation">{l.translation}</div>
                         )}
                       </div>

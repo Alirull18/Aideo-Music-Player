@@ -2273,30 +2273,6 @@ export function AideoView() {
                       {tracks.length > 0 ? "Tailored Mix" : "Curated Seeds"}
                     </button>
                   )}
-
-                  {discoveryData.global_charts && discoveryData.global_charts.length > 0 && (
-                    <button
-                      onClick={() => setActiveDiscoveryTab('charts')}
-                      className={`settings-tab-btn ${activeDiscoveryTab === 'charts' ? 'active' : ''}`}
-                      style={{
-                        padding: '8px 16px',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        borderRadius: 8,
-                        cursor: 'pointer',
-                        background: activeDiscoveryTab === 'charts' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
-                        border: 'none',
-                        color: activeDiscoveryTab === 'charts' ? '#f87171' : 'var(--text-dim)',
-                        transition: 'all 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6
-                      }}
-                    >
-                      <Compass size={12} />
-                      Worldwide Charts
-                    </button>
-                  )}
                 </div>
 
                 {/* Shelf Content */}

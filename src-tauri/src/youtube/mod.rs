@@ -1871,6 +1871,7 @@ async fn add_downloaded_track_to_library(
                 energy: None,
                 bass_ratio: None,
                 treble_ratio: None,
+                replaygain_gain: None,
             }
         }
     };
@@ -2381,7 +2382,7 @@ pub async fn generate_hybrid_mixes(
     lib_tracks: &[crate::db::Track],
     play_counts: &std::collections::HashMap<String, i64>,
 ) -> Result<Vec<YoutubeMix>, String> {
-    use rand::seq::{SliceRandom, IndexedRandom};
+    use rand::seq::SliceRandom;
 
     // Map helper
     let map_local_to_youtube_track = |track: &crate::db::Track| -> YoutubeTrack {
@@ -2410,51 +2411,70 @@ pub async fn generate_hybrid_mixes(
         }
     };
 
-    // Build a pool of all unique artists from top_artists, seed_artists, and lib_tracks
-    let mut pool_artists = Vec::new();
+    // Build prioritized pools strictly from user's most played & seed artists
+    let mut top_artist_pool = Vec::new();
     for ta in top_artists {
-        if !ta.is_empty() && !pool_artists.contains(ta) {
-            pool_artists.push(ta.clone());
+        if !ta.is_empty() && !top_artist_pool.contains(ta) {
+            top_artist_pool.push(ta.clone());
         }
     }
     for sa in seed_artists {
-        if !sa.is_empty() && !pool_artists.contains(sa) {
-            pool_artists.push(sa.clone());
+        if !sa.is_empty() && !top_artist_pool.contains(sa) {
+            top_artist_pool.push(sa.clone());
         }
     }
-    for t in lib_tracks {
-        if let Some(ref art) = t.artist {
-            if !art.is_empty() && !pool_artists.contains(art) {
-                pool_artists.push(art.clone());
+    // If user has no scrobbles or seed artists, fallback to local library top played artists
+    if top_artist_pool.is_empty() {
+        let mut top_played_lib = lib_tracks.to_vec();
+        top_played_lib.sort_by(|a, b| {
+            let count_a = play_counts.get(&a.path).unwrap_or(&0);
+            let count_b = play_counts.get(&b.path).unwrap_or(&0);
+            count_b.cmp(count_a)
+        });
+        for t in top_played_lib {
+            if let Some(ref art) = t.artist {
+                if !art.is_empty() && !top_artist_pool.contains(art) {
+                    top_artist_pool.push(art.clone());
+                }
             }
         }
     }
 
-    // Pick a random artist from our combined pool
-    let artist_2 = {
-        let mut rng = rand::rng();
-        if !pool_artists.is_empty() {
-            pool_artists.choose(&mut rng).cloned().unwrap_or_else(|| "popular pop".to_string())
-        } else {
-            "popular pop".to_string()
-        }
+    // Pick top primary and secondary artists derived strictly from user's history
+    let artist_1 = top_artist_pool.first().cloned().unwrap_or_default();
+    let artist_2 = if top_artist_pool.len() > 1 {
+        top_artist_pool[1].clone()
+    } else {
+        artist_1.clone()
     };
 
-    let artist_1 = top_artists.first().or(seed_artists.first()).cloned().unwrap_or_default();
     let q1 = if !artist_1.is_empty() {
-        format!("{} greatest hits", artist_1)
+        format!("{} official audio greatest hits", artist_1)
     } else {
-        "popular acoustic hits".to_string()
+        "popular acoustic music".to_string()
     };
     
     let q2 = if !artist_2.is_empty() {
-        format!("{} mix", artist_2)
+        format!("{} official music", artist_2)
     } else {
         "chill pop music".to_string()
     };
 
-    let q3 = format!("{} playlist", top_genre);
-    let q4 = "lofi hip hop radio beats to relax study".to_string();
+    let q3 = if !top_genre.is_empty() {
+        format!("{} official music", top_genre)
+    } else if !artist_1.is_empty() {
+        format!("{} songs", artist_1)
+    } else {
+        "top music playlist".to_string()
+    };
+
+    let q4 = if !top_genre.is_empty() {
+        format!("chill {} music", top_genre)
+    } else if !artist_2.is_empty() {
+        format!("{} acoustic chill", artist_2)
+    } else {
+        "lofi chill beats".to_string()
+    };
 
     let queries = vec![
         (q1, "supermix"),
@@ -2610,6 +2630,133 @@ pub async fn generate_hybrid_mixes(
     }
 
     Ok(mixes)
+}
+
+#[tauri::command]
+pub async fn get_worldwide_leaderboard(
+    genre: String, 
+    country: Option<String>, 
+    source: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>
+) -> Result<Vec<YoutubeTrack>, String> {
+    let api_key = fetch_innertube_key().await;
+    let client = crate::get_http_client();
+    let genre_clean = genre.trim().to_lowercase();
+    let country_clean = country.unwrap_or_default().trim().to_lowercase();
+    let source_clean = source.unwrap_or_else(|| "lastfm".to_string()).trim().to_lowercase();
+
+    let start_offset = offset.unwrap_or(0);
+    let fetch_limit = limit.unwrap_or(15);
+    let fetch_count = (start_offset + fetch_limit + 10).min(100);
+
+    let mut chart_candidates: Vec<(String, String)> = Vec::new();
+
+    if source_clean == "billboard" {
+        // Fetch Billboard Hot 100 open data
+        if let Ok(res) = client.get("https://raw.githubusercontent.com/mhollingshead/billboard-hot-100/main/recent.json")
+            .send()
+            .await 
+        {
+            if let Ok(json) = res.json::<serde_json::Value>().await {
+                if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+                    for item in data.iter().take(fetch_count) {
+                        let title = item.get("song").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let artist = item.get("artist").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        if !title.is_empty() && !artist.is_empty() {
+                            chart_candidates.push((title, artist));
+                        }
+                    }
+                }
+            }
+        }
+    } else if source_clean == "listenbrainz" {
+        // Fetch ListenBrainz sitewide top recordings
+        if let Ok(res) = client.get("https://api.listenbrainz.org/1/stats/sitewide/top-recordings")
+            .send()
+            .await 
+        {
+            if let Ok(json) = res.json::<serde_json::Value>().await {
+                if let Some(recordings) = json.get("payload").and_then(|p| p.get("top_recordings")).and_then(|r| r.as_array()) {
+                    for r in recordings.iter().take(fetch_count) {
+                        let title = r.get("track_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let artist = r.get("artist_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        if !title.is_empty() && !artist.is_empty() {
+                            chart_candidates.push((title, artist));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Default or fallback to Last.fm chart API
+    if chart_candidates.is_empty() {
+        let raw_tracks = if !country_clean.is_empty() && country_clean != "global" && country_clean != "worldwide" {
+            crate::lastfm_api::get_geo_top_tracks_page(&country_clean, fetch_count as u32).await.unwrap_or_default()
+        } else {
+            crate::lastfm_api::get_genre_top_tracks_page(&genre_clean, fetch_count as u32).await.unwrap_or_default()
+        };
+        
+        for t in raw_tracks {
+            let title = t.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let artist = t.get("artist")
+                .and_then(|a| a.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !title.is_empty() && !artist.is_empty() && artist != "Unknown Artist" {
+                chart_candidates.push((title, artist));
+            }
+        }
+    }
+
+    if chart_candidates.is_empty() {
+        let fallback_q = if !country_clean.is_empty() {
+            format!("top music hits in {}", country_clean)
+        } else if genre_clean.is_empty() || genre_clean == "global" {
+            "worldwide top music hits leaderboard".to_string()
+        } else {
+            format!("top {} music hits leaderboard", genre_clean)
+        };
+        return search_youtube_internal(&client, &api_key, &fallback_q, false).await;
+    }
+
+    let mut tasks = Vec::new();
+    for (title, artist) in chart_candidates.into_iter().skip(start_offset).take(fetch_limit) {
+        let query = format!("{} {}", artist, title);
+        let client_c = client.clone();
+        let api_key_c = api_key.clone();
+        tasks.push(async move {
+            search_youtube_internal(&client_c, &api_key_c, &query, false).await
+        });
+    }
+
+    let results = futures::future::join_all(tasks).await;
+    let mut leaderboard = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+
+    for res in results {
+        if let Ok(tracks) = res {
+            for mut t in tracks.into_iter().take(2) {
+                if is_third_party_or_instrumental(&t.title, &t.artist) || is_compilation_channel(&t.artist) {
+                    continue;
+                }
+                if !seen_ids.contains(&t.id) {
+                    seen_ids.insert(t.id.clone());
+                    t.recommendation_source = Some(if genre_clean.is_empty() || genre_clean == "global" {
+                        "Global Charts".to_string()
+                    } else {
+                        format!("Top {}", genre_clean)
+                    });
+                    leaderboard.push(t);
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(leaderboard)
 }
 
 #[tauri::command]

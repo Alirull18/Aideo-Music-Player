@@ -80,6 +80,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     spatial_enabled: false,
     spatial_haas_delay: 7.5,
     spatial_wet: 0.15,
+    convolution_enabled: localStorage.getItem('aideo_convolution_enabled') === 'true',
+    convolution_ir_path: localStorage.getItem('aideo_convolution_ir_path') || '',
+    convolution_wet: Number(localStorage.getItem('aideo_convolution_wet') || 0.5),
     subsonic_enabled: false,
     night_mode_enabled: false,
     r128_enabled: false,
@@ -422,7 +425,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       'enabled', 'eq_enabled', 'eq_parametric', 'eq_graphic_gains', 
       'eq_parametric_bands', 'crossfeed_enabled', 'crossfeed_level', 
       'crossfeed_corner', 'spatial_enabled', 'spatial_haas_delay', 
-      'spatial_wet', 'subsonic_enabled', 'night_mode_enabled', 
+      'spatial_wet', 'convolution_enabled', 'convolution_ir_path', 'convolution_wet',
+      'subsonic_enabled', 'night_mode_enabled', 
       'r128_enabled', 'width', 'upsample_rate', 'dither',
       'aideo_filter_enabled', 'aideo_filter_room_size', 'aideo_filter_bass_thump', 
       'aideo_filter_dampening', 'preamp_gain', 'limiter_threshold', 'resampler_phase_mode',
@@ -595,7 +599,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   setAudioDevice: async (name: string) => {
     try {
       await invoke('set_audio_device', { name });
-      set({ currentDevice: name });
+      const devName = (name === '[System Default Device]' || name === 'Default Device' || name === 'System Default Device') ? '' : name;
+      set({ currentDevice: devName });
     } catch (e) { console.error(e); }
   },
 

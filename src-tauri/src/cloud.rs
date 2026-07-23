@@ -664,25 +664,43 @@ pub fn prune_cache_to_limit_internal(app_handle: &tauri::AppHandle) -> Result<()
     let Some(data_dir) = dirs::data_dir() else {
         return Err("Failed to resolve data directory".to_string());
     };
-    let cache_dir = data_dir.join("Aideo").join("CloudCache");
-    if !cache_dir.exists() {
-        return Ok(());
-    }
+    let cloud_cache = data_dir.join("Aideo").join("CloudCache");
+    let ytdlp_cache = data_dir.join("Aideo").join("cache");
 
     let limit_bytes = (limit_gb * 1024.0 * 1024.0 * 1024.0) as u64;
 
     let mut files = Vec::new();
     let mut total_size = 0u64;
 
-    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                let is_cache_or_tmp = path.extension()
-                    .map(|ext| ext == "cache" || ext == "tmp")
-                    .unwrap_or(false);
+    // 1. Scan CloudCache
+    if cloud_cache.exists() {
+        if let Ok(entries) = std::fs::read_dir(&cloud_cache) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let is_cache_or_tmp = path.extension()
+                        .map(|ext| ext == "cache" || ext == "tmp")
+                        .unwrap_or(false);
 
-                if is_cache_or_tmp {
+                    if is_cache_or_tmp {
+                        if let Ok(metadata) = std::fs::metadata(&path) {
+                            let size = metadata.len();
+                            let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                            total_size += size;
+                            files.push((path, size, modified));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Scan yt-dlp cache directory
+    if ytdlp_cache.exists() {
+        if let Ok(entries) = std::fs::read_dir(&ytdlp_cache) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
                     if let Ok(metadata) = std::fs::metadata(&path) {
                         let size = metadata.len();
                         let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
@@ -694,17 +712,38 @@ pub fn prune_cache_to_limit_internal(app_handle: &tauri::AppHandle) -> Result<()
         }
     }
 
+    // 3. Scan system temp directory for aideo_cache_*
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    if filename.starts_with("aideo_cache_") {
+                        if let Ok(metadata) = std::fs::metadata(&path) {
+                            let size = metadata.len();
+                            let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                            total_size += size;
+                            files.push((path, size, modified));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if total_size > limit_bytes {
         files.sort_by_key(|f| f.2);
 
         println!(
-            "[cache-manager] Cache size ({} MB) exceeds limit ({} MB). Pruning oldest files...",
+            "[cache-manager] Combined cache size ({} MB) exceeds limit ({} MB). Pruning oldest LRU files...",
             total_size / (1024 * 1024),
             limit_bytes / (1024 * 1024)
         );
 
+        let target_size = (limit_bytes as f64 * 0.75) as u64; // 75% target threshold (3.75 GB)
+
         for (path, size, _) in files {
-            if total_size <= limit_bytes {
+            if total_size <= target_size {
                 break;
             }
             if std::fs::remove_file(&path).is_ok() {

@@ -164,14 +164,20 @@ export function AlbumsView({
 
     tracks.forEach((t) => {
       const albumTitle = t.album?.trim() || 'Unknown Album';
-      const artistName = t.artist?.trim() || 'Unknown Artist';
-      const key = `${artistName.toLowerCase()}:::${albumTitle.toLowerCase()}`;
+      const albumArtist = t.album_artist?.trim() || t.albumArtist?.trim();
+      const trackArtist = t.artist?.trim() || 'Unknown Artist';
+      
+      // If explicit album_artist is present, use it in the key; otherwise group strictly by album title
+      const effectiveArtist = albumArtist || trackArtist;
+      const key = albumArtist 
+        ? `${albumArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`
+        : `album:::${albumTitle.toLowerCase()}`;
 
       if (!map.has(key)) {
         map.set(key, {
           id: key,
           title: albumTitle,
-          artist: artistName,
+          artist: effectiveArtist,
           coverUrl: t.cover_url || null,
           sampleTrack: t,
           tracks: [t],
@@ -184,6 +190,16 @@ export function AlbumsView({
         if (!group.coverUrl && t.cover_url) {
           group.coverUrl = t.cover_url;
           group.sampleTrack = t;
+        }
+
+        // If no explicit album_artist was set and track artists differ within the same album title,
+        // mark album artist as 'Various Artists' unless they all share the main primary artist name.
+        if (!albumArtist && group.artist !== 'Various Artists' && group.artist !== trackArtist) {
+          const firstArtistMain = group.artist.split(/ feat\.| ft\.|,/i)[0].trim().toLowerCase();
+          const currArtistMain = trackArtist.split(/ feat\.| ft\.|,/i)[0].trim().toLowerCase();
+          if (firstArtistMain !== currArtistMain) {
+            group.artist = 'Various Artists';
+          }
         }
       }
     });

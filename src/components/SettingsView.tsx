@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -109,10 +109,21 @@ export function SettingsView() {
     colorScheme, setColorScheme, shortcuts, setShortcut
   } = useStore();
 
-  // Tab navigation State
-  const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account' | 'shortcuts'>('appearance');
+  // Cache Size & Usage State
+  const [cacheInfo, setCacheInfo] = useState<{ bytes: number; formatted: string; count: number }>({ bytes: 0, formatted: 'Calculating...', count: 0 });
 
-  const [recordingAction, setRecordingAction] = useState<string | null>(null);
+  const fetchCacheInfo = useCallback(async () => {
+    try {
+      const info: any = await invoke('get_cache_size_info');
+      if (info) setCacheInfo(info);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCacheInfo();
+  }, [fetchCacheInfo, cacheSizeLimit]);
 
   useEffect(() => {
     if (!recordingAction) return;
@@ -1753,20 +1764,24 @@ export function SettingsView() {
                       initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                       style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1200, background: '#101018', border: '1px solid var(--glass-border)', borderRadius: 8, marginTop: 4, overflow: 'hidden', maxHeight: 200, overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.8)' }}>
                       {devices.length === 0 && <div style={{ padding: 12, fontSize: 11, color: 'var(--text-dim)' }}>No device drivers identified</div>}
-                      {devices.map(d => (
-                        <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
-                          style={{
-                            padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
-                            color: currentDevice === d ? 'var(--accent)' : 'var(--text)', background: currentDevice === d ? 'rgba(var(--accent-rgb),0.1)' : '',
-                            display: 'flex', alignItems: 'center', gap: 8
-                          }}>
-                          {d.startsWith('[ASIO]') && <span style={{ fontSize: 8, background: '#ef4444', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>ASIO</span>}
-                          {d.startsWith('[WASAPI]') && <span style={{ fontSize: 8, background: '#3b82f6', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>WASAPI</span>}
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
-                          </span>
-                        </div>
-                      ))}
+                      {devices.map(d => {
+                        const isSelected = (!currentDevice && d === '[System Default Device]') || currentDevice === d;
+                        return (
+                          <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
+                            style={{
+                              padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
+                              color: isSelected ? 'var(--accent)' : 'var(--text)', background: isSelected ? 'rgba(var(--accent-rgb),0.1)' : '',
+                              display: 'flex', alignItems: 'center', gap: 8
+                            }}>
+                            {d === '[System Default Device]' && <span style={{ fontSize: 8, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '2px 6px', borderRadius: 4, fontWeight: 900, flexShrink: 0, border: '1px solid rgba(34, 197, 94, 0.3)' }}>DEFAULT</span>}
+                            {d.startsWith('[ASIO]') && <span style={{ fontSize: 8, background: '#ef4444', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>ASIO</span>}
+                            {d.startsWith('[WASAPI]') && <span style={{ fontSize: 8, background: '#3b82f6', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>WASAPI</span>}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {d === '[System Default Device]' ? 'System Default Device' : d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -2382,8 +2397,13 @@ export function SettingsView() {
               {/* Cache Size Limit Slider */}
               <div style={{ marginTop: 20, background: 'rgba(255,255,255,0.02)', padding: '14px 18px', borderRadius: 10, border: '1px solid var(--glass-border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Smart Cache Limit Slider</span>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)' }}>{cacheSizeLimit.toFixed(1)} GB limit</span>
+                  <div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', display: 'block' }}>Smart Cache Limit Slider</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, display: 'block' }}>
+                      Current Storage Usage: <strong style={{ color: cacheInfo.bytes > cacheSizeLimit * 1024 * 1024 * 1024 ? '#f87171' : '#4ade80' }}>{cacheInfo.formatted}</strong> ({cacheInfo.count} files)
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--accent)' }}>{cacheSizeLimit.toFixed(1)} GB limit</span>
                 </div>
                 <input 
                   type="range" 
@@ -2392,7 +2412,11 @@ export function SettingsView() {
                   step={0.5} 
                   value={cacheSizeLimit}
                   style={{ width: '100%', height: 6, accentColor: 'var(--accent)', cursor: 'pointer' }}
-                  onChange={e => setCacheSizeLimit(Number(e.target.value))} 
+                  onChange={e => {
+                    const val = Number(e.target.value);
+                    setCacheSizeLimit(val);
+                    setTimeout(fetchCacheInfo, 300);
+                  }} 
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginTop: 6, fontWeight: 600 }}>
                   <span>2.0 GB</span>
@@ -2402,7 +2426,7 @@ export function SettingsView() {
                   <span>10.0 GB</span>
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.3, opacity: 0.8 }}>
-                  Automatically cleans up the least recently used / oldest stream caches when size exceeds limit.
+                  Automatically prunes the least recently used / oldest stream caches when total usage exceeds your selected limit.
                 </div>
               </div>
             </div>

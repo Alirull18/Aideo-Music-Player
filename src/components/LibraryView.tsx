@@ -444,42 +444,6 @@ const TrackRow = memo(({
                     onClick={async (e) => { 
                       e.stopPropagation();
                       setMenuOpenFor(null);
-                      setIsMatching(t.id);
-                      try {
-                        const res: any = await invoke('acoustid_identify_track', { path: t.path });
-                        const recording = res.acoustid?.results?.[0]?.recordings?.[0];
-                        if (recording) {
-                          const match = {
-                            title: recording.title,
-                            artist: recording.artists?.[0]?.name || 'Unknown Artist',
-                            album: recording.releasegroups?.[0]?.title || '',
-                          };
-                          setMatchData({ track: t, match });
-                        } else {
-                          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Acoustic Match: No matches found.', type: 'warning' } }));
-                        }
-                      } catch (err) {
-                        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Acoustic Match failed: ${err}`, type: 'error' } }));
-                      } finally {
-                        setIsMatching(null);
-                      }
-                    }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(168, 85, 247, 0.15)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    {isMatching === t.id ? (
-                        <RefreshCw size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
-                      ) : (
-                        <Activity size={14} />
-                      )}
-                      {isMatching === t.id ? 'Analyzing...' : 'Acoustic Match'}
-                  </div>
-
-                  <div
-                    onClick={async (e) => { 
-                      e.stopPropagation();
-                      setMenuOpenFor(null);
                       try {
                         const similar: any[] = await invoke('get_similar_tracks', { path: t.path });
                         if (similar && similar.length > 0) {

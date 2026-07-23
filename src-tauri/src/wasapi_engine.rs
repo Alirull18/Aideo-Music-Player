@@ -86,15 +86,71 @@ where
             target_device = enumerator.get_default_device(&Direction::Render).ok();
         } else {
             let count = collection.get_nbr_devices().unwrap_or(0);
+            let mut candidates = Vec::new();
             for i in 0..count {
                 if let Ok(dev) = collection.get_device_at_index(i) {
                     if let Ok(name) = dev.get_friendlyname() {
-                        if name.contains(&dev_name) || dev_name.contains(&name) {
-                            target_device = Some(dev);
+                        candidates.push((i, name));
+                    }
+                }
+            }
+
+            let mut matched_idx = None;
+
+            // Tier 1: Exact Match
+            for (idx, name) in &candidates {
+                if name == &dev_name {
+                    matched_idx = Some(*idx);
+                    break;
+                }
+            }
+
+            // Tier 2: Case-Insensitive Exact Match
+            if matched_idx.is_none() {
+                let dev_name_lower = dev_name.to_lowercase();
+                for (idx, name) in &candidates {
+                    if name.to_lowercase() == dev_name_lower {
+                        matched_idx = Some(*idx);
+                        break;
+                    }
+                }
+            }
+
+            // Tier 3: Model-Specific Match (filtering out generic terms)
+            if matched_idx.is_none() {
+                let generic_words = ["headphone", "headphones", "speaker", "speakers", "audio", "device", "realtek", "high", "definition", "out", "line", "sound"];
+                
+                let model_tokens: Vec<&str> = dev_name
+                    .split(|c: char| !c.is_alphanumeric())
+                    .filter(|token| {
+                        let t = token.to_lowercase();
+                        !t.is_empty() && !generic_words.contains(&t.as_str())
+                    })
+                    .collect();
+
+                if !model_tokens.is_empty() {
+                    for (idx, name) in &candidates {
+                        let name_lower = name.to_lowercase();
+                        if model_tokens.iter().all(|token| name_lower.contains(&token.to_lowercase())) {
+                            matched_idx = Some(*idx);
                             break;
                         }
                     }
                 }
+            }
+
+            // Tier 4: Fallback Substring Match
+            if matched_idx.is_none() {
+                for (idx, name) in &candidates {
+                    if name.contains(&dev_name) {
+                        matched_idx = Some(*idx);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(idx) = matched_idx {
+                target_device = collection.get_device_at_index(idx).ok();
             }
         }
 

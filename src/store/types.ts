@@ -109,6 +109,9 @@ export interface DSPState {
   spatial_enabled: boolean;
   spatial_haas_delay: number;
   spatial_wet: number;
+  convolution_enabled: boolean;
+  convolution_ir_path: string;
+  convolution_wet: number;
 
   // Dynamics
   subsonic_enabled: boolean;
@@ -168,7 +171,7 @@ export interface NetworkTelemetry {
 }
 
 export interface PlayerState {
-  view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights';
+  view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts';
   networkTelemetry: NetworkTelemetry | null;
   tracks: Track[];
   queue: Track[];
@@ -195,6 +198,7 @@ export interface PlayerState {
   scanStatus: string;
   isTranslating: boolean;
   showRomaji: boolean;
+  showTranslation: boolean;
   scrobbleEnabled: boolean;
   lastfmSessionKey: string | null;
   lastfmToken: string | null;
@@ -229,7 +233,7 @@ export interface PlayerState {
   setCoverArtModalTrack: (track: Track | null) => void;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights') => void;
+  setView: (view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts') => void;
   setAppMode: (mode: 'local' | 'hybrid') => void;
   setOnboardingCompleted: (completed: boolean) => void;
   setShowOnboarding: (show: boolean) => void;
@@ -258,6 +262,7 @@ export interface PlayerState {
   toggleSmartMixWidget: () => void;
   setLastFmSession: (key: string | null) => void;
   setShowRomaji: (val: boolean) => void;
+  setShowTranslation: (val: boolean) => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
   deleteTrack: (path: string) => Promise<void>;

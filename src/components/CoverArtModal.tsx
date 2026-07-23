@@ -37,9 +37,29 @@ export function CoverArtModal() {
     setSearching(true);
     setResults([]);
     try {
+      // 1. Try lyric databases first (LRCLIB, NetEase, QQMusic)
       const res: SearchResult[] = await invoke('search_lyrics_online', { query: queryToSearch });
-      // Filter out only results that actually contain cover art
-      const coverResults = res.filter(r => r.cover_url && r.cover_url.trim().length > 0);
+      let coverResults = res.filter(r => r.cover_url && r.cover_url.trim().length > 0);
+
+      // 2. If no covers found, fallback to YouTube Music API search which returns high-resolution thumbnails
+      if (coverResults.length === 0) {
+        try {
+          const ytTracks: any[] = await invoke('search_youtube', { query: queryToSearch });
+          if (ytTracks && ytTracks.length > 0) {
+            coverResults = ytTracks
+              .filter(t => t.thumbnail || t.cover_url)
+              .slice(0, 9)
+              .map((t, idx) => ({
+                id: `yt-${idx}-${t.id || t.video_id}`,
+                title: t.title || queryToSearch,
+                artist: t.artist || t.uploader || 'YouTube Music',
+                source: 'YouTube',
+                cover_url: t.thumbnail || t.cover_url,
+              }));
+          }
+        } catch (_) {}
+      }
+
       setResults(coverResults);
     } catch (e) {
       console.error(e);

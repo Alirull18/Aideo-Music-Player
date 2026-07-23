@@ -1,19 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { Track } from '../store/types';
 
-// Helper logic mimicking AlbumsView grouping logic for unit verification
-function groupTracksIntoAlbums(tracks: Track[]) {
-  const map = new Map<string, { title: string; artist: string; tracks: Track[]; totalDuration: number }>();
+// Helper logic matching AlbumsView grouping logic
+function groupTracksIntoAlbums(tracks: any[]) {
+  const map = new Map<string, { title: string; artist: string; tracks: any[]; totalDuration: number }>();
 
   tracks.forEach((t) => {
     const albumTitle = t.album?.trim() || 'Unknown Album';
-    const artistName = t.artist?.trim() || 'Unknown Artist';
-    const key = `${artistName.toLowerCase()}:::${albumTitle.toLowerCase()}`;
+    const albumArtist = t.album_artist?.trim() || t.albumArtist?.trim();
+    const trackArtist = t.artist?.trim() || 'Unknown Artist';
+    
+    const effectiveArtist = albumArtist || trackArtist;
+    const key = albumArtist 
+      ? `${albumArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`
+      : `album:::${albumTitle.toLowerCase()}`;
 
     if (!map.has(key)) {
       map.set(key, {
         title: albumTitle,
-        artist: artistName,
+        artist: effectiveArtist,
         tracks: [t],
         totalDuration: t.duration || 0,
       });
@@ -21,6 +26,14 @@ function groupTracksIntoAlbums(tracks: Track[]) {
       const group = map.get(key)!;
       group.tracks.push(t);
       group.totalDuration += t.duration || 0;
+
+      if (!albumArtist && group.artist !== 'Various Artists' && group.artist !== trackArtist) {
+        const firstArtistMain = group.artist.split(/ feat\.| ft\.|,/i)[0].trim().toLowerCase();
+        const currArtistMain = trackArtist.split(/ feat\.| ft\.|,/i)[0].trim().toLowerCase();
+        if (firstArtistMain !== currArtistMain) {
+          group.artist = 'Various Artists';
+        }
+      }
     }
   });
 
@@ -81,5 +94,18 @@ describe('Albums View Edge Cases & Crash Prevention (What-If Study Cases)', () =
 
     expect(result.length).toBeGreaterThan(0);
     expect(endTime - startTime).toBeLessThan(50); // Must group 1,000 tracks in under 50ms
+  });
+
+  it('What-If Scenario 5: Featured artists and compilation tracks do not split album into duplicates', () => {
+    const featuredTracks: any[] = [
+      { id: 1, path: 'C:/1.mp3', title: 'Track 1', artist: 'Daft Punk', album: 'Random Access Memories', duration: 200 },
+      { id: 2, path: 'C:/2.mp3', title: 'Track 2', artist: 'Daft Punk ft. Pharrell Williams', album: 'Random Access Memories', duration: 240 },
+      { id: 3, path: 'C:/3.mp3', title: 'Track 3', artist: 'Daft Punk feat. Panda Bear', album: 'Random Access Memories', duration: 220 },
+    ];
+
+    const result = groupTracksIntoAlbums(featuredTracks);
+    expect(result.length).toBe(1);
+    expect(result[0].title).toBe('Random Access Memories');
+    expect(result[0].tracks.length).toBe(3);
   });
 });

@@ -615,6 +615,8 @@ fn spawn_youtube_downloader(
                         println!("[player-bg] Encrypted cache written successfully: {:?}", cache_path);
                         // Clean up temp file
                         let _ = std::fs::remove_file(&temp_path);
+                        // Enforce strict 5.0 GB cache limit via LRU eviction
+                        enforce_cache_size_limit();
                     }
                 }
                 break; // Break the attempt loop on success!
@@ -651,6 +653,99 @@ fn spawn_youtube_downloader(
     });
     
     complete
+}
+
+pub const MAX_CACHE_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5.0 GB maximum cache storage limit
+
+pub fn enforce_cache_size_limit() {
+    let Some(data_dir) = dirs::data_dir() else { return; };
+    let cloud_cache = data_dir.join("Aideo").join("CloudCache");
+    let ytdlp_cache = data_dir.join("Aideo").join("cache");
+
+    let mut total_size: u64 = 0;
+    let mut files = Vec::new();
+
+    // 1. Scan CloudCache
+    if let Ok(entries) = std::fs::read_dir(&cloud_cache) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Ok(metadata) = path.metadata() {
+                    let len = metadata.len();
+                    let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+                    // Auto-delete orphaned .tmp files older than 1 hour
+                    if path.extension().and_then(|e| e.to_str()) == Some("tmp") {
+                        if let Ok(elapsed) = modified.elapsed() {
+                            if elapsed.as_secs() > 3600 {
+                                let _ = std::fs::remove_file(&path);
+                                continue;
+                            }
+                        }
+                    }
+
+                    total_size += len;
+                    files.push((path, len, modified));
+                }
+            }
+        }
+    }
+
+    // 2. Scan ytdlp_cache
+    if let Ok(entries) = std::fs::read_dir(&ytdlp_cache) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Ok(metadata) = path.metadata() {
+                    let len = metadata.len();
+                    let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    total_size += len;
+                    files.push((path, len, modified));
+                }
+            }
+        }
+    }
+
+    // 3. Scan temp directory for aideo_cache_*
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+                    if filename.starts_with("aideo_cache_") {
+                        if let Ok(metadata) = path.metadata() {
+                            let len = metadata.len();
+                            let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                            total_size += len;
+                            files.push((path, len, modified));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("[cache-manager] Current total cache size: {} MB (Strict limit: 5000 MB)", total_size / (1024 * 1024));
+
+    // If total cache size exceeds 5.0 GB limit, perform LRU eviction down to 3.5 GB (70% target threshold)
+    if total_size > MAX_CACHE_BYTES {
+        let target_size = (MAX_CACHE_BYTES as f64 * 0.70) as u64; // 3.5 GB target
+        
+        // Sort files by modified time ascending (Least Recently Used first)
+        files.sort_by_key(|(_, _, modified)| *modified);
+
+        let mut bytes_deleted: u64 = 0;
+        for (file_path, len, _) in files {
+            if total_size <= target_size {
+                break;
+            }
+            if std::fs::remove_file(&file_path).is_ok() {
+                total_size = total_size.saturating_sub(len);
+                bytes_deleted += len;
+            }
+        }
+        println!("[cache-manager] Pruned {} MB of LRU cache to restrict storage strictly under 5.0 GB limit.", bytes_deleted / (1024 * 1024));
+    }
 }
 
 pub fn clear_youtube_url_cache() {
@@ -1638,6 +1733,9 @@ pub struct DSPState {
     pub spatial_enabled: bool,
     pub spatial_haas_delay: f32,
     pub spatial_wet: f32,
+    pub convolution_enabled: bool,
+    pub convolution_ir_path: String,
+    pub convolution_wet: f32,
 
     // Dynamics
     pub subsonic_enabled: bool,
@@ -1865,6 +1963,9 @@ impl Player {
             spatial_enabled: false,
             spatial_haas_delay: 7.5,
             spatial_wet: 0.15,
+            convolution_enabled: false,
+            convolution_ir_path: String::new(),
+            convolution_wet: 0.5,
 
             // Dynamics
             subsonic_enabled: false,
@@ -1916,22 +2017,8 @@ impl Player {
         let fc = Arc::clone(&file_ch);
         let fmt = Arc::clone(&file_format);
 
-        // Cleanup orphaned .tmp files in CloudCache on startup
-        if let Some(data_dir) = dirs::data_dir() {
-            let cache_dir = data_dir.join("Aideo").join("CloudCache");
-            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_file() {
-                        if let Some(ext) = p.extension() {
-                            if ext == "tmp" {
-                                let _ = std::fs::remove_file(p);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Enforce strict 5.0 GB cache limit & cleanup orphaned temp files on startup
+        enforce_cache_size_limit();
 
         // Spawn network telemetry speed & latency monitor thread
         let current_track_clone = Arc::clone(&current_track);
@@ -2644,6 +2731,113 @@ impl AudioNode for SpatializerNode {
         self.enabled = dsp.enabled && dsp.spatial_enabled;
         self.spatial_wet = dsp.spatial_wet;
         self.spatial_haas_delay = dsp.spatial_haas_delay;
+    }
+}
+
+pub struct ConvolutionNode {
+    enabled: bool,
+    filter_left: ConvolutionFilter,
+    filter_right: ConvolutionFilter,
+    current_ir_path: String,
+}
+
+impl ConvolutionNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            filter_left: ConvolutionFilter::new(),
+            filter_right: ConvolutionFilter::new(),
+            current_ir_path: String::new(),
+        }
+    }
+
+    fn load_ir_file(&mut self, path: &str) {
+        if path.is_empty() || !std::path::Path::new(path).exists() {
+            self.filter_left.load_ir_samples(Vec::new());
+            self.filter_right.load_ir_samples(Vec::new());
+            return;
+        }
+
+        if let Ok(file) = std::fs::File::open(path) {
+            let mss = MediaSourceStream::new(Box::new(file), Default::default());
+            let mut hint = Hint::new();
+            if let Some(ext) = std::path::Path::new(path).extension() {
+                hint.with_extension(&ext.to_string_lossy());
+            }
+
+            if let Ok(probed) = get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default()) {
+                let mut format = probed.format;
+                if let Some(track) = format.tracks().first().cloned() {
+                    if let Ok(mut decoder) = get_codecs().make(&track.codec_params, &DecoderOptions::default()) {
+                        let mut left_samples = Vec::new();
+                        let mut right_samples = Vec::new();
+                        while let Ok(packet) = format.next_packet() {
+                            if packet.track_id() == track.id {
+                                if let Ok(decoded) = decoder.decode(&packet) {
+                                    let n_frames = decoded_frames(&decoded);
+                                    let ch_count = decoded.spec().channels.count();
+                                    let l_src = extract_f32_channel_data(&decoded, 0, n_frames);
+                                    let r_src = if ch_count > 1 { extract_f32_channel_data(&decoded, 1, n_frames) } else { l_src.clone() };
+                                    left_samples.extend(l_src);
+                                    right_samples.extend(r_src);
+                                }
+                            }
+                        }
+                        self.filter_left.load_ir_samples(left_samples);
+                        self.filter_right.load_ir_samples(right_samples);
+                        self.current_ir_path = path.to_string();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn extract_f32_channel_data(buf: &AudioBufferRef<'_>, ch: usize, n_frames: usize) -> Vec<f32> {
+    match buf {
+        AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
+        AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| s as f32 / i16::MAX as f32).collect(),
+        AudioBufferRef::S32(b) => b.chan(ch).iter().map(|&s| s as f32 / i32::MAX as f32).collect(),
+        AudioBufferRef::U8(b)  => b.chan(ch).iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
+        AudioBufferRef::S24(b) => b.chan(ch).iter().map(|&s| s.inner() as f32 / 8_388_607.0).collect(),
+        AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
+        _ => vec![0.0; n_frames],
+    }
+}
+
+impl AudioNode for ConvolutionNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], _sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+        let len = samples[0].len();
+        if samples.len() >= 2 {
+            let (left, right) = samples.split_at_mut(1);
+            let l_chan = &mut left[0];
+            let r_chan = &mut right[0];
+            for i in 0..len {
+                l_chan[i] = self.filter_left.process(l_chan[i]);
+                r_chan[i] = self.filter_right.process(r_chan[i]);
+            }
+        } else {
+            let l_chan = &mut samples[0];
+            for i in 0..len {
+                l_chan[i] = self.filter_left.process(l_chan[i]);
+            }
+        }
+    }
+
+    fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.convolution_enabled;
+        self.filter_left.enabled = self.enabled;
+        self.filter_right.enabled = self.enabled;
+        self.filter_left.wet = dsp.convolution_wet;
+        self.filter_right.wet = dsp.convolution_wet;
+
+        if dsp.convolution_ir_path != self.current_ir_path {
+            self.load_ir_file(&dsp.convolution_ir_path);
+        }
     }
 }
 
@@ -3377,9 +3571,51 @@ fn play_file(
                 full_name.clone()
             };
             
-            #[allow(deprecated)]
             let found_dev = match host.output_devices() {
-                Ok(mut ds) => ds.find(|d| d.name().unwrap_or_default() == actual_name),
+                Ok(ds) => {
+                    let mut candidate_list = Vec::new();
+                    for d in ds {
+                        #[allow(deprecated)]
+                        if let Ok(n) = d.name() {
+                            candidate_list.push((d, n));
+                        }
+                    }
+                    
+                    // Tier 1: Exact match
+                    let mut matched = candidate_list.iter().find(|(_, n)| n == &actual_name).map(|(d, _)| d);
+                    
+                    // Tier 2: Case-insensitive exact match
+                    if matched.is_none() {
+                        let lower_target = actual_name.to_lowercase();
+                        matched = candidate_list.iter().find(|(_, n)| n.to_lowercase() == lower_target).map(|(d, _)| d);
+                    }
+                    
+                    // Tier 3: Model token match
+                    if matched.is_none() {
+                        let generic_words = ["headphone", "headphones", "speaker", "speakers", "audio", "device", "realtek", "high", "definition", "out", "line", "sound"];
+                        let model_tokens: Vec<&str> = actual_name
+                            .split(|c: char| !c.is_alphanumeric())
+                            .filter(|token| {
+                                let t = token.to_lowercase();
+                                !t.is_empty() && !generic_words.contains(&t.as_str())
+                            })
+                            .collect();
+
+                        if !model_tokens.is_empty() {
+                            matched = candidate_list.iter().find(|(_, n)| {
+                                let n_lower = n.to_lowercase();
+                                model_tokens.iter().all(|token| n_lower.contains(&token.to_lowercase()))
+                            }).map(|(d, _)| d);
+                        }
+                    }
+
+                    // Tier 4: Fallback substring match
+                    if matched.is_none() {
+                        matched = candidate_list.iter().find(|(_, n)| n.contains(&actual_name) || actual_name.contains(n)).map(|(d, _)| d);
+                    }
+                    
+                    matched.cloned()
+                }
                 Err(e) => {
                     eprintln!("[player] Could not list host devices: {}", e);
                     None
@@ -4038,6 +4274,7 @@ fn play_file(
         Box::new(SubsonicNode::new()),
         Box::new(CrossfeedNode::new()),
         Box::new(SpatializerNode::new()),
+        Box::new(ConvolutionNode::new()),
         Box::new(WidthNode::new()),
         Box::new(CompressorNode::new()),
         Box::new(NormalizerNode::new()),
@@ -4506,6 +4743,27 @@ fn play_file(
                     }
                 }
                 
+                // 🚀 Pre-DSP FFT Extraction: Extract visualizer spectrum BEFORE DSP gain/headroom cuts
+                // so the visualizer stays energetic, full, and bouncy when toggling DSP options.
+                if !current_dsp.low_spec_mode {
+                    let pre_len = processed[0].len();
+                    let p_ch = processed.len();
+                    for idx in 0..pre_len {
+                        let mut m_sample = 0.0f32;
+                        for ch in 0..p_ch {
+                            m_sample += processed[ch][idx];
+                        }
+                        m_sample /= p_ch as f32;
+                        fft_buffer.push(m_sample);
+                        if fft_buffer.len() >= 2048 {
+                            let _ = fft_tx.try_send((fft_buffer.clone(), dev_rate as f32));
+                            fft_buffer.clear();
+                        }
+                    }
+                } else if !fft_buffer.is_empty() {
+                    fft_buffer.clear();
+                }
+
                 if current_dsp.enabled {
                     for node in &mut nodes {
                         node.process(&mut processed, dev_rate as f32);
@@ -4530,7 +4788,6 @@ fn play_file(
             use rand::Rng;
 
             while out_idx < n_out {
-                let mut mono_sample = 0.0;
                 for ch in 0..dev_ch {
                     let src_ch = if ch < use_ch { ch } else { 0 };
                     let mut sample = out_planar[src_ch][out_idx];
@@ -4550,21 +4807,6 @@ fn play_file(
                     }
 
                     interleaved.push(sample);
-                    if ch < use_ch {
-                        mono_sample += sample;
-                    }
-                }
-                
-                // FFT Extraction
-                if !dsp_now.low_spec_mode {
-                    mono_sample /= use_ch as f32;
-                    fft_buffer.push(mono_sample);
-                    if fft_buffer.len() >= 2048 {
-                        let _ = fft_tx.try_send((fft_buffer.clone(), dev_rate as f32));
-                        fft_buffer.clear();
-                    }
-                } else if !fft_buffer.is_empty() {
-                    fft_buffer.clear();
                 }
                 out_idx += 1;
             }
