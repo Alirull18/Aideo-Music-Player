@@ -109,6 +109,10 @@ export function SettingsView() {
     colorScheme, setColorScheme, shortcuts, setShortcut
   } = useStore();
 
+  // Tab navigation State
+  const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account' | 'shortcuts'>('appearance');
+  const [recordingAction, setRecordingAction] = useState<string | null>(null);
+
   // Cache Size & Usage State
   const [cacheInfo, setCacheInfo] = useState<{ bytes: number; formatted: string; count: number }>({ bytes: 0, formatted: 'Calculating...', count: 0 });
 
