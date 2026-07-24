@@ -64,8 +64,16 @@
     <!-- Navigation Header -->
     <nav>
         <div class="logo">
-            <img src="logo.png" alt="Aideo Logo" class="logo-img">
-            <span>AIDEO</span>
+            <a href="#top" style="display:flex; align-items:center; gap:12px; text-decoration:none;">
+                <img src="logo.png" alt="Aideo Logo" class="logo-img">
+                <span>AIDEO</span>
+            </a>
+        </div>
+        <div class="nav-topics">
+            <a href="#features-catalog" class="nav-topic-link">Features</a>
+            <a href="#dsp-playground" class="nav-topic-link">Interactive EQ</a>
+            <a href="#technical-specs" class="nav-topic-link">Specs</a>
+            <a href="#roadmap" class="nav-topic-link">Changelog</a>
         </div>
         <div class="nav-links">
             <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn-nav" id="nav-github-link"><i class="fab fa-github"></i> Repository</a>
@@ -82,7 +90,7 @@
                     Version 0.9.3 Is Live &bull; Stable Auto-Updates
                 </div>
                 <h1 id="hero-title">Pristine Sound.<br/><span class="gradient-text">Dynamic Soul.</span></h1>
-                <p class="tagline">An audiophile-grade desktop music player and DSP console for Windows. Unleash calibrated acoustic responses via a real-time **Biquad DSP engine**, integrated **AutoEQ indexing** for 4,000+ headphones, and a tokio-powered **YouTube Music AI Discovery Hub**.</p>
+                <p class="tagline">A free &amp; open-source Windows music player with a real-time <strong>Biquad DSP Engine</strong>, <strong>4,000+ AutoEQ profiles</strong>, <strong>Synced Lyrics</strong>, <strong>Web Stream &amp; Cloud support</strong>, <strong>Last.fm scrobbling</strong>, and <strong>local analytics</strong>.</p>
                 
                 <div class="cta-group">
                     <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary" id="download-btn-hero">
@@ -147,98 +155,112 @@
             </div>
         </header>
 
-        <!-- CORE FEATURES SHOWCASE GRID (Mathematically Balanced Bento Grid) -->
+        <!-- CORE FEATURES SHOWCASE GRID (User-Friendly Bento Grid) -->
         <section class="features-overhaul" id="features-catalog">
             <div class="section-heading">
                 <span class="eyebrow">Aideo Catalog</span>
-                <h2>Application Architecture & DSP Core</h2>
-                <p>Every single processing component in the Aideo pipeline is engineered for absolute performance, giving audiophiles the ultimate control panel for high-end external DAC hardware.</p>
+                <h2>Everything You Need for Perfect Sound</h2>
+                <p>Discover how Aideo brings crystal-clear audio tuning, automated headphone presets, synced lyrics, and smart cloud streaming together in one clean app.</p>
             </div>
 
             <!-- Bento Box Grid Matrix -->
             <div class="bento-grid">
                 
-                <!-- Bento Block 1 (Wide 2-Col): Parametric EQ & AutoEQ -->
+                <!-- Bento Block 1 (Wide 2-Col): Smart Headphone Tuning & 4,000+ Presets -->
                 <div class="premium-feature-card bento-span-2" id="feature-eq">
                     <div class="card-status-badge purple">Calibrated</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-sliders"></i></div>
-                        <h3>Pro Parametric EQ & AutoEQ Indexer</h3>
-                        <p>Bypasses rigid EQ preset structures to calibrate raw headphone output. Integrates directly with the official AutoEq index of over 4,000+ headphones (Sennheiser, Sony, AirPods, IEMs) to search your model and apply precise corrective frequency curves dynamically with built-in preamp headroom protection.</p>
+                        <h3>Smart Headphone Tuning &amp; 4,000+ Presets</h3>
+                        <p>Search your exact headphone model (Sennheiser, Sony, AirPods, IEMs) to automatically apply expert sound tuning. Enjoy 5 and 10 band equalizers with built-in volume protection to stop digital clipping and distortion.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> High-performance 5 & 10 band filters with custom Q-factors</li>
-                        <li><i class="fas fa-check"></i> Automatic negative gain clipping headroom protection</li>
+                        <li><i class="fas fa-check"></i> Automatic sound tuning for 4,000+ headphones</li>
+                        <li><i class="fas fa-check"></i> Built-in volume protection to prevent distortion</li>
                     </ul>
                 </div>
 
-                <!-- Bento Block 2 (Normal 1-Col): Apple Music Metadata uploads -->
+                <!-- Bento Block 2 (Normal 1-Col): Cover Art Upload Center -->
                 <div class="premium-feature-card bento-span-1 highlight-green" id="feature-artwork">
                     <div class="card-status-badge green">Metadata</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-image"></i></div>
-                        <h3>Cover Art Upload Center</h3>
-                        <p>Fully resolved artwork indexing featuring online metadata queries to fetch high-res 600x600px album covers. Supports local drag-and-drop file uploads, saving images next to tracks (`{filename}.jpg`) to fully prevent leakage in flat folders.</p>
+                        <h3>High-Res Cover Art &amp; Easy Uploads</h3>
+                        <p>Automatically fetches crisp 600x600px album art for your songs. Want to use your own image? Simply drag and drop any picture directly onto your track to save it.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> Keyless Apple Music Metadata API</li>
-                        <li><i class="fas fa-check"></i> Base64 drag-and-drop upload zone</li>
+                        <li><i class="fas fa-check"></i> Automatic online album cover search</li>
+                        <li><i class="fas fa-check"></i> Simple drag-and-drop custom cover uploads</li>
                     </ul>
                 </div>
 
-                <!-- Bento Block 3 (Wide 2-Col): Immersive Fullscreen HUD -->
+                <!-- Bento Block 3 (Wide 2-Col): Fullscreen Lyric HUD -->
                 <div class="premium-feature-card bento-span-2 highlight-cyan" id="feature-fullscreen">
                     <div class="card-status-badge cyan">Immersive</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-expand"></i></div>
-                        <h3>Fullscreen Lyric HUD & Liquid Canvas</h3>
-                        <p>An elegant, cinematic visualizer dashboard displaying high-fidelity artwork overlays, dynamic center-aligned lyrics, and real-time playback control. The background reacts dynamically using Interactive Liquid visualizer shaders mapped to audio frequencies and dominant cover art colors.</p>
+                        <h3>Cinematic Fullscreen Lyrics &amp; Visualizer</h3>
+                        <p>Immerse yourself in live scrolling lyrics that stay perfectly synced with your music. Features dynamic background visualizers that glow and shift colors matching your album artwork.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> Color-reactive ambient backdrop shaders</li>
-                        <li><i class="fas fa-check"></i> Keyboard shortcuts optimized for large monitors</li>
+                        <li><i class="fas fa-check"></i> Real-time synchronized scrolling lyrics</li>
+                        <li><i class="fas fa-check"></i> Color-matching visualizer background</li>
                     </ul>
                 </div>
 
-                <!-- Bento Block 4 (Normal 1-Col): Loved Songs database -->
+                <!-- Bento Block 4 (Normal 1-Col): Favorites & Last.fm Scrobbling -->
                 <div class="premium-feature-card bento-span-1 highlight-green" id="feature-loved">
-                    <div class="card-status-badge green">Social</div>
+                    <div class="card-status-badge green">Scrobbling</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-heart"></i></div>
-                        <h3>Loved Songs Sync</h3>
-                        <p>A native favoriting system mapped to a database flag inside Aideo's SQLite core. Instantly compiles a dedicated sidebar playlist for your loved songs on-the-fly, while syncing telemetry updates to external scrobbling networks like Last.fm.</p>
+                        <h3>Favorites &amp; Last.fm Sync</h3>
+                        <p>Heart your favorite tracks with one click to build an instant Favorites playlist. Automatically sync your listening history to your Last.fm profile in real time.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> 1-click active track favoriting</li>
-                        <li><i class="fas fa-check"></i> Real-time scrobble synchronization</li>
+                        <li><i class="fas fa-check"></i> 1-click favoriting for quick playlists</li>
+                        <li><i class="fas fa-check"></i> Automatic real-time Last.fm scrobbling</li>
                     </ul>
                 </div>
 
-                <!-- Bento Block 5 (Normal 1-Col): Secure XOR Vault -->
+                <!-- Bento Block 4b (Normal 1-Col): Local Insights & Analytics -->
+                <div class="premium-feature-card bento-span-1 highlight-cyan" id="feature-insights">
+                    <div class="card-status-badge cyan">Analytics</div>
+                    <div class="card-top-content">
+                        <div class="card-icon"><i class="fas fa-chart-pie"></i></div>
+                        <h3>Listening Stats &amp; Yearly Wrapped</h3>
+                        <p>Explore your music habits with a 100% private offline stats dashboard. View your top artists, genres, listening heatmaps, and launch a Spotify-style Wrapped slideshow anytime.</p>
+                    </div>
+                    <ul class="feature-bullets">
+                        <li><i class="fas fa-check"></i> Private offline listening statistics</li>
+                        <li><i class="fas fa-check"></i> Interactive Spotify-style Wrapped slideshow</li>
+                    </ul>
+                </div>
+
+                <!-- Bento Block 5 (Normal 1-Col): Password Protection -->
                 <div class="premium-feature-card bento-span-1" id="feature-security">
                     <div class="card-status-badge purple">Hardened</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-key"></i></div>
-                        <h3>Secure XOR Obfuscator</h3>
-                        <p>Zero plaintext storage. We eliminated insecure localStorage footprints for cloud servers and passwords. Credentials are encrypted using a backend symmetric XOR-128 cipher stored in local native AppData, bound strictly to active Zustand memory states.</p>
+                        <h3>Encrypted Password Protection</h3>
+                        <p>Keep your cloud music accounts and server passwords safe. All credentials are encrypted locally on your computer with zero plain-text storage or tracking.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> Obfuscated `subsonic_pass.enc`</li>
-                        <li><i class="fas fa-check"></i> Protection from local script readers</li>
+                        <li><i class="fas fa-check"></i> Encrypted local password storage</li>
+                        <li><i class="fas fa-check"></i> Zero plain-text security risk</li>
                     </ul>
                 </div>
 
-                <!-- Bento Block 6 (Normal 1-Col): Calibration Wizard -->
+                <!-- Bento Block 6 (Normal 1-Col): Setup Wizard -->
                 <div class="premium-feature-card bento-span-1 highlight-cyan" id="feature-wizard">
                     <div class="card-status-badge cyan">Tuning</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-magic"></i></div>
-                        <h3>Acoustic Setup Wizard</h3>
-                        <p>A premium boot walkthrough designed to configure your acoustic environment on startup. Guides you to select bit-perfect CPAL device transports, scan your folders, profile directories, and choose your preferred Hybrid Lossless Cloud system.</p>
+                        <h3>Easy Initial Setup Wizard</h3>
+                        <p>Get started in seconds with a guided setup wizard. Choose your audio output device, scan your music folders, and select your favorite streaming services easily.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> Multi-step acoustic diagnostics</li>
-                        <li><i class="fas fa-check"></i> Local vs Cloud hybrid modes</li>
+                        <li><i class="fas fa-check"></i> Guided setup on first launch</li>
+                        <li><i class="fas fa-check"></i> Automatic music folder scanner</li>
                     </ul>
                 </div>
 
@@ -247,40 +269,40 @@
                     <div class="card-status-badge green">Plugins</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-puzzle-piece"></i></div>
-                        <h3>Visual Plugins Manager</h3>
-                        <p>Bypasses manual developer setup steps. Aideo manages, inspects, and downloads optional external processing proxies (`yt-dlp` and `ffmpeg`) directly inside Settings. Backend stream proxies are updated on-the-fly at runtime.</p>
+                        <h3>Automatic Web Helper Plugins</h3>
+                        <p>No tricky manual installs required. Aideo automatically downloads and updates helper plugins right inside Settings to keep web streaming smooth.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> Automated dependencies download</li>
-                        <li><i class="fas fa-check"></i> In-app status checking logs</li>
+                        <li><i class="fas fa-check"></i> One-click helper plugin installer</li>
+                        <li><i class="fas fa-check"></i> Automatic background updates</li>
                     </ul>
                 </div>
 
-                <!-- Bento Block 8 (Normal 1-Col): SQLite database & playlists -->
+                <!-- Bento Block 8 (Normal 1-Col): Hybrid Playlists -->
                 <div class="premium-feature-card bento-span-1" id="feature-db">
                     <div class="card-status-badge purple">Database</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-database"></i></div>
-                        <h3>Playlists & DB Migrations</h3>
-                        <p>Unified database mappings. By removing restrictive path foreign keys inside our SQLite schema, Aideo lets you mix online web streams, Tidal Lossless tracks, and local files in the same playlist. Schema migrations are run dynamically on startup.</p>
+                        <h3>Unified Hybrid Playlists</h3>
+                        <p>Combine local MP3s/FLACs, web streams, and cloud tracks inside the exact same playlist without any restriction.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> Auto-run non-destructive migrations</li>
-                        <li><i class="fas fa-check"></i> Uniform music library structures</li>
+                        <li><i class="fas fa-check"></i> Mix local files and web streams together</li>
+                        <li><i class="fas fa-check"></i> Smooth automatic library updates</li>
                     </ul>
                 </div>
 
-                <!-- Bento Block 9 (Wide 2-Col): WASAPI Exclusive & DSD Gold-Badge -->
+                <!-- Bento Block 9 (Wide 2-Col): Bit-Perfect Sound -->
                 <div class="premium-feature-card bento-span-2 highlight-gold" id="feature-wasapi">
                     <div class="card-status-badge gold">Native DSD</div>
                     <div class="card-top-content">
                         <div class="card-icon"><i class="fas fa-certificate"></i></div>
-                        <h3>WASAPI Exclusive Transport & Gold DSD Decoding</h3>
-                        <p>Supports direct native downsampling of DSF and DFF files (mapping to 88.2kHz/176.4kHz 24-bit PCM channels) displayed with custom metallic **DSD NATIVE gold badges**. Linkwitz headphone crossfeed (700Hz shadow lowpass corner filter with a 300µs acoustic delay) tames headphone listening fatigue. CPAL live loops hot-plug and restore playback onto new audio hardware switch devices dynamically.</p>
+                        <h3>Bit-Perfect Direct Sound &amp; High-Res DSD</h3>
+                        <p>Send pure, uncompressed audio straight to your headphones or DAC without Windows interfering. Includes natural crossfeed mode to reduce listening fatigue and direct playback for high-res DSD audio files.</p>
                     </div>
                     <ul class="feature-bullets">
-                        <li><i class="fas fa-check"></i> Haas-effect soundstage width expansion</li>
-                        <li><i class="fas fa-check"></i> 250ms driver switch debouncing loops avoiding handle lockups</li>
+                        <li><i class="fas fa-check"></i> Pure direct sound bypassing Windows mixer</li>
+                        <li><i class="fas fa-check"></i> Crossfeed mode to reduce headphone fatigue</li>
                     </ul>
                 </div>
             </div>
@@ -451,17 +473,6 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
             </div>
         </section>
 
-        <!-- REAL-TIME DYNAMIC TELEMETRY SPECTROGRAM -->
-        <section class="telemetry-section" style="padding-top: 0;" id="realtime-spectrogram">
-            <div class="telemetry-wrapper" style="grid-template-columns: 1fr;">
-                <div class="telemetry-visual" id="spectrogram-card">
-                    <h3><i class="fas fa-chart-simple"></i> Real-Time Acoustic Spectrogram Visualizer</h3>
-                    <div class="spectrum-bars-container" id="spectrum-bars-container">
-                        <!-- Bars are generated dynamically -->
-                    </div>
-                </div>
-            </div>
-        </section>
 
         <!-- PROJECT TIMELINE ROADMAP -->
         <section class="roadmap-section" id="roadmap">
@@ -1016,30 +1027,6 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
         }
         animateParticles();
 
-        // Spectrogram Telemetry generator
-        const barsContainer = document.getElementById("spectrum-bars-container");
-        const totalBars = 32;
-        const bars = [];
-
-        for (let i = 0; i < totalBars; i++) {
-            const bar = document.createElement("div");
-            bar.className = "spectrogram-bar";
-            barsContainer.appendChild(bar);
-            bars.push(bar);
-        }
-
-        function updateSpectrogram() {
-            bars.forEach((bar, idx) => {
-                // Generate natural continuous sine wave shapes for visual premium effect
-                const time = Date.now() * 0.0035;
-                const waveVal = Math.sin(idx * 0.25 + time) * Math.cos(idx * 0.1 - time * 0.4);
-                let height = Math.abs(waveVal) * 90 + Math.random() * 8;
-                height = Math.max(5, Math.min(100, height));
-                bar.style.height = `${height}%`;
-            });
-            requestAnimationFrame(updateSpectrogram);
-        }
-        updateSpectrogram();
 
         // Run initial curve drawing
         drawCurve();

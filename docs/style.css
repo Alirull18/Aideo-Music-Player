@@ -133,10 +133,29 @@ nav {
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.btn-nav:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.15);
-  transform: translateY(-1px);
+.nav-topics {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.nav-topic-link {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.nav-topic-link:hover {
+  color: var(--text-primary);
+  opacity: 0.9;
+}
+
+@media (max-width: 768px) {
+  .nav-topics {
+    display: none;
+  }
 }
 
 /* ─── Hero Split-Screen Layout ─── */
