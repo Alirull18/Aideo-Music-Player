@@ -35,16 +35,16 @@ fn trigger_reconnection() {
                         match client.connect() {
                             Ok(_) => {
                                 println!("[Discord] Connected Successfully!");
-                                {
-                                    let mut global_client = DISCORD_CLIENT.lock().unwrap();
+                                 {
+                                    let mut global_client = crate::safe_lock(&DISCORD_CLIENT);
                                     *global_client = Some(client);
                                 }
                                 IS_CONNECTING.store(false, Ordering::SeqCst);
                                 
                                 // Send the last known presence if we have one
-                                let details = LAST_DETAILS.lock().unwrap().clone();
-                                let state = LAST_STATE.lock().unwrap().clone();
-                                let is_playing = *LAST_IS_PLAYING.lock().unwrap();
+                                let details = crate::safe_lock(&LAST_DETAILS).clone();
+                                let state = crate::safe_lock(&LAST_STATE).clone();
+                                let is_playing = *crate::safe_lock(&LAST_IS_PLAYING);
                                 
                                 if let (Some(d), Some(s)) = (details, state) {
                                     let _ = update_presence_internal(&d, &s, is_playing);
@@ -73,7 +73,7 @@ fn trigger_reconnection() {
 }
 
 fn update_presence_internal(details: &str, state: &str, is_playing: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let mut global_client = DISCORD_CLIENT.lock().unwrap();
+    let mut global_client = crate::safe_lock(&DISCORD_CLIENT);
     if let Some(client) = global_client.as_mut() {
         println!("[Discord] Updating status: {} - {}", details, state);
         let assets = activity::Assets::new()
@@ -108,9 +108,9 @@ fn update_presence_internal(details: &str, state: &str, is_playing: bool) -> Res
 pub fn update_presence(details: &str, state: &str, is_playing: bool) {
     // 1. Save last state
     {
-        *LAST_DETAILS.lock().unwrap() = Some(details.to_string());
-        *LAST_STATE.lock().unwrap() = Some(state.to_string());
-        *LAST_IS_PLAYING.lock().unwrap() = is_playing;
+        *crate::safe_lock(&LAST_DETAILS) = Some(details.to_string());
+        *crate::safe_lock(&LAST_STATE) = Some(state.to_string());
+        *crate::safe_lock(&LAST_IS_PLAYING) = is_playing;
     }
 
     // 2. Try updating
@@ -120,7 +120,7 @@ pub fn update_presence(details: &str, state: &str, is_playing: bool) {
             println!("[Discord] Presence update failed or client not connected: {}. Ensuring background thread is active...", e);
             // Clear the client if it was some erroring client
             {
-                let mut global_client = DISCORD_CLIENT.lock().unwrap();
+                let mut global_client = crate::safe_lock(&DISCORD_CLIENT);
                 if let Some(mut client) = global_client.take() {
                     let _ = client.close();
                 }
@@ -133,11 +133,12 @@ pub fn update_presence(details: &str, state: &str, is_playing: bool) {
 #[allow(dead_code)]
 pub fn clear_presence() {
     {
-        *LAST_DETAILS.lock().unwrap() = None;
-        *LAST_STATE.lock().unwrap() = None;
+        *crate::safe_lock(&LAST_DETAILS) = None;
+        *crate::safe_lock(&LAST_STATE) = None;
     }
-    let mut global_client = DISCORD_CLIENT.lock().unwrap();
+    let mut global_client = crate::safe_lock(&DISCORD_CLIENT);
     if let Some(client) = global_client.as_mut() {
         let _ = client.clear_activity();
     }
 }
+

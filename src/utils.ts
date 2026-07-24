@@ -28,8 +28,42 @@ export function getStreamName(url: string | null) {
 }
 
 export const resolvedPathMap = new Map<string, string>();
-export const onlineTrackCache = new Map<string, any>();
 export const trackIdToStreamUrl = new Map<string, { url: string; resolvedAt: number }>();
+
+export const onlineTrackCache = (() => {
+  const map = new Map<string, any>();
+  try {
+    const raw = localStorage.getItem('aideo_online_track_cache');
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        arr.forEach(([k, v]) => {
+          if (k && v) map.set(k, v);
+        });
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load onlineTrackCache:', e);
+  }
+  return map;
+})();
+
+export function saveOnlineTrackCache() {
+  try {
+    const entries = Array.from(onlineTrackCache.entries()).slice(-200);
+    localStorage.setItem('aideo_online_track_cache', JSON.stringify(entries));
+  } catch (e) {
+    console.error('Failed to save onlineTrackCache:', e);
+  }
+}
+
+export function setOnlineTrackCache(key: string, track: any) {
+  if (!key || !track) return;
+  // Don't cache generic fallback metadata
+  if (track.title === 'Web Audio Stream' || track.artist === 'Web Stream') return;
+  onlineTrackCache.set(key, track);
+  saveOnlineTrackCache();
+}
 
 export function pathsEqual(p1: string | null | undefined, p2: string | null | undefined): boolean {
   if (!p1 || !p2) return false;
@@ -41,7 +75,35 @@ export function pathsEqual(p1: string | null | undefined, p2: string | null | un
 
   const n1 = r1.replace(/\\/g, '/').toLowerCase();
   const n2 = r2.replace(/\\/g, '/').toLowerCase();
-  return n1 === n2;
+  if (n1 === n2) return true;
+
+  // Handle Temp Cache Files (e.g. CloudCache/<hash>.tmp or aideo_cache_<hash>.wav)
+  const isTemp1 = n1.includes('cloudcache') || n1.includes('aideo_cache_');
+  const isTemp2 = n2.includes('cloudcache') || n2.includes('aideo_cache_');
+  if (isTemp1 || isTemp2) {
+    const extractHash = (p: string) => {
+      const m = p.match(/([a-f0-9]{32})/i);
+      return m ? m[1].toLowerCase() : null;
+    };
+    const h1 = extractHash(n1);
+    const h2 = extractHash(n2);
+    if (h1 && h2 && h1 === h2) return true;
+
+    if (h1) {
+      for (const key of onlineTrackCache.keys()) {
+        const keyLower = key.replace(/\\/g, '/').toLowerCase();
+        if (keyLower === n2 || n2.includes(keyLower)) return true;
+      }
+    }
+    if (h2) {
+      for (const key of onlineTrackCache.keys()) {
+        const keyLower = key.replace(/\\/g, '/').toLowerCase();
+        if (keyLower === n1 || n1.includes(keyLower)) return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 export function parseStreamMetadata(url: string | null) {
@@ -54,12 +116,29 @@ export function parseStreamMetadata(url: string | null) {
   
   if (onlineTrackCache.has(lookupUrl)) {
     const cached = onlineTrackCache.get(lookupUrl);
-    if (cached) {
+    if (cached && cached.title && cached.title !== 'Web Audio Stream') {
       return {
-        title: cached.title || 'Unknown Stream',
+        title: cached.title,
         artist: cached.artist || 'Online Stream',
         album: cached.album || ''
       };
+    }
+  }
+
+  // Check onlineTrackCache for any key matching hash in URL
+  const hashMatch = lookupUrl.match(/([a-f0-9]{32})/i);
+  if (hashMatch) {
+    const hash = hashMatch[1].toLowerCase();
+    for (const [key, cached] of onlineTrackCache.entries()) {
+      if (key.includes(hash) || pathsEqual(key, lookupUrl)) {
+        if (cached && cached.title && cached.title !== 'Web Audio Stream') {
+          return {
+            title: cached.title,
+            artist: cached.artist || 'Online Stream',
+            album: cached.album || ''
+          };
+        }
+      }
     }
   }
 
@@ -115,10 +194,10 @@ export function cleanSearchQuery(artist: string | null | undefined, title: strin
 
   // Common YouTube publishers/channels that shouldn't be treated as the main artist
   const PUBLISHERS = [
-    /studio\s*choom/i, /스튜디오\s*춤/i, /kbs\s*kpop/i, /sbs\s*kpop/i, /mnet/i, /m2/i, /1thek/i,
-    /stone\s*music/i, /dingo/i, /colors/i, /genius/i, /hybe\s*labels/i, /jyp/i, /yg\s*entertainment/i,
-    /smtown/i, /starship/i, /fncent/i, /cube/i, /woolliment/i, /fancam/i, /직캠/i, /k-pop/i, /kpop/i,
-    /youtube\s*direct/i, /unknown/i, /online\s*stream/i, /—/
+    /studio\s*choom/i, /스튜디오\s*춤/i, /kbs\s*kpop/i, /sbs\s*kpop/i, /mnet/i, /\bm2\b/i, /1thek/i,
+    /stone\s*music/i, /dingo/i, /\bcolors\b/i, /genius/i, /hybe\s*labels/i, /jyp/i, /yg\s*entertainment/i,
+    /smtown/i, /starship/i, /fncent/i, /cube/i, /woolliment/i, /fancam/i, /직캠/i,
+    /youtube\s*direct/i, /unknown/i, /online\s*stream/i
   ];
 
   const isPublisher = (name: string) => {
@@ -137,9 +216,15 @@ export function cleanSearchQuery(artist: string | null | undefined, title: strin
     for (const delim of delimiters) {
       if (delim.test(t)) {
         const parts = t.split(delim);
-        a = parts[0].trim();
-        t = parts.slice(1).join(' ').trim();
-        break;
+        const candidateArtist = parts[0].trim();
+        const candidateTitle = parts.slice(1).join(' ').trim();
+        // Only accept the split if the left side is a plausible artist token
+        // (non-empty, reasonably short) and leaves a non-empty title behind.
+        if (candidateArtist && candidateArtist.length <= 40 && candidateTitle) {
+          a = candidateArtist;
+          t = candidateTitle;
+          break;
+        }
       }
     }
 
@@ -180,6 +265,12 @@ export function cleanSearchQuery(artist: string | null | undefined, title: strin
   // Remove empty brackets/parentheses
   cleanTitle = cleanTitle.replace(/[([][\s]*[\])]/g, '').trim();
   cleanArtist = cleanArtist.replace(/[([][\s]*[\])]/g, '').trim();
+
+  // Last-resort fallback: if cleaning nuked the artist entirely, restore the raw
+  // original so the search query always carries an artist token when one existed.
+  if (!cleanArtist) {
+    cleanArtist = (artist || '').trim();
+  }
 
   return { artist: cleanArtist, title: cleanTitle };
 }

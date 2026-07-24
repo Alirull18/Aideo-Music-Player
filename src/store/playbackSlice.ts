@@ -331,7 +331,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         return;
       }
 
-      set(s => ({ playback: { ...s.playback, ...status } }));
+      const currentPlayback = get().playback;
+      if (
+        currentPlayback.status !== status.status ||
+        Math.abs((currentPlayback.position_secs || 0) - (status.position_secs || 0)) >= 0.1 ||
+        currentPlayback.volume !== status.volume
+      ) {
+        set(s => ({ playback: { ...s.playback, ...status } }));
+      }
 
       // Periodically sync media progress with OS Media Control Center (once every 1 second, or 5 ticks of 200ms)
       if (status.status === 'Playing') {

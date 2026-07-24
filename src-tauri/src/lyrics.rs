@@ -169,6 +169,30 @@ pub fn parse_lrc(content: &str) -> Vec<LyricLine> {
             });
         }
     }
+
+    // Plain-lyrics fallback: if nothing parsed (no timestamped lines) but the file
+    // has real text content (e.g. LRCLIB `plainLyrics`), synthesize unsynced lines
+    // so the UI can still display them instead of reporting "No Lyrics".
+    if lines.is_empty() {
+        let has_text = content.lines().any(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with('[')
+        });
+        if has_text {
+            for line in content.lines() {
+                let text = line.trim();
+                if text.is_empty() || text.starts_with('[') {
+                    continue;
+                }
+                lines.push(LyricLine {
+                    time_secs: 0.0,
+                    text: text.to_string(),
+                    words: None,
+                });
+            }
+        }
+    }
+
     lines.sort_by(|a, b| a.time_secs.partial_cmp(&b.time_secs)
         .unwrap_or(std::cmp::Ordering::Equal));
     lines

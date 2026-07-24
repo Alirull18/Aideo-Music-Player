@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { Cast, Loader2, Wifi, WifiOff, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
+import { LocalQRCode } from './LocalQRCode';
 
 export function CastSelector() {
   const {
@@ -301,11 +302,7 @@ export function CastSelector() {
                     alignItems: 'center',
                     justifyContent: 'center'
                   }}>
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=70x70&data=${encodeURIComponent(remoteUrl)}`}
-                      alt="Pairing QR Code"
-                      style={{ width: 70, height: 70, display: 'block' }}
-                    />
+                    <LocalQRCode value={remoteUrl} size={70} />
                   </div>
                 </div>
               ) : (

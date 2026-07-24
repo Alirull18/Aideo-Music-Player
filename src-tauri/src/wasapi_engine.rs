@@ -284,9 +284,8 @@ where
             return;
         }
 
-        // Give the main thread a solid head start (300ms) to fill the ringbuffer
-        // This completely eliminates the "startup underrun" stutter on professional USB DACs.
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        // Give the main thread a brief head start (50ms) to fill the ringbuffer
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         if client.start_stream().is_err() {
             return;
@@ -348,7 +347,9 @@ where
                         f32_data.len() * 4,
                     )
                 };
-                output_bytes.copy_from_slice(byte_slice);
+                if output_bytes.len() == byte_slice.len() {
+                    output_bytes.copy_from_slice(byte_slice);
+                }
             } else if bits == 32 {
                 // 32-bit container: Int32 or Int24
                 // WASAPI expects 24-bit valid data to be left-justified in the 32-bit container.

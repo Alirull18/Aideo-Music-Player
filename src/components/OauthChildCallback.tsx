@@ -17,14 +17,22 @@ export function OauthChildCallback() {
     // Try to get immediate session
     client.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        emit('oauth-success', session).then(() => {
+        const safeSessionPayload = {
+          access_token: session.access_token,
+          user: { id: session.user?.id, email: session.user?.email }
+        };
+        emit('oauth-success', safeSessionPayload).then(() => {
           getCurrentWindow().close().catch(() => {});
         });
       } else {
         // Listen to state changes if the session is parsing asynchronously
         const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
           if (session) {
-            emit('oauth-success', session).then(() => {
+            const safeSessionPayload = {
+              access_token: session.access_token,
+              user: { id: session.user?.id, email: session.user?.email }
+            };
+            emit('oauth-success', safeSessionPayload).then(() => {
               subscription.unsubscribe();
               getCurrentWindow().close().catch(() => {});
             });

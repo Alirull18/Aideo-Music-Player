@@ -1207,10 +1207,9 @@ export function SettingsView() {
                     onClick={async () => {
                       setLfmLoading(true); setLfmError('');
                       try {
-                        const token = await invoke<string>('lastfm_get_token');
+                        const [token, authUrl] = await invoke<[string, string]>('lastfm_get_auth_url');
                         useStore.setState({ lastfmToken: token });
-                        const apiKey = "f4cbad896003f0f61f05b844ee3c5b0b";
-                        await openUrl(`https://www.last.fm/api/auth/?api_key=${apiKey}&token=${token}`);
+                        await openUrl(authUrl);
                       } catch (e: any) {
                         setLfmError(String(e));
                         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Last.fm authentication error: ${e}`, type: 'error' } }));

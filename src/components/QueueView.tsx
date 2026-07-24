@@ -18,7 +18,7 @@ export function QueueView() {
     bottomSpacerHeight: bottomQueueSpacer,
     startIndex: queueStartIndex,
   } = useVirtualList(queue, {
-    itemHeight: 58,
+    itemHeight: 64,
   });
 
   const handleDragStart = (e: React.DragEvent, idx: number) => {
@@ -110,7 +110,7 @@ export function QueueView() {
                     const i = queueStartIndex + idx;
                     return (
                       <div
-                        key={`${t.path}-${i}`}
+                        key={t.id || t.path || `q-${i}`}
                         draggable
                         onDragStart={(e) => handleDragStart(e, i)}
                         onDragOver={handleDragOver}

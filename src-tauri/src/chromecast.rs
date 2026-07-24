@@ -60,15 +60,29 @@ fn is_path_safe(app_state: &crate::AppState, filepath: &str) -> bool {
         return true;
     }
 
-    if let Some(parent) = canonical.parent() {
-        let parent_str = parent.to_string_lossy().to_string();
+    if let Some(_parent) = canonical.parent() {
         let conn = crate::safe_lock(&app_state.db);
-        let mut stmt = match conn.prepare("SELECT 1 FROM tracks WHERE path LIKE ?1 LIMIT 1") {
+        let mut stmt = match conn.prepare("SELECT path FROM tracks") {
             Ok(s) => s,
             Err(_) => return false,
         };
-        let pattern = format!("{}%", parent_str);
-        stmt.exists([pattern]).unwrap_or(false)
+        
+        let track_paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+
+        for db_path_str in track_paths {
+            if let Ok(db_canonical) = std::path::Path::new(&db_path_str).canonicalize() {
+                if let Some(db_parent) = db_canonical.parent() {
+                    if canonical.starts_with(db_parent) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     } else {
         false
     }

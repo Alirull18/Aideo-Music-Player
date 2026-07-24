@@ -1,4 +1,5 @@
-use std::path::Path;
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 use symphonia::core::probe::Hint;
 use symphonia::core::meta::MetadataOptions;
@@ -12,38 +13,42 @@ use crate::db::Track;
 use tauri::{AppHandle, Emitter};
 
 pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
-    let mut tracks = Vec::new();
-
     if !std::path::Path::new(dir).exists() {
-        return tracks;
+        return Vec::new();
     }
 
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.is_file() {
+    let files: Vec<PathBuf> = WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| {
+            let path = e.path();
             if let Some(ext) = path.extension() {
                 let ext_str = ext.to_string_lossy().to_lowercase();
-                if ext_str == "flac" || ext_str == "wav" || ext_str == "m4a" || ext_str == "mp3"
-                    || ext_str == "ogg" || ext_str == "opus" || ext_str == "aac" || ext_str == "aiff"
-                    || ext_str == "ape" || ext_str == "wma" || ext_str == "dsf" || ext_str == "dff" {
-                    let path_owned = path.to_path_buf();
-                    let result = std::panic::catch_unwind(move || {
-                        extract_metadata(&path_owned)
-                    });
-                    match result {
-                        Ok(Some(track)) => tracks.push(track),
-                        Ok(None) => {}
-                        Err(e) => {
-                            let msg = format!("Failed to read file: {:?}. Error: {:?}", path, e);
-                            eprintln!("[scanner] {}", msg);
-                            let _ = app_handle.emit("playback-error", msg);
-                        }
-                    }
+                if matches!(ext_str.as_str(), "flac" | "wav" | "m4a" | "mp3" | "ogg" | "opus" | "aac" | "aiff" | "ape" | "wma" | "dsf" | "dff") {
+                    return Some(path.to_path_buf());
                 }
             }
-        }
-    }
-    tracks
+            None
+        })
+        .collect();
+
+    files.par_iter()
+        .filter_map(|path_owned| {
+            let path_clone = path_owned.clone();
+            let result = std::panic::catch_unwind(move || extract_metadata(&path_clone));
+            match result {
+                Ok(Some(track)) => Some(track),
+                Ok(None) => None,
+                Err(e) => {
+                    let msg = format!("Failed to read file: {:?}. Error: {:?}", path_owned, e);
+                    eprintln!("[scanner] {}", msg);
+                    let _ = app_handle.emit("playback-error", msg);
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 fn parse_dsf_metadata(path: &Path) -> Option<Track> {
@@ -90,6 +95,9 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                                ((id3_header[8] as usize) << 7) |
                                (id3_header[9] as usize);
                 
+                if id3_size > 10 * 1024 * 1024 {
+                    return None;
+                }
                 let mut frame_data = vec![0u8; id3_size];
                 if file.read_exact(&mut frame_data).is_ok() {
                     let mut offset = 0;

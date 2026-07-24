@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
+import { X } from 'lucide-react';
 import { useStore } from '../store';
 
 export interface ToastMessage {
@@ -60,35 +61,84 @@ function formatToastMessage(
 
 export function ToastContainer() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [bufferingState, setBufferingState] = useState<{ title: string; artist: string } | null>(null);
 
   useEffect(() => {
     // Listen for backend playback-errors
     const unlisten = listen<string>('playback-error', (event) => {
       addToast(event.payload, 'error');
+      setBufferingState(null);
     });
     const unlistenInfo = listen<string>('ui-toast-info', (event) => {
       addToast(event.payload, 'info');
     });
     const unlistenSuccess = listen<string>('ui-toast-success', (event) => {
       addToast(event.payload, 'success');
+      setBufferingState(null);
     });
     const unlistenPlaybackSuccess = listen<string>('playback-success', (event) => {
       addToast(event.payload, 'success');
+      setBufferingState(null);
+    });
+    const unlistenStreamStart = listen<string>('stream-buffering-start', (event) => {
+      const state = useStore.getState();
+      // If song is already playing and progressing, don't show buffering toast
+      if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
+        setBufferingState(null);
+        return;
+      }
+      const currentTrack = state.currentTrack;
+      const title = currentTrack?.title || event.payload.split(/[\\/]/).pop() || 'Online Stream';
+      const artist = currentTrack?.artist || 'Preparing stream & buffering...';
+      setBufferingState({ title, artist });
+    });
+
+    const unlistenStreamEnd = listen<string>('stream-buffering-end', () => {
+      setBufferingState(null);
+    });
+
+    // Auto-dismiss buffering state as soon as track starts playing and advancing in position
+    const unsubStore = useStore.subscribe((state) => {
+      if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
+        setBufferingState(null);
+      }
     });
 
     const handleToast = (e: Event) => {
       const customEvent = e as CustomEvent;
       addToast(customEvent.detail.message, customEvent.detail.type);
     };
+
+    const handleBuffering = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && customEvent.detail.active) {
+        const state = useStore.getState();
+        if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
+          setBufferingState(null);
+          return;
+        }
+        setBufferingState({
+          title: customEvent.detail.title || 'Unknown Track',
+          artist: customEvent.detail.artist || 'Unknown Artist',
+        });
+      } else {
+        setBufferingState(null);
+      }
+    };
     
     window.addEventListener('ui-toast', handleToast);
+    window.addEventListener('ui-stream-buffering', handleBuffering);
 
     return () => {
       unlisten.then(f => f());
       unlistenInfo.then(f => f());
       unlistenSuccess.then(f => f());
       unlistenPlaybackSuccess.then(f => f());
+      unlistenStreamStart.then(f => f());
+      unlistenStreamEnd.then(f => f());
+      unsubStore();
       window.removeEventListener('ui-toast', handleToast);
+      window.removeEventListener('ui-stream-buffering', handleBuffering);
     };
   }, []);
 
@@ -119,6 +169,91 @@ export function ToastContainer() {
       pointerEvents: 'none'
     }}>
       <AnimatePresence>
+        {bufferingState && (
+          <motion.div
+            key="stream-buffering-card"
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 15, scale: 0.95 }}
+            style={{
+              width: 320,
+              background: 'rgba(20, 20, 32, 0.92)',
+              backdropFilter: 'blur(16px)',
+              border: '1px solid rgba(139, 92, 246, 0.3)',
+              borderRadius: 12,
+              padding: '14px 18px',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.5), 0 0 20px rgba(139, 92, 246, 0.2)',
+              pointerEvents: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div 
+                style={{ 
+                  width: 20, 
+                  height: 20, 
+                  border: '2.5px solid rgba(255,255,255,0.15)', 
+                  borderTopColor: 'var(--accent, #8b5cf6)', 
+                  borderRadius: '50%',
+                  animation: 'aideo-spin 0.8s linear infinite',
+                  flexShrink: 0
+                }} 
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {bufferingState.title}
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.65)', marginTop: 2 }}>
+                  Starting stream & pre-buffering audio...
+                </div>
+              </div>
+              <button
+                onClick={() => setBufferingState(null)}
+                title="Dismiss notification"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: 'none',
+                  color: 'rgba(255, 255, 255, 0.6)',
+                  cursor: 'pointer',
+                  padding: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 6,
+                  transition: 'background 0.2s, color 0.2s',
+                  flexShrink: 0
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)';
+                  e.currentTarget.style.color = '#ffffff';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)';
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            {/* Animated Progress Bar */}
+            <div style={{ height: 3, width: '100%', background: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
+              <motion.div
+                initial={{ x: '-100%' }}
+                animate={{ x: '100%' }}
+                transition={{ repeat: Infinity, duration: 1.2, ease: 'easeInOut' }}
+                style={{
+                  height: '100%',
+                  width: '60%',
+                  background: 'linear-gradient(90deg, #8b5cf6, #ec4899)',
+                  borderRadius: 3
+                }}
+              />
+            </div>
+          </motion.div>
+        )}
+
         {toasts.map(t => (
           <motion.div
             key={t.id}

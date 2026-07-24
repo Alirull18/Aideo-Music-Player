@@ -29,7 +29,9 @@ pub struct Playlist {
 }
 
 pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
-
+    if !table.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return false;
+    }
     let mut stmt = match conn.prepare(&format!("PRAGMA table_info({})", table)) {
         Ok(s) => s,
         Err(_) => return false,
@@ -49,7 +51,7 @@ pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> boo
 }
 
 pub fn init_db(db_path: &str) -> Result<Connection> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
     
     // Performance Tuning: Enable WAL (Write-Ahead Logging) and Foreign Keys
     let _ = conn.execute("PRAGMA journal_mode = WAL", []);
@@ -59,44 +61,35 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     // Create base table if missing
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tracks (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             path TEXT UNIQUE NOT NULL,
             title TEXT,
             artist TEXT,
             album TEXT,
-            duration REAL
+            duration REAL,
+            format TEXT
         )",
         [],
     )?;
 
-    // Migration: Add format column if it doesn't exist
-    if !column_exists(&conn, "tracks", "format") {
-        conn.execute("ALTER TABLE tracks ADD COLUMN format TEXT", [])?;
-    }
-    
-    // Migration: Add lyric_offset column if it doesn't exist
+    // Safe Schema Alterations
     if !column_exists(&conn, "tracks", "lyric_offset") {
         conn.execute("ALTER TABLE tracks ADD COLUMN lyric_offset INTEGER DEFAULT 0", [])?;
     }
-
-    // Migration: Add loved column if it doesn't exist
     if !column_exists(&conn, "tracks", "loved") {
         conn.execute("ALTER TABLE tracks ADD COLUMN loved INTEGER DEFAULT 0", [])?;
     }
-
-    // Migration: Add disliked column if it doesn't exist
     if !column_exists(&conn, "tracks", "disliked") {
         conn.execute("ALTER TABLE tracks ADD COLUMN disliked INTEGER DEFAULT 0", [])?;
     }
-
-    // Migration: Add cover_url column if it doesn't exist
     if !column_exists(&conn, "tracks", "cover_url") {
         conn.execute("ALTER TABLE tracks ADD COLUMN cover_url TEXT", [])?;
     }
-
-    // Migration: Add sonic profile columns if they don't exist
+    if !column_exists(&conn, "tracks", "path_hash") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN path_hash TEXT", [])?;
+    }
     if !column_exists(&conn, "tracks", "bpm") {
-        conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL DEFAULT 120.0", [])?;
+        conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL DEFAULT 0.0", [])?;
     }
     if !column_exists(&conn, "tracks", "energy") {
         conn.execute("ALTER TABLE tracks ADD COLUMN energy REAL DEFAULT 0.5", [])?;
@@ -132,7 +125,6 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     )?;
 
     // Migration: Remove foreign key constraint on track_path from playlist_tracks.
-    // SQLite does not support ALTER TABLE DROP CONSTRAINT, so we migrate by renaming and recreating.
     let has_tracks_fk: bool = {
         let mut stmt = conn.prepare("PRAGMA foreign_key_list(playlist_tracks)")?;
         let mut rows = stmt.query([])?;
@@ -149,10 +141,9 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 
     if has_tracks_fk {
         println!("[Database] Migrating playlist_tracks table: removing tracks(path) foreign key constraint...");
-        // 1. Rename existing table
-        conn.execute("ALTER TABLE playlist_tracks RENAME TO temp_playlist_tracks", [])?;
-        // 2. Create new table without the tracks FK
-        conn.execute(
+        let tx = conn.transaction()?;
+        tx.execute("ALTER TABLE playlist_tracks RENAME TO temp_playlist_tracks", [])?;
+        tx.execute(
             "CREATE TABLE playlist_tracks (
                 playlist_id INTEGER,
                 track_path TEXT,
@@ -162,14 +153,13 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
             )",
             [],
         )?;
-        // 3. Copy data
-        conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_path, position)
              SELECT playlist_id, track_path, position FROM temp_playlist_tracks",
             [],
         )?;
-        // 4. Drop temp table
-        conn.execute("DROP TABLE temp_playlist_tracks", [])?;
+        tx.execute("DROP TABLE temp_playlist_tracks", [])?;
+        tx.commit()?;
         println!("[Database] Migration completed successfully!");
     }
 
@@ -324,13 +314,15 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
     let tx = conn.transaction()?;
     for track in tracks {
         tx.execute(
-            "INSERT OR REPLACE INTO tracks (id, path, title, artist, album, duration, format, lyric_offset, loved, cover_url)
-             VALUES (
-                 (SELECT id FROM tracks WHERE path = :path),
-                 :path, :title, :artist, :album, :duration, :format, :lyric_offset,
-                 COALESCE((SELECT loved FROM tracks WHERE path = :path), 0),
-                 COALESCE(:cover_url, (SELECT cover_url FROM tracks WHERE path = :path))
-             )",
+            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url)
+             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url)
+             ON CONFLICT(path) DO UPDATE SET
+                 title = excluded.title,
+                 artist = excluded.artist,
+                 album = excluded.album,
+                 duration = excluded.duration,
+                 format = excluded.format,
+                 cover_url = COALESCE(excluded.cover_url, tracks.cover_url)",
             rusqlite::named_params! {
                 ":path": &track.path,
                 ":title": &track.title,
@@ -339,6 +331,7 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                 ":duration": &track.duration,
                 ":format": &track.format,
                 ":lyric_offset": &track.lyric_offset,
+                ":loved": &track.loved,
                 ":cover_url": &track.cover_url,
             },
         )?;
@@ -372,10 +365,11 @@ pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energ
 }
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain FROM tracks")?;
+    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash FROM tracks")?;
     let track_iter = stmt.query_map([], |row| {
         let path: String = row.get(1)?;
-        let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
+        let db_hash: Option<String> = row.get(16).ok();
+        let path_hash = db_hash.or_else(|| Some(format!("{:x}", md5::compute(path.as_bytes()))));
         Ok(Track {
             id: row.get(0)?,
             path,

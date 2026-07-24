@@ -11,23 +11,25 @@ pub static REMOTE_PIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn get_or_init_pin() -> &'static str {
     REMOTE_PIN.get_or_init(|| {
-        let pin = rand::random::<u16>() % 9000 + 1000;
-        let pin_str = pin.to_string();
-        println!("[Aideo Connect] Generated new remote authorization PIN: {}", pin_str);
-        pin_str
+        let token = format!("{:032x}", rand::random::<u128>());
+        println!("[Aideo Connect] Generated secure remote authorization token: {}", token);
+        token
     })
 }
 
 pub async fn start_remote_server(app_handle: AppHandle, app_state: Arc<crate::AppState>) {
-    // Ensure PIN is initialized on startup
+    // Ensure Token is initialized on startup
     let _ = get_or_init_pin();
+
+    let allow_lan = std::env::var("AIDEO_ALLOW_LAN_REMOTE").unwrap_or_default() == "1";
+    let bind_ip = if allow_lan { [0, 0, 0, 0] } else { [127, 0, 0, 1] };
 
     let mut port = 38562;
     let listener = loop {
-        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let addr = SocketAddr::from((bind_ip, port));
         match TcpListener::bind(addr).await {
             Ok(l) => {
-                println!("[Aideo Connect] Bound successfully to port {}", port);
+                println!("[Aideo Connect] Bound successfully to {}:{}", if allow_lan { "0.0.0.0" } else { "127.0.0.1" }, port);
                 break l;
             }
             Err(_) => {
@@ -175,15 +177,18 @@ async fn handle_websocket(
                         let current_track_opt = crate::safe_lock(&player.current_track).clone();
                         if let Some(ref track_path) = current_track_opt {
                             let conn = crate::safe_lock(&state_clone.db);
-                            if let Ok(tracks) = crate::db::get_all_tracks(&conn) {
-                                if let Some(t) = tracks.iter().find(|tr| &tr.path == track_path) {
-                                    title = t.title.clone().unwrap_or_else(|| "Unknown Title".to_string());
-                                    artist = t.artist.clone().unwrap_or_else(|| "Unknown Artist".to_string());
-                                    album = t.album.clone().unwrap_or_default();
-                                    duration = t.duration.unwrap_or(0.0);
-                                    
-                                    if track_path.starts_with("http://") || track_path.starts_with("https://") {
-                                        cover_art = t.cover_url.clone();
+                            let stmt = conn.prepare("SELECT title, artist, album, duration, cover_url FROM tracks WHERE path = ?1 LIMIT 1").ok();
+                            if let Some(mut stmt) = stmt {
+                                if let Ok(mut rows) = stmt.query([track_path]) {
+                                    if let Ok(Some(row)) = rows.next() {
+                                        title = row.get::<_, Option<String>>(0).ok().flatten().unwrap_or_else(|| "Unknown Title".to_string());
+                                        artist = row.get::<_, Option<String>>(1).ok().flatten().unwrap_or_else(|| "Unknown Artist".to_string());
+                                        album = row.get::<_, Option<String>>(2).ok().flatten().unwrap_or_default();
+                                        duration = row.get::<_, Option<f64>>(3).ok().flatten().unwrap_or(0.0);
+                                        let c_url = row.get::<_, Option<String>>(4).ok().flatten();
+                                        if track_path.starts_with("http://") || track_path.starts_with("https://") {
+                                            cover_art = c_url;
+                                        }
                                     }
                                 }
                             }

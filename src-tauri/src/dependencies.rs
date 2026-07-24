@@ -40,10 +40,19 @@ async fn download_with_progress(
     dep_id: &str,
     app_handle: &tauri::AppHandle,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    if let Ok(parsed) = url::Url::parse(url) {
+        let host = parsed.host_str().unwrap_or("").to_lowercase();
+        if !host.ends_with("github.com") && !host.ends_with("githubusercontent.com") {
+            return Err("Security error: Dependency download domain not allowed.".to_string());
+        }
+    } else {
+        return Err("Invalid dependency download URL.".to_string());
+    }
+
+    let client = crate::get_http_client();
     let res = client
         .get(url)
-        .header("User-Agent", "Mozilla/5.0")
+        .header("User-Agent", "AideoMusicPlayer/0.9.3")
         .send()
         .await
         .map_err(|e| format!("Network request failed: {}", e))?;
@@ -52,8 +61,13 @@ async fn download_with_progress(
         .content_length()
         .ok_or_else(|| "Failed to fetch file content size".to_string())?;
 
-    let mut file = std::fs::File::create(dest_path)
-        .map_err(|e| format!("Failed to create local destination file: {}", e))?;
+    if total_size < 1_000_000 {
+        return Err("Invalid dependency binary size (too small or corrupted).".to_string());
+    }
+
+    let temp_dest = dest_path.with_extension("tmp");
+    let mut file = std::fs::File::create(&temp_dest)
+        .map_err(|e| format!("Failed to create temporary destination file: {}", e))?;
 
     let mut downloaded = 0;
     let mut stream = res.bytes_stream();
@@ -80,6 +94,10 @@ async fn download_with_progress(
             last_emit = now;
         }
     }
+    drop(file);
+
+    std::fs::rename(&temp_dest, dest_path)
+        .map_err(|e| format!("Failed to finalize dependency installation: {}", e))?;
 
     Ok(())
 }

@@ -850,6 +850,7 @@ pub fn resolve_youtube_url(url: &str) -> String {
         "-g".to_string(),
         "-f".to_string(), "251/140/bestaudio/best".to_string(),
         "--user-agent".to_string(), YT_USER_AGENT.to_string(),
+        "--extractor-args".to_string(), "youtube:player-client=android,mweb".to_string(),
         "--cache-dir".to_string(), cache_dir_str.clone(),
         "--force-ipv4".to_string(),
         "--no-check-formats".to_string(),
@@ -1170,18 +1171,21 @@ fn prepare_decoder(
 
                 resolved_path = temp_path.to_string_lossy().to_string();
 
-                println!("[player] Buffering first 256KB of YouTube track to ensure stable probing...");
+                println!("[player] Buffering first 64KB of YouTube track to ensure stable probing...");
+                let _ = app_handle.emit("stream-buffering-start", path);
                 let start_time = std::time::Instant::now();
                 loop {
                     let file_size = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
-                    if file_size >= 256 * 1024 {
+                    if file_size >= 64 * 1024 {
                         break;
                     }
                     if start_time.elapsed().as_secs() > 20 {
+                        let _ = app_handle.emit("stream-buffering-end", path);
                         return Err("Buffering timed out. Please check your internet connection and verify that the yt-dlp plugin is working.".to_string());
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                 }
+                let _ = app_handle.emit("stream-buffering-end", path);
                 println!("[player] Buffering complete ({} bytes). Handing over to Symphonia decoding...", std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0));
             }
         }
@@ -3790,21 +3794,25 @@ fn play_file(
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [f32], _| {
-                        thread_local! {
-                            static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
-                        }
-                        MMCSS_INITIALIZED.with(|initialized| {
-                            if !initialized.get() {
-                                let mut task_index = 0u32;
-                                unsafe {
-                                    let _ = windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
-                                        windows::core::w!("Pro Audio"),
-                                        &mut task_index,
-                                    );
-                                }
-                                initialized.set(true);
+                        #[cfg(target_os = "windows")]
+                        {
+                            thread_local! {
+                                static MMCSS_HANDLE: std::cell::RefCell<Option<windows::Win32::Foundation::HANDLE>> = std::cell::RefCell::new(None);
                             }
-                        });
+                            MMCSS_HANDLE.with(|cell| {
+                                if cell.borrow().is_none() {
+                                    let mut task_index = 0u32;
+                                    unsafe {
+                                        if let Ok(h) = windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
+                                            windows::core::w!("Pro Audio"),
+                                            &mut task_index,
+                                        ) {
+                                            *cell.borrow_mut() = Some(h);
+                                        }
+                                    }
+                                }
+                            });
+                        }
                         let paused = paused_cb.load(Ordering::Relaxed) != 1;
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };

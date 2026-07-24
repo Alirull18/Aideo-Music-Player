@@ -181,3 +181,12 @@ pub async fn get_top_artists(username: &str) -> Result<Value, String> {
     let json: Value = res.json().await.map_err(|e| e.to_string())?;
     Ok(json)
 }
+
+#[tauri::command]
+pub async fn lastfm_get_auth_url() -> Result<(String, String), String> {
+    let token = get_auth_token().await?;
+    let api_key = get_api_key();
+    let auth_url = format!("https://www.last.fm/api/auth/?api_key={}&token={}", api_key, token);
+    Ok((token, auth_url))
+}
+

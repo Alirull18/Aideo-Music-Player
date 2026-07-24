@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface UseVirtualListOptions {
   itemHeight: number;
@@ -13,19 +13,21 @@ export function useVirtualList<T>(
   const { itemHeight, overscan = 8, scrollContainer } = options;
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(600);
-  const containerRef = useRef<any>(null);
+  const [node, setNode] = useState<HTMLElement | null>(null);
+
+  const containerRef = useCallback((element: HTMLElement | null) => {
+    setNode(element);
+  }, []);
 
   useEffect(() => {
-    // If a custom scroll container is passed, use it, otherwise use the ref
-    const targetContainer = scrollContainer !== undefined ? scrollContainer : containerRef.current;
+    const targetContainer = scrollContainer !== undefined ? scrollContainer : node;
     if (!targetContainer) return;
 
     setContainerHeight(targetContainer.clientHeight);
     setScrollTop(targetContainer.scrollTop);
 
-    const handleScroll = (e: Event) => {
-      const target = e.currentTarget as HTMLElement;
-      setScrollTop(target.scrollTop);
+    const handleScroll = () => {
+      setScrollTop(targetContainer.scrollTop);
     };
 
     const handleResize = () => {
@@ -45,7 +47,7 @@ export function useVirtualList<T>(
       window.removeEventListener('resize', handleResize);
       resizeObserver.disconnect();
     };
-  }, [scrollContainer, containerRef.current]);
+  }, [scrollContainer, node]);
 
   const totalHeight = items.length * itemHeight;
   
@@ -69,3 +71,4 @@ export function useVirtualList<T>(
     bottomSpacerHeight,
   };
 }
+

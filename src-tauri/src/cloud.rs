@@ -777,5 +777,37 @@ pub fn check_url_is_cached(url: String) -> bool {
     false
 }
 
+#[tauri::command]
+pub async fn save_keyring_secret(service: String, secret: String) -> Result<(), String> {
+    use keyring::Entry;
+    let entry = Entry::new("AideoMusicPlayer", &service).map_err(|e| e.to_string())?;
+    if secret.is_empty() {
+        let _ = entry.delete_credential();
+    } else {
+        entry.set_password(&secret).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_keyring_secret(service: String) -> Result<String, String> {
+    use keyring::{Entry, Error};
+    let entry = Entry::new("AideoMusicPlayer", &service).map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(pass) => Ok(pass),
+        Err(Error::NoEntry) => Ok(String::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn delete_keyring_secret(service: String) -> Result<(), String> {
+    use keyring::Entry;
+    let entry = Entry::new("AideoMusicPlayer", &service).map_err(|e| e.to_string())?;
+    let _ = entry.delete_credential();
+    Ok(())
+}
+
+
 
 

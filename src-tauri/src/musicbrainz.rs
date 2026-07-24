@@ -1,16 +1,17 @@
-use reqwest::Client;
 use serde_json::Value;
 
 const USER_AGENT: &str = concat!("AideoMusicPlayer/", env!("CARGO_PKG_VERSION"), " ( https://github.com/Alirull18/Aideo-Music-Player )");
+
+lazy_static::lazy_static! {
+    static ref RE_TITLE_CLEAN: regex::Regex = regex::Regex::new(r"(?i)\[.*?\]|\(.*?\)|(official\s*(music\s*)?video)|(audio)|(lyric\s*video)|(lyrics)").unwrap();
+}
 
 pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String> {
     let mut clean_t = title.to_string();
     let mut clean_a = artist.to_string();
 
     // 1. Sanitize the title using Regex
-    if let Ok(re) = regex::Regex::new(r"(?i)\[.*?\]|\(.*?\)|(official\s*(music\s*)?video)|(audio)|(lyric\s*video)|(lyrics)") {
-        clean_t = re.replace_all(&clean_t, "").trim().to_string();
-    }
+    clean_t = RE_TITLE_CLEAN.replace_all(&clean_t, "").trim().to_string();
 
     // 2. Hyphen Splitting (if artist is empty but title contains ' - ')
     if clean_a.trim().is_empty() && clean_t.contains(" - ") {
@@ -21,9 +22,8 @@ pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String
         }
     }
 
-    let client = Client::new();
+    let client = crate::get_http_client();
     let query = if clean_a.trim().is_empty() {
-        // If we only have a title, do a loose general search across all fields
         format!("\"{}\"", clean_t)
     } else {
         format!("recording:\"{}\" AND artist:\"{}\"", clean_t, clean_a)
@@ -36,8 +36,7 @@ pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String
     
     let mut json: Value = res.json().await.map_err(|e| e.to_string())?;
 
-    // 3. The Waterfall: iTunes Fallback
-    // If MusicBrainz finds nothing, hit the iTunes API which has a massive global catalog.
+    // 3. iTunes Fallback
     let count = json["count"].as_u64().unwrap_or(0);
     if count == 0 {
         let itunes_term = if clean_a.trim().is_empty() {
@@ -55,7 +54,6 @@ pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String
                         let itunes_artist = track["artistName"].as_str().unwrap_or(&clean_a);
                         let itunes_album = track["collectionName"].as_str().unwrap_or("");
                         
-                        // Structure it like MusicBrainz so the frontend doesn't need to change
                         json = serde_json::json!({
                             "recordings": [{
                                 "title": itunes_title,
@@ -74,7 +72,7 @@ pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String
 
 pub async fn get_cover_art_url(release_id: &str) -> Result<String, String> {
     let url = format!("https://coverartarchive.org/release/{}", release_id);
-    let client = Client::new();
+    let client = crate::get_http_client();
     
     let res = client.get(&url)
         .header("User-Agent", USER_AGENT)

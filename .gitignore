@@ -69,7 +69,9 @@ Untitled-1.txt
 
 # Agent & Graph Caches
 .agents/
+.kilo/
 handler.md
+task.md
 docs/AI_CONTEXT.md
 docs/ARCHITECTURE.md
 yagnirule.md

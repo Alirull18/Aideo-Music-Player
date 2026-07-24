@@ -1,4 +1,3 @@
-use reqwest::Client;
 use serde_json::Value;
 use std::env;
 
@@ -11,7 +10,7 @@ fn get_api_key() -> String {
 
 /// 🎵 Fetch similar tracks for a given track from Last.fm's collaborative scrobble database
 pub async fn get_similar_tracks(artist: &str, track: &str) -> Result<Vec<Value>, String> {
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     
     let res = client.get(API_URL)
@@ -47,7 +46,7 @@ pub async fn get_similar_tracks(artist: &str, track: &str) -> Result<Vec<Value>,
 
 /// 👥 Fetch similar artists for a seed artist from Last.fm
 pub async fn get_similar_artists(artist: &str) -> Result<Vec<String>, String> {
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     
     let res = client.get(API_URL)
@@ -84,7 +83,7 @@ pub async fn get_similar_artists(artist: &str) -> Result<Vec<String>, String> {
 
 /// 📈 Fetch the top tracks for a given artist
 pub async fn get_artist_top_tracks(artist: &str) -> Result<Vec<Value>, String> {
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     
     let res = client.get(API_URL)
@@ -124,7 +123,7 @@ pub async fn get_global_top_tracks() -> Result<Vec<Value>, String> {
 
 /// 📈 Fetch global top tracks from Last.fm with pagination for variety
 pub async fn get_global_top_tracks_page(page: u32) -> Result<Vec<Value>, String> {
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     let page_str = page.to_string();
 
@@ -159,7 +158,7 @@ pub async fn get_global_top_tracks_page(page: u32) -> Result<Vec<Value>, String>
 
 /// 🎸 Fetch top tracks for a genre/tag from Last.fm (e.g. "pop", "hip-hop", "k-pop", "indie")
 pub async fn get_tag_top_tracks(tag: &str) -> Result<Vec<Value>, String> {
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
 
     let res = client.get(API_URL)
@@ -197,7 +196,7 @@ pub async fn get_tag_top_tracks(tag: &str) -> Result<Vec<Value>, String> {
 
 /// 🏷️ Fetch top tags/genres for a given artist from Last.fm
 pub async fn get_artist_top_tags(artist: &str) -> Result<Vec<String>, String> {
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     
     let res = client.get(API_URL)
@@ -233,7 +232,7 @@ pub async fn get_artist_top_tags(artist: &str) -> Result<Vec<String>, String> {
 
 /// 🔍 Fetch artist info from Last.fm
 pub async fn get_artist_info(artist: &str) -> Result<Value, String> {
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     
     let res = client.get(API_URL)
@@ -263,7 +262,7 @@ pub async fn get_genre_top_tracks_page(genre: &str, limit: u32) -> Result<Vec<Va
     if genre.is_empty() || genre == "global" || genre == "all" {
         return get_global_top_tracks_page(1).await;
     }
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     let limit_str = limit.to_string();
 
@@ -301,7 +300,7 @@ pub async fn get_geo_top_tracks_page(country: &str, limit: u32) -> Result<Vec<Va
     if country.is_empty() || country == "global" || country == "worldwide" {
         return get_global_top_tracks_page(1).await;
     }
-    let client = Client::new();
+    let client = crate::get_http_client();
     let api_key = get_api_key();
     let limit_str = limit.to_string();
 
@@ -333,4 +332,3 @@ pub async fn get_geo_top_tracks_page(country: &str, limit: u32) -> Result<Vec<Va
 
     Ok(tracks)
 }
-

@@ -590,7 +590,10 @@ function AideoApp() {
                     setIsDownloadingUpdate(true);
                     setUpdateError(null);
                     try {
-                      await invoke('download_and_install', { url: updateInfo.download_url });
+                      await invoke('download_and_install', { 
+                        url: updateInfo.download_url,
+                        expectedSha256: updateInfo.sha256_url ? await fetch(updateInfo.sha256_url).then(r => r.text()).catch(() => null) : null
+                      });
                     } catch (e: any) {
                       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Update failed: ${e}`, type: 'error' } }));
                       setUpdateError(e.toString());

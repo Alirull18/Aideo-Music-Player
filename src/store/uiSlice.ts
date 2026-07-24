@@ -1,11 +1,12 @@
 import { StateCreator } from 'zustand';
 import { PlayerState } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { safeGetStorage } from '../utils/storage';
 
 let sleepTimerInterval: any = null;
 
 const getSavedShortcuts = () => {
-  const raw = localStorage.getItem('aideo-keyboard-shortcuts');
+  const raw = safeGetStorage('aideo-keyboard-shortcuts');
   const defaults = {
     playPause: 'Space',
     next: 'ArrowRight',
@@ -27,18 +28,18 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showProMode: false,
   showControlCenter: false,
   showSettings: false,
-  sidebarLastfmVisible: localStorage.getItem('aideo-sidebar-lastfm') !== 'false',
-  sidebarListenbrainzVisible: localStorage.getItem('aideo-sidebar-listenbrainz') !== 'false',
-  sidebarCollapsed: localStorage.getItem('aideo-sidebar-collapsed') === 'true',
-  liquidBackgroundEnabled: localStorage.getItem('aideo-liquid-bg') !== 'false',
-  showSmartMixWidget: localStorage.getItem('aideo-show-smart-mix') !== 'false',
+  sidebarLastfmVisible: safeGetStorage('aideo-sidebar-lastfm') !== 'false',
+  sidebarListenbrainzVisible: safeGetStorage('aideo-sidebar-listenbrainz') !== 'false',
+  sidebarCollapsed: safeGetStorage('aideo-sidebar-collapsed') === 'true',
+  liquidBackgroundEnabled: safeGetStorage('aideo-liquid-bg') !== 'false',
+  showSmartMixWidget: safeGetStorage('aideo-show-smart-mix') !== 'false',
   playbackError: null,
   playbackSuccess: null,
-  appMode: (localStorage.getItem('aideo-app-mode') as 'local' | 'hybrid') || 'hybrid',
-  onboardingCompleted: localStorage.getItem('aideo-onboarding-completed') === 'true',
-  showOnboarding: localStorage.getItem('aideo-onboarding-completed') !== 'true',
-  notificationsEnabled: localStorage.getItem('aideo-notifications-enabled') !== 'false',
-  developerNotifications: localStorage.getItem('aideo-developer-notifications') === 'true',
+  appMode: (safeGetStorage('aideo-app-mode') as 'local' | 'hybrid') || 'hybrid',
+  onboardingCompleted: safeGetStorage('aideo-onboarding-completed') === 'true',
+  showOnboarding: safeGetStorage('aideo-onboarding-completed') !== 'true',
+  notificationsEnabled: safeGetStorage('aideo-notifications-enabled') !== 'false',
+  developerNotifications: safeGetStorage('aideo-developer-notifications') === 'true',
   discoveryData: null,
   isLoadingRecs: true,
   activeDiscoveryTab: 'recommendations',
@@ -54,7 +55,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   miniPlayerMode: false,
   shortcuts: getSavedShortcuts(),
   sleepTimer: { duration: 0, remaining: 0, active: false },
-  colorScheme: (localStorage.getItem('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
+  colorScheme: (safeGetStorage('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
 
   setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }

@@ -122,7 +122,16 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   currentTrackIndex: -1,
   currentTrack: (() => {
     try {
-      return JSON.parse(localStorage.getItem('aideo_current_track') || 'null');
+      const saved = JSON.parse(localStorage.getItem('aideo_current_track') || 'null');
+      if (saved && (saved.title === 'Web Audio Stream' || saved.artist === 'Web Stream')) {
+        const history: any[] = JSON.parse(localStorage.getItem('aideo_play_history') || '[]');
+        const realTrack = history.slice().reverse().find(t => t && typeof t === 'object' && t.title && t.title !== 'Web Audio Stream' && t.artist !== 'Web Stream');
+        if (realTrack) {
+          localStorage.setItem('aideo_current_track', JSON.stringify(realTrack));
+          return realTrack;
+        }
+      }
+      return saved;
     } catch {
       return null;
     }
@@ -384,6 +393,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         playback: { ...get().playback, current_track: track.path, status: 'Playing', position_secs: startPos || 0, last_skip_time: Date.now() },
       });
 
+      if (isOnline) {
+        window.dispatchEvent(new CustomEvent('ui-stream-buffering', {
+          detail: { active: true, title: track.title || 'Unknown Title', artist: track.artist || 'Unknown Artist' }
+        }));
+      }
+
       let finalPath = track.path;
       if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
@@ -540,9 +555,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         track = state.queue.find(t => pathsEqual(t.path, path)) || null;
       }
 
-      // Check currentTrack first if it matches
-      if (!track && state.currentTrack && pathsEqual(state.currentTrack.path, path)) {
-        track = state.currentTrack;
+      // Check currentTrack first if it matches or if path is a temp file representation of currentTrack
+      if (!track && state.currentTrack && (pathsEqual(state.currentTrack.path, path) || (state.currentTrack.title && state.currentTrack.title !== 'Web Audio Stream'))) {
+        track = { ...state.currentTrack, path };
+      }
+
+      // Check playHistory
+      if (!track) {
+        track = state.playHistory.slice().reverse().find(t => t && pathsEqual(t.path, path) && t.title && t.title !== 'Web Audio Stream') || null;
       }
 
       // Construct high-fidelity virtual Track object as fallback to ensure seek bar work
@@ -578,7 +598,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       const isOnline = path.startsWith('http://') || path.startsWith('https://');
 
-      if (track) {
+      if (track && track.title && track.title !== 'Web Audio Stream') {
         localStorage.setItem('aideo_current_track', JSON.stringify(track));
       }
 

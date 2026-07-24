@@ -130,8 +130,22 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             lrc = await invoke<string>('get_qqmusic_lrc', { mid: bestMatch.content_id }).catch(() => '');
           }
 
+          console.log('[lyrics] query=', query, 'results=', results?.length, 'bestMatch=', bestMatch?.title, 'lrc.len=', lrc?.length);
+
           if (lrc) {
             await get().saveLyrics(track.path, lrc);
+
+            // Explicitly resolve status so it can never get stuck on 'loading'
+            // if saveLyrics' internal read-back guard races with a track change.
+            const lines: any = await invoke('get_lyrics', { path: track.path }).catch(() => []);
+            const stillCurrent = pathsEqual(get().playback.current_track, track.path);
+            if (stillCurrent) {
+              if (Array.isArray(lines) && lines.length > 0) {
+                set({ lyrics: lines, lyricStatus: 'found' });
+              } else {
+                set({ lyricStatus: 'not_found' });
+              }
+            }
 
             if (track.duration && bestMatch.duration) {
               const diffSec = track.duration - bestMatch.duration;

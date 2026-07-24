@@ -880,21 +880,15 @@ export function AideoView() {
     }
   };
 
-  const handleOpenWebBypass = (track: any, provider: 'lucida' | 'squid') => {
+  const handleOpenWebBypass = (track: any, _provider?: string) => {
     const searchString = `${track.artist} - ${track.title}`.trim();
     navigator.clipboard.writeText(searchString).then(() => {
-      setCopiedId(`${track.id}-${provider}`);
+      setCopiedId(track.id);
       setTimeout(() => setCopiedId(null), 2000);
       
-      const targetUrl = provider === 'lucida' ? 'https://lucida.to' : 'https://squid.wtf';
-      
       window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Copied "${searchString}"! Opening ${provider} in browser...`, type: 'success' } 
+        detail: { message: `Copied "${searchString}" to clipboard!`, type: 'success' } 
       }));
-      
-      openUrl(targetUrl).catch(() => {
-        window.open(targetUrl, '_blank');
-      });
     });
   };
 

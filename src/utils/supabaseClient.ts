@@ -25,7 +25,7 @@ export const getSupabaseClient = () => {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        flowType: 'implicit'
+        flowType: 'pkce'
       }
     });
   }

@@ -5,12 +5,34 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::default::get_probe;
 use base64::Engine;
 
+use std::sync::Mutex;
+use std::collections::HashMap;
+
+lazy_static::lazy_static! {
+    static ref COVER_CACHE: Mutex<HashMap<String, Option<String>>> = Mutex::new(HashMap::new());
+}
+
 /// Extracts embedded cover art from an audio file and returns it as a data URL.
 pub fn get_cover_art(audio_path: &str) -> Option<String> {
+    if let Ok(cache) = COVER_CACHE.lock() {
+        if let Some(art) = cache.get(audio_path) {
+            return art.clone();
+        }
+    }
+
     let path = audio_path.to_string();
-    std::panic::catch_unwind(move || extract_art(&path))
+    let res = std::panic::catch_unwind(move || extract_art(&path))
         .ok()
-        .flatten()
+        .flatten();
+
+    if let Ok(mut cache) = COVER_CACHE.lock() {
+        if cache.len() >= 100 {
+            cache.clear();
+        }
+        cache.insert(audio_path.to_string(), res.clone());
+    }
+
+    res
 }
 
 fn extract_art(audio_path: &str) -> Option<String> {
