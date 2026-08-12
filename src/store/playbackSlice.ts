@@ -1,6 +1,7 @@
 import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl } from '../utils';
 
 let isPolling = false;
@@ -27,6 +28,10 @@ const performDspInvoke = async (dsp: any) => {
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   networkTelemetry: null,
+  activeStem: 'original',
+  stemLoading: false,
+  stemProgress: null,
+  currentStems: null,
   playback: {
     status: 'Stopped',
     current_track: (() => {
@@ -96,7 +101,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     crossfade_transition_enabled: localStorage.getItem('aideo_crossfade_enabled') === 'true',
     crossfade_transition_duration: Number(localStorage.getItem('aideo_crossfade_duration') || 5.0),
     stream_engine: (localStorage.getItem('aideo_stream_engine') || 'yt-dlp') as 'yt-dlp' | 'reqwest',
-    lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false'
+    lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false',
+    vocal_isolator_enabled: localStorage.getItem('aideo_vocal_isolator_enabled') === 'true',
+    vocal_attenuation: Number(localStorage.getItem('aideo_vocal_attenuation') || 0.0),
+    vocal_solo_mode: localStorage.getItem('aideo_vocal_solo_mode') === 'true',
+    pitch_semitones: Number(localStorage.getItem('aideo_pitch_semitones') || 0)
   },
   devices: [],
   currentDevice: null,
@@ -439,7 +448,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       'aideo_filter_dampening', 'preamp_gain', 'limiter_threshold', 'resampler_phase_mode',
       'auto_headroom', 'saturation_enabled', 'saturation_drive', 
       'crossfade_transition_enabled', 'crossfade_transition_duration',
-      'stream_engine', 'lookahead_prebuffer_enabled'
+      'stream_engine', 'lookahead_prebuffer_enabled',
+      'vocal_isolator_enabled', 'vocal_attenuation', 'vocal_solo_mode', 'pitch_semitones'
     ];
     const isActivatingDSP = dspKeys.some(key => {
       if (key === 'upsample_rate') {
@@ -553,6 +563,18 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
   },
 
+  toggleDspAB: async () => {
+    const current = get().dsp;
+    const nextEnabled = !current.enabled;
+    await get().setDSP({ enabled: nextEnabled });
+    window.dispatchEvent(new CustomEvent('ui-toast', {
+      detail: {
+        message: nextEnabled ? '⚡ A/B Mode B: Tuned DSP & AutoEQ Active' : '🎧 A/B Mode A: Direct Raw Bypass (DSP Off)',
+        type: nextEnabled ? 'success' : 'info'
+      }
+    }));
+  },
+
   toggleExclusive: async () => {
     try {
       const res: boolean = await invoke('toggle_exclusive_mode');
@@ -570,6 +592,120 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
       set(s => ({ playback: { ...s.playback, bit_perfect: res } }));
     } catch (e) { console.error(e); }
+  },
+
+  setVocalIsolation: (attenuation: number, soloMode?: boolean) => {
+    const current = get().dsp;
+    const isEnabled = attenuation > 0.001 || Boolean(soloMode);
+    const updated = {
+      ...current,
+      enabled: isEnabled || current.enabled,
+      vocal_isolator_enabled: isEnabled,
+      vocal_attenuation: attenuation,
+      vocal_solo_mode: soloMode !== undefined ? soloMode : current.vocal_solo_mode,
+    };
+    get().setDSP(updated);
+    localStorage.setItem('aideo_vocal_isolator_enabled', String(isEnabled));
+    localStorage.setItem('aideo_vocal_attenuation', String(attenuation));
+    if (soloMode !== undefined) {
+      localStorage.setItem('aideo_vocal_solo_mode', String(soloMode));
+    }
+  },
+
+  setPitchShift: (semitones: number) => {
+    const current = get().dsp;
+    const updated = {
+      ...current,
+      pitch_semitones: semitones,
+    };
+    get().setDSP(updated);
+    localStorage.setItem('aideo_pitch_semitones', String(semitones));
+  },
+
+  checkStemCache: async (trackPath: string) => {
+    if (!trackPath || trackPath.startsWith('http')) return null;
+    try {
+      const res: any = await invoke('get_stem_cache', { path: trackPath });
+      if (res) {
+        set({ currentStems: res });
+      }
+      return res;
+    } catch (e) {
+      console.error('get_stem_cache error:', e);
+      return null;
+    }
+  },
+
+  separateStems: async (trackPath: string) => {
+    set({ stemLoading: true, stemProgress: { percent: 0.05, stage: 'Initializing HTDemucs Neural Engine...' } });
+    let unlisten: any = null;
+    try {
+      unlisten = await listen('stem-split-progress', (event: any) => {
+        if (event.payload) {
+          set({ stemProgress: event.payload });
+        }
+      });
+      const res: any = await invoke('separate_track_stems', { path: trackPath });
+      set({ currentStems: res, stemLoading: false, stemProgress: null });
+      if (unlisten) unlisten();
+      return res;
+    } catch (e) {
+      set({ stemLoading: false, stemProgress: null });
+      if (unlisten) unlisten();
+      throw e;
+    }
+  },
+
+  setActiveStem: async (stem: 'original' | 'instrumental' | 'vocals') => {
+    const state = get();
+    const currentPath = state.playback.current_track;
+    if (!currentPath) return;
+
+    if (stem === 'original') {
+      set({ activeStem: 'original' });
+      const originalPath = state.currentStems?.track_path || currentPath;
+      if (originalPath && originalPath !== currentPath) {
+        const currentPos = state.playback.position_secs;
+        const tr: Track = state.tracks.find(t => t.path === originalPath) || {
+          id: state.currentTrack?.id || -1,
+          path: originalPath,
+          title: state.currentTrack?.title || '',
+          artist: state.currentTrack?.artist || '',
+          album: state.currentTrack?.album || '',
+          duration: state.currentTrack?.duration || 0,
+          format: 'FLAC',
+          lyric_offset: state.currentTrack?.lyric_offset || 0,
+          cover_url: state.currentTrack?.cover_url,
+        };
+        await state.playTrack(tr, false, false, undefined, currentPos);
+      }
+      return;
+    }
+
+    let stems = state.currentStems;
+    if (!stems || stems.track_path !== currentPath) {
+      stems = await state.separateStems(currentPath);
+    }
+
+    if (!stems) return;
+
+    set({ activeStem: stem });
+    const targetPath = stem === 'instrumental' ? stems.instrumental_path : stems.vocals_path;
+    if (targetPath) {
+      const currentPos = state.playback.position_secs;
+      const tr: Track = {
+        id: state.currentTrack?.id || -1,
+        path: targetPath,
+        title: state.currentTrack?.title || '',
+        artist: state.currentTrack?.artist || '',
+        album: state.currentTrack?.album || '',
+        duration: state.currentTrack?.duration || 0,
+        format: 'WAV',
+        lyric_offset: state.currentTrack?.lyric_offset || 0,
+        cover_url: state.currentTrack?.cover_url,
+      };
+      await state.playTrack(tr, false, false, undefined, currentPos);
+    }
   },
 
   keepAwake: localStorage.getItem('aideo_keep_awake') === 'true',

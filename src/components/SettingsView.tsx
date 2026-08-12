@@ -1955,6 +1955,95 @@ export function SettingsView() {
       )
     },
     {
+      id: 'audio-crossfade',
+      title: 'DJ Audio Crossfade & Gapless Transitions',
+      description: 'Blend smoothly between queued songs with customizable 0 to 10 second crossfade transitions, eliminating silence pauses between tracks.',
+      keywords: 'audio crossfade transition gapless blend dj fade smooth duration seconds fadeout fadein queue',
+      tab: 'audio',
+      element: (
+        <div className="settings-ctrl-card">
+          <div className="settings-ctrl-header-row">
+            <div>
+              <div className="settings-ctrl-title">DJ-Style Audio Crossfade</div>
+              <div className="settings-ctrl-desc">
+                Smoothly mix the tail of the current song with the intro of the next track in queue.
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                className={`btn ${dsp.crossfade_transition_enabled ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '6px 14px' }}
+                onClick={() => setDSP({ crossfade_transition_enabled: !dsp.crossfade_transition_enabled })}
+              >
+                {dsp.crossfade_transition_enabled ? 'Crossfade: ON' : 'Crossfade: OFF'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                Transition Duration: <span style={{ color: 'var(--accent)', fontWeight: 800 }}>{dsp.crossfade_transition_duration.toFixed(1)} seconds</span>
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                {dsp.crossfade_transition_duration === 0 ? 'Pure Gapless Cut' : dsp.crossfade_transition_duration <= 3 ? 'Radio Blend' : dsp.crossfade_transition_duration <= 6 ? 'DJ Crossfade' : 'Club Ambient Morph'}
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min={0}
+              max={10}
+              step={0.5}
+              value={dsp.crossfade_transition_duration}
+              disabled={!dsp.crossfade_transition_enabled}
+              onChange={e => setDSP({ crossfade_transition_duration: parseFloat(e.target.value) })}
+              style={{
+                width: '100%',
+                height: 6,
+                accentColor: 'var(--accent)',
+                cursor: dsp.crossfade_transition_enabled ? 'pointer' : 'default',
+                opacity: dsp.crossfade_transition_enabled ? 1 : 0.4
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              {[
+                { label: 'Off', val: 0, enable: false, desc: 'Gapless Cut' },
+                { label: '2.5s', val: 2.5, enable: true, desc: 'Quick Fade' },
+                { label: '5.0s', val: 5.0, enable: true, desc: 'Standard DJ' },
+                { label: '8.0s', val: 8.0, enable: true, desc: 'Ambient Blend' },
+              ].map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => setDSP({ crossfade_transition_enabled: p.enable, crossfade_transition_duration: p.val })}
+                  style={{
+                    flex: 1,
+                    fontSize: 10,
+                    padding: '8px 4px',
+                    borderRadius: 6,
+                    border: '1px solid var(--glass-border)',
+                    background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                    color: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'white' : 'var(--text)',
+                    cursor: 'pointer',
+                    fontWeight: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 700 : 500,
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 2
+                  }}
+                >
+                  <span style={{ fontWeight: 700 }}>{p.label}</span>
+                  <span style={{ fontSize: 8, opacity: 0.6 }}>{p.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
       id: 'system-behavior',
       title: 'System Sleep & Discord rich presence',
       description: 'Toggle system sleep prevention during playback, and show active track status directly on Discord rich profiles.',

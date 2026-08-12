@@ -92,7 +92,7 @@ const getSourceStyle = (source: string) => {
 
 export function AideoLabView() {
   const { 
-    dsp, setDSP, accentColor, lowSpecMode, colorScheme
+    dsp, setDSP, toggleDspAB, accentColor, lowSpecMode, colorScheme
   } = useStore();
   const [activeTab, setActiveTab] = useState<'eq' | 'spatial' | 'dynamics' | 'aideo_filter'>('eq');
   const [systemIsLight, setSystemIsLight] = useState(() => 
@@ -772,29 +772,74 @@ export function AideoLabView() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* Master Acoustic Engine Switch */}
-          <button
-            onClick={() => setDSP({ enabled: !dsp.enabled })}
+          {/* Instant A/B Comparison Switch */}
+          <div
+            onClick={toggleDspAB}
+            title="Instant A/B Audio Comparison (Press 'B' anywhere to toggle)"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              background: dsp.enabled ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.1)',
-              border: dsp.enabled ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)',
-              color: dsp.enabled ? '#34d399' : '#f87171',
-              padding: '8px 16px',
+              background: 'rgba(0, 0, 0, 0.35)',
+              padding: 3,
               borderRadius: 10,
-              fontSize: 12,
-              fontWeight: 700,
+              border: '1px solid var(--glass-border)',
               cursor: 'pointer',
-              transition: 'all 0.2s',
-              boxShadow: dsp.enabled ? '0 0 12px rgba(16, 185, 129, 0.15)' : 'none',
-              letterSpacing: '0.5px'
+              userSelect: 'none',
+              gap: 2
             }}
           >
-            <Power size={14} style={{ transform: dsp.enabled ? 'scale(1.1)' : 'none', transition: 'all 0.2s' }} />
-            ENGINE: {dsp.enabled ? 'ACTIVE' : 'BYPASSED'}
-          </button>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '6px 12px',
+                borderRadius: 8,
+                fontSize: 11,
+                fontWeight: 700,
+                background: !dsp.enabled ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
+                color: !dsp.enabled ? '#22d3ee' : 'var(--text-dim)',
+                border: !dsp.enabled ? '1px solid rgba(6, 182, 212, 0.4)' : '1px solid transparent',
+                transition: 'all 0.2s',
+                boxShadow: !dsp.enabled ? '0 0 10px rgba(6, 182, 212, 0.2)' : 'none'
+              }}
+            >
+              <span>Mode A: Raw</span>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '6px 12px',
+                borderRadius: 8,
+                fontSize: 11,
+                fontWeight: 700,
+                background: dsp.enabled ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+                color: dsp.enabled ? '#34d399' : 'var(--text-dim)',
+                border: dsp.enabled ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid transparent',
+                transition: 'all 0.2s',
+                boxShadow: dsp.enabled ? '0 0 10px rgba(16, 185, 129, 0.2)' : 'none'
+              }}
+            >
+              <Sparkles size={11} />
+              <span>Mode B: DSP</span>
+            </div>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                background: 'rgba(255, 255, 255, 0.1)',
+                color: 'var(--text-dim)',
+                padding: '2px 5px',
+                borderRadius: 4,
+                marginRight: 4,
+                marginLeft: 2
+              }}
+            >
+              B
+            </span>
+          </div>
 
           {/* Tab Selection */}
           <div style={{
@@ -1846,12 +1891,39 @@ export function AideoLabView() {
                       </span>
                     </div>
                     <input
-                      type="range" min="2.0" max="10.0" step="0.5"
+                      type="range" min="0.0" max="10.0" step="0.5"
                       value={dsp.crossfade_transition_duration}
                       disabled={!dsp.crossfade_transition_enabled}
                       onChange={e => setDSP({ crossfade_transition_duration: parseFloat(e.target.value) })}
                       style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.crossfade_transition_enabled ? 'pointer' : 'default', opacity: dsp.crossfade_transition_enabled ? 1 : 0.5 }}
                     />
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                      {[
+                        { label: 'Off', val: 0, enable: false },
+                        { label: '2.5s', val: 2.5, enable: true },
+                        { label: '5.0s', val: 5.0, enable: true },
+                        { label: '8.0s', val: 8.0, enable: true },
+                      ].map(p => (
+                        <button
+                          key={p.label}
+                          onClick={() => setDSP({ crossfade_transition_enabled: p.enable, crossfade_transition_duration: p.val, enabled: p.enable ? true : dsp.enabled })}
+                          style={{
+                            flex: 1,
+                            fontSize: 10,
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            border: '1px solid var(--glass-border)',
+                            background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                            color: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'white' : 'var(--text)',
+                            cursor: 'pointer',
+                            fontWeight: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 700 : 500,
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>

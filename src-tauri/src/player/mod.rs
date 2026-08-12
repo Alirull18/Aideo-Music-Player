@@ -1758,6 +1758,16 @@ pub struct DSPState {
     pub crossfade_transition_duration: f32,
     pub stream_engine: String,
     pub lookahead_prebuffer_enabled: bool,
+
+    // Vocal Isolator & Karaoke
+    #[serde(default)]
+    pub vocal_isolator_enabled: bool,
+    #[serde(default)]
+    pub vocal_attenuation: f32,
+    #[serde(default)]
+    pub vocal_solo_mode: bool,
+    #[serde(default)]
+    pub pitch_semitones: i32,
 }
 fn find_ffmpeg_path() -> String {
 
@@ -1988,6 +1998,12 @@ impl Player {
             crossfade_transition_duration: 5.0,
             stream_engine: "yt-dlp".to_string(),
             lookahead_prebuffer_enabled: true,
+
+            // Vocal Isolator & Karaoke
+            vocal_isolator_enabled: false,
+            vocal_attenuation: 0.0,
+            vocal_solo_mode: false,
+            pitch_semitones: 0,
         }));
         let target_device = Arc::new(Mutex::new(None::<String>));
         let queue = Arc::new(Mutex::new(VecDeque::new()));
@@ -2790,7 +2806,6 @@ impl ConvolutionNode {
                         self.filter_left.load_ir_samples(left_samples);
                         self.filter_right.load_ir_samples(right_samples);
                         self.current_ir_path = path.to_string();
-                        return;
                     }
                 }
             }
@@ -3554,9 +3569,9 @@ fn play_file(
 
     let host = if let Some(ref name) = target {
         if name.starts_with("[ASIO]") {
-            #[cfg(target_os = "windows")]
-            { cpal::host_from_id(cpal::HostId::Asio).unwrap_or(cpal::default_host()) }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(all(feature = "asio", target_os = "windows"))]
+            { cpal::host_from_id(cpal::HostId::Asio).unwrap_or_else(|_| cpal::default_host()) }
+            #[cfg(not(all(feature = "asio", target_os = "windows")))]
             { cpal::default_host() }
         } else {
             cpal::default_host()

@@ -299,6 +299,9 @@ function AideoApp() {
         e.preventDefault();
         const currentVol = state.playback.volume;
         state.setVolume(Math.max(currentVol - 0.05, 0));
+      } else if (e.key.toLowerCase() === 'b' || keyName === (userShortcuts.dspBypass || 'b')) {
+        e.preventDefault();
+        state.toggleDspAB();
       }
     };
     window.addEventListener('keydown', handleKeyDown);

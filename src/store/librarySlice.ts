@@ -555,8 +555,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         track = state.queue.find(t => pathsEqual(t.path, path)) || null;
       }
 
-      // Check currentTrack first if it matches or if path is a temp file representation of currentTrack
-      if (!track && state.currentTrack && (pathsEqual(state.currentTrack.path, path) || (state.currentTrack.title && state.currentTrack.title !== 'Web Audio Stream'))) {
+      // Check currentTrack first if it matches
+      if (!track && state.currentTrack && pathsEqual(state.currentTrack.path, path)) {
         track = { ...state.currentTrack, path };
       }
 

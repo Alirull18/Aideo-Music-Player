@@ -5,14 +5,25 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles, Wifi, Globe, Gauge, Database, Clock } from 'lucide-react';
 
 export function AudioControlCenter() {
-  const { dsp, setDSP, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry, sleepTimer, startSleepTimer, stopSleepTimer } = useStore();
+  const { dsp, setDSP, toggleDspAB, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry, sleepTimer, startSleepTimer, stopSleepTimer } = useStore();
   const [devOpen, setDevOpen] = useState(false);
 
   const fileRate = playback.file_rate || 44100;
   const fileCh = playback.file_ch || 2;
   const fileFormat = playback.file_format || 'PCM';
 
-  const dspActive = dsp.enabled || dsp.eq_enabled || dsp.crossfeed_enabled || dsp.spatial_enabled || dsp.night_mode_enabled || dsp.subsonic_enabled;
+  const dspActive = dsp.enabled && (
+    dsp.eq_enabled ||
+    dsp.crossfeed_enabled ||
+    dsp.spatial_enabled ||
+    dsp.night_mode_enabled ||
+    dsp.subsonic_enabled ||
+    dsp.saturation_enabled ||
+    dsp.aideo_filter_enabled ||
+    dsp.convolution_enabled ||
+    dsp.width !== 1.0 ||
+    (dsp.preamp_gain !== undefined && dsp.preamp_gain !== 0.0)
+  );
 
   const isAsio = currentDevice?.startsWith('[ASIO]');
   const isWasapiExclusive = playback.exclusive;
@@ -67,8 +78,20 @@ export function AudioControlCenter() {
               </h3>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-secondary" onClick={resetProMode}>Reset</button>
-                <button className={`btn ${dsp.enabled ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setDSP({ enabled: !dsp.enabled })}>
-                  {dsp.enabled ? 'Engine: ON' : 'Engine: OFF'}
+                <button
+                  className="btn btn-secondary"
+                  onClick={toggleDspAB}
+                  title="Instant A/B Compare (Press 'B' globally)"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    borderColor: dsp.enabled ? 'rgba(16, 185, 129, 0.4)' : 'rgba(6, 182, 212, 0.4)',
+                    color: dsp.enabled ? '#34d399' : '#22d3ee'
+                  }}
+                >
+                  <span>{dsp.enabled ? 'Mode B: DSP' : 'Mode A: Raw'}</span>
+                  <span style={{ fontSize: 9, opacity: 0.7, background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: 3 }}>B</span>
                 </button>
               </div>
             </div>
@@ -242,6 +265,77 @@ export function AudioControlCenter() {
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.4 }}>
                     Reduces quantization distortion by adding 24-bit TPDF noise. Recommended for high-end DACs.
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>DJ Audio Crossfade</div>
+                <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: dsp.crossfade_transition_enabled ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Sparkles size={14} /> Gapless Crossfade
+                    </span>
+                    <button
+                      onClick={() => setDSP({ crossfade_transition_enabled: !dsp.crossfade_transition_enabled })}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: '4px 8px',
+                        borderRadius: 12,
+                        border: 'none',
+                        background: dsp.crossfade_transition_enabled ? 'var(--accent)' : 'rgba(255,255,255,0.1)',
+                        color: dsp.crossfade_transition_enabled ? '#fff' : 'var(--text-dim)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {dsp.crossfade_transition_enabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
+                      <span>Transition Duration</span>
+                      <span style={{ color: dsp.crossfade_transition_enabled ? 'var(--accent)' : 'var(--text-dim)', fontWeight: 700 }}>
+                        {dsp.crossfade_transition_enabled ? `${dsp.crossfade_transition_duration.toFixed(1)}s` : 'Disabled'}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={10}
+                      step={0.5}
+                      value={dsp.crossfade_transition_duration}
+                      disabled={!dsp.crossfade_transition_enabled}
+                      onChange={e => setDSP({ crossfade_transition_duration: parseFloat(e.target.value) })}
+                      style={{ width: '100%', height: 4, accentColor: 'var(--accent)', cursor: dsp.crossfade_transition_enabled ? 'pointer' : 'default', opacity: dsp.crossfade_transition_enabled ? 1 : 0.4 }}
+                    />
+                    <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+                      {[
+                        { label: 'Off', val: 0, enable: false },
+                        { label: '2.5s', val: 2.5, enable: true },
+                        { label: '5.0s', val: 5.0, enable: true },
+                        { label: '8.0s', val: 8.0, enable: true },
+                      ].map(p => (
+                        <button
+                          key={p.label}
+                          onClick={() => setDSP({ crossfade_transition_enabled: p.enable, crossfade_transition_duration: p.val })}
+                          style={{
+                            fontSize: 9,
+                            padding: '3px 6px',
+                            borderRadius: 4,
+                            border: '1px solid var(--glass-border)',
+                            background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                            color: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'white' : 'var(--text-dim)',
+                            cursor: 'pointer',
+                            flex: 1,
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -444,16 +538,28 @@ export function AudioControlCenter() {
                     {dspActive ? 'Processing Active' : 'Bypassed (Lossless)'}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {dsp.eq_enabled && (
-                      <span style={{ color: '#818cf8', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Sparkles size={10} /> Graphic EQ enabled
-                      </span>
+                    {dspActive ? (
+                      <>
+                        {dsp.eq_enabled && (
+                          <span style={{ color: '#818cf8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Sparkles size={10} /> Graphic / Parametric EQ enabled
+                          </span>
+                        )}
+                        {dsp.crossfeed_enabled && <span>• Linkwitz Headphone Crossfeed active</span>}
+                        {dsp.spatial_enabled && <span>• Haas Spatial Widener active</span>}
+                        {dsp.subsonic_enabled && <span>• Subsonic filter active</span>}
+                        {dsp.night_mode_enabled && <span>• Night Mode dynamics active</span>}
+                        {dsp.saturation_enabled && <span>• Analog Tube Warmth active</span>}
+                        {dsp.convolution_enabled && <span>• Convolution IR Engine active</span>}
+                        {dsp.aideo_filter_enabled && <span>• Spatial Acoustic Filter active</span>}
+                        {dsp.width !== 1.0 && <span>• Soundstage Width: {Math.round(dsp.width * 100)}%</span>}
+                        {dsp.preamp_gain !== undefined && dsp.preamp_gain !== 0.0 && (
+                          <span>• Preamp Gain: {dsp.preamp_gain > 0 ? `+${dsp.preamp_gain}` : dsp.preamp_gain} dB</span>
+                        )}
+                      </>
+                    ) : (
+                      <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No active DSP modifiers</span>
                     )}
-                    {dsp.crossfeed_enabled && <span>• Linkwitz Headphone Crossfeed active</span>}
-                    {dsp.spatial_enabled && <span>• Haas Spatial Widener active</span>}
-                    {dsp.subsonic_enabled && <span>• Subsonic filter active</span>}
-                    {dsp.width !== 1.0 && <span>• Soundstage Width: {Math.round(dsp.width * 100)}%</span>}
-                    {!dspActive && <span style={{ opacity: 0.5, fontStyle: 'italic' }}>No active DSP modifiers</span>}
                   </div>
                 </div>
               </div>

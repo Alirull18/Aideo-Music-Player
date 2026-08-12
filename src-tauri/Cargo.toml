@@ -1,10 +1,14 @@
 [package]
 name = "aideo"
-version = "0.9.3"
+version = "0.9.4"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
 default-run = "aideo"
+
+[features]
+default = []
+asio = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,7 +30,7 @@ dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 symphonia = { version = "0.5.5", features = ["all"] }
-cpal = { version = "0.17.3", features = ["asio"] }
+cpal = "0.17.3"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 walkdir = "2.5.0"
 libloading = "0.8.0"
@@ -74,6 +78,8 @@ tokio-tungstenite = "0.29.0"
 sha2 = "0.10"
 hex = "0.4"
 rayon = "1.10"
+stem-splitter-core = { version = "1.2.0", features = ["directml"] }
+hound = "3.5"
 
 
 [profile.release]

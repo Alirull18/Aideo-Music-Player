@@ -632,7 +632,7 @@ pub async fn search_youtube(query: String) -> Result<Vec<YoutubeTrack>, String> 
         query
     };
 
-    search_youtube_internal_impl(&client, &api_key, &final_query, true, false).await
+    search_youtube_internal_impl(client, &api_key, &final_query, true, false).await
 }
 
 #[tauri::command]
@@ -2717,7 +2717,7 @@ pub async fn get_worldwide_leaderboard(
         } else {
             format!("top {} music hits leaderboard", genre_clean)
         };
-        return search_youtube_internal(&client, &api_key, &fallback_q, false).await;
+        return search_youtube_internal(client, &api_key, &fallback_q, false).await;
     }
 
     let mut tasks = Vec::new();

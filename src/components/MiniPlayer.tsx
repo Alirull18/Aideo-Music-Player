@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { useStore } from '../store';
-import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, Heart, ThumbsDown } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, Heart, ThumbsDown, Music } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import defaultCover from '../assets/default_cover.png';
 import { baseName } from '../utils';
 
@@ -8,6 +10,10 @@ export function MiniPlayer() {
     playback,
     currentTrack,
     coverArt,
+    lyrics,
+    lyricOffset,
+    showRomaji,
+    showTranslation,
     pauseTrack,
     resumeTrack,
     playNext,
@@ -19,6 +25,44 @@ export function MiniPlayer() {
   } = useStore();
 
   const current = currentTrack;
+
+  const activeLyric = useMemo(() => {
+    if (!lyrics || !lyrics.length) return null;
+    const now = playback.position_secs + lyricOffset / 1000;
+    let currentLine = null;
+    for (let i = 0; i < lyrics.length; i++) {
+      if (lyrics[i].time_secs <= now) {
+        currentLine = lyrics[i];
+      } else {
+        break;
+      }
+    }
+    return currentLine;
+  }, [lyrics, playback.position_secs, lyricOffset]);
+
+  // Determine displayed text honoring active Romaji and Translation preferences
+  const displayLyricText = useMemo(() => {
+    if (!activeLyric) return '';
+    if (showTranslation && activeLyric.translation) {
+      return activeLyric.translation;
+    }
+    if (showRomaji && activeLyric.romaji && activeLyric.romaji !== activeLyric.text) {
+      return activeLyric.romaji;
+    }
+    return activeLyric.text;
+  }, [activeLyric, showTranslation, showRomaji]);
+
+  const lyricTooltip = useMemo(() => {
+    if (!activeLyric) return current?.album || '';
+    const parts = [activeLyric.text];
+    if (activeLyric.romaji && activeLyric.romaji !== activeLyric.text) {
+      parts.push(`🈳 Romaji: ${activeLyric.romaji}`);
+    }
+    if (activeLyric.translation) {
+      parts.push(`🌐 Translation: ${activeLyric.translation}`);
+    }
+    return parts.join('\n');
+  }, [activeLyric, current?.album]);
 
   return (
     <div className="mini-player-container" data-tauri-drag-region>
@@ -49,6 +93,35 @@ export function MiniPlayer() {
             </div>
             <div className="mini-artist" title={current?.artist || 'Unknown Artist'}>
               {current?.artist || 'Unknown Artist'}
+            </div>
+            <div className="mini-lyric-ticker" title={lyricTooltip}>
+              <AnimatePresence mode="wait">
+                {activeLyric ? (
+                  <motion.div
+                    key={`${activeLyric.time_secs}-${showTranslation ? 'tr' : showRomaji ? 'ro' : 'orig'}`}
+                    initial={{ opacity: 0, y: 3 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -3 }}
+                    transition={{ duration: 0.15 }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, width: '100%', overflow: 'hidden' }}
+                  >
+                    <Music size={10} style={{ color: 'var(--dynamic-accent, #8b5cf6)', flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {displayLyricText}
+                    </span>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="no-lyric"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 0.6 }}
+                    exit={{ opacity: 0 }}
+                    style={{ fontSize: 10, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {lyrics.length > 0 ? '♫ Instrumental ♫' : (current?.album || '')}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 

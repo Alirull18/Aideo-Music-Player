@@ -28,6 +28,8 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showProMode: false,
   showControlCenter: false,
   showSettings: false,
+  showKaraokeStudio: false,
+  toggleKaraokeStudio: () => set((s: any) => ({ showKaraokeStudio: !s.showKaraokeStudio })),
   sidebarLastfmVisible: safeGetStorage('aideo-sidebar-lastfm') !== 'false',
   sidebarListenbrainzVisible: safeGetStorage('aideo-sidebar-listenbrainz') !== 'false',
   sidebarCollapsed: safeGetStorage('aideo-sidebar-collapsed') === 'true',

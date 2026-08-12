@@ -7,6 +7,13 @@ the codebase.** The graph is faster, cheaper (fewer tokens), and gives
 you structural context (callers, dependents, test coverage) that file
 scanning cannot.
 
+### Installation (Kilo CLI)
+
+The MCP server is registered in `.kilo/kilo.json` as `code-review-graph`.
+Restart the Kilo session after modifying that file. The graph database
+already exists at `.code-review-graph/` — no `build` needed unless the
+codebase is freshly cloned.
+
 ### When to use graph tools FIRST
 
 - **Exploring code**: `semantic_search_nodes_tool` or `query_graph_tool` instead of Grep

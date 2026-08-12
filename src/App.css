@@ -389,30 +389,34 @@ input[type=range] {
 
 .track-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
 }
 
 .track-table thead th {
   text-align: left;
-  padding: 10px 16px;
+  padding: 10px 10px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--text-dim);
   border-bottom: 1px solid var(--glass-border);
-}
-
-.track-row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 65px;
+  white-space: nowrap;
 }
 
 .track-row td {
-  padding: 16px;
+  padding: 12px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.02);
   vertical-align: middle;
   transition: background 0.12s;
+}
+
+.track-row td.cell-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .track-row:hover td {
@@ -425,13 +429,19 @@ input[type=range] {
 }
 
 .track-name {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .track-sub {
   font-size: 12px;
   color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -890,6 +900,12 @@ input[type=range] {
   background: rgba(251, 191, 36, 0.1);
   color: #fbbf24;
   border-color: rgba(251, 191, 36, 0.2);
+}
+
+.quality-tag.web-stream {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.25);
 }
 
 .quality-tag.dolby-atmos {
@@ -3463,6 +3479,12 @@ input[type=range] {
   cursor: none !important;
 }
 
+.fullscreen-hud,
+.fullscreen-layout-toggle,
+.fullscreen-exit-btn {
+  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .hud-hidden .fullscreen-hud,
 .hud-hidden .fullscreen-layout-toggle,
 .hud-hidden .fullscreen-exit-btn {
@@ -3473,6 +3495,31 @@ input[type=range] {
 
 .hud-hidden .fullscreen-exit-btn {
   transform: translateY(-20px);
+}
+
+/* Dynamic Ambient Glow Aura behind Fullscreen Cover */
+.fullscreen-cover-glow-aura {
+  position: absolute;
+  width: 480px;
+  height: 480px;
+  border-radius: 50%;
+  filter: blur(54px);
+  opacity: 0.45;
+  z-index: 0;
+  pointer-events: none;
+  animation: pulse-glow-aura 7s ease-in-out infinite alternate;
+  transition: background 0.6s ease;
+}
+
+@keyframes pulse-glow-aura {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1.1);
+    opacity: 0.55;
+  }
 }
 
 /* Grid & Content layouts */
@@ -4560,6 +4607,22 @@ input[type=range] {
   white-space: nowrap;
   margin-top: 2px;
 }
+.mini-lyric-ticker {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dynamic-accent, #8b5cf6);
+  height: 17px;
+  line-height: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+}
+.light-theme .mini-lyric-ticker {
+  color: var(--dynamic-accent, #7c3aed);
+}
 .mini-controls {
   display: flex;
   gap: 8px;
@@ -5231,3 +5294,347 @@ input[type=range] {
 .light-theme .insights-metric-card {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.03);
 }
+
+/* ==========================================================================
+   🎤 KARAOKE & VOCAL STUDIO STYLES
+   ========================================================================== */
+.karaoke-studio-modal {
+  width: 600px;
+  max-width: 95vw;
+  background: rgba(15, 17, 26, 0.88);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(244, 63, 94, 0.15);
+  border-radius: 24px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.karaoke-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.karaoke-header-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.karaoke-icon-glow {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.25);
+}
+
+.karaoke-header-title h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.3px;
+}
+
+.karaoke-now-playing-track {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: block;
+  margin-top: 2px;
+  max-width: 380px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.karaoke-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+.karaoke-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.karaoke-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+
+.karaoke-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.karaoke-preset-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.karaoke-preset-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.karaoke-preset-card.active {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: #f43f5e;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.25);
+}
+
+.karaoke-preset-card.active .preset-icon {
+  color: #f43f5e;
+}
+
+.preset-icon {
+  color: var(--text-dim);
+  transition: color 0.2s ease;
+}
+
+.preset-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.preset-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.preset-sub {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+.fader-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fader-value-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f43f5e;
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.karaoke-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.karaoke-range-slider {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+  cursor: pointer;
+  accent-color: #f43f5e;
+}
+
+.slider-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.karaoke-reset-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.karaoke-reset-btn:hover:not(:disabled) {
+  color: #f43f5e;
+}
+
+.karaoke-reset-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pitch-control-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+}
+
+.pitch-btn.step {
+  padding: 8px 18px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pitch-btn.step:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: #f43f5e;
+}
+
+.pitch-btn.step:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pitch-display-box {
+  flex: 1;
+  max-width: 180px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.pitch-num {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.pitch-unit {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+
+.pitch-quick-chips {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.pitch-chip {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pitch-chip:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pitch-chip.active {
+  background: rgba(244, 63, 94, 0.2);
+  border-color: #f43f5e;
+  color: #f43f5e;
+  font-weight: 700;
+}
+
+.karaoke-audiophile-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.badge-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #10b981;
+  display: block;
+}
+
+.badge-sub {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.6);
+  display: block;
+  margin-top: 1px;
+  line-height: 1.35;
+}
+
+.karaoke-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.karaoke-sing-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #f43f5e, #e11d48) !important;
+  border: none !important;
+  box-shadow: 0 4px 16px rgba(244, 63, 94, 0.4) !important;
+}
+
+.karaoke-sing-btn:hover {
+  box-shadow: 0 6px 20px rgba(244, 63, 94, 0.6) !important;
+  transform: translateY(-1px);
+}
+
+.pb-btn.karaoke-active {
+  color: #f43f5e !important;
+  background: rgba(244, 63, 94, 0.15) !important;
+  border-color: rgba(244, 63, 94, 0.35) !important;
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.35) !important;
+}
+
+

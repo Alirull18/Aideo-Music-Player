@@ -231,9 +231,9 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile 
     let rms = (sum_sq / samples.len() as f32).sqrt();
     let energy = (rms as f64 * 3.0).clamp(0.0, 1.0); // Simple normalization scaling
 
-    // 2. BPM / Tempo (Energy envelope onset detection + Autocorrelation)
-    // Block duration ~50ms
-    let block_size = sample_rate / 20; // 50ms blocks
+    // 2. BPM / Tempo (Energy envelope onset detection + Autocorrelation with Parabolic Interpolation)
+    // Block duration ~20ms (50 blocks per second) for enhanced tempo resolution
+    let block_size = (sample_rate / 50).max(1); // 20ms blocks
     let mut energy_envelope = Vec::new();
     
     for chunk in samples.chunks(block_size) {
@@ -249,34 +249,53 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile 
         onsets.push(diff);
     }
 
-    // Autocorrelation on onsets to find dominant periodicity (lags corresponding to 60-180 BPM)
-    // 50ms block size -> 20 blocks per second.
-    // Lag of 7 blocks -> 20 / 7 * 60 = 171 BPM
-    // Lag of 20 blocks -> 20 / 20 * 60 = 60 BPM
-    let min_lag = 7;
-    let max_lag = 20;
-    let mut best_lag = 10;
-    let mut max_correlation = 0.0;
+    // Autocorrelation on onsets to find dominant periodicity (lags corresponding to 60-190 BPM)
+    // 20ms block size -> 50 blocks per second.
+    // Lag 16 -> 50 / 16 * 60 = 187.5 BPM
+    // Lag 50 -> 50 / 50 * 60 = 60.0 BPM
+    let min_lag = 16;
+    let max_lag = 50.min(onsets.len().saturating_sub(1));
+    let mut correlations = vec![0.0f32; max_lag + 2];
+    let mut best_lag = 0;
+    let mut max_correlation = 0.0f32;
 
-    for lag in min_lag..=max_lag {
-        let mut correlation = 0.0;
-        let mut count = 0;
-        for i in 0..(onsets.len() - lag) {
-            correlation += onsets[i] * onsets[i + lag];
-            count += 1;
-        }
-        if count > 0 {
-            correlation /= count as f32;
-        }
-        if correlation > max_correlation {
-            max_correlation = correlation;
-            best_lag = lag;
+    if onsets.len() > min_lag + 2 && max_lag > min_lag {
+        for lag in min_lag..=max_lag {
+            let mut correlation = 0.0f32;
+            let mut count = 0;
+            for i in 0..(onsets.len() - lag) {
+                correlation += onsets[i] * onsets[i + lag];
+                count += 1;
+            }
+            if count > 0 {
+                correlation /= count as f32;
+            }
+            correlations[lag] = correlation;
+            if correlation > max_correlation {
+                max_correlation = correlation;
+                best_lag = lag;
+            }
         }
     }
 
-    let bpm = if best_lag > 0 {
-        // block_size is 50ms (20 per sec)
-        (20.0 / best_lag as f64) * 60.0
+    let bpm = if best_lag >= min_lag && best_lag <= max_lag {
+        // Apply 3-point parabolic interpolation around the peak lag
+        let exact_lag = if best_lag > min_lag && best_lag < max_lag {
+            let alpha = correlations[best_lag - 1];
+            let beta = correlations[best_lag];
+            let gamma = correlations[best_lag + 1];
+            let denom = 2.0 * (alpha - 2.0 * beta + gamma);
+            if denom.abs() > 1e-7 {
+                let delta = (alpha - gamma) / denom;
+                (best_lag as f64 + delta as f64).clamp(min_lag as f64, max_lag as f64)
+            } else {
+                best_lag as f64
+            }
+        } else {
+            best_lag as f64
+        };
+        let raw_bpm = (50.0 / exact_lag) * 60.0;
+        ((raw_bpm * 10.0).round() / 10.0).clamp(60.0, 200.0)
     } else {
         120.0
     };

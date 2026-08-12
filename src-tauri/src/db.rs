@@ -447,31 +447,26 @@ pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &st
 
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain 
+        "SELECT t.id, pt.track_path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain 
          FROM playlist_tracks pt
          LEFT JOIN tracks t ON t.path = pt.track_path 
          WHERE pt.playlist_id = ?1 
          ORDER BY pt.position ASC"
     )?;
     let track_iter = stmt.query_map(params![playlist_id], |row| {
-        // With LEFT JOIN, t.* fields can be NULL if the track was orphaned
-        let path_opt: Option<String> = row.get(1)?;
-        let path = match path_opt {
-            Some(p) => p,
-            None => return Err(rusqlite::Error::QueryReturnedNoRows), // skip fully NULL rows
-        };
+        let path: String = row.get(1)?;
         let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
         Ok(Track {
-            id: row.get(0).unwrap_or(0),
+            id: row.get::<_, Option<i32>>(0)?.unwrap_or(0),
             path,
             title: row.get(2)?,
             artist: row.get(3)?,
             album: row.get(4)?,
             duration: row.get(5)?,
             format: row.get(6)?,
-            lyric_offset: row.get(7).unwrap_or(0),
-            loved: Some(row.get(8).unwrap_or(0)),
-            disliked: Some(row.get(9).unwrap_or(0)),
+            lyric_offset: row.get::<_, Option<i32>>(7)?.unwrap_or(0),
+            loved: Some(row.get::<_, Option<i32>>(8)?.unwrap_or(0)),
+            disliked: Some(row.get::<_, Option<i32>>(9)?.unwrap_or(0)),
             cover_url: row.get(10).ok(),
             path_hash,
             bpm: row.get(11).ok(),

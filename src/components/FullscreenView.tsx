@@ -81,6 +81,7 @@ export function FullscreenView() {
   }, [playback.status]);
 
   const currentTime = smoothedTime + lyricOffset / 1000;
+  const trackDuration = currentTrack?.duration || 0;
 
   const [layout, setLayout] = useState<'stage' | 'zen'>(() => {
     return (localStorage.getItem('aideo-fullscreen-layout') as 'stage' | 'zen') || 'stage';
@@ -156,9 +157,12 @@ export function FullscreenView() {
     };
   }, []);
 
-  // Keyboard and native fullscreen toggles
+  // Keyboard navigation & ambient hotkeys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const targetTag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (targetTag === 'input' || targetTag === 'textarea') return;
+
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -170,13 +174,50 @@ export function FullscreenView() {
           appWindow.setFullscreen(!isFS);
           setIsNativeFullscreen(!isFS);
         });
+      } else if (e.code === 'Space' || key === ' ') {
+        e.preventDefault();
+        handlePlayPause();
+      } else if (key === 'l') {
+        e.preventDefault();
+        setLayout(prev => prev === 'stage' ? 'zen' : 'stage');
+      } else if (key === 'v') {
+        e.preventDefault();
+        const modes: ('baseline' | 'circle' | 'wave')[] = ['baseline', 'circle', 'wave'];
+        setVizMode(prev => {
+          const nextIdx = (modes.indexOf(prev) + 1) % modes.length;
+          return modes[nextIdx];
+        });
+      } else if (key === 't') {
+        e.preventDefault();
+        handleTranslate();
+      } else if (key === 'r') {
+        e.preventDefault();
+        handleRomajiToggle();
+      } else if (key === 'm') {
+        e.preventDefault();
+        handleMuteToggle();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        seek(Math.max(0, playback.position_secs - 5));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        seek(Math.min(trackDuration, playback.position_secs + 5));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const nextVol = Math.min(1, Math.round((playback.volume + 0.05) * 100) / 100);
+        setVolume(nextVol);
+        setIsMuted(false);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const nextVol = Math.max(0, Math.round((playback.volume - 0.05) * 100) / 100);
+        setVolume(nextVol);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setView]);
+  }, [setView, playback.status, playback.volume, playback.position_secs, trackDuration, isMuted, prevVolume, showRomaji, showTranslation, lyrics.length]);
 
-  // Autohide HUD timer: 3 seconds of inactivity
+  // Autohide HUD timer: 3.5 seconds of inactivity
   useEffect(() => {
     const resetTimer = () => {
       setIsHUDHidden(false);
@@ -185,11 +226,13 @@ export function FullscreenView() {
       }
       activityTimer.current = window.setTimeout(() => {
         setIsHUDHidden(true);
-      }, 3000);
+      }, 3500);
     };
 
-    window.addEventListener('mousemove', resetTimer);
+    window.addEventListener('mousemove', resetTimer, { passive: true });
+    window.addEventListener('pointermove', resetTimer, { passive: true });
     window.addEventListener('keydown', resetTimer);
+    window.addEventListener('wheel', resetTimer, { passive: true });
     window.addEventListener('click', resetTimer);
 
     // Initial trigger
@@ -197,7 +240,9 @@ export function FullscreenView() {
 
     return () => {
       window.removeEventListener('mousemove', resetTimer);
+      window.removeEventListener('pointermove', resetTimer);
       window.removeEventListener('keydown', resetTimer);
+      window.removeEventListener('wheel', resetTimer);
       window.removeEventListener('click', resetTimer);
       if (activityTimer.current) {
         clearTimeout(activityTimer.current);
@@ -298,7 +343,6 @@ export function FullscreenView() {
   };
 
   // Safe track progress values
-  const trackDuration = currentTrack?.duration || 0;
   const progressPercent = trackDuration > 0 ? (playback.position_secs / trackDuration) * 100 : 0;
 
   // Simple formatting helper
@@ -347,12 +391,19 @@ export function FullscreenView() {
             {/* Left Column: Artwork and Meta */}
             <div className="fullscreen-stage-left">
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 440, height: 440 }}>
+                {/* Dynamic Ambient Glow Aura */}
+                <div 
+                  className="fullscreen-cover-glow-aura" 
+                  style={{
+                    background: `radial-gradient(circle, ${accentColor || 'var(--dynamic-accent)'} 0%, rgba(var(--accent-rgb, 139, 92, 246), 0.35) 45%, transparent 70%)`
+                  }} 
+                />
                 {vizMode === 'circle' && (
-                  <div style={{ position: 'absolute', width: 620, height: 620, zIndex: 0, pointerEvents: 'none' }}>
+                  <div style={{ position: 'absolute', width: 620, height: 620, zIndex: 1, pointerEvents: 'none' }}>
                     <Visualizer mode="circle" />
                   </div>
                 )}
-                <div className="fullscreen-cover-art-wrap" style={{ zIndex: 1, margin: 0 }}>
+                <div className="fullscreen-cover-art-wrap" style={{ zIndex: 2, margin: 0 }}>
                   <img
                     src={coverArt || defaultCover}
                     alt="Album Artwork"

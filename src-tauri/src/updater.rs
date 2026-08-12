@@ -203,15 +203,15 @@ mod tests {
 
     #[test]
     fn test_is_newer() {
-        assert!(is_newer("v0.9.4", "v0.9.3"));
-        assert!(is_newer("1.0.0", "0.9.3"));
-        assert!(!is_newer("v0.9.3", "v0.9.3"));
-        assert!(!is_newer("v0.9.2", "v0.9.3"));
+        assert!(is_newer("v0.9.5", "v0.9.4"));
+        assert!(is_newer("1.0.0", "0.9.4"));
+        assert!(!is_newer("v0.9.4", "v0.9.4"));
+        assert!(!is_newer("v0.9.3", "v0.9.4"));
     }
 
     #[test]
     fn test_is_trusted_github_url() {
-        assert!(is_trusted_github_url("https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.9.3/aideo.exe"));
+        assert!(is_trusted_github_url("https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.9.4/aideo.exe"));
         assert!(is_trusted_github_url("https://objects.githubusercontent.com/github-production-release-asset/123"));
         assert!(!is_trusted_github_url("https://malicious-domain.com/setup.exe"));
         assert!(!is_trusted_github_url("http://github.com/insecure"));

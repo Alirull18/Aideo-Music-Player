@@ -76,6 +76,7 @@ export function Sidebar() {
         </div>
       )}
 
+
       <div className={`nav-item ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView('aideo_lab')} title={sidebarCollapsed ? "Aideo Lab" : undefined}>
         <Activity size={18} />
         {!sidebarCollapsed && <span>Aideo Lab</span>}

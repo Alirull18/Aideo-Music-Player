@@ -74,6 +74,15 @@ handler.md
 task.md
 docs/AI_CONTEXT.md
 docs/ARCHITECTURE.md
-yagnirule.md
 .code-review-graph/
 ponytail/
+
+# AI Stems & Neural Models
+stems/
+*.stems
+models/
+*.onnx
+AppData/Aideo/stems/
+src/components/KaraokeStudioModal.tsx
+src-tauri/src/stem_engine.rs
+

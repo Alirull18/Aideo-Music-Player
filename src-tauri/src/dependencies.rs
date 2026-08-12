@@ -52,7 +52,7 @@ async fn download_with_progress(
     let client = crate::get_http_client();
     let res = client
         .get(url)
-        .header("User-Agent", "AideoMusicPlayer/0.9.3")
+        .header("User-Agent", "AideoMusicPlayer/0.9.4")
         .send()
         .await
         .map_err(|e| format!("Network request failed: {}", e))?;

@@ -2,7 +2,7 @@ import { useState, useEffect, memo } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X } from 'lucide-react';
+import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { Track, Playlist } from '../store/types';
 import { useVirtualList } from '../utils/useVirtualList';
@@ -13,6 +13,13 @@ import { AlbumsView } from './AlbumsView';
 const isStreamTrack = (path: string, format?: string | null) => {
   return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
 };
+
+const isLosslessTrack = (t: any) => {
+  const f = (t.format || '').toLowerCase();
+  return f.includes('flac') || f.includes('wav') || f.includes('alac') || f.includes('dsf') || f.includes('dff') || f.includes('dsd');
+};
+
+type QuickFilterType = 'all' | 'loved' | 'lossless' | 'local' | 'streams';
 
 
 interface CloudTrack {
@@ -163,46 +170,54 @@ const pendingArtRequests = new Map<string, Promise<any>>();
 
 function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | null }) {
   const targetPath = coverUrl || path;
-  const [art, setArt] = useState<string | null>(coverArtCache.get(targetPath) || null);
+  const isDirectWebUrl = !!targetPath && (targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:'));
+  const [art, setArt] = useState<string | null>(() => {
+    if (isDirectWebUrl) return targetPath;
+    return coverArtCache.get(targetPath) || null;
+  });
 
   useEffect(() => {
-    let active = true;
-    const cached = coverArtCache.get(targetPath) || null;
-    setArt(cached);
+    if (!targetPath) {
+      setArt(null);
+      return;
+    }
 
-    if (!targetPath) return;
-
-    if (targetPath.startsWith('data:')) {
+    if (isDirectWebUrl) {
       setArt(targetPath);
       return;
     }
 
-    if (!cached && !coverArtCache.has(targetPath)) {
-      if (!pendingArtRequests.has(targetPath)) {
-        const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
-          const artUrl = (res && typeof res === 'string') ? res : null;
-          coverArtCache.set(targetPath, artUrl);
-          return artUrl;
-        }).catch(() => {
-          coverArtCache.set(targetPath, null);
-          return null;
-        }).finally(() => {
-          pendingArtRequests.delete(targetPath);
-        });
-        pendingArtRequests.set(targetPath, req);
-      }
-      
-      pendingArtRequests.get(targetPath)?.then(resolvedArt => {
-        if (active) {
-          setArt(resolvedArt || null);
-        }
-      });
+    let active = true;
+    const cached = coverArtCache.get(targetPath);
+    if (cached !== undefined) {
+      setArt(cached);
+      return;
     }
+
+    if (!pendingArtRequests.has(targetPath)) {
+      const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
+        const artUrl = (res && typeof res === 'string') ? res : null;
+        coverArtCache.set(targetPath, artUrl);
+        return artUrl;
+      }).catch(() => {
+        coverArtCache.set(targetPath, null);
+        return null;
+      }).finally(() => {
+        pendingArtRequests.delete(targetPath);
+      });
+      pendingArtRequests.set(targetPath, req);
+    }
+    
+    pendingArtRequests.get(targetPath)?.then(resolvedArt => {
+      if (active) {
+        setArt(resolvedArt || null);
+      }
+    });
 
     return () => {
       active = false;
     };
-  }, [targetPath]);
+  }, [targetPath, isDirectWebUrl]);
 
   return (
     <div className="lib-thumb-mini">
@@ -216,12 +231,12 @@ interface TrackRowProps {
   i: number;
   active: boolean;
   isHighRes: boolean;
-  menuOpenFor: number | null;
+  menuOpenFor: any;
   isMatching: number | null;
   currentPlaylist: Playlist | null;
   playTrack: (track: Track) => Promise<void> | void;
   setView: (view: any) => void;
-  setMenuOpenFor: (id: number | null) => void;
+  setMenuOpenFor: (id: any) => void;
   playNextInQueue: (track: Track) => Promise<void> | void;
   addToQueue: (track: Track) => Promise<void> | void;
   matchMetadata: (track: Track) => Promise<any>;
@@ -245,9 +260,11 @@ const TrackRow = memo(({
   toggleLoveTrack, toggleDislikeTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
 }: TrackRowProps) => {
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
+  const rowId = t.path || t.id;
 
   return (
     <tr className={`track-row${active ? ' playing' : ''}`}
+      style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 2000 : 1 }}
       onClick={() => { playTrack(t); setView('nowplaying'); }}>
       <td style={{ textAlign: 'center', color: active ? 'var(--accent)' : 'var(--text-dim)', fontSize: 12 }}>
         {active ? '▶' : i + 1}
@@ -315,16 +332,18 @@ const TrackRow = memo(({
       <td>
         <TrackThumbnail path={t.path} coverUrl={t.cover_url} />
       </td>
-      <td>
+      <td className="cell-truncate">
         <div className="track-name">{t.title || baseName(t.path)}</div>
       </td>
-      <td>
+      <td className="cell-truncate">
         <div className="track-sub">{t.artist || '—'}</div>
       </td>
-      <td>
+      <td style={{ textAlign: 'center' }}>
         {t.format && (
           <span 
             className={`quality-tag ${isHighRes ? 'high-res' : ''} ${
+              isStreamTrack(t.path, t.format) || t.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'web-stream' : ''
+            } ${
               t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd') ? 'dsd-gold' : ''
             } ${isDolbyAtmos ? 'dolby-atmos' : ''}`}
             style={{
@@ -349,32 +368,49 @@ const TrackRow = memo(({
           </span>
         )}
       </td>
-      <td style={{ textAlign: 'right' }}>
-        <div className="track-sub" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-          {fmt(t.duration)}
-          {isStreamTrack(t.path, t.format) && (
-            <CloudCacheButton 
-              streamUrl={t.path} 
-              cacheCloudTrack={() => cacheCloudTrack(t)} 
-              deleteCachedTrack={deleteCachedTrack} 
-              cachedCloudHashes={cachedCloudHashes} 
-              precomputedHash={t.path_hash}
-            />
-          )}
-          <div style={{ position: 'relative' }}>
+      <td style={{ textAlign: 'right', overflow: 'visible' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+          <span style={{ 
+            fontVariantNumeric: 'tabular-nums', 
+            fontSize: 12, 
+            color: 'var(--text-dim)', 
+            minWidth: 38, 
+            textAlign: 'right' 
+          }}>
+            {fmt(t.duration)}
+          </span>
+          <div style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {isStreamTrack(t.path, t.format) && (
+              <CloudCacheButton 
+                streamUrl={t.path} 
+                cacheCloudTrack={() => cacheCloudTrack(t)} 
+                deleteCachedTrack={deleteCachedTrack} 
+                cachedCloudHashes={cachedCloudHashes} 
+                precomputedHash={t.path_hash}
+              />
+            )}
+          </div>
+          <div style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 3000 : 1, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <button
               className="icon-btn"
-              onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === t.id ? null : t.id); }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4 }}
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                setMenuOpenFor((prev: any) => prev === rowId ? null : rowId); 
+              }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <MoreVertical size={16} />
             </button>
             <AnimatePresence>
-              {menuOpenFor === t.id && (
+              {menuOpenFor === rowId && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                  key="track-menu"
+                  initial={{ opacity: 0, scale: 0.95, y: -4 }} 
+                  animate={{ opacity: 1, scale: 1, y: 0 }} 
+                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                  transition={{ duration: 0.12 }}
                   style={{ 
-                    position: 'absolute', right: 0, top: '100%', zIndex: 100, 
+                    position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 3000, 
                     background: 'rgba(20, 20, 30, 0.95)', backdropFilter: 'blur(16px)',
                     border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, 
                     padding: 6, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
@@ -537,8 +573,8 @@ const CloudTrackRow = memo(({
   t: CloudTrack,
   i: number,
   active: boolean,
-  menuOpenFor: string | null,
-  setMenuOpenFor: (id: string | null) => void,
+  menuOpenFor: any,
+  setMenuOpenFor: (id: any) => void,
   playCloudTrack: (track: CloudTrack) => void,
   addToQueue: (track: any) => void,
   playNextInQueue: (track: any) => void,
@@ -547,9 +583,11 @@ const CloudTrackRow = memo(({
   cachedCloudHashes: string[]
 }) => {
   const vt = cloudTrackToVirtualTrack(t);
+  const rowId = t.stream_url || t.id;
   
   return (
     <tr className={`track-row${active ? ' playing' : ''}`}
+      style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 2000 : 1 }}
       onClick={() => playCloudTrack(t)}>
       <td style={{ textAlign: 'center', color: active ? 'var(--accent)' : 'var(--text-dim)', fontSize: 12 }}>
         {active ? '▶' : i + 1}
@@ -557,7 +595,7 @@ const CloudTrackRow = memo(({
       <td>
         <TrackThumbnail path={t.stream_url} coverUrl={t.cover_url} />
       </td>
-      <td>
+      <td className="cell-truncate">
         <div className="track-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>{t.title}</span>
           <span style={{ 
@@ -570,36 +608,53 @@ const CloudTrackRow = memo(({
           </span>
         </div>
       </td>
-      <td>
+      <td className="cell-truncate">
         <div className="track-sub">{t.artist || '—'}</div>
       </td>
-      <td>
+      <td style={{ textAlign: 'center' }}>
         <span className="quality-tag high-res">LOSSLESS</span>
       </td>
-      <td style={{ textAlign: 'right' }}>
-        <div className="track-sub" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12 }}>
-          {fmt(t.duration)}
-          <CloudCacheButton 
-            streamUrl={t.stream_url} 
-            cacheCloudTrack={() => cacheCloudTrack(t)} 
-            deleteCachedTrack={deleteCachedTrack} 
-            cachedCloudHashes={cachedCloudHashes} 
-            precomputedHash={t.path_hash}
-          />
-          <div style={{ position: 'relative' }}>
+      <td style={{ textAlign: 'right', overflow: 'visible' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+          <span style={{ 
+            fontVariantNumeric: 'tabular-nums', 
+            fontSize: 12, 
+            color: 'var(--text-dim)', 
+            minWidth: 38, 
+            textAlign: 'right' 
+          }}>
+            {fmt(t.duration)}
+          </span>
+          <div style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CloudCacheButton 
+              streamUrl={t.stream_url} 
+              cacheCloudTrack={() => cacheCloudTrack(t)} 
+              deleteCachedTrack={deleteCachedTrack} 
+              cachedCloudHashes={cachedCloudHashes} 
+              precomputedHash={t.path_hash}
+            />
+          </div>
+          <div style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 3000 : 1, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <button
               className="icon-btn"
-              onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === t.id ? null : t.id); }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4 }}
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                setMenuOpenFor((prev: any) => prev === rowId ? null : rowId); 
+              }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <MoreVertical size={16} />
             </button>
             <AnimatePresence>
-              {menuOpenFor === t.id && (
+              {menuOpenFor === rowId && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                  key="cloud-track-menu"
+                  initial={{ opacity: 0, scale: 0.95, y: -4 }} 
+                  animate={{ opacity: 1, scale: 1, y: 0 }} 
+                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                  transition={{ duration: 0.12 }}
                   style={{ 
-                    position: 'absolute', right: 0, top: '100%', zIndex: 100, 
+                    position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 3000, 
                     background: 'rgba(20, 20, 30, 0.95)', backdropFilter: 'blur(16px)',
                     border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, 
                     padding: 6, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
@@ -648,12 +703,23 @@ export function LibraryView() {
       setViewMode('tracks');
     }
   }, [view, currentPlaylist]);
+
+  useEffect(() => {
+    const handleGlobalClick = () => setMenuOpenFor(null);
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, []);
   
   const [activeSector, setActiveSector] = useState<'local' | 'subsonic' | 'jellyfin'>('local');
+  const [activeFilter, setActiveFilter] = useState<QuickFilterType>('all');
   const [viewMode, setViewMode] = useState<'tracks' | 'albums'>('tracks');
   const [albumSortBy, setAlbumSortBy] = useState<'title' | 'artist' | 'count'>('title');
   const [albumCount, setAlbumCount] = useState<number>(0);
   const [menuOpenFor, setMenuOpenFor] = useState<any>(null);
+
+  useEffect(() => {
+    setActiveFilter('all');
+  }, [view, currentPlaylist, activeSector]);
   const [matchData, setMatchData] = useState<{ track: any, match: any } | null>(null);
   const [isMatching, setIsMatching] = useState<number | null>(null);
   const [playlistModalFor, setPlaylistModalFor] = useState<any | null>(null);
@@ -880,7 +946,20 @@ export function LibraryView() {
         : tracks.filter((t: any) => !isStreamTrack(t.path, t.format))
       );
 
+  const countAll = sourceTracks.length;
+  const countLoved = sourceTracks.filter((t: any) => t.loved === 1).length;
+  const countLossless = sourceTracks.filter((t: any) => isLosslessTrack(t)).length;
+  const countLocal = sourceTracks.filter((t: any) => !isStreamTrack(t.path, t.format)).length;
+  const countStreams = sourceTracks.filter((t: any) => isStreamTrack(t.path, t.format)).length;
+
   const filteredTracks = sourceTracks.filter((t: any) => {
+    // 1. Quick Filter Chip
+    if (activeFilter === 'loved' && t.loved !== 1) return false;
+    if (activeFilter === 'lossless' && !isLosslessTrack(t)) return false;
+    if (activeFilter === 'local' && isStreamTrack(t.path, t.format)) return false;
+    if (activeFilter === 'streams' && !isStreamTrack(t.path, t.format)) return false;
+
+    // 2. Search Query
     if (!debouncedSearchQuery) return true;
     const q = debouncedSearchQuery.toLowerCase();
     return (t.title?.toLowerCase().includes(q) || t.artist?.toLowerCase().includes(q) || t.path.toLowerCase().includes(q));
@@ -981,8 +1060,8 @@ export function LibraryView() {
                   ? `${subsonicTracks.length} cloud tracks loaded`
                   : `${jellyfinTracks.length} cloud tracks loaded`
               ) : (
-                searchQuery ? `${filteredTracks.length} / ${sourceTracks.length}` : sourceTracks.length
-              )} {viewMode !== 'albums' && !isCloudTab && (sourceTracks.length === 1 && !searchQuery ? 'track' : 'tracks')}
+                searchQuery || activeFilter !== 'all' ? `${filteredTracks.length} / ${sourceTracks.length}` : sourceTracks.length
+              )} {viewMode !== 'albums' && !isCloudTab && (sourceTracks.length === 1 && !searchQuery && activeFilter === 'all' ? 'track' : 'tracks')}
             </div>
 
             {!isLovedStreamsView && !currentPlaylist && (
@@ -1316,13 +1395,114 @@ export function LibraryView() {
 
       {viewMode === 'albums' ? (
         <AlbumsView 
-          tracks={isCloudTab ? (activeSector === 'subsonic' ? subsonicTracks : jellyfinTracks) : sourceTracks} 
+          tracks={isCloudTab ? (activeSector === 'subsonic' ? subsonicTracks : jellyfinTracks) : (activeFilter === 'all' ? sourceTracks : filteredTracks)} 
           searchQuery={searchQuery} 
           sortBy={albumSortBy} 
           onAlbumCountChange={setAlbumCount} 
         />
       ) : (
         <>
+          {/* Quick Filter Chips Bar */}
+          {sourceTracks.length > 0 && activeSector === 'local' && viewMode === 'tracks' && (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 8, 
+              flexWrap: 'wrap', 
+              marginBottom: 18 
+            }}>
+              {[
+                { id: 'all' as QuickFilterType, label: 'All', count: countAll, icon: <ListMusic size={13} /> },
+                { id: 'loved' as QuickFilterType, label: 'Loved', count: countLoved, icon: <Heart size={13} fill={activeFilter === 'loved' ? '#10b981' : 'transparent'} color={activeFilter === 'loved' ? '#10b981' : 'var(--text-dim)'} /> },
+                { id: 'lossless' as QuickFilterType, label: 'Hi-Res Lossless', count: countLossless, icon: <Sparkles size={13} color={activeFilter === 'lossless' ? '#fbbf24' : 'var(--text-dim)'} /> },
+                ...(countStreams > 0 ? [{ id: 'local' as QuickFilterType, label: 'Local Files', count: countLocal, icon: <HardDrive size={13} /> }] : []),
+                ...(countStreams > 0 ? [{ id: 'streams' as QuickFilterType, label: 'Web Streams', count: countStreams, icon: <Globe size={13} color={activeFilter === 'streams' ? '#06b6d4' : 'var(--text-dim)'} /> }] : []),
+              ].map((chip) => {
+                const isActive = activeFilter === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    onClick={() => setActiveFilter(chip.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 14px',
+                      borderRadius: 20,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      background: isActive 
+                        ? 'var(--dynamic-accent, #8b5cf6)' 
+                        : 'rgba(255, 255, 255, 0.04)',
+                      color: isActive ? '#ffffff' : 'var(--text-dim)',
+                      border: isActive 
+                        ? '1px solid rgba(255, 255, 255, 0.3)' 
+                        : '1px solid rgba(255, 255, 255, 0.08)',
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: isActive 
+                        ? '0 0 14px rgba(var(--accent-rgb), 0.35)' 
+                        : 'none',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                        e.currentTarget.style.color = '#ffffff';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+                        e.currentTarget.style.color = 'var(--text-dim)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                      }
+                    }}
+                  >
+                    {chip.icon}
+                    <span>{chip.label}</span>
+                    <span style={{
+                      fontSize: 10,
+                      padding: '1px 6px',
+                      borderRadius: 10,
+                      fontWeight: 700,
+                      background: isActive ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.06)',
+                      color: isActive ? '#ffffff' : 'var(--text-dim)',
+                    }}>
+                      {chip.count}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {activeFilter !== 'all' && (
+                <button
+                  onClick={() => setActiveFilter('all')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '6px 10px',
+                    borderRadius: 20,
+                    fontSize: 11,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-dim)',
+                    transition: 'color 0.2s',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+                  title="Reset quick filter"
+                >
+                  <X size={12} /> Clear Filter
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Local Table rendering */}
           {activeSector === 'local' && (
             <>
@@ -1336,6 +1516,18 @@ export function LibraryView() {
                       )}
                 </p>
               )}
+              {sourceTracks.length > 0 && filteredTracks.length === 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 220, gap: 12, color: 'var(--text-dim)' }}>
+                  <p style={{ margin: 0, fontSize: 14 }}>No tracks match your current filter or search.</p>
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => { setActiveFilter('all'); setSearchQuery(''); }}
+                    style={{ fontSize: 12, padding: '7px 18px', borderRadius: 16 }}
+                  >
+                    Reset Filter &amp; Search
+                  </button>
+                </div>
+              )}
               {sourceTracks.length > 0 && !libraryReady && (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 16, color: 'var(--text-dim)' }}>
                   <Loader2 className="spin" size={32} style={{ color: 'var(--accent)' }} />
@@ -1346,13 +1538,13 @@ export function LibraryView() {
                 <table className="track-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 48, textAlign: 'center' }}>#</th>
-                      <th style={{ width: 68 }}></th>
-                      <th style={{ width: 48 }}></th>
-                      <th>Title</th>
-                      <th>Artist</th>
-                      <th style={{ width: 80 }}>Quality</th>
-                      <th style={{ width: 72, textAlign: 'right' }}>Time</th>
+                      <th style={{ width: 50, textAlign: 'center' }}>#</th>
+                      <th style={{ width: 68, textAlign: 'center' }}></th>
+                      <th style={{ width: 52 }}></th>
+                      <th style={{ width: '38%' }}>Title</th>
+                      <th style={{ width: '28%' }}>Artist</th>
+                      <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
+                      <th style={{ width: 140, textAlign: 'right' }}>Time</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1364,7 +1556,7 @@ export function LibraryView() {
 
                       return (
                         <TrackRow
-                          key={t.id}
+                          key={t.path || t.id}
                           t={t}
                           i={i}
                           active={active}
@@ -1411,12 +1603,12 @@ export function LibraryView() {
                 <table className="track-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 48, textAlign: 'center' }}>#</th>
-                      <th style={{ width: 48 }}></th>
-                      <th>Title</th>
-                      <th>Artist</th>
-                      <th style={{ width: 80 }}>Quality</th>
-                      <th style={{ width: 72, textAlign: 'right' }}>Time</th>
+                      <th style={{ width: 50, textAlign: 'center' }}>#</th>
+                      <th style={{ width: 52 }}></th>
+                      <th style={{ width: '42%' }}>Title</th>
+                      <th style={{ width: '32%' }}>Artist</th>
+                      <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
+                      <th style={{ width: 140, textAlign: 'right' }}>Time</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1426,7 +1618,7 @@ export function LibraryView() {
                       const active = playback.current_track === t.stream_url;
                       return (
                         <CloudTrackRow
-                          key={t.id}
+                          key={t.stream_url || t.id}
                           t={t}
                           i={i}
                           active={active}
@@ -1466,12 +1658,12 @@ export function LibraryView() {
                 <table className="track-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 48, textAlign: 'center' }}>#</th>
-                      <th style={{ width: 48 }}></th>
-                      <th>Title</th>
-                      <th>Artist</th>
-                      <th style={{ width: 80 }}>Quality</th>
-                      <th style={{ width: 72, textAlign: 'right' }}>Time</th>
+                      <th style={{ width: 50, textAlign: 'center' }}>#</th>
+                      <th style={{ width: 52 }}></th>
+                      <th style={{ width: '42%' }}>Title</th>
+                      <th style={{ width: '32%' }}>Artist</th>
+                      <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
+                      <th style={{ width: 140, textAlign: 'right' }}>Time</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1481,7 +1673,7 @@ export function LibraryView() {
                       const active = playback.current_track === t.stream_url;
                       return (
                         <CloudTrackRow
-                          key={t.id}
+                          key={t.stream_url || t.id}
                           t={t}
                           i={i}
                           active={active}

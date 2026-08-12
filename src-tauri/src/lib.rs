@@ -38,6 +38,7 @@ pub mod dependencies;
 pub mod chromecast;
 pub mod sonic_analyzer;
 pub mod remote_server;
+pub mod stem_engine;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -414,6 +415,22 @@ fn get_dsp_state(state: State<'_, AppState>) -> Result<player::DSPState, String>
     Ok(current.clone())
 }
 
+// ── AI Stem Separation Commands ──────────────────────────────────────────
+#[tauri::command]
+fn get_stem_cache(path: String) -> Result<Option<stem_engine::StemResult>, String> {
+    Ok(stem_engine::check_cached_stems(&path))
+}
+
+#[tauri::command]
+async fn separate_track_stems(path: String, app: AppHandle) -> Result<stem_engine::StemResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        stem_engine::separate_track_stems(&path, &app, cancel_token)
+    })
+    .await
+    .map_err(|e| format!("Task execution error: {}", e))?
+}
+
 // ── Bulk Queue & ListenBrainz Commands ───────────────────────────────────────────
 #[tauri::command]
 fn add_to_queue_bulk(paths: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
@@ -460,7 +477,7 @@ async fn listenbrainz_scrobble(artist: String, track: String, timestamp: i64, to
 // ── Device Commands ────────────────────────────────────────────────────────
 #[tauri::command]
 fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let is_playing = {
+    let _is_playing = {
         let player = safe_lock(&state.player);
         player.status.load(Ordering::Relaxed) != 0
     };
@@ -478,6 +495,7 @@ fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> 
         }
     }
 
+    #[cfg(feature = "asio")]
     #[cfg(target_os = "windows")]
     {
         if !is_playing || cache.is_empty() {
@@ -1672,7 +1690,7 @@ fn get_remote_connection_url() -> Result<String, String> {
     let port = crate::remote_server::ACTIVE_PORT.get().copied().ok_or_else(|| "Remote server not active".to_string())?;
     let ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let pin = crate::remote_server::get_or_init_pin();
-    Ok(format!("http://{}:{}?pin={}", ip, port, pin))
+    Ok(format!("http://{}:{}/?pin={}", ip, port, pin))
 }
 
 #[tauri::command]
@@ -1908,6 +1926,8 @@ pub fn run() {
             get_qqmusic_lrc,
             set_dsp_state,
             get_dsp_state,
+            get_stem_cache,
+            separate_track_stems,
             get_audio_devices,
             set_audio_device,
             apply_online_cover,
@@ -2077,6 +2097,7 @@ pub fn run() {
 
 
 
+            #[cfg(feature = "asio")]
             #[cfg(target_os = "windows")]
             {
                 match cpal::host_from_id(cpal::HostId::Asio) {
@@ -2202,6 +2223,7 @@ pub fn run() {
                         .build()
                         .unwrap_or_default();
 
+                    let mut healed_count = 0;
                     for (path, title_opt, artist_opt) in tracks_to_heal {
                         let title = title_opt.unwrap_or_default();
                         let artist = artist_opt.unwrap_or_default();
@@ -2218,14 +2240,15 @@ pub fn run() {
                                         rusqlite::params![cover, path]
                                     );
                                     println!("[system] Successfully healed cover art for '{}' by '{}' with high-res square URL.", title, artist);
-                                    
-                                    // Proactively notify the frontend to reload the library so changes reflect immediately!
-                                    let _ = app_handle_clone.emit("library-updated", ());
+                                    healed_count += 1;
                                 }
                             }
                         }
                         // Small sleep to avoid throttling
                         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    }
+                    if healed_count > 0 {
+                        let _ = app_handle_clone.emit("library-updated", ());
                     }
                 }
             });

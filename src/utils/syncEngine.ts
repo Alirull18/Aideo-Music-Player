@@ -73,34 +73,6 @@ export async function syncToCloud(): Promise<void> {
       console.log('[Sync] No liked tracks to sync to Supabase.');
     }
 
-    // Next, check if there are liked tracks on the cloud that we need to delete because they are unloved locally
-    try {
-      const { data: cloudLikes, error: getLikesError } = await supabase
-        .from('liked_tracks')
-        .select('track_path')
-        .eq('user_id', userId);
-
-      if (!getLikesError && cloudLikes && cloudLikes.length > 0) {
-        const cloudPaths = cloudLikes.map((t: any) => t.track_path);
-        const lovedPaths = new Set(lovedTracks.map(t => t.path));
-        const pathsToDelete = cloudPaths.filter((path: string) => !lovedPaths.has(path));
-
-        if (pathsToDelete.length > 0) {
-          console.log(`[Sync] Deleting ${pathsToDelete.length} unliked tracks from Supabase...`);
-          const { error: deleteError } = await supabase
-            .from('liked_tracks')
-            .delete()
-            .eq('user_id', userId)
-            .in('track_path', pathsToDelete);
-          if (deleteError) {
-            console.error('[Sync] Error deleting unliked tracks:', deleteError.message);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[Sync] Failed to process unliked tracks cleanup:', err);
-    }
-
     // 3. Sync Playlists
     const playlists = state.playlists;
     for (const pl of playlists) {
@@ -214,7 +186,6 @@ export async function syncFromCloud(options?: {
       console.log('[Sync] Retrieved liked tracks from Supabase:', cloudLikes?.length, cloudLikes, likesError);
 
       if (!likesError && cloudLikes) {
-        const cloudPaths = new Set(cloudLikes.map((t: any) => t.track_path));
         const currentTracks = useStore.getState().tracks;
 
         // 1. If liked in cloud but not locally, make it liked locally
@@ -232,23 +203,6 @@ export async function syncFromCloud(options?: {
               duration: t.duration || null,
               format: t.format || null,
               coverUrl: t.cover_url || null
-            });
-          }
-        }
-
-        // 2. If liked locally but not in cloud, unlike it locally
-        for (const lt of currentTracks) {
-          if (lt.loved === 1 && !cloudPaths.has(lt.path)) {
-            console.log('[Sync] Invoking toggle_love_track (unlike) for local track:', lt.path);
-            await invoke('toggle_love_track', {
-              path: lt.path,
-              loved: false,
-              title: lt.title || null,
-              artist: lt.artist || null,
-              album: lt.album || null,
-              duration: lt.duration || null,
-              format: lt.format || null,
-              coverUrl: lt.cover_url || null
             });
           }
         }

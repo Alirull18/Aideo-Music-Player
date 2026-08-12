@@ -71,6 +71,17 @@ export interface LyricLine {
   words?: LyricWord[];
 }
 
+export interface StemResult {
+  track_path: string;
+  hash: string;
+  vocals_path: string;
+  instrumental_path: string;
+  drums_path: string;
+  bass_path: string;
+  other_path: string;
+  is_cached: boolean;
+}
+
 export interface EQBand {
   freq: number;
   gain: number;
@@ -130,6 +141,12 @@ export interface DSPState {
   crossfade_transition_duration: number;
   stream_engine: 'yt-dlp' | 'reqwest';
   lookahead_prebuffer_enabled: boolean;
+
+  // Vocal Isolator & Karaoke
+  vocal_isolator_enabled: boolean;
+  vocal_attenuation: number;
+  vocal_solo_mode: boolean;
+  pitch_semitones: number;
 }
 
 
@@ -243,6 +260,17 @@ export interface PlayerState {
   setScrobbleThreshold: (val: number) => void;
   toggleSettings: () => void;
   toggleQueue: () => void;
+  showKaraokeStudio: boolean;
+  toggleKaraokeStudio: () => void;
+  activeStem: 'original' | 'instrumental' | 'vocals';
+  stemLoading: boolean;
+  stemProgress: { percent: number; stage: string; track_path?: string } | null;
+  currentStems: StemResult | null;
+  separateStems: (trackPath: string) => Promise<StemResult>;
+  checkStemCache: (trackPath: string) => Promise<StemResult | null>;
+  setActiveStem: (stem: 'original' | 'instrumental' | 'vocals') => Promise<void>;
+  setVocalIsolation: (attenuation: number, soloMode?: boolean) => void;
+  setPitchShift: (semitones: number) => void;
   toggleScrobble: () => void;
   keepAwake: boolean;
   toggleKeepAwake: () => Promise<void>;
@@ -299,6 +327,7 @@ export interface PlayerState {
   toggleControlCenter: () => void;
   resetProMode: () => void;
   setDSP: (dsp: Partial<DSPState>) => Promise<void>;
+  toggleDspAB: () => Promise<void>;
   toggleExclusive: () => Promise<void>;
   toggleBitPerfect: () => Promise<void>;
   fetchDevices: () => Promise<void>;
