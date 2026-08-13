@@ -52,7 +52,7 @@ async fn download_with_progress(
     let client = crate::get_http_client();
     let res = client
         .get(url)
-        .header("User-Agent", "AideoMusicPlayer/0.9.4")
+        .header("User-Agent", "AideoMusicPlayer/0.9.5")
         .send()
         .await
         .map_err(|e| format!("Network request failed: {}", e))?;
@@ -216,4 +216,84 @@ pub fn uninstall_dependency(app_handle: tauri::AppHandle, dep_id: String) -> Res
 
     Ok(true)
 }
+
+#[tauri::command]
+pub async fn check_update_ytdlp(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    let aideo_dir = get_aideo_dir();
+    let ytdlp_path = aideo_dir.join("yt-dlp.exe");
+
+    if !ytdlp_path.exists() {
+        return install_dependency(app_handle, "ytdlp".to_string()).await;
+    }
+
+    let _ = app_handle.emit("ui-toast", serde_json::json!({
+        "message": "Checking for yt-dlp binary updates...",
+        "type": "info"
+    }));
+
+    // Method 1: Execute yt-dlp -U in background
+    let ytdlp_clone = ytdlp_path.clone();
+    let update_output = tokio::task::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new(&ytdlp_clone);
+        cmd.arg("-U");
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        cmd.output()
+    }).await.map_err(|e| e.to_string())?;
+
+    let is_updated = match update_output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            println!("[ytdlp-update] stdout: {}, stderr: {}", stdout, stderr);
+            stdout.contains("Updated yt-dlp") || stdout.contains("yt-dlp is up to date") || out.status.success()
+        }
+        Err(_) => false,
+    };
+
+    if is_updated {
+        let _ = app_handle.emit("ui-toast", serde_json::json!({
+            "message": "yt-dlp stream engine is up to date!",
+            "type": "success"
+        }));
+        return Ok(true);
+    }
+
+    // Method 2 fallback: Re-download latest binary if -U failed
+    let dest = aideo_dir.join("yt-dlp.exe");
+    let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+    download_with_progress(url, &dest, "ytdlp", &app_handle).await?;
+    
+    let _ = app_handle.emit("ui-toast", serde_json::json!({
+        "message": "yt-dlp binary successfully updated to latest release!",
+        "type": "success"
+    }));
+
+    Ok(true)
+}
+
+pub fn spawn_background_ytdlp_updater(_app_handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        // Wait 15 seconds after startup before background check
+        std::thread::sleep(std::time::Duration::from_secs(15));
+        let aideo_dir = get_aideo_dir();
+        let ytdlp_path = aideo_dir.join("yt-dlp.exe");
+        if ytdlp_path.exists() {
+            println!("[ytdlp-auto-update] Running background check for yt-dlp updates...");
+            let mut cmd = std::process::Command::new(&ytdlp_path);
+            cmd.arg("-U");
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+            let _ = cmd.output();
+            println!("[ytdlp-auto-update] Background update check completed.");
+        }
+    });
+}
+
 

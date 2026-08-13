@@ -1,7 +1,21 @@
-import React from 'react';
-import { Puzzle, DownloadCloud } from 'lucide-react';
+import React, { useState } from 'react';
+import { Puzzle, DownloadCloud, Loader2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 export const PluginsTab: React.FC = () => {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleUpdateYtdlp = async () => {
+    setIsUpdating(true);
+    try {
+      await invoke('check_update_ytdlp');
+    } catch (e) {
+      console.error('Failed to update yt-dlp:', e);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -24,10 +38,12 @@ export const PluginsTab: React.FC = () => {
           </div>
           <p className="text-xs text-white/60">Extracts YouTube & web media stream URLs directly.</p>
           <button
-            onClick={() => {}}
-            className="w-full py-2 bg-white/10 hover:bg-white/20 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 text-white"
+            onClick={handleUpdateYtdlp}
+            disabled={isUpdating}
+            className="w-full py-2 bg-white/10 hover:bg-white/20 text-xs rounded-lg transition-all flex items-center justify-center gap-1.5 text-white disabled:opacity-50 cursor-pointer"
           >
-            <DownloadCloud className="w-4 h-4" /> Update yt-dlp Binary
+            {isUpdating ? <Loader2 className="w-4 h-4 animate-spin text-emerald-400" /> : <DownloadCloud className="w-4 h-4" />}
+            {isUpdating ? 'Checking for updates...' : 'Update yt-dlp Binary'}
           </button>
         </div>
 

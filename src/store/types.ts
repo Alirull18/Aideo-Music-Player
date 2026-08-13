@@ -16,6 +16,8 @@ export interface Track {
   energy?: number | null;
   bass_ratio?: number | null;
   treble_ratio?: number | null;
+  track_number?: number | null;
+  disc_number?: number | null;
 }
 
 export interface CloudTrack {
@@ -27,6 +29,8 @@ export interface CloudTrack {
   cover_url: string | null;
   stream_url: string;
   provider: 'subsonic' | 'jellyfin';
+  track_number?: number | null;
+  disc_number?: number | null;
 }
 
 export interface YoutubeTrack {
@@ -69,17 +73,6 @@ export interface LyricLine {
   romaji?: string;
   translation?: string;
   words?: LyricWord[];
-}
-
-export interface StemResult {
-  track_path: string;
-  hash: string;
-  vocals_path: string;
-  instrumental_path: string;
-  drums_path: string;
-  bass_path: string;
-  other_path: string;
-  is_cached: boolean;
 }
 
 export interface EQBand {
@@ -141,12 +134,6 @@ export interface DSPState {
   crossfade_transition_duration: number;
   stream_engine: 'yt-dlp' | 'reqwest';
   lookahead_prebuffer_enabled: boolean;
-
-  // Vocal Isolator & Karaoke
-  vocal_isolator_enabled: boolean;
-  vocal_attenuation: number;
-  vocal_solo_mode: boolean;
-  pitch_semitones: number;
 }
 
 
@@ -199,6 +186,8 @@ export interface PlayerState {
   playHistory: Track[];
   playCounts: Record<string, number>;
   playback: PlaybackState;
+  isMuted: boolean;
+  mutedPrevVolume: number;
   lyrics: LyricLine[];
   lyricOffset: number;
   lyricStatus: 'idle' | 'loading' | 'found' | 'not_found';
@@ -260,17 +249,6 @@ export interface PlayerState {
   setScrobbleThreshold: (val: number) => void;
   toggleSettings: () => void;
   toggleQueue: () => void;
-  showKaraokeStudio: boolean;
-  toggleKaraokeStudio: () => void;
-  activeStem: 'original' | 'instrumental' | 'vocals';
-  stemLoading: boolean;
-  stemProgress: { percent: number; stage: string; track_path?: string } | null;
-  currentStems: StemResult | null;
-  separateStems: (trackPath: string) => Promise<StemResult>;
-  checkStemCache: (trackPath: string) => Promise<StemResult | null>;
-  setActiveStem: (stem: 'original' | 'instrumental' | 'vocals') => Promise<void>;
-  setVocalIsolation: (attenuation: number, soloMode?: boolean) => void;
-  setPitchShift: (semitones: number) => void;
   toggleScrobble: () => void;
   keepAwake: boolean;
   toggleKeepAwake: () => Promise<void>;
@@ -321,6 +299,7 @@ export interface PlayerState {
   resumeTrack: () => Promise<void>;
   stopTrack: () => Promise<void>;
   setVolume: (vol: number) => Promise<void>;
+  toggleMute: () => Promise<void>;
   seek: (secs: number) => Promise<void>;
   pollStatus: () => Promise<void>;
   toggleProMode: () => void;
@@ -344,6 +323,7 @@ export interface PlayerState {
   deletePlaylist: (id: number) => Promise<void>;
   addToPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
   removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
+  reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void>;
   loadPlaylistTracks: (playlistId: number) => Promise<void>;
   toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
   toggleDislikeTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
@@ -448,6 +428,10 @@ export interface PlayerState {
   // Color Scheme Theme Mode
   colorScheme: 'dark' | 'light' | 'system';
   setColorScheme: (mode: 'dark' | 'light' | 'system') => void;
+
+  // Album Art Fit Mode
+  albumArtFit: 'cover' | 'contain';
+  setAlbumArtFit: (fit: 'cover' | 'contain') => void;
 }
 
 function rgbToHsl(r: number, g: number, b: number) {

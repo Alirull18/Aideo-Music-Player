@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -92,8 +93,16 @@ const getSourceStyle = (source: string) => {
 
 export function AideoLabView() {
   const { 
-    dsp, setDSP, toggleDspAB, accentColor, lowSpecMode, colorScheme
-  } = useStore();
+    dsp, setDSP, toggleDspAB, accentColor, lowSpecMode, colorScheme, playbackStatus
+  } = useStore(useShallow(s => ({
+    dsp: s.dsp,
+    setDSP: s.setDSP,
+    toggleDspAB: s.toggleDspAB,
+    accentColor: s.accentColor,
+    lowSpecMode: s.lowSpecMode,
+    colorScheme: s.colorScheme,
+    playbackStatus: s.playback.status,
+  })));
   const [activeTab, setActiveTab] = useState<'eq' | 'spatial' | 'dynamics' | 'aideo_filter'>('eq');
   const [systemIsLight, setSystemIsLight] = useState(() => 
     typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: light)').matches : false
@@ -335,9 +344,11 @@ export function AideoLabView() {
       animId = requestAnimationFrame(render);
     };
 
-    render();
+    if (playbackStatus === 'Playing') {
+      render();
+    }
     return () => cancelAnimationFrame(animId);
-  }, [activeTab, lowSpecMode, isLightTheme]);
+  }, [activeTab, lowSpecMode, isLightTheme, playbackStatus]);
 
   // Real-time audio-reactive Soundstage arena pulse engine
   useEffect(() => {
@@ -401,9 +412,11 @@ export function AideoLabView() {
       animId = requestAnimationFrame(render);
     };
 
-    render();
+    if (playbackStatus === 'Playing') {
+      render();
+    }
     return () => cancelAnimationFrame(animId);
-  }, [activeTab, lowSpecMode]);
+  }, [activeTab, lowSpecMode, playbackStatus]);
 
   // Fetch Jaakko Pasanen AutoEQ database
   const fetchAutoEqDb = async () => {
@@ -757,7 +770,7 @@ export function AideoLabView() {
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: 'var(--bg)',
+      background: 'transparent',
       color: 'var(--text)',
       padding: '30px 40px',
       overflowY: 'auto'
@@ -1072,7 +1085,7 @@ export function AideoLabView() {
                     value={selectedPresetName}
                     onChange={(e) => handleLoadPreset(e.target.value)}
                     style={{
-                      background: 'rgba(0, 0, 0, 0.3)',
+                      background: 'var(--glass)',
                       color: 'var(--text)',
                       border: '1px solid var(--glass-border)',
                       borderRadius: 6,
@@ -1083,18 +1096,18 @@ export function AideoLabView() {
                       minWidth: 150
                     }}
                   >
-                    <option value="" disabled>Select Preset...</option>
-                    <optgroup label="System Presets">
-                      <option value="Flat">Flat / Bypass</option>
-                      <option value="Bass Boost">Bass Boost</option>
-                      <option value="Vocal Booster">Vocal Booster</option>
-                      <option value="Treble Booster">Treble Booster</option>
-                      <option value="Audiophile Hi-Res">Audiophile Hi-Res</option>
+                    <option value="" disabled style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Select Preset...</option>
+                    <optgroup label="System Presets" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>
+                      <option value="Flat" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Flat / Bypass</option>
+                      <option value="Bass Boost" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Bass Boost</option>
+                      <option value="Vocal Booster" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Vocal Booster</option>
+                      <option value="Treble Booster" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Treble Booster</option>
+                      <option value="Audiophile Hi-Res" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Audiophile Hi-Res</option>
                     </optgroup>
                     {customPresets.length > 0 && (
-                      <optgroup label="Your Presets">
+                      <optgroup label="Your Presets" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>
                         {customPresets.map(p => (
-                          <option key={p.name} value={p.name}>{p.name}</option>
+                          <option key={p.name} value={p.name} style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>{p.name}</option>
                         ))}
                       </optgroup>
                     )}
@@ -1107,7 +1120,7 @@ export function AideoLabView() {
                       value={newPresetName}
                       onChange={(e) => setNewPresetName(e.target.value)}
                       style={{
-                        background: 'rgba(0, 0, 0, 0.3)',
+                        background: 'var(--glass)',
                         color: 'var(--text)',
                         border: '1px solid var(--glass-border)',
                         borderRadius: 6,

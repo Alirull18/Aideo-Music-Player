@@ -3,7 +3,7 @@ import { PlayerState } from './types';
 import { invoke } from '@tauri-apps/api/core';
 
 export const createLastfmSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
-  scrobbleEnabled: localStorage.getItem('lastfm_session') ? true : false,
+  scrobbleEnabled: localStorage.getItem('lastfm_scrobble_enabled') !== 'false' && !!localStorage.getItem('lastfm_session'),
   lastfmSessionKey: localStorage.getItem('lastfm_session') || null,
   lastfmToken: null,
   scrobbledCurrent: false,
@@ -16,16 +16,18 @@ export const createLastfmSlice: StateCreator<PlayerState, [], [], any> = (set, g
   },
 
   toggleScrobble: () => set(s => {
-    if (s.scrobbleEnabled) {
-      localStorage.removeItem('lastfm_session');
-      return { scrobbleEnabled: false, lastfmSessionKey: null };
-    }
-    return { scrobbleEnabled: true };
+    const next = !s.scrobbleEnabled;
+    localStorage.setItem('lastfm_scrobble_enabled', String(next));
+    return { scrobbleEnabled: next };
   }),
 
   setLastFmSession: (key: string | null) => {
-    if (key) localStorage.setItem('lastfm_session', key);
-    else localStorage.removeItem('lastfm_session');
+    if (key) {
+      localStorage.setItem('lastfm_session', key);
+      localStorage.setItem('lastfm_scrobble_enabled', 'true');
+    } else {
+      localStorage.removeItem('lastfm_session');
+    }
     set({ lastfmSessionKey: key, scrobbleEnabled: !!key });
   },
 

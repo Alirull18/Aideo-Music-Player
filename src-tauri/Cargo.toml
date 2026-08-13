@@ -1,6 +1,6 @@
 [package]
 name = "aideo"
-version = "0.9.4"
+version = "0.9.5"
 description = "A high-performance, audiophile-grade music player with dynamic theming and smart lyric search."
 authors = ["Alirul"]
 edition = "2021"
@@ -24,7 +24,7 @@ tauri-build = { version = "2", features = [] }
 dotenvy = "0.15"
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
 tauri-plugin-opener = "2"
 dotenvy = "0.15"
 serde = { version = "1", features = ["derive"] }
@@ -78,9 +78,6 @@ tokio-tungstenite = "0.29.0"
 sha2 = "0.10"
 hex = "0.4"
 rayon = "1.10"
-stem-splitter-core = { version = "1.2.0", features = ["directml"] }
-hound = "3.5"
-
 
 [profile.release]
 opt-level = 3

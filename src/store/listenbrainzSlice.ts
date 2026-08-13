@@ -4,7 +4,7 @@ import { PlayerState } from './types';
 export const createListenbrainzSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   listenbrainzToken: localStorage.getItem('listenbrainz_token') || null,
   listenbrainzUsername: localStorage.getItem('listenbrainz_username') || null,
-  listenbrainzEnabled: localStorage.getItem('listenbrainz_token') ? true : false,
+  listenbrainzEnabled: localStorage.getItem('listenbrainz_enabled') !== 'false' && !!localStorage.getItem('listenbrainz_token'),
   listenbrainzRecent: [],
   listenbrainzRecs: [],
   listenbrainzListenCount: null,
@@ -12,6 +12,7 @@ export const createListenbrainzSlice: StateCreator<PlayerState, [], [], any> = (
   setListenbrainzToken: (token: string | null) => {
     if (token) {
       localStorage.setItem('listenbrainz_token', token);
+      localStorage.setItem('listenbrainz_enabled', 'true');
       set({ listenbrainzToken: token, listenbrainzEnabled: true });
     } else {
       localStorage.removeItem('listenbrainz_token');
@@ -38,6 +39,7 @@ export const createListenbrainzSlice: StateCreator<PlayerState, [], [], any> = (
       if (data.valid && username) {
         localStorage.setItem('listenbrainz_token', token);
         localStorage.setItem('listenbrainz_username', username);
+        localStorage.setItem('listenbrainz_enabled', 'true');
         set({ 
           listenbrainzToken: token, 
           listenbrainzUsername: username, 
@@ -54,6 +56,7 @@ export const createListenbrainzSlice: StateCreator<PlayerState, [], [], any> = (
 
   toggleListenbrainzScrobble: () => set(s => {
     const nextEnabled = !s.listenbrainzEnabled;
+    localStorage.setItem('listenbrainz_enabled', String(nextEnabled));
     return { listenbrainzEnabled: nextEnabled };
   }),
 

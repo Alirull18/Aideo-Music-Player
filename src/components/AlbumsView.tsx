@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { 
@@ -8,6 +9,7 @@ import {
 import defaultCover from '../assets/default_cover.png';
 import { extractDominantColor } from '../utils/colorExtractor';
 import { ArtistDiscographyDrawer } from './ArtistDiscographyDrawer';
+import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey } from '../utils/albumUtils';
 
 interface AlbumGroup {
   id: string;
@@ -105,7 +107,7 @@ const getSavedLovedAlbums = (): string[] => {
 interface AlbumsViewProps {
   tracks?: any[];
   searchQuery?: string;
-  sortBy?: 'title' | 'artist' | 'count';
+  sortBy?: 'title' | 'artist' | 'count' | 'recent';
   onAlbumCountChange?: (count: number) => void;
 }
 
@@ -121,7 +123,14 @@ export function AlbumsView({
   const { 
     playTrack, addToQueue, playNextInQueue, playlists, addToPlaylist,
     setCoverArtModalTrack
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    playTrack: s.playTrack,
+    addToQueue: s.addToQueue,
+    playNextInQueue: s.playNextInQueue,
+    playlists: s.playlists,
+    addToPlaylist: s.addToPlaylist,
+    setCoverArtModalTrack: s.setCoverArtModalTrack,
+  })));
 
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumGroup | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
@@ -166,12 +175,10 @@ export function AlbumsView({
       const albumTitle = t.album?.trim() || 'Unknown Album';
       const albumArtist = t.album_artist?.trim() || t.albumArtist?.trim();
       const trackArtist = t.artist?.trim() || 'Unknown Artist';
+      const key = buildAlbumKey(t);
       
-      // If explicit album_artist is present, use it in the key; otherwise group strictly by album title
-      const effectiveArtist = albumArtist || trackArtist;
-      const key = albumArtist 
-        ? `${albumArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`
-        : `album:::${albumTitle.toLowerCase()}`;
+      const isVarious = key.startsWith('various:::') || albumArtist?.toLowerCase() === 'various artists';
+      const effectiveArtist = isVarious ? 'Various Artists' : (albumArtist || trackArtist);
 
       if (!map.has(key)) {
         map.set(key, {
@@ -192,7 +199,7 @@ export function AlbumsView({
           group.sampleTrack = t;
         }
 
-        // If no explicit album_artist was set and track artists differ within the same album title,
+        // If no explicit album_artist was set and track artists differ within the same album,
         // mark album artist as 'Various Artists' unless they all share the main primary artist name.
         if (!albumArtist && group.artist !== 'Various Artists' && group.artist !== trackArtist) {
           const firstArtistMain = group.artist.split(/ feat\.| ft\.|,/i)[0].trim().toLowerCase();
@@ -204,7 +211,12 @@ export function AlbumsView({
       }
     });
 
-    return Array.from(map.values());
+    const result = Array.from(map.values());
+    result.forEach((group) => {
+      group.tracks = sortAlbumTracks(group.tracks);
+    });
+
+    return result;
   }, [tracks]);
 
   // Filter & Sort
@@ -220,6 +232,11 @@ export function AlbumsView({
         if (sortBy === 'title') return a.title.localeCompare(b.title);
         if (sortBy === 'artist') return a.artist.localeCompare(b.artist);
         if (sortBy === 'count') return b.tracks.length - a.tracks.length;
+        if (sortBy === 'recent') {
+          const maxIdA = Math.max(...a.tracks.map((t: any) => (typeof t.id === 'number' ? t.id : (Number(t.id) || 0))), 0);
+          const maxIdB = Math.max(...b.tracks.map((t: any) => (typeof t.id === 'number' ? t.id : (Number(t.id) || 0))), 0);
+          return maxIdB - maxIdA;
+        }
         return 0;
       });
   }, [albumGroups, searchQuery, sortBy, filterLovedOnly, lovedAlbumKeys]);
@@ -234,8 +251,9 @@ export function AlbumsView({
   // Action handlers
   const handlePlayAlbum = async (album: AlbumGroup, shuffle = false) => {
     if (album.tracks.length === 0) return;
-    let trackList = [...album.tracks];
+    let trackList = sortAlbumTracks(album.tracks);
     if (shuffle) {
+      trackList = [...trackList];
       for (let i = trackList.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [trackList[i], trackList[j]] = [trackList[j], trackList[i]];
@@ -257,6 +275,23 @@ export function AlbumsView({
     }
 
     await playTrack(firstTrack);
+  };
+
+  const handlePlayTrackFromAlbum = async (clickedTrack: any, allAlbumTracks: any[]) => {
+    const sorted = sortAlbumTracks(allAlbumTracks);
+    const trackIdx = sorted.findIndex(t => (t.path && t.path === clickedTrack.path) || (t.id && t.id === clickedTrack.id));
+    const restTracks = trackIdx >= 0 ? sorted.slice(trackIdx + 1) : [];
+    useStore.setState({ queue: restTracks, shuffle: false });
+    try {
+      await invoke('clear_queue');
+      if (restTracks.length > 0) {
+        const paths = restTracks.map(t => t.path || t.stream_url);
+        await invoke('add_to_queue_bulk', { paths });
+      }
+    } catch (e) {
+      console.error('Failed to sync queue:', e);
+    }
+    await playTrack(clickedTrack);
   };
 
   const handlePlayAlbumNext = async (album: AlbumGroup) => {
@@ -861,33 +896,94 @@ export function AlbumsView({
 
               {/* Drawer Track List */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
-                <table className="track-table" style={{ width: '100%' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 40, textAlign: 'center' }}>#</th>
-                      <th>Title</th>
-                      <th style={{ width: 72, textAlign: 'right' }}>Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedAlbum.tracks.map((t, idx) => (
-                      <tr
-                        key={t.id || idx}
-                        onClick={() => playTrack(t)}
-                        style={{ cursor: 'pointer', transition: 'background 0.2s' }}
-                      >
-                        <td style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>{idx + 1}</td>
-                        <td>
-                          <div style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>{t.title || '—'}</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.artist || '—'}</div>
-                        </td>
-                        <td style={{ textAlign: 'right', color: 'var(--text-dim)', fontSize: 13 }}>
-                          {fmt(t.duration)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {(() => {
+                  const discGroups = groupTracksByDisc(selectedAlbum.tracks);
+                  const isMultiDisc = discGroups.length > 1;
+
+                  if (isMultiDisc) {
+                    return discGroups.map((group) => (
+                      <div key={`disc-${group.disc}`} style={{ marginBottom: 20 }}>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: 8, 
+                          padding: '6px 12px', 
+                          marginBottom: 8, 
+                          background: 'rgba(255, 255, 255, 0.05)', 
+                          borderRadius: 8,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: 'var(--accent)'
+                        }}>
+                          <Disc size={14} />
+                          <span>Disc {group.disc}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 400 }}>({group.tracks.length} tracks)</span>
+                        </div>
+                        <table className="track-table" style={{ width: '100%' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ width: 40, textAlign: 'center' }}>#</th>
+                              <th>Title</th>
+                              <th style={{ width: 72, textAlign: 'right' }}>Time</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.tracks.map((t, idx) => (
+                              <tr
+                                key={t.id || t.path || idx}
+                                onClick={() => handlePlayTrackFromAlbum(t, selectedAlbum.tracks)}
+                                style={{ cursor: 'pointer', transition: 'background 0.2s' }}
+                              >
+                                <td style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
+                                  {getTrackNumber(t) || idx + 1}
+                                </td>
+                                <td>
+                                  <div style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>{t.title || '—'}</div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.artist || '—'}</div>
+                                </td>
+                                <td style={{ textAlign: 'right', color: 'var(--text-dim)', fontSize: 13 }}>
+                                  {fmt(t.duration)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ));
+                  }
+
+                  return (
+                    <table className="track-table" style={{ width: '100%' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 40, textAlign: 'center' }}>#</th>
+                          <th>Title</th>
+                          <th style={{ width: 72, textAlign: 'right' }}>Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedAlbum.tracks.map((t, idx) => (
+                          <tr
+                            key={t.id || t.path || idx}
+                            onClick={() => handlePlayTrackFromAlbum(t, selectedAlbum.tracks)}
+                            style={{ cursor: 'pointer', transition: 'background 0.2s' }}
+                          >
+                            <td style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
+                              {getTrackNumber(t) || idx + 1}
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>{t.title || '—'}</div>
+                              <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.artist || '—'}</div>
+                            </td>
+                            <td style={{ textAlign: 'right', color: 'var(--text-dim)', fontSize: 13 }}>
+                              {fmt(t.duration)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+                })()}
               </div>
             </motion.div>
           </motion.div>

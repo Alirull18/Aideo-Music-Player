@@ -91,7 +91,6 @@ export function Visualizer({ mode: propMode }: VisualizerProps) {
       ctx.clearRect(0, 0, width, height);
 
       if (playbackStatus !== 'Playing') {
-        animationId = requestAnimationFrame(render);
         return;
       }
 

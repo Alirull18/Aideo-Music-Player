@@ -1,10 +1,11 @@
-import { useState, useEffect, memo, useRef } from 'react';
+import { useState, useEffect, memo, useRef, useMemo } from 'react';
 import { useStore, Track } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers } from 'lucide-react';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, ChevronDown, Flame, Disc } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { YoutubeMix } from '../store/types';
 
@@ -312,11 +313,12 @@ const pendingArtRequests = new Map<string, Promise<any>>();
 // Helper to get premium CSS class for recommendation source badges
 function getBadgeClass(source: string) {
   const src = source.toLowerCase();
+  if (src.includes('similar to') || src.includes('collaborative')) return 'badge-lastfm';
+  if (src.includes('fans of') || src.includes('from ') || src.includes('favorites') || src.includes('favourite')) return 'badge-favorites';
   if (src.includes('listenbrainz')) return 'badge-listenbrainz';
   if (src.includes('last.fm')) return 'badge-lastfm';
-  if (src.includes('favorites') || src.includes('favourite')) return 'badge-favorites';
-  if (src.includes('youtube') || src.includes('trending') || src.includes('global')) return 'badge-youtube';
-  if (src.includes('•') || src.includes('recently played') || src.includes('recent') || src.includes('γçó') || src.includes('gçó')) return 'badge-recent';
+  if (src.includes('youtube') || src.includes('trending') || src.includes('global') || src.includes('radio')) return 'badge-youtube';
+  if (src.includes('discovery') || src.includes('genre') || src.includes('top ') || src.includes('•') || src.includes('recently played') || src.includes('recent') || src.includes('γçó') || src.includes('gçó')) return 'badge-recent';
   return 'badge-default';
 }
 
@@ -376,7 +378,8 @@ export function AideoView() {
     playTrack, 
     setView, 
     playStream,
-    playback,
+    playbackCurrentTrack,
+    playbackStatus,
     currentTrack,
     pauseTrack,
     resumeTrack,
@@ -391,7 +394,30 @@ export function AideoView() {
     addToQueue,
     triggerAutoplayRadio,
     appMode
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    tracks: s.tracks,
+    playHistory: s.playHistory,
+    playCounts: s.playCounts,
+    playTrack: s.playTrack,
+    setView: s.setView,
+    playStream: s.playStream,
+    playbackCurrentTrack: s.playback.current_track,
+    playbackStatus: s.playback.status,
+    currentTrack: s.currentTrack,
+    pauseTrack: s.pauseTrack,
+    resumeTrack: s.resumeTrack,
+    generateSmartMix: s.generateSmartMix,
+    showSmartMixWidget: s.showSmartMixWidget,
+    discoveryData: s.discoveryData,
+    setDiscoveryData: s.setDiscoveryData,
+    isLoadingRecs: s.isLoadingRecs,
+    setIsLoadingRecs: s.setIsLoadingRecs,
+    activeDiscoveryTab: s.activeDiscoveryTab,
+    setActiveDiscoveryTab: s.setActiveDiscoveryTab,
+    addToQueue: s.addToQueue,
+    triggerAutoplayRadio: s.triggerAutoplayRadio,
+    appMode: s.appMode,
+  })));
   const [greeting, setGreeting] = useState('Good morning');
   const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
   const isFetchingRef = useRef(false);
@@ -417,6 +443,10 @@ export function AideoView() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [artistProfile, setArtistProfile] = useState<any | null>(null);
+  const [artistActiveTab, setArtistActiveTab] = useState<'popular' | 'all' | 'library'>('popular');
+  const [artistDiscography, setArtistDiscography] = useState<any[]>([]);
+  const [isLoadingDiscography, setIsLoadingDiscography] = useState(false);
+  const [artistSongFilter, setArtistSongFilter] = useState('');
   const [resolvingTrackId, setResolvingTrackId] = useState<string | null>(null);
   const [showFullBio, setShowFullBio] = useState(false);
   const [artistHeroImage, setArtistHeroImage] = useState<string | null>(null);
@@ -456,6 +486,11 @@ export function AideoView() {
 
   useEffect(() => {
     if (artistProfile && artistProfile.name) {
+      setArtistActiveTab('popular');
+      setArtistSongFilter('');
+      setArtistDiscography([]);
+      setIsLoadingDiscography(true);
+
       // Fetch artist hero image (using top song or album cover)
       fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(artistProfile.name)}&media=music&entity=album&limit=1`)
         .then(res => res.json())
@@ -468,8 +503,22 @@ export function AideoView() {
           }
         })
         .catch(() => setArtistHeroImage(null));
+
+      // Fetch full pristine studio discography & all releases from YouTube Music
+      invoke<any[]>('get_artist_discography', { artist: artistProfile.name })
+        .then((tracks) => {
+          setArtistDiscography(tracks || []);
+        })
+        .catch((err) => {
+          console.warn('Failed to load artist discography:', err);
+        })
+        .finally(() => {
+          setIsLoadingDiscography(false);
+        });
     } else {
       setArtistHeroImage(null);
+      setArtistDiscography([]);
+      setArtistSongFilter('');
     }
   }, [artistProfile]);
 
@@ -701,18 +750,24 @@ export function AideoView() {
       // A. Load ListenBrainz collaborative filtering recommendations if connected
       if (isLbConnected && (!currentStore.listenbrainzRecs || currentStore.listenbrainzRecs.length === 0)) {
         try {
-          await currentStore.fetchListenbrainzDashboard();
+          await Promise.race([
+            currentStore.fetchListenbrainzDashboard(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('LB timeout')), 2000))
+          ]);
         } catch (e) {
-          console.error('Failed to auto-fetch ListenBrainz dashboard', e);
+          console.warn('ListenBrainz dashboard timed out or failed:', e);
         }
       }
 
       // B. Load Last.fm personalized top artists if connected
       if (isLfmConnected && (!currentStore.lastfmTopArtists || currentStore.lastfmTopArtists.length === 0)) {
         try {
-          await currentStore.fetchLastfmDashboard();
+          await Promise.race([
+            currentStore.fetchLastfmDashboard(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('LFM timeout')), 2000))
+          ]);
         } catch (e) {
-          console.error('Failed to auto-fetch Last.fm dashboard', e);
+          console.warn('Last.fm dashboard timed out or failed:', e);
         }
       }
 
@@ -893,9 +948,9 @@ export function AideoView() {
   };
 
   const handleTogglePreview = async (track: any) => {
-    const isCurrentTrack = playback.current_track === track.url;
-    const isPlaying = isCurrentTrack && playback.status === 'Playing';
-    const isPaused = isCurrentTrack && playback.status === 'Paused';
+    const isCurrentTrack = playbackCurrentTrack === track.url;
+    const isPlaying = isCurrentTrack && playbackStatus === 'Playing';
+    const isPaused = isCurrentTrack && playbackStatus === 'Paused';
 
     if (isPlaying) {
       window.dispatchEvent(new CustomEvent('ui-toast', { 
@@ -1286,7 +1341,30 @@ export function AideoView() {
   // Calculate total play count summary
   const totalPlays = Object.values(playCounts).reduce((sum, count) => sum + count, 0);
 
+  const localArtistTracks = useMemo(() => {
+    if (!artistProfile?.name) return [];
+    const target = artistProfile.name.toLowerCase().trim();
+    return tracks.filter(t => t.artist?.toLowerCase().trim() === target || t.artist?.toLowerCase().includes(target));
+  }, [artistProfile?.name, tracks]);
 
+  const filteredTopTracks = useMemo(() => {
+    const list = artistProfile?.top_tracks || [];
+    if (!artistSongFilter.trim()) return list;
+    const q = artistSongFilter.toLowerCase().trim();
+    return list.filter((t: any) => (t.name || '').toLowerCase().includes(q));
+  }, [artistProfile?.top_tracks, artistSongFilter]);
+
+  const filteredDiscography = useMemo(() => {
+    if (!artistSongFilter.trim()) return artistDiscography;
+    const q = artistSongFilter.toLowerCase().trim();
+    return artistDiscography.filter((t: any) => (t.title || '').toLowerCase().includes(q) || (t.artist || '').toLowerCase().includes(q));
+  }, [artistDiscography, artistSongFilter]);
+
+  const filteredLocalTracks = useMemo(() => {
+    if (!artistSongFilter.trim()) return localArtistTracks;
+    const q = artistSongFilter.toLowerCase().trim();
+    return localArtistTracks.filter((t: any) => (t.title || '').toLowerCase().includes(q));
+  }, [localArtistTracks, artistSongFilter]);
 
   const renderTrackCarousel = (tracksList: any[]) => {
     if (!tracksList || tracksList.length === 0) return null;
@@ -1317,12 +1395,12 @@ export function AideoView() {
                       className="discovery-grid-play-circle"
                       onClick={() => handleTogglePreview(track)}
                       title={
-                        playback.current_track === track.url && playback.status === 'Playing'
+                        playbackCurrentTrack === track.url && playbackStatus === 'Playing'
                           ? "Pause preview"
                           : "Stream online preview"
                       }
                     >
-                      {playback.current_track === track.url && playback.status === 'Playing' ? (
+                      {playbackCurrentTrack === track.url && playbackStatus === 'Playing' ? (
                         <Pause size={14} fill="currentColor" />
                       ) : (
                         <Play size={14} fill="currentColor" style={{ marginLeft: 1 }} />
@@ -1425,12 +1503,12 @@ export function AideoView() {
                       className="discovery-play-circle"
                       onClick={() => handleTogglePreview(track)}
                       title={
-                        playback.current_track === track.url && playback.status === 'Playing'
+                        playbackCurrentTrack === track.url && playbackStatus === 'Playing'
                           ? "Pause preview"
                           : "Stream online preview"
                       }
                     >
-                      {playback.current_track === track.url && playback.status === 'Playing' ? (
+                      {playbackCurrentTrack === track.url && playbackStatus === 'Playing' ? (
                         <Pause size={14} fill="currentColor" />
                       ) : (
                         <Play size={14} fill="currentColor" style={{ marginLeft: 1 }} />
@@ -2044,42 +2122,239 @@ export function AideoView() {
                 </div>
               </div>
 
-              {/* Popular Tracks Section */}
-              <div>
-                <h3 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', marginBottom: 16 }}>Popular Songs</h3>
-                <div style={{
-                  background: 'var(--glass)',
-                  border: '1px solid var(--glass-border)',
-                  borderRadius: 20,
-                  overflow: 'hidden',
-                  backdropFilter: 'blur(20px)'
-                }}>
-                  {artistProfile.top_tracks && artistProfile.top_tracks.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      {artistProfile.top_tracks.map((t: any, idx: number) => (
-                        <PopularTrackRow
-                          key={`top-track-${idx}`}
-                          track={t}
-                          artistName={artistProfile.name}
-                          idx={idx}
-                          resolvingTrackId={resolvingTrackId}
-                          downloadingIds={downloadingIds}
-                          downloadedIds={downloadedIds}
-                          copiedId={copiedId}
-                          handlePlayPopularTrack={handlePlayPopularTrack}
-                          handleOpenWebBypassForPopular={handleOpenWebBypassForPopular}
-                          handleDownloadPopularTrack={handleDownloadPopularTrack}
-                          formatNumber={formatNumber}
-                          totalTracks={artistProfile.top_tracks.length}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)' }}>
-                      No popular tracks found for this artist.
-                    </div>
-                  )}
+              {/* Discography & Tracks Navigation */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                  {/* Tabs */}
+                  <div style={{ display: 'flex', gap: 6, background: 'rgba(255, 255, 255, 0.03)', padding: 4, borderRadius: 14, border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <button
+                      onClick={() => setArtistActiveTab('popular')}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 10,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: 'none',
+                        background: artistActiveTab === 'popular' ? 'var(--accent)' : 'transparent',
+                        color: artistActiveTab === 'popular' ? '#fff' : 'var(--text-dim)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Flame size={14} />
+                      Popular ({artistProfile.top_tracks?.length || 0})
+                    </button>
+
+                    <button
+                      onClick={() => setArtistActiveTab('all')}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 10,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: 'none',
+                        background: artistActiveTab === 'all' ? 'var(--accent)' : 'transparent',
+                        color: artistActiveTab === 'all' ? '#fff' : 'var(--text-dim)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Disc size={14} />
+                      All Releases & Songs ({artistDiscography.length || (isLoadingDiscography ? '...' : 0)})
+                    </button>
+
+                    {localArtistTracks.length > 0 && (
+                      <button
+                        onClick={() => setArtistActiveTab('library')}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 10,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          border: 'none',
+                          background: artistActiveTab === 'library' ? 'var(--accent)' : 'transparent',
+                          color: artistActiveTab === 'library' ? '#fff' : 'var(--text-dim)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6
+                        }}
+                      >
+                        <Music size={14} />
+                        In Library ({localArtistTracks.length})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Search/Filter within Artist Songs */}
+                  <div style={{ position: 'relative', minWidth: 260, flex: '1 1 260px', maxWidth: 400 }}>
+                    <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                    <input
+                      type="text"
+                      placeholder={`Filter all songs by ${artistProfile.name} (e.g. 'de do dri', b-sides)...`}
+                      value={artistSongFilter}
+                      onChange={e => setArtistSongFilter(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px 8px 34px',
+                        borderRadius: 12,
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        color: '#fff',
+                        fontSize: 12,
+                        outline: 'none',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                    {artistSongFilter && (
+                      <button
+                        onClick={() => setArtistSongFilter('')}
+                        style={{
+                          position: 'absolute',
+                          right: 8,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-dim)',
+                          cursor: 'pointer',
+                          padding: 2,
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Tab Contents */}
+                {artistActiveTab === 'popular' && (
+                  <div style={{
+                    background: 'var(--glass)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 20,
+                    overflow: 'hidden',
+                    backdropFilter: 'blur(20px)'
+                  }}>
+                    {filteredTopTracks && filteredTopTracks.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        {filteredTopTracks.map((t: any, idx: number) => (
+                          <PopularTrackRow
+                            key={`top-track-${idx}`}
+                            track={t}
+                            artistName={artistProfile.name}
+                            idx={idx}
+                            resolvingTrackId={resolvingTrackId}
+                            downloadingIds={downloadingIds}
+                            downloadedIds={downloadedIds}
+                            copiedId={copiedId}
+                            handlePlayPopularTrack={handlePlayPopularTrack}
+                            handleOpenWebBypassForPopular={handleOpenWebBypassForPopular}
+                            handleDownloadPopularTrack={handleDownloadPopularTrack}
+                            formatNumber={formatNumber}
+                            totalTracks={filteredTopTracks.length}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                        <span>No tracks matched "{artistSongFilter}" in Popular Hits.</span>
+                        {artistDiscography.length > 0 && (
+                          <button
+                            onClick={() => setArtistActiveTab('all')}
+                            style={{
+                              background: 'var(--accent)',
+                              border: 'none',
+                              color: '#fff',
+                              padding: '6px 16px',
+                              borderRadius: 12,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Search across All Releases & Discography
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {artistActiveTab === 'all' && (
+                  <div>
+                    {isLoadingDiscography ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px', color: 'var(--text-dim)', background: 'var(--glass)', borderRadius: 20 }}>
+                        <Loader2 className="spin" size={28} style={{ marginBottom: 10, color: 'var(--accent)' }} />
+                        <span style={{ fontSize: 13 }}>Loading full discography, singles & b-sides for {artistProfile.name}...</span>
+                      </div>
+                    ) : filteredDiscography.length > 0 ? (
+                      renderTrackCarousel(filteredDiscography)
+                    ) : (
+                      <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)', background: 'var(--glass)', borderRadius: 16 }}>
+                        No songs found in discography matching "{artistSongFilter}".
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {artistActiveTab === 'library' && (
+                  <div style={{
+                    background: 'var(--glass)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 20,
+                    overflow: 'hidden',
+                    backdropFilter: 'blur(20px)'
+                  }}>
+                    {filteredLocalTracks.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        {filteredLocalTracks.map((t, idx) => (
+                          <div
+                            key={t.id || t.path}
+                            onClick={() => playTrack(t)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              padding: '12px 20px',
+                              borderBottom: idx === filteredLocalTracks.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.04)',
+                              cursor: 'pointer',
+                              gap: 16
+                            }}
+                            className="dropdown-item-hover"
+                          >
+                            <div style={{ width: 24, fontSize: 13, fontWeight: 700, color: 'var(--text-dim)', textAlign: 'center' }}>
+                              {idx + 1}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {t.title}
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                                {t.album || 'Unknown Album'}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                              {fmt(t.duration)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)' }}>
+                        No local tracks found in your library for {artistProfile.name}.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ) : searchResults.length > 0 ? (
@@ -2321,34 +2596,72 @@ export function AideoView() {
                             </span>
                           </div>
                         )}
-                        {filteredRecs.length > visibleRecsCount && (
-                          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                        {filteredRecs.length > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 28, flexWrap: 'wrap' }}>
+                            {filteredRecs.length > visibleRecsCount ? (
+                              <button
+                                onClick={() => setVisibleRecsCount(prev => prev + 15)}
+                                style={{
+                                  background: 'var(--accent)',
+                                  border: 'none',
+                                  color: '#fff',
+                                  padding: '10px 24px',
+                                  borderRadius: 24,
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  boxShadow: '0 4px 16px rgba(139, 92, 246, 0.25)'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                  e.currentTarget.style.boxShadow = '0 6px 20px rgba(139, 92, 246, 0.35)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.transform = 'none';
+                                  e.currentTarget.style.boxShadow = '0 4px 16px rgba(139, 92, 246, 0.25)';
+                                }}
+                              >
+                                <ChevronDown size={14} />
+                                Show More Recommendations ({Math.min(visibleRecsCount, filteredRecs.length)} of {filteredRecs.length})
+                              </button>
+                            ) : null}
+
                             <button
-                              onClick={() => setVisibleRecsCount(prev => prev + 15)}
+                              onClick={() => fetchRecommendations(true)}
+                              disabled={isRefreshingRecs || isLoadingRecs}
                               style={{
-                                background: 'rgba(255, 255, 255, 0.03)',
-                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                background: 'rgba(255, 255, 255, 0.04)',
+                                border: '1px solid rgba(255, 255, 255, 0.1)',
                                 color: '#fff',
-                                padding: '10px 24px',
-                                borderRadius: 20,
+                                padding: '10px 20px',
+                                borderRadius: 24,
                                 fontSize: 12,
                                 fontWeight: 700,
-                                cursor: 'pointer',
+                                cursor: isRefreshingRecs ? 'wait' : 'pointer',
                                 transition: 'all 0.2s',
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: 6
+                                gap: 8
                               }}
                               onMouseEnter={(e) => {
-                                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
-                                e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
+                                if (!isRefreshingRecs) {
+                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                                }
                               }}
                               onMouseLeave={(e) => {
-                                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                                if (!isRefreshingRecs) {
+                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                                }
                               }}
                             >
-                              Load More Recommendations
+                              <Sparkles size={14} className={isRefreshingRecs ? "spin" : ""} color="var(--accent)" />
+                              {isRefreshingRecs ? "Finding New Tracks..." : "Discover More Fresh Tracks"}
                             </button>
                           </div>
                         )}
@@ -2362,7 +2675,15 @@ export function AideoView() {
                   })()}
                 </motion.div>
               </div>
-            ) : null}
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 180, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20, padding: 24, textAlign: 'center' }}>
+                <Sparkles size={24} color="var(--accent)" style={{ marginBottom: 8 }} />
+                <p style={{ margin: '0 0 12px 0', fontSize: 13 }}>Personalized discovery mixes are ready to be curated.</p>
+                <button className="btn btn-primary" onClick={() => fetchRecommendations(true)} style={{ padding: '8px 16px', fontSize: 12 }}>
+                  Load Recommendations
+                </button>
+              </div>
+            )}
           </section>
           <section className="aideo-section">
             <h2 className="aideo-sec-title">Quick Recap</h2>

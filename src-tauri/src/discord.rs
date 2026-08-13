@@ -5,37 +5,64 @@ use std::time::Duration;
 use std::thread;
 use lazy_static::lazy_static;
 
-// Placeholder Client ID - You can create your own at discord.com/developers
+// Client ID for Aideo Music Player
 const DISCORD_CLIENT_ID: &str = "1504408732203745301"; 
 
 lazy_static! {
     static ref DISCORD_CLIENT: Mutex<Option<DiscordIpcClient>> = Mutex::new(None);
     static ref IS_CONNECTING: AtomicBool = AtomicBool::new(false);
+    static ref IS_ENABLED: AtomicBool = AtomicBool::new(false);
     static ref LAST_DETAILS: Mutex<Option<String>> = Mutex::new(None);
     static ref LAST_STATE: Mutex<Option<String>> = Mutex::new(None);
     static ref LAST_IS_PLAYING: Mutex<bool> = Mutex::new(false);
 }
 
-pub fn init_discord() {
-    println!("[Discord] Initializing Discord RPC...");
-    trigger_reconnection();
+pub fn set_enabled(enabled: bool) {
+    println!("[Discord] set_enabled: {}", enabled);
+    IS_ENABLED.store(enabled, Ordering::SeqCst);
+    if enabled {
+        trigger_reconnection();
+    } else {
+        // Disconnect immediately and release IPC client
+        IS_CONNECTING.store(false, Ordering::SeqCst);
+        let mut global_client = crate::safe_lock(&DISCORD_CLIENT);
+        if let Some(mut client) = global_client.take() {
+            let _ = client.clear_activity();
+            let _ = client.close();
+        }
+    }
 }
 
 fn trigger_reconnection() {
+    if !IS_ENABLED.load(Ordering::SeqCst) {
+        return;
+    }
+
     if IS_CONNECTING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
         thread::spawn(|| {
             println!("[Discord] Spawning background reconnection loop...");
             let mut attempts = 0;
             const MAX_ATTEMPTS: u32 = 30; // 5 minutes total (30 * 10 seconds)
             loop {
+                if !IS_ENABLED.load(Ordering::SeqCst) {
+                    println!("[Discord] RPC disabled by user. Terminating connection search.");
+                    IS_CONNECTING.store(false, Ordering::SeqCst);
+                    break;
+                }
+
                 attempts += 1;
                 println!("[Discord] Attempting to connect with ID: {} (attempt {}/{})", DISCORD_CLIENT_ID, attempts, MAX_ATTEMPTS);
                 match DiscordIpcClient::new(DISCORD_CLIENT_ID) {
                     Ok(mut client) => {
                         match client.connect() {
                             Ok(_) => {
+                                if !IS_ENABLED.load(Ordering::SeqCst) {
+                                    let _ = client.close();
+                                    IS_CONNECTING.store(false, Ordering::SeqCst);
+                                    break;
+                                }
                                 println!("[Discord] Connected Successfully!");
-                                 {
+                                {
                                     let mut global_client = crate::safe_lock(&DISCORD_CLIENT);
                                     *global_client = Some(client);
                                 }
@@ -61,8 +88,8 @@ fn trigger_reconnection() {
                     }
                 }
                 
-                if attempts >= MAX_ATTEMPTS {
-                    println!("[Discord] Max reconnection attempts ({}) reached. Stopping background loop.", MAX_ATTEMPTS);
+                if attempts >= MAX_ATTEMPTS || !IS_ENABLED.load(Ordering::SeqCst) {
+                    println!("[Discord] Stopping background connection loop (attempts: {}, enabled: {}).", attempts, IS_ENABLED.load(Ordering::SeqCst));
                     IS_CONNECTING.store(false, Ordering::SeqCst);
                     break;
                 }
@@ -73,6 +100,10 @@ fn trigger_reconnection() {
 }
 
 fn update_presence_internal(details: &str, state: &str, is_playing: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if !IS_ENABLED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
     let mut global_client = crate::safe_lock(&DISCORD_CLIENT);
     if let Some(client) = global_client.as_mut() {
         println!("[Discord] Updating status: {} - {}", details, state);
@@ -113,6 +144,10 @@ pub fn update_presence(details: &str, state: &str, is_playing: bool) {
         *crate::safe_lock(&LAST_IS_PLAYING) = is_playing;
     }
 
+    if !IS_ENABLED.load(Ordering::SeqCst) {
+        return;
+    }
+
     // 2. Try updating
     match update_presence_internal(details, state, is_playing) {
         Ok(_) => {}
@@ -130,7 +165,6 @@ pub fn update_presence(details: &str, state: &str, is_playing: bool) {
     }
 }
 
-#[allow(dead_code)]
 pub fn clear_presence() {
     {
         *crate::safe_lock(&LAST_DETAILS) = None;

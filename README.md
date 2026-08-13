@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.9.4
+# 💎 Aideo Music Player v0.9.5
 
 **A High-Performance, Audiophile-Grade Desktop Music Engine with Smart Hardware Auto-Matching, Automatic Storage Management, Real-Time Lyric Translation, and Dynamic Aesthetics.**
 
@@ -61,56 +61,21 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## 📢 What's New: Latest Updates
+## ✨ What's New in v0.9.5
 
-Welcome to the latest version of Aideo! We've added powerful new features to give you a smoother, more immersive, and personalized listening experience:
+Version **0.9.5** delivers a major upgrade to music discovery, battery & CPU efficiency, full artist discography browsing, and seamless desktop multitasking:
 
----
+* 🧠 **Smarter AI Discovery Hub**: Enjoy 40–75+ accurate music recommendations tailored to your taste, with smart anti-collision verification that prevents unrelated songs with the same title from appearing.
+* 🚫 **Zero-Tolerance Slop Filter**: Search results and recommendations automatically filter out reaction videos, dance covers, and fancams—keeping your feed 100% focused on authentic music.
+* 🎵 **Complete Artist Discographies**: Explore an artist's full catalog with instant tabs for **🔥 Popular Hits**, **🎵 All Releases & Singles**, and **📁 In Library**, complete with a live in-profile search filter.
+* ⚡ **Whisper-Quiet 0% Idle Engine**: Visualizers, background timers, and lyric sweeps automatically sleep when audio is paused or minimized, saving laptop battery and eliminating idle CPU usage.
+* 📌 **Pinned Mini Player & Multi-Screen HUD**: Keep the Mini Player floating above games and work with the new **Always-on-Top Pin**, or enjoy borderless fullscreen on multi-monitor setups without cursor capture.
+* 🎨 **Adaptive Artwork & Ambient Blur**: Non-square album covers render in their authentic aspect ratio with dynamic, color-matched ambient blur backdrops.
+* 🎯 **Multi-Select & Bulk Actions**: Select multiple songs at once (`Ctrl + Click`, `Shift + Click`) to play, queue, favorite, or add them to playlists with a single click.
+* 🔄 **Resilient Reconnection & Auto-Updates**: Network dropouts automatically resume right where you left off, while background streaming helpers update seamlessly.
+* 🪟 **System Tray & Session Memory**: Keep audio playing when minimized to the Windows system tray. Aideo automatically restores your volume, tabs, and window layout on startup.
 
-### 📱 Live Scrolling Lyrics on Mobile (Aideo Connect)
-* **Real-Time Synced Lyrics on Your Phone**: Scan the QR code on your desktop player to open the Aideo companion on your smartphone or tablet—no app installation required!
-* **Karaoke-Style Auto-Scroll**: Watch lyrics smoothly glide along on your phone screen in perfect sync with the music.
-* **Tap to Seek from Phone**: Tap any lyric line on your phone to instantly jump playback on your computer straight to that line.
-
----
-
-### 🎚️ DJ-Style Audio Crossfade (0–10s)
-* **Smooth Transitions Between Songs**: Say goodbye to awkward pauses between tracks. Crossfade blends the end of the current song into the beginning of the next.
-* **Customizable Blend Duration**: Adjust the transition length anywhere from 0 seconds (instant clean cut) up to 10 seconds (long ambient blend) with convenient quick presets (`Off`, `2.5s Smooth`, `5.0s DJ`, `8.0s Ambient`).
-* **Easy Access**: Configure your crossfade settings directly from the Audio Control Center, Settings, or Aideo Lab.
-
----
-
-### 🎧 Instant A/B Sound Comparison Switch (Hot-key `[B]`)
-* **1-Key Sound Comparison**: Press the **`[B]`** key on your keyboard to instantly switch between **Pure Raw Audio** (bypassing all effects) and **Tuned DSP & Equalizer**.
-* **Zero Interruption**: Compare your custom audio enhancements and headphone calibrations in real-time without restarting or pausing the music.
-
----
-
-### 🌟 Fullscreen Ambient Glow & Distraction-Free Mode
-* **Dynamic Artwork Glow Aura**: Album cover art now casts a beautiful, ambient color glow that pulses gently with the song's energy.
-* **Smart Auto-Hiding Controls**: When you're relaxing in fullscreen, the mouse cursor and on-screen controls gently fade away after 3.5 seconds of inactivity.
-* **Quick Ambient Shortcuts**: Use your keyboard to control playback (`Space`), toggle stage layouts (`L`), cycle visualizers (`V`), switch lyric translations (`T`), toggle Romaji (`R`), and adjust volume/seek with arrow keys.
-
----
-
-### 📝 Mini-Player Lyric Ticker with Romaji & Translation
-* **Live Lyric Line in Mini-Player**: The pinned desktop Mini Player displays the current singing line right above the playback bar.
-* **Translation & Romaji Support**: Honors your language preferences to display Japanese Romaji pronunciations or English translations.
-* **Hover for Translation Breakdown**: Hover your mouse over the lyric line in the Mini Player to view a neat multi-line tooltip showing the original text, pronunciation, and translation together.
-
----
-
-### 🎯 1-Click Library Quick Filter Chips
-* **Instant Category Filtering**: Quickly browse your music collection with convenient 1-click filter pills: `All`, `❤️ Loved`, `✨ Hi-Res Lossless`, `💾 Local Files`, and `🌐 Web Streams`.
-* **Live Song Count Badges**: See exactly how many songs match each category at a glance (e.g., `Loved · 24`).
-* **Smart Reset**: Clear filters or search queries with a single tap.
-
----
-
-### ☁️ Safe Cloud Library Synchronization
-* **Reliable Favorite Songs Sync**: Your liked songs synchronize safely across multiple devices using cloud sync, so offline songs on other computers are never accidentally lost.
-* **Smooth Scrolling in Large Libraries**: Enjoy buttery-smooth scrolling with locked table columns and instant album art loading across all your playlists and streams.
+> 📖 *For the complete developer notes and deep technical details, see the [**v0.9.5 Release Notes**](docs/RELEASE_NOTES_v0.9.5.md).*
 
 ---
 
@@ -126,6 +91,7 @@ Control your music effortlessly from anywhere in the player with built-in hotkey
 | **`ArrowLeft`** | **Previous Track** | Return to the previous song |
 | **`ArrowUp`** | **Volume Up (+5%)** | Smoothly increase audio volume |
 | **`ArrowDown`** | **Volume Down (-5%)** | Smoothly decrease audio volume |
+| **`M`** | **Mute / Unmute** | Instantly silence or restore audio at previous volume |
 | **`B`** | **A/B Sound Compare** | Toggle between Pure Raw Audio and Tuned DSP/AutoEQ |
 | **Media Keys** | **Hardware Media** | Supports Windows keyboard media keys (Play, Next, Prev) |
 
@@ -149,7 +115,7 @@ Control your music effortlessly from anywhere in the player with built-in hotkey
 
 ## 🚀 Getting Started
 
-1. **Download**: Grab the latest release installer (`Aideo_0.9.4_x64_en-US.msi` or `.exe`) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+1. **Download**: Grab the latest release installer (`Aideo_0.9.5_x64_en-US.msi` or `.exe`) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
 2. **Install**: Run the Windows installer and launch Aideo.
 3. **Enjoy**: Add your music folder or connect Subsonic/Jellyfin cloud streaming to start listening!
 
@@ -159,7 +125,7 @@ Control your music effortlessly from anywhere in the player with built-in hotkey
 
 - **Frontend**: React 19, TypeScript, Framer Motion, Zustand, Lucide React
 - **Backend**: Rust, Tauri v2, Tokio, WASAPI
-- **Audio & DSP**: CPAL, Symphonia, Rubato Resampler, Hound 16-bit PCM Stream Mixer, Biquad Filter Array, EBU R128 LUFS Loudness Engine, DirectML ONNX Engine
+- **Audio & DSP**: CPAL, Symphonia, Rubato Resampler, Biquad Filter Array, EBU R128 LUFS Loudness Engine
 - **Database**: SQLite (via rusqlite), Supabase Cloud Sync
 - **Styling**: Vanilla CSS with custom glassmorphism design system
 

@@ -46,17 +46,86 @@ pub fn get_lrc_path(audio_path: &str) -> std::path::PathBuf {
     }
 }
 
-/// Finds a .lrc file next to the audio file or in AppData cache and parses it.
+/// Extracts embedded lyric tags from audio file (USLT, LYRICS, UNSYNCEDLYRICS)
+pub fn extract_embedded_lyrics(audio_path: &str) -> Option<String> {
+    let path = std::path::Path::new(audio_path);
+    if !path.exists() {
+        return None;
+    }
+
+    let file = std::fs::File::open(path).ok()?;
+    let mss = symphonia::core::io::MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = symphonia::core::probe::Hint::new();
+    if let Some(ext) = path.extension() {
+        hint.with_extension(&ext.to_string_lossy());
+    }
+
+    let mut probed = symphonia::default::get_probe()
+        .format(&hint, mss, &symphonia::core::formats::FormatOptions::default(), &symphonia::core::meta::MetadataOptions::default())
+        .ok()?;
+
+    if let Some(metadata) = probed.format.metadata().current() {
+        for tag in metadata.tags() {
+            if let Some(symphonia::core::meta::StandardTagKey::Lyrics) = tag.std_key {
+                let s = tag.value.to_string();
+                if !s.trim().is_empty() {
+                    return Some(s);
+                }
+            }
+            let key_upper = tag.key.to_uppercase();
+            if key_upper == "LYRICS" || key_upper == "UNSYNCEDLYRICS" || key_upper == "UNSYNCED LYRICS" || key_upper == "USLT" || key_upper == "SYLT" {
+                let s = tag.value.to_string();
+                if !s.trim().is_empty() {
+                    return Some(s);
+                }
+            }
+        }
+    }
+
+    if let Some(rev) = probed.metadata.get() {
+        if let Some(metadata) = rev.current() {
+            for tag in metadata.tags() {
+                if let Some(symphonia::core::meta::StandardTagKey::Lyrics) = tag.std_key {
+                    let s = tag.value.to_string();
+                    if !s.trim().is_empty() {
+                        return Some(s);
+                    }
+                }
+                let key_upper = tag.key.to_uppercase();
+                if key_upper == "LYRICS" || key_upper == "UNSYNCEDLYRICS" || key_upper == "UNSYNCED LYRICS" || key_upper == "USLT" || key_upper == "SYLT" {
+                    let s = tag.value.to_string();
+                    if !s.trim().is_empty() {
+                        return Some(s);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Finds a .lrc file next to the audio file, in AppData cache, or embedded in audio tags, and parses it.
 pub fn get_lyrics_for_track(audio_path: &str) -> Vec<LyricLine> {
     let lrc_path = get_lrc_path(audio_path);
-    if !lrc_path.exists() {
-        return Vec::new();
+    if lrc_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&lrc_path) {
+            let parsed = parse_lrc(&content);
+            if !parsed.is_empty() {
+                return parsed;
+            }
+        }
     }
-    let content = match std::fs::read_to_string(&lrc_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    parse_lrc(&content)
+
+    // Fallback: extract embedded lyrics from the audio file itself
+    if let Some(embedded) = extract_embedded_lyrics(audio_path) {
+        let parsed = parse_lrc(&embedded);
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+
+    Vec::new()
 }
 
 fn parse_line_words(line_start_secs: f64, text: &str) -> (String, Option<Vec<LyricWord>>) {

@@ -1,11 +1,29 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles, Wifi, Globe, Gauge, Database, Clock } from 'lucide-react';
 
 export function AudioControlCenter() {
-  const { dsp, setDSP, toggleDspAB, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry, sleepTimer, startSleepTimer, stopSleepTimer } = useStore();
+  const { dsp, setDSP, toggleDspAB, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry, sleepTimer, startSleepTimer, stopSleepTimer } = useStore(useShallow(s => ({
+    dsp: s.dsp,
+    setDSP: s.setDSP,
+    toggleDspAB: s.toggleDspAB,
+    resetProMode: s.resetProMode,
+    playback: s.playback,
+    toggleExclusive: s.toggleExclusive,
+    devices: s.devices,
+    currentDevice: s.currentDevice,
+    setAudioDevice: s.setAudioDevice,
+    showControlCenter: s.showControlCenter,
+    toggleControlCenter: s.toggleControlCenter,
+    fetchDevices: s.fetchDevices,
+    networkTelemetry: s.networkTelemetry,
+    sleepTimer: s.sleepTimer,
+    startSleepTimer: s.startSleepTimer,
+    stopSleepTimer: s.stopSleepTimer,
+  })));
   const [devOpen, setDevOpen] = useState(false);
 
   const fileRate = playback.file_rate || 44100;

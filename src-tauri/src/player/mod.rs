@@ -1758,16 +1758,6 @@ pub struct DSPState {
     pub crossfade_transition_duration: f32,
     pub stream_engine: String,
     pub lookahead_prebuffer_enabled: bool,
-
-    // Vocal Isolator & Karaoke
-    #[serde(default)]
-    pub vocal_isolator_enabled: bool,
-    #[serde(default)]
-    pub vocal_attenuation: f32,
-    #[serde(default)]
-    pub vocal_solo_mode: bool,
-    #[serde(default)]
-    pub pitch_semitones: i32,
 }
 fn find_ffmpeg_path() -> String {
 
@@ -1998,12 +1988,6 @@ impl Player {
             crossfade_transition_duration: 5.0,
             stream_engine: "yt-dlp".to_string(),
             lookahead_prebuffer_enabled: true,
-
-            // Vocal Isolator & Karaoke
-            vocal_isolator_enabled: false,
-            vocal_attenuation: 0.0,
-            vocal_solo_mode: false,
-            pitch_semitones: 0,
         }));
         let target_device = Arc::new(Mutex::new(None::<String>));
         let queue = Arc::new(Mutex::new(VecDeque::new()));

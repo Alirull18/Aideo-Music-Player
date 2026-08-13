@@ -25,7 +25,40 @@ export function LyricsPanel() {
     }
   };
   
-  // Interpolated timer for smooth 60fps word-by-word sweeping
+  // Auto Translation & Romaji on track change / startup when user has toggle enabled
+  useEffect(() => {
+    if (!currentTrack || lyrics.length === 0 || isTranslating) return;
+
+    const checkAndFetch = async () => {
+      if (showTranslation) {
+        const hasTranslation = lyrics.some(l => l.translation);
+        if (!hasTranslation) {
+          try {
+            await translateLyrics();
+          } catch (err) {
+            console.error('Auto-translation failed:', err);
+          }
+          return;
+        }
+      }
+
+      if (showRomaji) {
+        const hasRomaji = lyrics.some(l => l.romaji);
+        if (!hasRomaji) {
+          try {
+            await getRomaji();
+          } catch (err) {
+            console.error('Auto-romaji failed:', err);
+          }
+        }
+      }
+    };
+
+    checkAndFetch();
+  }, [currentTrack?.path, lyrics.length, showRomaji, showTranslation, isTranslating]);
+
+  // Syllable word-by-word sync detection: only run 60fps rAF timer if track has word-level karaoke data
+  const hasWordSync = useMemo(() => lyrics.some(l => l.words && l.words.length > 0), [lyrics]);
   const [smoothedTime, setSmoothedTime] = useState(playback.position_secs);
   const lastPositionRef = useRef(playback.position_secs);
   const lastTimeRef = useRef(performance.now());
@@ -33,11 +66,13 @@ export function LyricsPanel() {
   useEffect(() => {
     lastPositionRef.current = playback.position_secs;
     lastTimeRef.current = performance.now();
-    setSmoothedTime(playback.position_secs);
-  }, [playback.position_secs]);
+    if (hasWordSync) {
+      setSmoothedTime(playback.position_secs);
+    }
+  }, [playback.position_secs, hasWordSync]);
 
   useEffect(() => {
-    if (playback.status !== 'Playing') return;
+    if (!hasWordSync || playback.status !== 'Playing') return;
 
     let frameId: number;
     const update = () => {
@@ -50,9 +85,9 @@ export function LyricsPanel() {
 
     frameId = requestAnimationFrame(update);
     return () => cancelAnimationFrame(frameId);
-  }, [playback.status]);
+  }, [playback.status, hasWordSync]);
 
-  const currentTime = smoothedTime + lyricOffset / 1000;
+  const currentTime = (hasWordSync ? smoothedTime : playback.position_secs) + lyricOffset / 1000;
 
   const [lyricMode, setLyricMode] = useState<'lrc' | 'text'>(() => {
     return (localStorage.getItem('aideo-lyric-mode') as 'lrc' | 'text') || 'lrc';

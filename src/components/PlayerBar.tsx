@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
-import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2, Minimize2, Heart, ThumbsDown } from 'lucide-react';
+import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, Volume2, Volume1, VolumeX, SlidersHorizontal, X, ListMusic, Activity, Infinity as InfinityIcon, Maximize2, Minimize2, Heart, ThumbsDown } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { CastSelector } from './CastSelector';
 import { fmt, baseName, getStreamName } from '../utils';
@@ -19,7 +19,7 @@ const isRadioStream = (track: any): boolean => {
 
 export function PlayerBar() {
   const {
-    view, playback, currentDevice, coverArt, lyrics, lyricOffset,
+    view, playback, isMuted, toggleMute, currentDevice, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
     dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
@@ -246,8 +246,21 @@ export function PlayerBar() {
             HI-RES · {dsp.upsample_rate / 1000}kHz
           </span>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Volume2 size={16} color="var(--text-dim)" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            className="pb-btn pb-btn-vol"
+            onClick={toggleMute}
+            title={isMuted || playback.volume === 0 ? "Unmute (M)" : "Mute (M)"}
+            style={{ padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {isMuted || playback.volume === 0 ? (
+              <VolumeX size={16} color="var(--accent, #8b5cf6)" />
+            ) : playback.volume < 0.5 ? (
+              <Volume1 size={16} color="var(--text-dim)" />
+            ) : (
+              <Volume2 size={16} color="var(--text-dim)" />
+            )}
+          </button>
           <input className="vol-slider" type="range" min={0} max={1} step={0.01} style={{ width: 80 }}
             value={playback.volume} onChange={e => setVolume(+e.target.value)} />
         </div>

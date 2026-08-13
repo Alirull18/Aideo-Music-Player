@@ -275,5 +275,21 @@ export function cleanSearchQuery(artist: string | null | undefined, title: strin
   return { artist: cleanArtist, title: cleanTitle };
 }
 
+export function isStreamTrack(path?: string | null, format?: string | null): boolean {
+  if (!path) return false;
+  return (
+    path.startsWith('http://') ||
+    path.startsWith('https://') ||
+    path.startsWith('mms://') ||
+    path.startsWith('rtsp://') ||
+    format?.toUpperCase() === 'YOUTUBE DIRECT' ||
+    format?.toUpperCase() === 'TIDAL' ||
+    format?.toUpperCase() === 'SUBSONIC' ||
+    format?.toUpperCase() === 'JELLYFIN' ||
+    format?.toUpperCase() === 'STREAM' ||
+    format?.toUpperCase() === 'RADIO'
+  );
+}
+
 
 

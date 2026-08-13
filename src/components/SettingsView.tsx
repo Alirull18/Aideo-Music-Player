@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -88,7 +89,7 @@ export function SettingsView() {
     keepAwake, toggleKeepAwake,
     discordEnabled, toggleDiscord,
     lowSpecMode, toggleLowSpecMode,
-    dsp, setDSP, playback, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
+    dsp, setDSP, playbackExclusive, playbackBitPerfect, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
     listenbrainzToken, listenbrainzUsername, listenbrainzEnabled,
     validateAndSetListenbrainzToken, setListenbrainzToken, toggleListenbrainzScrobble,
     sidebarLastfmVisible, sidebarListenbrainzVisible,
@@ -106,8 +107,82 @@ export function SettingsView() {
     cacheSizeLimit, setCacheSizeLimit,
     discoverCastDevices,
     resetDislikedTracks,
-    colorScheme, setColorScheme, shortcuts, setShortcut
-  } = useStore();
+    colorScheme, setColorScheme, shortcuts, setShortcut,
+    albumArtFit, setAlbumArtFit
+  } = useStore(useShallow(s => ({
+    scanDirs: s.scanDirs,
+    addScanDir: s.addScanDir,
+    removeScanDir: s.removeScanDir,
+    scanLibrary: s.scanLibrary,
+    scanStatus: s.scanStatus,
+    toggleScrobble: s.toggleScrobble,
+    setLastFmSession: s.setLastFmSession,
+    lastfmSessionKey: s.lastfmSessionKey,
+    lastfmToken: s.lastfmToken,
+    scrobbleThreshold: s.scrobbleThreshold,
+    setScrobbleThreshold: s.setScrobbleThreshold,
+    keepAwake: s.keepAwake,
+    toggleKeepAwake: s.toggleKeepAwake,
+    discordEnabled: s.discordEnabled,
+    toggleDiscord: s.toggleDiscord,
+    lowSpecMode: s.lowSpecMode,
+    toggleLowSpecMode: s.toggleLowSpecMode,
+    dsp: s.dsp,
+    setDSP: s.setDSP,
+    playbackExclusive: s.playback.exclusive,
+    playbackBitPerfect: s.playback.bit_perfect,
+    toggleExclusive: s.toggleExclusive,
+    devices: s.devices,
+    currentDevice: s.currentDevice,
+    setAudioDevice: s.setAudioDevice,
+    fetchDevices: s.fetchDevices,
+    listenbrainzToken: s.listenbrainzToken,
+    listenbrainzUsername: s.listenbrainzUsername,
+    listenbrainzEnabled: s.listenbrainzEnabled,
+    validateAndSetListenbrainzToken: s.validateAndSetListenbrainzToken,
+    setListenbrainzToken: s.setListenbrainzToken,
+    toggleListenbrainzScrobble: s.toggleListenbrainzScrobble,
+    sidebarLastfmVisible: s.sidebarLastfmVisible,
+    sidebarListenbrainzVisible: s.sidebarListenbrainzVisible,
+    toggleSidebarLastfmVisible: s.toggleSidebarLastfmVisible,
+    toggleSidebarListenbrainzVisible: s.toggleSidebarListenbrainzVisible,
+    liquidBackgroundEnabled: s.liquidBackgroundEnabled,
+    toggleLiquidBackground: s.toggleLiquidBackground,
+    showSmartMixWidget: s.showSmartMixWidget,
+    toggleSmartMixWidget: s.toggleSmartMixWidget,
+    notificationsEnabled: s.notificationsEnabled,
+    developerNotifications: s.developerNotifications,
+    toggleNotificationsEnabled: s.toggleNotificationsEnabled,
+    toggleDeveloperNotifications: s.toggleDeveloperNotifications,
+    subsonicUrl: s.subsonicUrl,
+    subsonicUser: s.subsonicUser,
+    subsonicPass: s.subsonicPass,
+    subsonicConnected: s.subsonicConnected,
+    subsonicLoading: s.subsonicLoading,
+    jellyfinUrl: s.jellyfinUrl,
+    jellyfinConnected: s.jellyfinConnected,
+    jellyfinLoading: s.jellyfinLoading,
+    connectSubsonic: s.connectSubsonic,
+    disconnectSubsonic: s.disconnectSubsonic,
+    connectJellyfin: s.connectJellyfin,
+    disconnectJellyfin: s.disconnectJellyfin,
+    autoplayDiscoveryLevel: s.autoplayDiscoveryLevel,
+    setAutoplayDiscoveryLevel: s.setAutoplayDiscoveryLevel,
+    autoplayAlgorithm: s.autoplayAlgorithm,
+    setAutoplayAlgorithm: s.setAutoplayAlgorithm,
+    setShowOnboarding: s.setShowOnboarding,
+    setOnboardingCompleted: s.setOnboardingCompleted,
+    cacheSizeLimit: s.cacheSizeLimit,
+    setCacheSizeLimit: s.setCacheSizeLimit,
+    discoverCastDevices: s.discoverCastDevices,
+    resetDislikedTracks: s.resetDislikedTracks,
+    colorScheme: s.colorScheme,
+    setColorScheme: s.setColorScheme,
+    shortcuts: s.shortcuts,
+    setShortcut: s.setShortcut,
+    albumArtFit: s.albumArtFit,
+    setAlbumArtFit: s.setAlbumArtFit,
+  })));
 
   // Tab navigation State
   const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account' | 'shortcuts'>('appearance');
@@ -229,6 +304,9 @@ export function SettingsView() {
   const [autoplayLocal, setAutoplayLocal] = useState(() => {
     return localStorage.getItem('aideo_autoplay_local_for_cloud') === 'true';
   });
+  const [closeToTray, setCloseToTray] = useState(() => {
+    return localStorage.getItem('aideo_close_to_tray') === 'true';
+  });
 
   // Tab-specific reset handlers
   const resetAppearance = () => {
@@ -276,8 +354,8 @@ export function SettingsView() {
       spatial_haas_delay: 15.0,
       spatial_wet: 0.5
     });
-    if (playback.exclusive) await toggleExclusive();
-    if (playback.bit_perfect) await useStore.getState().toggleBitPerfect();
+    if (playbackExclusive) await toggleExclusive();
+    if (playbackBitPerfect) await useStore.getState().toggleBitPerfect();
     
     window.dispatchEvent(new CustomEvent('ui-toast', { 
       detail: { message: 'Audio hardware engine restored to bit-perfect flat!', type: 'success' } 
@@ -564,7 +642,8 @@ export function SettingsView() {
             { id: 'next', label: 'Next Track' },
             { id: 'prev', label: 'Previous Track' },
             { id: 'volumeUp', label: 'Volume Up' },
-            { id: 'volumeDown', label: 'Volume Down' }
+            { id: 'volumeDown', label: 'Volume Down' },
+            { id: 'mute', label: 'Mute / Unmute' }
           ].map(action => {
             const isRecording = recordingAction === action.id;
             return (
@@ -760,6 +839,59 @@ export function SettingsView() {
               checked={liquidBackgroundEnabled} 
               onChange={toggleLiquidBackground} 
             />
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'album-art-fit',
+      title: 'Album Art Aspect Ratio Handling',
+      description: 'Choose whether non-square artwork (singles, Japanese Obi covers, rectangular art) is displayed in full aspect fit with blurred ambient padding, or cropped to fill the square.',
+      keywords: 'album art artwork aspect ratio fit cover contain blur ambient padding obi singles rectangular appearance',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1, paddingRight: 24 }}>
+              <div className="settings-ctrl-title">Album Artwork Aspect Fit</div>
+              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
+                <strong>Aspect Fit (Contain with Ambient Blur)</strong> displays non-square covers completely without cropping and renders a smooth blurred ambient backdrop. <strong>Aspect Fill (Cover)</strong> crops the artwork to fill the entire square container.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, background: 'rgba(255, 255, 255, 0.05)', padding: 4, borderRadius: 10 }}>
+              <button
+                onClick={() => setAlbumArtFit('contain')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: albumArtFit === 'contain' ? 'var(--accent, #8b5cf6)' : 'transparent',
+                  color: albumArtFit === 'contain' ? 'white' : 'var(--text-dim)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Aspect Fit (Blur)
+              </button>
+              <button
+                onClick={() => setAlbumArtFit('cover')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: albumArtFit === 'cover' ? 'var(--accent, #8b5cf6)' : 'transparent',
+                  color: albumArtFit === 'cover' ? 'white' : 'var(--text-dim)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Aspect Fill (Cover)
+              </button>
+            </div>
           </div>
         </div>
       )
@@ -1812,13 +1944,13 @@ export function SettingsView() {
             <div style={{ flex: 1, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
                 <div className="settings-ctrl-title">Bit-Perfect Signal Pass</div>
-                <div className={`exclusive-toggle ${playback.bit_perfect ? 'active' : ''}`}
+                <div className={`exclusive-toggle ${playbackBitPerfect ? 'active' : ''}`}
                   onClick={() => useStore.getState().toggleBitPerfect()}
-                  style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.bit_perfect ? 'rgba(6, 182, 212, 0.08)' : 'rgba(0,0,0,0.2)', borderColor: playback.bit_perfect ? '#06b6d4' : '', cursor: 'pointer', transition: 'all 0.2s' }}>
+                  style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playbackBitPerfect ? 'rgba(6, 182, 212, 0.08)' : 'rgba(0,0,0,0.2)', borderColor: playbackBitPerfect ? '#06b6d4' : '', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>Bit-Perfect Bypass</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playback.bit_perfect ? '#06b6d4' : 'rgba(255,255,255,0.05)', color: playback.bit_perfect ? '#fff' : 'var(--text-dim)' }}>
-                      {playback.bit_perfect ? 'ACTIVE' : 'OFF'}
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackBitPerfect ? '#06b6d4' : 'rgba(255,255,255,0.05)', color: playbackBitPerfect ? '#fff' : 'var(--text-dim)' }}>
+                      {playbackBitPerfect ? 'ACTIVE' : 'OFF'}
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
@@ -1829,13 +1961,13 @@ export function SettingsView() {
 
               <div>
                 <div className="settings-ctrl-title">Exclusive Mode</div>
-                <div className={`exclusive-toggle ${playback.exclusive ? 'active' : ''}`} 
+                <div className={`exclusive-toggle ${playbackExclusive ? 'active' : ''}`} 
                   onClick={toggleExclusive} 
-                  style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.exclusive ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(0,0,0,0.2)', cursor: 'pointer', transition: 'all 0.2s' }}>
+                  style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playbackExclusive ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(0,0,0,0.2)', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>Exclusive Access</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playback.exclusive ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: playback.exclusive ? '#fff' : 'var(--text-dim)' }}>
-                      {playback.exclusive ? 'ON' : 'OFF'}
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackExclusive ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: playbackExclusive ? '#fff' : 'var(--text-dim)' }}>
+                      {playbackExclusive ? 'ON' : 'OFF'}
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
@@ -1845,7 +1977,7 @@ export function SettingsView() {
               </div>
 
               <AnimatePresence>
-                {playback.exclusive && (
+                {playbackExclusive && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
@@ -1913,6 +2045,23 @@ export function SettingsView() {
                   </div>
                 </div>
               </div>
+
+              <div>
+                <div className="settings-ctrl-title">EBU R128 & ReplayGain Normalization</div>
+                <div className={`exclusive-toggle ${dsp.r128_enabled ? 'active' : ''}`}
+                  onClick={() => setDSP({ r128_enabled: !dsp.r128_enabled, enabled: !dsp.r128_enabled ? true : dsp.enabled })}
+                  style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: dsp.r128_enabled ? 'rgba(59, 130, 246, 0.12)' : 'rgba(0,0,0,0.2)', borderColor: dsp.r128_enabled ? '#3b82f6' : '', cursor: 'pointer', transition: 'all 0.2s' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Loudness Normalization</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: dsp.r128_enabled ? '#3b82f6' : 'rgba(255,255,255,0.05)', color: dsp.r128_enabled ? '#fff' : 'var(--text-dim)' }}>
+                      {dsp.r128_enabled ? 'ACTIVE' : 'OFF'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
+                    Normalizes playback loudness across quiet and loud tracks to standard -14 LUFS / ReplayGain targets.
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1941,7 +2090,7 @@ export function SettingsView() {
                   }}
                   onClick={() => {
                     setDSP({ upsample_rate: rate });
-                    if (rate > 0 && playback.bit_perfect) {
+                    if (rate > 0 && playbackBitPerfect) {
                       useStore.getState().toggleBitPerfect();
                     }
                   }}
@@ -2466,6 +2615,41 @@ export function SettingsView() {
     },
 
     {
+      id: 'window-close-behavior',
+      title: 'Window Close & System Tray Integration',
+      description: 'Choose whether clicking the window close button minimizes Aideo to the system tray or exits the application.',
+      keywords: 'tray system minimize close window background taskbar trayicon exit',
+      tab: 'system',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1, paddingRight: 24 }}>
+              <div className="settings-ctrl-title">Minimize to System Tray on Close</div>
+              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
+                When enabled, clicking the window close (X) button will hide the window to the system tray so your music continues playing in the background. Re-launching Aideo or clicking the icon will restore the window.
+              </div>
+            </div>
+            <SlidingSwitch 
+              checked={closeToTray} 
+              onChange={async () => {
+                const newVal = !closeToTray;
+                setCloseToTray(newVal);
+                localStorage.setItem('aideo_close_to_tray', String(newVal));
+                try {
+                  await invoke('set_close_to_tray', { enabled: newVal });
+                } catch (e) {
+                  console.error('Failed to set close to tray:', e);
+                }
+                window.dispatchEvent(new CustomEvent('ui-toast', { 
+                  detail: { message: `Close Behavior set to: ${newVal ? 'Minimize to Tray' : 'Exit Application'}`, type: 'info' } 
+                }));
+              }} 
+            />
+          </div>
+        </div>
+      )
+    },
+    {
       id: 'cache-management',
       title: 'Cache and Storage Management',
       description: 'Clear temporary files, cached streaming audio files, and temporary url lookup parameters to reclaim local disk storage.',
@@ -2952,13 +3136,31 @@ function DependencyManagerPanel() {
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {dep.installed ? (
-                  <button 
-                    onClick={() => handleUninstall(dep.id)} 
-                    className="settings-btn settings-btn-danger" 
-                    style={{ fontSize: 11, padding: '6px 12px' }}
-                  >
-                    Uninstall
-                  </button>
+                  <>
+                    {dep.id === 'ytdlp' && (
+                      <button 
+                        onClick={async () => {
+                          try {
+                            await invoke('check_update_ytdlp');
+                            fetchStatus();
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="settings-btn" 
+                        style={{ fontSize: 11, padding: '6px 12px', background: 'rgba(var(--accent-rgb, 139, 92, 246), 0.15)', color: 'var(--accent, #8b5cf6)', border: '1px solid rgba(var(--accent-rgb, 139, 92, 246), 0.3)' }}
+                      >
+                        Check Updates
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => handleUninstall(dep.id)} 
+                      className="settings-btn settings-btn-danger" 
+                      style={{ fontSize: 11, padding: '6px 12px' }}
+                    >
+                      Uninstall
+                    </button>
+                  </>
                 ) : (
                   <button 
                     onClick={() => handleInstall(dep.id)} 

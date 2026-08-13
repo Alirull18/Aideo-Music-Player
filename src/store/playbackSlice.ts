@@ -1,8 +1,8 @@
 import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl } from '../utils';
+import { safeGetStorage, safeSetStorage } from '../utils/storage';
 
 let isPolling = false;
 let dspThrottleTimeout: any = null;
@@ -28,10 +28,6 @@ const performDspInvoke = async (dsp: any) => {
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   networkTelemetry: null,
-  activeStem: 'original',
-  stemLoading: false,
-  stemProgress: null,
-  currentStems: null,
   playback: {
     status: 'Stopped',
     current_track: (() => {
@@ -43,12 +39,32 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
     })(),
     position_secs: 0,
-    volume: 1.0,
+    volume: (() => {
+      try {
+        const saved = safeGetStorage('aideo_volume');
+        if (saved !== null) {
+          const parsed = parseFloat(saved);
+          if (!isNaN(parsed)) return Math.max(0, Math.min(1, parsed));
+        }
+      } catch {}
+      return 1.0;
+    })(),
     exclusive: false,
     bit_perfect: false,
     dev_rate: 0,
     driver_type: 'WASAPI'
   },
+  isMuted: false,
+  mutedPrevVolume: (() => {
+    try {
+      const saved = safeGetStorage('aideo_volume');
+      if (saved !== null) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed > 0) return Math.min(1, parsed);
+      }
+    } catch {}
+    return 1.0;
+  })(),
   dsp: {
     enabled: false,
     low_spec_mode: localStorage.getItem('aideo_low_spec') === 'true',
@@ -90,7 +106,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     convolution_wet: Number(localStorage.getItem('aideo_convolution_wet') || 0.5),
     subsonic_enabled: false,
     night_mode_enabled: false,
-    r128_enabled: false,
+    r128_enabled: localStorage.getItem('aideo_r128_enabled') === 'true',
     aideo_filter_enabled: localStorage.getItem('aideo_filter_enabled') === 'true',
     aideo_filter_room_size: Number(localStorage.getItem('aideo_filter_room_size') || 0.85),
     aideo_filter_bass_thump: Number(localStorage.getItem('aideo_filter_bass_thump') || 6.0),
@@ -101,11 +117,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     crossfade_transition_enabled: localStorage.getItem('aideo_crossfade_enabled') === 'true',
     crossfade_transition_duration: Number(localStorage.getItem('aideo_crossfade_duration') || 5.0),
     stream_engine: (localStorage.getItem('aideo_stream_engine') || 'yt-dlp') as 'yt-dlp' | 'reqwest',
-    lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false',
-    vocal_isolator_enabled: localStorage.getItem('aideo_vocal_isolator_enabled') === 'true',
-    vocal_attenuation: Number(localStorage.getItem('aideo_vocal_attenuation') || 0.0),
-    vocal_solo_mode: localStorage.getItem('aideo_vocal_solo_mode') === 'true',
-    pitch_semitones: Number(localStorage.getItem('aideo_pitch_semitones') || 0)
+    lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false'
   },
   devices: [],
   currentDevice: null,
@@ -214,9 +226,28 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   setVolume: async (vol: number) => {
     const clampedVol = Math.max(0, Math.min(1, vol));
     try {
+      if (clampedVol > 0) {
+        safeSetStorage('aideo_volume', String(clampedVol));
+      }
       await invoke('set_volume', { volume: clampedVol });
-      set(s => ({ playback: { ...s.playback, volume: clampedVol } }));
+      set(s => ({
+        playback: { ...s.playback, volume: clampedVol },
+        isMuted: clampedVol === 0 ? s.isMuted : false
+      }));
     } catch (e) { console.error(e); }
+  },
+
+  toggleMute: async () => {
+    const state = get();
+    if (state.isMuted) {
+      const restoreVol = state.mutedPrevVolume > 0 ? state.mutedPrevVolume : 0.5;
+      set({ isMuted: false });
+      await state.setVolume(restoreVol);
+    } else {
+      const currentVol = state.playback.volume;
+      set({ mutedPrevVolume: currentVol > 0 ? currentVol : 0.5, isMuted: true });
+      await state.setVolume(0);
+    }
   },
 
 
@@ -448,8 +479,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       'aideo_filter_dampening', 'preamp_gain', 'limiter_threshold', 'resampler_phase_mode',
       'auto_headroom', 'saturation_enabled', 'saturation_drive', 
       'crossfade_transition_enabled', 'crossfade_transition_duration',
-      'stream_engine', 'lookahead_prebuffer_enabled',
-      'vocal_isolator_enabled', 'vocal_attenuation', 'vocal_solo_mode', 'pitch_semitones'
+      'stream_engine', 'lookahead_prebuffer_enabled'
     ];
     const isActivatingDSP = dspKeys.some(key => {
       if (key === 'upsample_rate') {
@@ -534,6 +564,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_saturation_drive', String(full.saturation_drive));
     localStorage.setItem('aideo_crossfade_enabled', String(full.crossfade_transition_enabled));
     localStorage.setItem('aideo_crossfade_duration', String(full.crossfade_transition_duration));
+    localStorage.setItem('aideo_r128_enabled', String(full.r128_enabled));
     localStorage.setItem('aideo_stream_engine', full.stream_engine);
     localStorage.setItem('aideo_lookahead_prebuffer', String(full.lookahead_prebuffer_enabled));
 
@@ -594,120 +625,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     } catch (e) { console.error(e); }
   },
 
-  setVocalIsolation: (attenuation: number, soloMode?: boolean) => {
-    const current = get().dsp;
-    const isEnabled = attenuation > 0.001 || Boolean(soloMode);
-    const updated = {
-      ...current,
-      enabled: isEnabled || current.enabled,
-      vocal_isolator_enabled: isEnabled,
-      vocal_attenuation: attenuation,
-      vocal_solo_mode: soloMode !== undefined ? soloMode : current.vocal_solo_mode,
-    };
-    get().setDSP(updated);
-    localStorage.setItem('aideo_vocal_isolator_enabled', String(isEnabled));
-    localStorage.setItem('aideo_vocal_attenuation', String(attenuation));
-    if (soloMode !== undefined) {
-      localStorage.setItem('aideo_vocal_solo_mode', String(soloMode));
-    }
-  },
-
-  setPitchShift: (semitones: number) => {
-    const current = get().dsp;
-    const updated = {
-      ...current,
-      pitch_semitones: semitones,
-    };
-    get().setDSP(updated);
-    localStorage.setItem('aideo_pitch_semitones', String(semitones));
-  },
-
-  checkStemCache: async (trackPath: string) => {
-    if (!trackPath || trackPath.startsWith('http')) return null;
-    try {
-      const res: any = await invoke('get_stem_cache', { path: trackPath });
-      if (res) {
-        set({ currentStems: res });
-      }
-      return res;
-    } catch (e) {
-      console.error('get_stem_cache error:', e);
-      return null;
-    }
-  },
-
-  separateStems: async (trackPath: string) => {
-    set({ stemLoading: true, stemProgress: { percent: 0.05, stage: 'Initializing HTDemucs Neural Engine...' } });
-    let unlisten: any = null;
-    try {
-      unlisten = await listen('stem-split-progress', (event: any) => {
-        if (event.payload) {
-          set({ stemProgress: event.payload });
-        }
-      });
-      const res: any = await invoke('separate_track_stems', { path: trackPath });
-      set({ currentStems: res, stemLoading: false, stemProgress: null });
-      if (unlisten) unlisten();
-      return res;
-    } catch (e) {
-      set({ stemLoading: false, stemProgress: null });
-      if (unlisten) unlisten();
-      throw e;
-    }
-  },
-
-  setActiveStem: async (stem: 'original' | 'instrumental' | 'vocals') => {
-    const state = get();
-    const currentPath = state.playback.current_track;
-    if (!currentPath) return;
-
-    if (stem === 'original') {
-      set({ activeStem: 'original' });
-      const originalPath = state.currentStems?.track_path || currentPath;
-      if (originalPath && originalPath !== currentPath) {
-        const currentPos = state.playback.position_secs;
-        const tr: Track = state.tracks.find(t => t.path === originalPath) || {
-          id: state.currentTrack?.id || -1,
-          path: originalPath,
-          title: state.currentTrack?.title || '',
-          artist: state.currentTrack?.artist || '',
-          album: state.currentTrack?.album || '',
-          duration: state.currentTrack?.duration || 0,
-          format: 'FLAC',
-          lyric_offset: state.currentTrack?.lyric_offset || 0,
-          cover_url: state.currentTrack?.cover_url,
-        };
-        await state.playTrack(tr, false, false, undefined, currentPos);
-      }
-      return;
-    }
-
-    let stems = state.currentStems;
-    if (!stems || stems.track_path !== currentPath) {
-      stems = await state.separateStems(currentPath);
-    }
-
-    if (!stems) return;
-
-    set({ activeStem: stem });
-    const targetPath = stem === 'instrumental' ? stems.instrumental_path : stems.vocals_path;
-    if (targetPath) {
-      const currentPos = state.playback.position_secs;
-      const tr: Track = {
-        id: state.currentTrack?.id || -1,
-        path: targetPath,
-        title: state.currentTrack?.title || '',
-        artist: state.currentTrack?.artist || '',
-        album: state.currentTrack?.album || '',
-        duration: state.currentTrack?.duration || 0,
-        format: 'WAV',
-        lyric_offset: state.currentTrack?.lyric_offset || 0,
-        cover_url: state.currentTrack?.cover_url,
-      };
-      await state.playTrack(tr, false, false, undefined, currentPos);
-    }
-  },
-
   keepAwake: localStorage.getItem('aideo_keep_awake') === 'true',
   
   toggleKeepAwake: async () => {
@@ -721,10 +638,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   discordEnabled: localStorage.getItem('aideo_discord_enabled') !== 'false',
 
-  toggleDiscord: () => {
+  toggleDiscord: async () => {
     const nextState = !get().discordEnabled;
     set({ discordEnabled: nextState });
     localStorage.setItem('aideo_discord_enabled', String(nextState));
+    try {
+      await invoke('set_discord_enabled', { enabled: nextState });
+    } catch (e) {
+      console.error(e);
+    }
     if (!nextState) {
       invoke('clear_discord_presence').catch(console.error);
     } else {
@@ -736,12 +658,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       const ds: string[] = await invoke('get_audio_devices');
       set({ devices: ds });
+      const savedDev = localStorage.getItem('aideo_target_device');
+      if (savedDev && ds.includes(savedDev) && !get().currentDevice) {
+        await invoke('set_audio_device', { name: savedDev });
+        const devName = (savedDev === '[System Default Device]' || savedDev === 'Default Device' || savedDev === 'System Default Device') ? '' : savedDev;
+        set({ currentDevice: devName });
+      }
     } catch (e) { console.error(e); }
   },
 
   setAudioDevice: async (name: string) => {
     try {
       await invoke('set_audio_device', { name });
+      localStorage.setItem('aideo_target_device', name);
       const devName = (name === '[System Default Device]' || name === 'Default Device' || name === 'System Default Device') ? '' : name;
       set({ currentDevice: devName });
     } catch (e) { console.error(e); }

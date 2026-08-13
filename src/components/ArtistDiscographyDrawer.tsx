@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { X, Play, Shuffle, User, Disc, Music } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
+import { sortAlbumTracks } from '../utils/albumUtils';
 
 const coverArtCache = new Map<string, string | null>();
 const pendingArtRequests = new Map<string, Promise<any>>();
@@ -124,7 +125,11 @@ export function ArtistDiscographyDrawer({
       }
     });
 
-    return Array.from(map.values());
+    const result = Array.from(map.values());
+    result.forEach((group) => {
+      group.tracks = sortAlbumTracks(group.tracks);
+    });
+    return result;
   }, [artistTracks]);
 
   const totalDuration = useMemo(() => {

@@ -38,7 +38,6 @@ pub mod dependencies;
 pub mod chromecast;
 pub mod sonic_analyzer;
 pub mod remote_server;
-pub mod stem_engine;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -390,6 +389,11 @@ async fn mbz_get_cover_art(release_id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn set_discord_enabled(enabled: bool) {
+    discord::set_enabled(enabled);
+}
+
+#[tauri::command]
 fn update_discord_presence(details: String, state_str: String, is_playing: bool) {
     discord::update_presence(&details, &state_str, is_playing);
 }
@@ -413,22 +417,6 @@ fn get_dsp_state(state: State<'_, AppState>) -> Result<player::DSPState, String>
     let player = safe_lock(&state.player);
     let current = safe_lock(&player.dsp_state);
     Ok(current.clone())
-}
-
-// ── AI Stem Separation Commands ──────────────────────────────────────────
-#[tauri::command]
-fn get_stem_cache(path: String) -> Result<Option<stem_engine::StemResult>, String> {
-    Ok(stem_engine::check_cached_stems(&path))
-}
-
-#[tauri::command]
-async fn separate_track_stems(path: String, app: AppHandle) -> Result<stem_engine::StemResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        stem_engine::separate_track_stems(&path, &app, cancel_token)
-    })
-    .await
-    .map_err(|e| format!("Task execution error: {}", e))?
 }
 
 // ── Bulk Queue & ListenBrainz Commands ───────────────────────────────────────────
@@ -599,8 +587,8 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
         for track in all_scanned_tracks {
             if !db_paths.contains(&track.path) {
                 tx.execute(
-                    "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, track_number, disc_number)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     rusqlite::params![
                         track.path,
                         track.title,
@@ -609,6 +597,20 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
                         track.duration,
                         track.format,
                         track.lyric_offset,
+                        track.track_number,
+                        track.disc_number,
+                    ],
+                ).map_err(|e| e.to_string())?;
+            } else {
+                tx.execute(
+                    "UPDATE tracks SET 
+                        track_number = COALESCE(?1, track_number),
+                        disc_number = COALESCE(?2, disc_number)
+                     WHERE path = ?3",
+                    rusqlite::params![
+                        track.track_number,
+                        track.disc_number,
+                        track.path,
                     ],
                 ).map_err(|e| e.to_string())?;
             }
@@ -616,6 +618,7 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
         
         for path in paths_to_delete {
             tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
         }
         
         tx.commit().map_err(|e| e.to_string())?;
@@ -623,6 +626,47 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(0);
         Ok(count as usize)
     }).await.map_err(|e| format!("Scanning task panicked: {}", e))?
+}
+
+#[tauri::command]
+async fn clean_missing_tracks(state: State<'_, AppState>) -> Result<usize, String> {
+    let db_conn_arc = Arc::clone(&state.db);
+    tokio::task::spawn_blocking(move || {
+        let db_tracks = {
+            let conn = safe_lock(&db_conn_arc);
+            let mut stmt = conn.prepare("SELECT id, path FROM tracks").map_err(|e| e.to_string())?;
+            let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+            let mut list = Vec::new();
+            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+                let id: i32 = row.get(0).map_err(|e| e.to_string())?;
+                let path: String = row.get(1).map_err(|e| e.to_string())?;
+                list.push((id, path));
+            }
+            list
+        };
+
+        let mut paths_to_delete = Vec::new();
+        for (_, path) in &db_tracks {
+            if !path.starts_with("http://") && !path.starts_with("https://") {
+                if !std::path::Path::new(path).exists() {
+                    paths_to_delete.push(path.clone());
+                }
+            }
+        }
+
+        let deleted_count = paths_to_delete.len();
+        if deleted_count > 0 {
+            let mut conn = safe_lock(&db_conn_arc);
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            for path in paths_to_delete {
+                tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
+                tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+        }
+
+        Ok(deleted_count)
+    }).await.map_err(|e| format!("Clean task panicked: {}", e))?
 }
 
 #[tauri::command]
@@ -658,6 +702,8 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
                 bass_ratio: None,
                 treble_ratio: None,
                 replaygain_gain: None,
+                track_number: None,
+                disc_number: None,
             }
         }
     };
@@ -745,6 +791,12 @@ fn add_to_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -
 fn remove_from_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
     let conn = safe_lock(&state.db);
     db::remove_from_playlist(&conn, playlist_id, &path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reorder_playlist(playlist_id: i32, track_paths: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut conn = safe_lock(&state.db);
+    db::reorder_playlist(&mut conn, playlist_id, &track_paths).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1565,17 +1617,56 @@ fn log_error(msg: String) {
 }
 
 #[tauri::command]
+fn start_dragging(window: Window) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_window_resizable(window: Window, resizable: bool) -> Result<(), String> {
+    window.set_resizable(resizable).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn move_window_by(window: Window, dx: i32, dy: i32) -> Result<(), String> {
+    if let Ok(pos) = window.outer_position() {
+        let new_pos = tauri::PhysicalPosition::new(pos.x + dx, pos.y + dy);
+        let _ = window.set_position(tauri::Position::Physical(new_pos));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn center_window(window: Window) -> Result<(), String> {
+    window.center().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_window_always_on_top(window: Window, always_on_top: bool) -> Result<(), String> {
+    window.set_always_on_top(always_on_top).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn enter_borderless_fullscreen(window: Window, fullscreen: bool) -> Result<(), String> {
+    window.set_fullscreen(fullscreen).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn set_mini_player_mode(window: Window, mini: bool) -> Result<(), String> {
     if mini {
         window.set_decorations(false).map_err(|e| e.to_string())?;
+        window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(260.0, 130.0)))).map_err(|e| e.to_string())?;
+        window.set_max_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(650.0, 360.0)))).map_err(|e| e.to_string())?;
         window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(340.0, 180.0))).map_err(|e| e.to_string())?;
         window.set_always_on_top(true).map_err(|e| e.to_string())?;
-        window.set_resizable(false).map_err(|e| e.to_string())?;
+        window.set_resizable(true).map_err(|e| e.to_string())?;
     } else {
         window.set_decorations(true).map_err(|e| e.to_string())?;
+        window.set_min_size(Some(tauri::Size::Logical(tauri::LogicalSize::new(800.0, 600.0)))).map_err(|e| e.to_string())?;
+        window.set_max_size::<tauri::Size>(None).map_err(|e| e.to_string())?;
         window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(1000.0, 700.0))).map_err(|e| e.to_string())?;
         window.set_always_on_top(false).map_err(|e| e.to_string())?;
         window.set_resizable(true).map_err(|e| e.to_string())?;
+        let _ = window.center();
     }
     Ok(())
 }
@@ -1874,6 +1965,17 @@ fn get_windows_accent_color() -> Result<String, String> {
 }
 
 static KEEP_AWAKE_TX: std::sync::OnceLock<std::sync::mpsc::Sender<bool>> = std::sync::OnceLock::new();
+static CLOSE_TO_TRAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[tauri::command]
+fn set_close_to_tray(enabled: bool) {
+    CLOSE_TO_TRAY.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn get_close_to_tray() -> bool {
+    CLOSE_TO_TRAY.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 #[tauri::command]
 fn toggle_keep_awake(enable: bool) -> Result<(), String> {
@@ -1894,12 +1996,96 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let _ = app.emit("deep-link", argv);
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_skip_taskbar(false);
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.center();
+                let _ = w.set_focus();
+            }
         }))
+        .on_menu_event(|app, event| {
+            match event.id().as_ref() {
+                "show" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_skip_taskbar(false);
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.center();
+                        let _ = window.set_focus();
+                    }
+                }
+                "quit" => {
+                    app.exit(0);
+                }
+                _ => {}
+            }
+        })
+        .on_tray_icon_event(|app, event| {
+            use tauri::tray::{TrayIconEvent, MouseButton};
+            match event {
+                TrayIconEvent::Click { button: MouseButton::Left, .. } |
+                TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_skip_taskbar(false);
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.center();
+                        let _ = window.set_focus();
+                    }
+                }
+                _ => {}
+            }
+        })
+        .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_skip_taskbar(false);
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.center();
+                let _ = w.set_focus();
+            }
+
+            let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
+                use tauri::menu::{Menu, MenuItem};
+
+                let show_i = MenuItem::with_id(app, "show", "Show Aideo", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "quit", "Quit Aideo", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+
+                if let Some(tray) = app.tray_by_id("main-tray") {
+                    let _ = tray.set_menu(Some(menu));
+                    let _ = tray.set_show_menu_on_left_click(false);
+                    let _ = tray.set_tooltip(Some("Aideo Music Player"));
+                }
+
+                Ok(())
+            })();
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && CLOSE_TO_TRAY.load(std::sync::atomic::Ordering::Relaxed) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            center_window,
+            set_window_always_on_top,
+            enter_borderless_fullscreen,
+            set_close_to_tray,
+            get_close_to_tray,
             open_oauth_window,
             log_error,
+            start_dragging,
+            set_window_resizable,
+            move_window_by,
             set_mini_player_mode,
             scan_and_save,
+            clean_missing_tracks,
             get_library,
             play_track,
             queue_next,
@@ -1926,8 +2112,6 @@ pub fn run() {
             get_qqmusic_lrc,
             set_dsp_state,
             get_dsp_state,
-            get_stem_cache,
-            separate_track_stems,
             get_audio_devices,
             set_audio_device,
             apply_online_cover,
@@ -1956,6 +2140,7 @@ pub fn run() {
             get_artist_profile,
             mbz_search_recording,
             mbz_get_cover_art,
+            set_discord_enabled,
             update_discord_presence,
             clear_discord_presence,
             get_playlists,
@@ -1963,6 +2148,7 @@ pub fn run() {
             delete_playlist,
             add_to_playlist,
             remove_from_playlist,
+            reorder_playlist,
             get_playlist_tracks,
             add_track_to_library,
             add_track,
@@ -1974,6 +2160,7 @@ pub fn run() {
             mark_history_synced,
             get_listening_insights,
             youtube::search_youtube,
+            youtube::get_artist_discography,
             youtube::get_search_suggestions,
             youtube::download_track,
             youtube::get_aideo_recommendations,
@@ -1999,6 +2186,7 @@ pub fn run() {
             dependencies::get_dependencies_status,
             dependencies::install_dependency,
             dependencies::uninstall_dependency,
+            dependencies::check_update_ytdlp,
             cloud::subsonic_ping,
             cloud::save_subsonic_password,
             cloud::get_subsonic_password,
@@ -2058,7 +2246,7 @@ pub fn run() {
             }
             app.manage(tidal_state);
 
-            discord::init_discord();
+            dependencies::spawn_background_ytdlp_updater(app.handle().clone());
             
             // Clean up old decrypted cached temporary files
             if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {

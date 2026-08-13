@@ -1,11 +1,14 @@
 import { useState, useEffect, memo } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe } from 'lucide-react';
+import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe, GripVertical, ArrowUp, ArrowDown, Play } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { Track, Playlist } from '../store/types';
 import { useVirtualList } from '../utils/useVirtualList';
+import { safeGetStorage, safeSetStorage } from '../utils/storage';
+import { matchesSearchQuery } from '../utils/searchParser';
 import { useRef } from 'react';
 import { AlbumsView } from './AlbumsView';
 
@@ -229,6 +232,7 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
 interface TrackRowProps {
   t: Track;
   i: number;
+  totalTracks: number;
   active: boolean;
   isHighRes: boolean;
   menuOpenFor: any;
@@ -243,6 +247,7 @@ interface TrackRowProps {
   setMatchData: (data: { track: Track; match: any } | null) => void;
   setIsMatching: (id: number | null) => void;
   removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void> | void;
+  reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void> | void;
   setPlaylistModalFor: (track: Track | null) => void;
   setEditModalFor: (track: Track | null) => void;
   toggleLoveTrack: (path: string) => Promise<void> | void;
@@ -250,24 +255,72 @@ interface TrackRowProps {
   setCoverArtModalTrack: (track: Track | null) => void;
   cacheCloudTrack: (track: Track) => Promise<void> | void;
   deleteCachedTrack: (streamUrl: string) => Promise<void> | void;
-  cachedCloudHashes: string[];
+  cachedCloudHashes: string[];  isDraggable?: boolean;
+  isDragged?: boolean;
+  isDragOver?: boolean;
+  onPointerDragStart?: (e: React.PointerEvent) => void;
+  isSelected?: boolean;
+  onRowClick?: (e: React.MouseEvent) => void;
 }
 
 const TrackRow = memo(({ 
-  t, i, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
+  t, i, totalTracks, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
   playTrack, setView, setMenuOpenFor, playNextInQueue, addToQueue, matchMetadata, 
-  setMatchData, setIsMatching, removeFromPlaylist, setPlaylistModalFor, setEditModalFor,
-  toggleLoveTrack, toggleDislikeTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
+  setMatchData, setIsMatching, removeFromPlaylist, reorderPlaylistTracks, setPlaylistModalFor, setEditModalFor,
+  toggleLoveTrack, toggleDislikeTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes,
+  isDraggable, isDragged, isDragOver, onPointerDragStart, isSelected, onRowClick
 }: TrackRowProps) => {
+  const [isRowHovered, setIsRowHovered] = useState(false);
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
   const rowId = t.path || t.id;
 
   return (
-    <tr className={`track-row${active ? ' playing' : ''}`}
-      style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 2000 : 1 }}
-      onClick={() => { playTrack(t); setView('nowplaying'); }}>
-      <td style={{ textAlign: 'center', color: active ? 'var(--accent)' : 'var(--text-dim)', fontSize: 12 }}>
-        {active ? '▶' : i + 1}
+    <tr 
+      className={`track-row${active ? ' playing' : ''}${isSelected ? ' selected' : ''}`}
+      data-playlist-track-index={i}
+      onMouseEnter={() => setIsRowHovered(true)}
+      onMouseLeave={() => setIsRowHovered(false)}
+      style={{ 
+        position: 'relative', 
+        zIndex: menuOpenFor === rowId ? 2000 : 1,
+        opacity: isDragged ? 0.35 : 1,
+        background: isSelected 
+          ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.18)' 
+          : (isDragOver ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.18)' : undefined),
+        borderLeft: isSelected ? '3px solid var(--accent, #8b5cf6)' : '3px solid transparent',
+        borderTop: isDragOver && !isDragged ? '2px solid var(--accent, #8b5cf6)' : undefined,
+        transition: 'background 0.15s, opacity 0.15s, border-left 0.15s',
+        userSelect: isDraggable ? 'none' : 'auto'
+      }}
+      onClick={(e) => {
+        if (onRowClick) {
+          onRowClick(e);
+        } else {
+          playTrack(t);
+          setView('nowplaying');
+        }
+      }}
+    >
+      <td 
+        style={{ 
+          textAlign: 'center', 
+          color: isSelected ? 'var(--accent)' : (active ? 'var(--accent)' : 'var(--text-dim)'), 
+          fontSize: 12,
+          fontWeight: isSelected ? 800 : 'normal',
+          cursor: isDraggable ? 'grab' : 'inherit',
+          userSelect: 'none'
+        }}
+        title={isDraggable ? 'Drag to reorder' : undefined}
+      >
+        {isSelected ? '✓' : (active ? '▶' : (isDraggable ? (
+          <div 
+            onPointerDown={onPointerDragStart}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'grab', touchAction: 'none', padding: '2px 4px' }}
+          >
+            <GripVertical size={13} style={{ opacity: isRowHovered || isDragged ? 1 : 0.35, color: (isRowHovered || isDragged) ? 'var(--accent)' : 'var(--text-dim)', transition: 'opacity 0.2s' }} />
+            <span>{i + 1}</span>
+          </div>
+        ) : i + 1))}
       </td>
       <td style={{ textAlign: 'center', width: 68 }}>
         <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
@@ -521,14 +574,44 @@ const TrackRow = memo(({
                   <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
 
                   {currentPlaylist ? (
-                    <div
-                      onClick={(e) => { e.stopPropagation(); removeFromPlaylist(currentPlaylist.id, t.path); setMenuOpenFor(null); }}
-                      style={{ padding: '10px 14px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    >
-                      Remove from Playlist
-                    </div>
+                    <>
+                      {i > 0 && (
+                        <div
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            reorderPlaylistTracks(currentPlaylist.id, i, i - 1); 
+                            setMenuOpenFor(null); 
+                          }}
+                          style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <ArrowUp size={14} /> Move Up
+                        </div>
+                      )}
+                      {i < totalTracks - 1 && (
+                        <div
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            reorderPlaylistTracks(currentPlaylist.id, i, i + 1); 
+                            setMenuOpenFor(null); 
+                          }}
+                          style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <ArrowDown size={14} /> Move Down
+                        </div>
+                      )}
+                      <div
+                        onClick={(e) => { e.stopPropagation(); removeFromPlaylist(currentPlaylist.id, t.path); setMenuOpenFor(null); }}
+                        style={{ padding: '10px 14px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        Remove from Playlist
+                      </div>
+                    </>
                   ) : (
                     <div
                       onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setPlaylistModalFor(t); }}
@@ -690,12 +773,41 @@ const CloudTrackRow = memo(({
 
 export function LibraryView() {
   const { 
-    view, tracks, playback, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
+    view, tracks, currentTrackPath, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
+    reorderPlaylistTracks,
     matchMetadata, addToQueue, playNextInQueue, playlists, addToPlaylist,
     subsonicUrl, subsonicUser, subsonicConnected, subsonicPass,
     jellyfinUrl, jellyfinConnected, toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
     setCoverArtModalTrack
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    view: s.view,
+    tracks: s.tracks,
+    currentTrackPath: s.playback.current_track,
+    loadLibrary: s.loadLibrary,
+    playTrack: s.playTrack,
+    setView: s.setView,
+    currentPlaylist: s.currentPlaylist,
+    removeFromPlaylist: s.removeFromPlaylist,
+    reorderPlaylistTracks: s.reorderPlaylistTracks,
+    matchMetadata: s.matchMetadata,
+    addToQueue: s.addToQueue,
+    playNextInQueue: s.playNextInQueue,
+    playlists: s.playlists,
+    addToPlaylist: s.addToPlaylist,
+    subsonicUrl: s.subsonicUrl,
+    subsonicUser: s.subsonicUser,
+    subsonicConnected: s.subsonicConnected,
+    subsonicPass: s.subsonicPass,
+    jellyfinUrl: s.jellyfinUrl,
+    jellyfinConnected: s.jellyfinConnected,
+    toggleLoveTrack: s.toggleLoveTrack,
+    toggleDislikeTrack: s.toggleDislikeTrack,
+    cacheCloudTrack: s.cacheCloudTrack,
+    deleteCachedTrack: s.deleteCachedTrack,
+    cachedCloudHashes: s.cachedCloudHashes,
+    fetchCachedCloudHashes: s.fetchCachedCloudHashes,
+    setCoverArtModalTrack: s.setCoverArtModalTrack,
+  })));
 
   useEffect(() => {
     fetchCachedCloudHashes();
@@ -712,8 +824,21 @@ export function LibraryView() {
   
   const [activeSector, setActiveSector] = useState<'local' | 'subsonic' | 'jellyfin'>('local');
   const [activeFilter, setActiveFilter] = useState<QuickFilterType>('all');
-  const [viewMode, setViewMode] = useState<'tracks' | 'albums'>('tracks');
-  const [albumSortBy, setAlbumSortBy] = useState<'title' | 'artist' | 'count'>('title');
+  const [viewMode, setViewModeState] = useState<'tracks' | 'albums'>(() => {
+    return (safeGetStorage('aideo-library-view-mode') as 'tracks' | 'albums') || 'tracks';
+  });
+  const setViewMode = (mode: 'tracks' | 'albums') => {
+    safeSetStorage('aideo-library-view-mode', mode);
+    setViewModeState(mode);
+  };
+
+  const [albumSortBy, setAlbumSortByState] = useState<'title' | 'artist' | 'count' | 'recent'>(() => {
+    return (safeGetStorage('aideo-album-sort-by') as 'title' | 'artist' | 'count' | 'recent') || 'title';
+  });
+  const setAlbumSortBy = (sort: 'title' | 'artist' | 'count' | 'recent') => {
+    safeSetStorage('aideo-album-sort-by', sort);
+    setAlbumSortByState(sort);
+  };
   const [albumCount, setAlbumCount] = useState<number>(0);
   const [menuOpenFor, setMenuOpenFor] = useState<any>(null);
 
@@ -731,10 +856,65 @@ export function LibraryView() {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Multi-Select state & bulk actions
+  const [selectedTrackPaths, setSelectedTrackPaths] = useState<string[]>([]);
+  const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
+  const [bulkPlaylistModal, setBulkPlaylistModal] = useState(false);
+
   useEffect(() => {
     const handler = setTimeout(() => setDebouncedSearchQuery(searchQuery), 120);
     return () => clearTimeout(handler);
   }, [searchQuery]);
+
+  // Clear multi-select when switching view, sector, or filter
+  useEffect(() => {
+    setSelectedTrackPaths([]);
+    setLastSelectedIdx(null);
+  }, [view, currentPlaylist, activeSector, activeFilter]);
+  
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  const startPlaylistPointerDrag = (startIdx: number, e: React.PointerEvent) => {
+    if (e.button !== 0 || !currentPlaylist) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    let currentOverIdx = startIdx;
+    setDraggedIdx(startIdx);
+    setDragOverIdx(startIdx);
+
+    const onPointerMove = (moveEvt: PointerEvent) => {
+      const el = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
+      const target = el?.closest('[data-playlist-track-index]');
+      if (target) {
+        const idxStr = target.getAttribute('data-playlist-track-index');
+        if (idxStr !== null) {
+          const idx = parseInt(idxStr, 10);
+          if (!isNaN(idx)) {
+            currentOverIdx = idx;
+            setDragOverIdx(idx);
+          }
+        }
+      }
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+
+      if (currentPlaylist && startIdx !== currentOverIdx) {
+        reorderPlaylistTracks(currentPlaylist.id, startIdx, currentOverIdx);
+      }
+      setDraggedIdx(null);
+      setDragOverIdx(null);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+  };
   
   // Deferred rendering for large libraries to prevent initial load jank
   const [libraryReady, setLibraryReady] = useState(tracks.length < 200);
@@ -959,11 +1139,94 @@ export function LibraryView() {
     if (activeFilter === 'local' && isStreamTrack(t.path, t.format)) return false;
     if (activeFilter === 'streams' && !isStreamTrack(t.path, t.format)) return false;
 
-    // 2. Search Query
+    // 2. Scoped Search Query matching
     if (!debouncedSearchQuery) return true;
-    const q = debouncedSearchQuery.toLowerCase();
-    return (t.title?.toLowerCase().includes(q) || t.artist?.toLowerCase().includes(q) || t.path.toLowerCase().includes(q));
+    return matchesSearchQuery(t, debouncedSearchQuery);
   });
+
+  // Multi-Select keyboard shortcuts (Ctrl+A / Esc)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setSelectedTrackPaths(filteredTracks.map((t: any) => t.path));
+      } else if (e.key === 'Escape') {
+        setSelectedTrackPaths([]);
+        setLastSelectedIdx(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [filteredTracks]);
+
+  const handleTrackRowClick = (t: any, index: number, e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      setSelectedTrackPaths(prev => 
+        prev.includes(t.path) ? prev.filter(p => p !== t.path) : [...prev, t.path]
+      );
+      setLastSelectedIdx(index);
+      return;
+    }
+
+    if (e.shiftKey && lastSelectedIdx !== null) {
+      e.preventDefault();
+      const start = Math.min(lastSelectedIdx, index);
+      const end = Math.max(lastSelectedIdx, index);
+      const range = filteredTracks.slice(start, end + 1).map((item: any) => item.path);
+      setSelectedTrackPaths(Array.from(new Set([...selectedTrackPaths, ...range])));
+      return;
+    }
+
+    if (selectedTrackPaths.length > 0) {
+      setSelectedTrackPaths([]);
+      setLastSelectedIdx(null);
+    }
+    playTrack(t);
+    setView('nowplaying');
+  };
+
+  const handlePlaySelected = async () => {
+    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+    if (selected.length === 0) return;
+    const first = selected[0];
+    const rest = selected.slice(1);
+    useStore.setState({ queue: rest, shuffle: false });
+    try {
+      await invoke('clear_queue');
+      if (rest.length > 0) {
+        const paths = rest.map((t: any) => t.path);
+        await invoke('add_to_queue_bulk', { paths });
+      }
+    } catch (e) { console.error(e); }
+    await playTrack(first);
+    setView('nowplaying');
+  };
+
+  const handleBulkAddToQueue = async () => {
+    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+    if (selected.length === 0) return;
+    const currentQ = useStore.getState().queue;
+    useStore.setState({ queue: [...currentQ, ...selected] });
+    try {
+      const paths = selected.map((t: any) => t.path);
+      await invoke('add_to_queue_bulk', { paths });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added ${selected.length} songs to queue`, type: 'success' } }));
+    } catch (e) { console.error(e); }
+  };
+
+  const handleBulkFavorite = async () => {
+    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+    for (const t of selected) {
+      if (t.loved !== 1) {
+        toggleLoveTrack(t.path);
+      }
+    }
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Loved ${selected.length} songs`, type: 'success' } }));
+  };
 
   const {
     visibleItems: virtualLocalTracks,
@@ -1240,6 +1503,7 @@ export function LibraryView() {
                   <option value="title" style={{ background: '#141420', color: 'white' }}>Title</option>
                   <option value="artist" style={{ background: '#141420', color: 'white' }}>Artist</option>
                   <option value="count" style={{ background: '#141420', color: 'white' }}>Track Count</option>
+                  <option value="recent" style={{ background: '#141420', color: 'white' }}>Recently Added</option>
                 </select>
               </div>
             )}
@@ -1551,14 +1815,16 @@ export function LibraryView() {
                     {topLocalSpacer > 0 && <tr style={{ height: topLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
                     {virtualLocalTracks.map((t: any, idx: number) => {
                       const i = localStartIndex + idx;
-                      const active = playback.current_track === t.path;
+                      const active = currentTrackPath === t.path;
                       const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
+                      const isDraggable = !!currentPlaylist && !debouncedSearchQuery && activeFilter === 'all';
 
                       return (
                         <TrackRow
                           key={t.path || t.id}
                           t={t}
                           i={i}
+                          totalTracks={filteredTracks.length}
                           active={active}
                           isHighRes={isHighRes}
                           menuOpenFor={menuOpenFor}
@@ -1573,6 +1839,7 @@ export function LibraryView() {
                           setMatchData={setMatchData}
                           setIsMatching={setIsMatching}
                           removeFromPlaylist={removeFromPlaylist}
+                          reorderPlaylistTracks={reorderPlaylistTracks}
                           setPlaylistModalFor={setPlaylistModalFor}
                           setEditModalFor={setEditModalFor}
                           toggleLoveTrack={toggleLoveTrack}
@@ -1581,6 +1848,12 @@ export function LibraryView() {
                           cacheCloudTrack={cacheCloudTrack}
                           deleteCachedTrack={deleteCachedTrack}
                           cachedCloudHashes={cachedCloudHashes}
+                          isDraggable={isDraggable}
+                          isDragged={draggedIdx === i}
+                          isDragOver={dragOverIdx === i}
+                          onPointerDragStart={(e) => startPlaylistPointerDrag(i, e)}
+                          isSelected={selectedTrackPaths.includes(t.path)}
+                          onRowClick={(e) => handleTrackRowClick(t, i, e)}
                         />
                       );
                     })}
@@ -1615,7 +1888,7 @@ export function LibraryView() {
                     {topSubsonicSpacer > 0 && <tr style={{ height: topSubsonicSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
                     {virtualSubsonicTracks.map((t: CloudTrack, idx: number) => {
                       const i = subsonicStartIndex + idx;
-                      const active = playback.current_track === t.stream_url;
+                      const active = currentTrackPath === t.stream_url;
                       return (
                         <CloudTrackRow
                           key={t.stream_url || t.id}
@@ -1670,7 +1943,7 @@ export function LibraryView() {
                     {topJellyfinSpacer > 0 && <tr style={{ height: topJellyfinSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
                     {virtualJellyfinTracks.map((t: CloudTrack, idx: number) => {
                       const i = jellyfinStartIndex + idx;
-                      const active = playback.current_track === t.stream_url;
+                      const active = currentTrackPath === t.stream_url;
                       return (
                         <CloudTrackRow
                           key={t.stream_url || t.id}
@@ -1895,6 +2168,163 @@ export function LibraryView() {
                 <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveMetadata}>Save Changes</button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bulk Add to Playlist Modal */}
+      <AnimatePresence>
+        {bulkPlaylistModal && (
+          <motion.div 
+            className="modal-overlay"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setBulkPlaylistModal(false)}
+          >
+            <motion.div 
+              className="modal-content"
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 400, width: '100%', padding: 24 }}
+            >
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ margin: 0, fontSize: 20 }}>Add {selectedTrackPaths.length} Songs to Playlist</h2>
+                <p style={{ color: 'var(--text-dim)', fontSize: 13, margin: '4px 0 0' }}>
+                  Select a destination playlist:
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto', marginBottom: 24, paddingRight: 4 }}>
+                {playlists.length > 0 ? (
+                  playlists.map((p: any) => (
+                    <div
+                      key={p.id}
+                      onClick={() => { 
+                        for (const path of selectedTrackPaths) {
+                          addToPlaylist(p.id, path);
+                        }
+                        setBulkPlaylistModal(false);
+                        setSelectedTrackPaths([]);
+                        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added ${selectedTrackPaths.length} songs to ${p.name}`, type: 'success' } })); 
+                      }}
+                      style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, cursor: 'pointer', transition: 'background 0.2s', fontSize: 14, fontWeight: 500 }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                    >
+                      {p.name}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ color: 'var(--text-dim)', fontSize: 14, textAlign: 'center', padding: '32px 0', background: 'rgba(0,0,0,0.2)', borderRadius: 8 }}>
+                    You don't have any playlists yet.
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setBulkPlaylistModal(false)}>Cancel</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Bulk Action Bar */}
+      <AnimatePresence>
+        {selectedTrackPaths.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 40, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 40, scale: 0.92 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+            style={{
+              position: 'fixed',
+              bottom: 84,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 2500,
+              background: 'rgba(16, 16, 24, 0.92)',
+              backdropFilter: 'blur(24px)',
+              WebkitBackdropFilter: 'blur(24px)',
+              border: '1px solid rgba(var(--accent-rgb, 139, 92, 246), 0.35)',
+              boxShadow: '0 16px 45px rgba(0, 0, 0, 0.7), 0 0 25px rgba(var(--accent-rgb, 139, 92, 246), 0.25)',
+              borderRadius: 24,
+              padding: '8px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 8, 
+              padding: '5px 12px', 
+              background: 'rgba(var(--accent-rgb, 139, 92, 246), 0.2)', 
+              borderRadius: 14, 
+              color: 'white', 
+              fontSize: 12, 
+              fontWeight: 700 
+            }}>
+              <Check size={14} style={{ color: 'var(--accent)' }} />
+              <span>{selectedTrackPaths.length} selected</span>
+            </div>
+
+            <div style={{ height: 22, width: 1, background: 'rgba(255, 255, 255, 0.15)' }} />
+
+            <button
+              className="btn btn-primary"
+              onClick={handlePlaySelected}
+              style={{ padding: '6px 14px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 10, cursor: 'pointer' }}
+            >
+              <Play size={13} fill="white" />
+              Play
+            </button>
+
+            <button
+              className="btn btn-secondary"
+              onClick={handleBulkAddToQueue}
+              style={{ padding: '6px 14px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 10, cursor: 'pointer' }}
+            >
+              <ListMusic size={13} />
+              Add to Queue
+            </button>
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => setBulkPlaylistModal(true)}
+              style={{ padding: '6px 14px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 10, cursor: 'pointer' }}
+            >
+              <Disc size={13} />
+              Add to Playlist
+            </button>
+
+            <button
+              className="btn btn-secondary"
+              onClick={handleBulkFavorite}
+              style={{ padding: '6px 14px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 10, cursor: 'pointer' }}
+            >
+              <Heart size={13} color="#ef4444" />
+              Favorite All
+            </button>
+
+            <button
+              onClick={() => { setSelectedTrackPaths([]); setLastSelectedIdx(null); }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-dim)',
+                cursor: 'pointer',
+                padding: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 8,
+                transition: 'color 0.2s'
+              }}
+              title="Deselect All (Esc)"
+            >
+              <X size={16} />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

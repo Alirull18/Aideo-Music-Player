@@ -1340,6 +1340,26 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error(e); }
   },
 
+  reorderPlaylistTracks: async (playlistId: number, fromIndex: number, toIndex: number) => {
+    const currentTracks = [...get().tracks];
+    if (fromIndex < 0 || fromIndex >= currentTracks.length || toIndex < 0 || toIndex >= currentTracks.length || fromIndex === toIndex) return;
+
+    const [movedTrack] = currentTracks.splice(fromIndex, 1);
+    currentTracks.splice(toIndex, 0, movedTrack);
+
+    set({ tracks: currentTracks });
+
+    try {
+      await invoke('reorder_playlist', {
+        playlistId,
+        trackPaths: currentTracks.map((t: Track) => t.path)
+      });
+    } catch (e) {
+      console.error('Failed to save reordered playlist:', e);
+      await get().loadPlaylistTracks(playlistId);
+    }
+  },
+
   loadPlaylistTracks: async (id: number) => {
     try {
       const tracks = await invoke<Track[]>('get_playlist_tracks', { playlistId: id });

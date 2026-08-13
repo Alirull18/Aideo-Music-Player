@@ -1,7 +1,7 @@
 import { StateCreator } from 'zustand';
 import { PlayerState } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { safeGetStorage } from '../utils/storage';
+import { safeGetStorage, safeSetStorage } from '../utils/storage';
 
 let sleepTimerInterval: any = null;
 
@@ -12,7 +12,9 @@ const getSavedShortcuts = () => {
     next: 'ArrowRight',
     prev: 'ArrowLeft',
     volumeUp: 'ArrowUp',
-    volumeDown: 'ArrowDown'
+    volumeDown: 'ArrowDown',
+    mute: 'm',
+    dspBypass: 'b'
   };
   if (raw) {
     try {
@@ -23,13 +25,11 @@ const getSavedShortcuts = () => {
 };
 
 export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
-  view: 'aideo',
+  view: (safeGetStorage('aideo-last-view') as any) || 'aideo',
   accentColor: '#8b5cf6',
   showProMode: false,
   showControlCenter: false,
   showSettings: false,
-  showKaraokeStudio: false,
-  toggleKaraokeStudio: () => set((s: any) => ({ showKaraokeStudio: !s.showKaraokeStudio })),
   sidebarLastfmVisible: safeGetStorage('aideo-sidebar-lastfm') !== 'false',
   sidebarListenbrainzVisible: safeGetStorage('aideo-sidebar-listenbrainz') !== 'false',
   sidebarCollapsed: safeGetStorage('aideo-sidebar-collapsed') === 'true',
@@ -58,6 +58,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   shortcuts: getSavedShortcuts(),
   sleepTimer: { duration: 0, remaining: 0, active: false },
   colorScheme: (safeGetStorage('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
+  albumArtFit: (safeGetStorage('aideo-album-art-fit') as 'cover' | 'contain') || 'contain',
 
   setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }
@@ -76,7 +77,12 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     if (msg) setTimeout(() => get().setPlaybackSuccess(null), 4000);
   },
 
-  setView: (view: any) => set({ view }),
+  setView: (view: any) => {
+    if (view && typeof view === 'string') {
+      safeSetStorage('aideo-last-view', view);
+    }
+    set({ view });
+  },
 
   setDiscoveryData: (discoveryData: any) => set({ discoveryData }),
   setIsLoadingRecs: (isLoadingRecs: boolean) => set({ isLoadingRecs }),
@@ -245,5 +251,10 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setColorScheme: (mode: 'dark' | 'light' | 'system') => {
     localStorage.setItem('aideo-color-scheme', mode);
     set({ colorScheme: mode });
+  },
+
+  setAlbumArtFit: (fit: 'cover' | 'contain') => {
+    localStorage.setItem('aideo-album-art-fit', fit);
+    set({ albumArtFit: fit });
   },
 });

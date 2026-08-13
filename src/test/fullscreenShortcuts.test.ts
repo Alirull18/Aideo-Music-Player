@@ -117,4 +117,25 @@ describe('Fullscreen Shortcuts & Visualizer Cycle Logic', () => {
     const right = handleFullscreenShortcut('ArrowRight', initialState);
     expect(right.position).toBe(55);
   });
+
+  it('should toggle mute state on M key and unmute on ArrowUp', () => {
+    const initialState = {
+      layout: 'stage' as const,
+      vizMode: 'baseline' as VisualizerMode,
+      isPlaying: true,
+      isMuted: false,
+      volume: 0.7,
+      position: 50,
+      duration: 200,
+    };
+    const muted = handleFullscreenShortcut('m', initialState);
+    expect(muted.isMuted).toBe(true);
+
+    const unmuted = handleFullscreenShortcut('m', muted);
+    expect(unmuted.isMuted).toBe(false);
+
+    const unmutedViaUp = handleFullscreenShortcut('ArrowUp', muted);
+    expect(unmutedViaUp.isMuted).toBe(false);
+    expect(unmutedViaUp.volume).toBe(0.75);
+  });
 });

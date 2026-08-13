@@ -41,7 +41,10 @@ function hexToHsl(hex: string) {
 
 export function LiquidBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { accentColor, playback, lowSpecMode, liquidBackgroundEnabled } = useStore();
+  const accentColor = useStore(s => s.accentColor);
+  const playbackStatus = useStore(s => s.playback.status);
+  const lowSpecMode = useStore(s => s.lowSpecMode);
+  const liquidBackgroundEnabled = useStore(s => s.liquidBackgroundEnabled);
   const spectrumRef = useRef<number[]>(new Array(64).fill(0));
 
   const smoothedBass = useRef(0);
@@ -78,6 +81,10 @@ export function LiquidBackground() {
       // Deep premium base dark backdrop
       ctx.fillStyle = 'rgba(9, 9, 14, 0.08)';
       ctx.fillRect(0, 0, w, h);
+
+      if (playbackStatus !== 'Playing' || document.visibilityState === 'hidden') {
+        return;
+      }
 
       const hsl = hexToHsl(accentColor);
       
@@ -173,8 +180,19 @@ export function LiquidBackground() {
     };
 
     render();
-    return () => cancelAnimationFrame(animId);
-  }, [accentColor, playback.status, lowSpecMode, liquidBackgroundEnabled]);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        render();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [accentColor, playbackStatus, lowSpecMode, liquidBackgroundEnabled]);
 
   if (lowSpecMode || !liquidBackgroundEnabled) return null;
 

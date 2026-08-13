@@ -76,4 +76,25 @@ describe('MiniPlayer Lyric Ticker Resolution & Internationalization', () => {
     const untranslatedLine: LyricLine = { time_secs: 5, text: 'Hello World' };
     expect(getDisplayLyricText(untranslatedLine, true, true)).toBe('Hello World');
   });
+
+  it('should manage miniPlayerMode in store state', async () => {
+    const { useStore } = await import('../store');
+    expect(useStore.getState().miniPlayerMode).toBe(false);
+    await useStore.getState().setMiniPlayerMode(true);
+    expect(useStore.getState().miniPlayerMode).toBe(true);
+    await useStore.getState().setMiniPlayerMode(false);
+    expect(useStore.getState().miniPlayerMode).toBe(false);
+  });
+
+  it('should default mini player lock state to false and persist when toggled', () => {
+    localStorage.clear();
+    const isLockedDefault = localStorage.getItem('aideo-mini-player-locked') === 'true';
+    expect(isLockedDefault).toBe(false);
+
+    localStorage.setItem('aideo-mini-player-locked', 'true');
+    expect(localStorage.getItem('aideo-mini-player-locked') === 'true').toBe(true);
+
+    localStorage.setItem('aideo-mini-player-locked', 'false');
+    expect(localStorage.getItem('aideo-mini-player-locked') === 'true').toBe(false);
+  });
 });

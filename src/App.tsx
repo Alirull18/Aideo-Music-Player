@@ -1,5 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { useStore } from './store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -71,7 +72,26 @@ function AideoApp() {
     miniPlayerMode,
     colorScheme,
     coverArtModalTrack
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    view: s.view,
+    pollStatus: s.pollStatus,
+    loadLibrary: s.loadLibrary,
+    lastScrobble: s.lastScrobble,
+    fetchPlaylists: s.fetchPlaylists,
+    playbackError: s.playbackError,
+    playbackSuccess: s.playbackSuccess,
+    customPrompt: s.customPrompt,
+    setCustomPrompt: s.setCustomPrompt,
+    setPlaybackError: s.setPlaybackError,
+    setPlaybackSuccess: s.setPlaybackSuccess,
+    lowSpecMode: s.lowSpecMode,
+    onboardingCompleted: s.onboardingCompleted,
+    showOnboarding: s.showOnboarding,
+    sidebarCollapsed: s.sidebarCollapsed,
+    miniPlayerMode: s.miniPlayerMode,
+    colorScheme: s.colorScheme,
+    coverArtModalTrack: s.coverArtModalTrack,
+  })));
   const [systemIsLight, setSystemIsLight] = useState(window.matchMedia('(prefers-color-scheme: light)').matches);
 
   useEffect(() => {
@@ -101,6 +121,25 @@ function AideoApp() {
     if (initialKeepAwake) {
       invoke('toggle_keep_awake', { enable: true }).catch(e => console.error("toggle_keep_awake error:", e));
     }
+
+    // Synchronize initial volume with backend on startup
+    const initialVolume = useStore.getState().playback.volume;
+    if (typeof initialVolume === 'number') {
+      invoke('set_volume', { volume: initialVolume }).catch(e => console.error("set_volume on startup error:", e));
+    }
+
+    // Synchronize close to tray setting with backend on startup
+    const initialCloseToTray = localStorage.getItem('aideo_close_to_tray') === 'true';
+    if (initialCloseToTray) {
+      invoke('set_close_to_tray', { enabled: true }).catch(e => console.error("set_close_to_tray error:", e));
+    }
+
+    // Synchronize Discord RPC setting with backend on startup
+    const initialDiscordEnabled = localStorage.getItem('aideo_discord_enabled') !== 'false';
+    invoke('set_discord_enabled', { enabled: initialDiscordEnabled }).catch(e => console.error("set_discord_enabled on startup error:", e));
+
+    // Ensure window is always centered and safely on-screen on startup
+    invoke('center_window').catch(() => {});
 
     // Async background setup for yt-dlp audio decoder
     invoke('check_and_download_ytdlp').catch(e => console.error("ytdlp download error:", e));
@@ -269,6 +308,69 @@ function AideoApp() {
       });
       if (isCancelled) { uPrev(); return; }
       cleanups.push(uPrev);
+
+      // Window Size, Position & State Restoration and Tracking
+      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          const { PhysicalSize, PhysicalPosition } = await import('@tauri-apps/api/dpi');
+          const win = getCurrentWindow();
+          if (win.label === 'main') {
+            const savedStateRaw = localStorage.getItem('aideo-window-state');
+            if (savedStateRaw) {
+              try {
+                const savedState = JSON.parse(savedStateRaw);
+                if (savedState.maximized) {
+                  await win.maximize();
+                } else {
+                  if (savedState.width && savedState.height) {
+                    await win.setSize(new PhysicalSize(savedState.width, savedState.height));
+                  }
+                  if (typeof savedState.x === 'number' && typeof savedState.y === 'number') {
+                    await win.setPosition(new PhysicalPosition(savedState.x, savedState.y));
+                  }
+                }
+              } catch (_) {}
+            }
+
+            let saveTimeout: any = null;
+            const persistWindowState = async () => {
+              try {
+                const isMax = await win.isMaximized();
+                if (isMax) {
+                  localStorage.setItem('aideo-window-state', JSON.stringify({ maximized: true }));
+                  return;
+                }
+                const size = await win.innerSize();
+                const pos = await win.outerPosition();
+                localStorage.setItem('aideo-window-state', JSON.stringify({
+                  maximized: false,
+                  width: size.width,
+                  height: size.height,
+                  x: pos.x,
+                  y: pos.y
+                }));
+              } catch (_) {}
+            };
+
+            const debouncedSave = () => {
+              if (saveTimeout) clearTimeout(saveTimeout);
+              saveTimeout = setTimeout(persistWindowState, 300);
+            };
+
+            const uResize = await win.onResized(debouncedSave);
+            const uMove = await win.onMoved(debouncedSave);
+            if (isCancelled) {
+              uResize();
+              uMove();
+            } else {
+              cleanups.push(uResize, uMove);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to setup window state persistence:', e);
+        }
+      }
     };
     setupListeners();
 
@@ -302,6 +404,9 @@ function AideoApp() {
       } else if (e.key.toLowerCase() === 'b' || keyName === (userShortcuts.dspBypass || 'b')) {
         e.preventDefault();
         state.toggleDspAB();
+      } else if (e.key.toLowerCase() === 'm' || keyName === (userShortcuts.mute || 'm')) {
+        e.preventDefault();
+        state.toggleMute();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -680,20 +785,21 @@ function AideoApp() {
 }
 
 export default function App() {
-  const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ !== undefined;
   const [isOauthChild, setIsOauthChild] = useState(false);
 
   useEffect(() => {
-    if (!isTauri) return;
     import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
       const win = getCurrentWindow();
       if (win.label === 'supabase-login') {
         setIsOauthChild(true);
       }
     }).catch(() => {});
-  }, [isTauri]);
+  }, []);
 
-  if (!isTauri) {
+  const isBrowserCallbackRoute = typeof window !== 'undefined' && 
+    (window.location.hash.includes('access_token') || window.location.search.includes('code') || window.location.pathname.includes('callback'));
+
+  if (isBrowserCallbackRoute && !(window as any).__TAURI_INTERNALS__) {
     return <BrowserCallbackLanding />;
   }
 

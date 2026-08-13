@@ -13,4 +13,10 @@ mod tests {
         assert!(column_exists(&conn, "tracks", "artist"), "tracks table should contain artist column");
         assert!(column_exists(&conn, "playlists", "name"), "playlists table should contain name column");
     }
+
+    #[test]
+    fn test_tray_icon_bytes() {
+        let img = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"));
+        assert!(img.is_ok(), "32x32.png should parse cleanly into tauri::image::Image: {:?}", img.err());
+    }
 }

@@ -20,6 +20,8 @@ pub struct Track {
     pub bass_ratio: Option<f64>,
     pub treble_ratio: Option<f64>,
     pub replaygain_gain: Option<f64>,
+    pub track_number: Option<i32>,
+    pub disc_number: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -102,6 +104,12 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     }
     if !column_exists(&conn, "tracks", "replaygain_gain") {
         conn.execute("ALTER TABLE tracks ADD COLUMN replaygain_gain REAL DEFAULT 0.0", [])?;
+    }
+    if !column_exists(&conn, "tracks", "track_number") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN track_number INTEGER", [])?;
+    }
+    if !column_exists(&conn, "tracks", "disc_number") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER", [])?;
     }
 
     // Create playlist tables
@@ -300,10 +308,23 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         }
     }
 
+    // Backfill any missing path_hash entries
+    if let Ok(mut stmt) = conn.prepare("SELECT path FROM tracks WHERE path_hash IS NULL") {
+        if let Ok(paths) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            let paths_to_hash: Vec<String> = paths.filter_map(|r| r.ok()).collect();
+            for path in paths_to_hash {
+                let hash = format!("{:x}", md5::compute(path.as_bytes()));
+                let _ = conn.execute("UPDATE tracks SET path_hash = ?1 WHERE path = ?2", rusqlite::params![hash, path]);
+            }
+        }
+    }
+
     // Add high-performance indexes for library filtering and analytics
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_order ON tracks(album, disc_number, track_number)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_loved ON tracks(loved)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_path_hash ON tracks(path_hash)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON playback_history(timestamp)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position)", []);
 
@@ -313,16 +334,21 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
     let tx = conn.transaction()?;
     for track in tracks {
+        let hash = track.path_hash.clone().unwrap_or_else(|| format!("{:x}", md5::compute(track.path.as_bytes())));
+        track.path_hash = Some(hash.clone());
         tx.execute(
-            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url)
-             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url)
+            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash)
+             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash)
              ON CONFLICT(path) DO UPDATE SET
                  title = excluded.title,
                  artist = excluded.artist,
                  album = excluded.album,
                  duration = excluded.duration,
                  format = excluded.format,
-                 cover_url = COALESCE(excluded.cover_url, tracks.cover_url)",
+                 cover_url = COALESCE(excluded.cover_url, tracks.cover_url),
+                 track_number = COALESCE(excluded.track_number, tracks.track_number),
+                 disc_number = COALESCE(excluded.disc_number, tracks.disc_number),
+                 path_hash = COALESCE(excluded.path_hash, tracks.path_hash)",
             rusqlite::named_params! {
                 ":path": &track.path,
                 ":title": &track.title,
@@ -333,6 +359,9 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                 ":lyric_offset": &track.lyric_offset,
                 ":loved": &track.loved,
                 ":cover_url": &track.cover_url,
+                ":track_number": &track.track_number,
+                ":disc_number": &track.disc_number,
+                ":path_hash": &hash,
             },
         )?;
     }
@@ -365,7 +394,7 @@ pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energ
 }
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash FROM tracks")?;
+    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number FROM tracks")?;
     let track_iter = stmt.query_map([], |row| {
         let path: String = row.get(1)?;
         let db_hash: Option<String> = row.get(16).ok();
@@ -388,6 +417,8 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
             bass_ratio: row.get(13).ok(),
             treble_ratio: row.get(14).ok(),
             replaygain_gain: row.get(15).ok(),
+            track_number: row.get(17).ok(),
+            disc_number: row.get(18).ok(),
         })
     })?;
 
@@ -445,11 +476,23 @@ pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &st
     Ok(())
 }
 
+pub fn reorder_playlist(conn: &mut Connection, playlist_id: i32, track_paths: &[String]) -> Result<()> {
+    let tx = conn.transaction()?;
+    for (i, path) in track_paths.iter().enumerate() {
+        tx.execute(
+            "UPDATE playlist_tracks SET position = ?1 WHERE playlist_id = ?2 AND track_path = ?3",
+            params![i as i32 + 1, playlist_id, path],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, pt.track_path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain 
-         FROM playlist_tracks pt
-         LEFT JOIN tracks t ON t.path = pt.track_path 
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.track_number, t.disc_number 
+         FROM playlist_tracks pt 
+         JOIN tracks t ON pt.track_path = t.path 
          WHERE pt.playlist_id = ?1 
          ORDER BY pt.position ASC"
     )?;
@@ -474,6 +517,8 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
             bass_ratio: row.get(13).ok(),
             treble_ratio: row.get(14).ok(),
             replaygain_gain: row.get(15).ok(),
+            track_number: row.get(16).ok(),
+            disc_number: row.get(17).ok(),
         })
     })?;
 

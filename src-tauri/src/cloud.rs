@@ -12,6 +12,8 @@ pub struct CloudTrack {
     pub stream_url: String,
     pub provider: String, // "subsonic" or "jellyfin"
     pub path_hash: Option<String>,
+    pub track_number: Option<i32>,
+    pub disc_number: Option<i32>,
 }
 
 // ── Subsonic Commands ────────────────────────────────────────────────────────
@@ -154,6 +156,9 @@ pub async fn subsonic_search(url: String, user: String, pass: String, query: Str
             
             let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
             
+            let track_number = song["track"].as_i64().map(|v| v as i32);
+            let disc_number = song["discNumber"].as_i64().map(|v| v as i32);
+            
             results.push(CloudTrack {
                 id,
                 title,
@@ -164,6 +169,8 @@ pub async fn subsonic_search(url: String, user: String, pass: String, query: Str
                 stream_url,
                 provider: "subsonic".to_string(),
                 path_hash,
+                track_number,
+                disc_number,
             });
         }
     }
@@ -261,6 +268,9 @@ pub async fn jellyfin_search(url: String, api_key: String, query: String) -> Res
             
             let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
             
+            let track_number = item["IndexNumber"].as_i64().map(|v| v as i32);
+            let disc_number = item["ParentIndexNumber"].as_i64().map(|v| v as i32);
+
             results.push(CloudTrack {
                 id,
                 title,
@@ -271,6 +281,8 @@ pub async fn jellyfin_search(url: String, api_key: String, query: String) -> Res
                 stream_url,
                 provider: "jellyfin".to_string(),
                 path_hash,
+                track_number,
+                disc_number,
             });
         }
     }
@@ -369,6 +381,9 @@ pub async fn subsonic_get_library(
             
             let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
             
+            let track_number = song["track"].as_i64().map(|v| v as i32);
+            let disc_number = song["discNumber"].as_i64().map(|v| v as i32);
+
             results.push(CloudTrack {
                 id,
                 title,
@@ -379,11 +394,13 @@ pub async fn subsonic_get_library(
                 stream_url,
                 provider: "subsonic".to_string(),
                 path_hash,
+                track_number,
+                disc_number,
             });
         }
     }
     
-    results.sort_by_key(|a| a.title.to_lowercase());
+    results.sort_by_key(|a| (a.disc_number.unwrap_or(1), a.track_number.unwrap_or(0), a.title.to_lowercase()));
     Ok(results)
 }
 
@@ -568,6 +585,9 @@ pub async fn jellyfin_get_library(
             
             let path_hash = Some(format!("{:x}", md5::compute(stream_url.as_bytes())));
             
+            let track_number = item["IndexNumber"].as_i64().map(|v| v as i32);
+            let disc_number = item["ParentIndexNumber"].as_i64().map(|v| v as i32);
+
             results.push(CloudTrack {
                 id,
                 title,
@@ -578,6 +598,8 @@ pub async fn jellyfin_get_library(
                 stream_url,
                 provider: "jellyfin".to_string(),
                 path_hash,
+                track_number,
+                disc_number,
             });
         }
     }

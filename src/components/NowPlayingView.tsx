@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
-import { MessageSquare, Activity, Maximize2, Heart, ThumbsDown } from 'lucide-react';
+import { MessageSquare, Activity, Maximize2, Heart, ThumbsDown, CheckCircle2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
 import { LiquidBackground } from './LiquidBackground';
-import { baseName, getStreamName } from '../utils';
+import { baseName, getStreamName, isStreamTrack } from '../utils';
 
 const isRadioStream = (track: any): boolean => {
   if (!track) return false;
@@ -24,9 +24,16 @@ export function NowPlayingView() {
   const { 
     playback, currentDevice, coverArt, accentColor, dsp, 
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
-    setView, toggleLoveTrack, toggleDislikeTrack, toggleControlCenter
+    setView, toggleLoveTrack, toggleDislikeTrack, toggleControlCenter,
+    albumArtFit, cachedCloudHashes
   } = useStore();
   const current = currentTrack;
+
+  const isCurrentCached = useMemo(() => {
+    if (!current || !isStreamTrack(current.path, current.format)) return false;
+    if (current.path_hash && cachedCloudHashes.includes(current.path_hash)) return true;
+    return false;
+  }, [current, cachedCloudHashes]);
 
   const [showLyrics, setShowLyrics] = useState(true);
 
@@ -208,8 +215,18 @@ export function NowPlayingView() {
           </button>
         </div>
 
-        <div className={`np-art-wrap${coverArt ? ' has-art' : ''}`}>
-          <img src={coverArt || defaultCover} alt="cover" className="np-art" />
+        <div className={`np-art-wrap${coverArt ? ' has-art' : ''} ${albumArtFit === 'contain' ? 'contain-mode' : ''}`}>
+          {albumArtFit === 'contain' && (
+            <div 
+              className="np-art-ambient-bg" 
+              style={{ backgroundImage: `url(${coverArt || defaultCover})` }} 
+            />
+          )}
+          <img 
+            src={coverArt || defaultCover} 
+            alt="cover" 
+            className={`np-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`} 
+          />
         </div>
         <div className="np-meta" style={{ minWidth: 0 }}>
           <div className="np-title" style={{
@@ -340,6 +357,27 @@ export function NowPlayingView() {
                 {current.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'WEB STREAM' : current.format.toUpperCase()}
               </span>
             )}
+            {isCurrentCached && (
+              <span 
+                className="offline-cached-badge"
+                style={{
+                  flexShrink: 0,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '3px 8px',
+                  borderRadius: 12,
+                  background: 'rgba(16, 185, 129, 0.15)',
+                  color: '#10b981',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+                title="This track is fully cached locally on your device and will play without internet connection."
+              >
+                <CheckCircle2 size={10} /> OFFLINE CACHED
+              </span>
+            )}
             {playback.current_track?.startsWith('http') && !current?.duration && (
               <span className="live-badge" style={{ flexShrink: 0 }}>LIVE</span>
             )}
@@ -421,7 +459,7 @@ export function NowPlayingView() {
             {current?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—')}
           </div>
         </div>
-        <div style={{ height: 80, width: '100%', marginTop: 'auto' }}>
+        <div style={{ height: 60, width: '100%', flexShrink: 0, marginTop: 8 }}>
           <Visualizer />
         </div>
       </div>

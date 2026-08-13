@@ -77,12 +77,4 @@ docs/ARCHITECTURE.md
 .code-review-graph/
 ponytail/
 
-# AI Stems & Neural Models
-stems/
-*.stems
-models/
-*.onnx
-AppData/Aideo/stems/
-src/components/KaraokeStudioModal.tsx
-src-tauri/src/stem_engine.rs
 

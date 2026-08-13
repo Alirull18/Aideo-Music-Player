@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Play,
   Pause,
@@ -27,6 +28,8 @@ import { baseName, getStreamName } from '../utils';
 export function FullscreenView() {
   const {
     playback,
+    isMuted,
+    toggleMute,
     currentTrack,
     coverArt,
     lyrics,
@@ -50,10 +53,12 @@ export function FullscreenView() {
     setShowTranslation,
     translateLyrics,
     isTranslating,
-    getRomaji
+    getRomaji,
+    albumArtFit
   } = useStore();
 
-  // Interpolated timer for smooth 60fps word-by-word sweeping
+  // Syllable word-by-word sync detection: only run 60fps rAF timer if track has word-level karaoke data
+  const hasWordSync = useMemo(() => lyrics.some(l => l.words && l.words.length > 0), [lyrics]);
   const [smoothedTime, setSmoothedTime] = useState(playback.position_secs);
   const lastPositionRef = useRef(playback.position_secs);
   const lastTimeRef = useRef(performance.now());
@@ -61,11 +66,13 @@ export function FullscreenView() {
   useEffect(() => {
     lastPositionRef.current = playback.position_secs;
     lastTimeRef.current = performance.now();
-    setSmoothedTime(playback.position_secs);
-  }, [playback.position_secs]);
+    if (hasWordSync) {
+      setSmoothedTime(playback.position_secs);
+    }
+  }, [playback.position_secs, hasWordSync]);
 
   useEffect(() => {
-    if (playback.status !== 'Playing') return;
+    if (!hasWordSync || playback.status !== 'Playing') return;
 
     let frameId: number;
     const update = () => {
@@ -78,17 +85,15 @@ export function FullscreenView() {
 
     frameId = requestAnimationFrame(update);
     return () => cancelAnimationFrame(frameId);
-  }, [playback.status]);
+  }, [playback.status, hasWordSync]);
 
-  const currentTime = smoothedTime + lyricOffset / 1000;
+  const currentTime = (hasWordSync ? smoothedTime : playback.position_secs) + lyricOffset / 1000;
   const trackDuration = currentTrack?.duration || 0;
 
   const [layout, setLayout] = useState<'stage' | 'zen'>(() => {
     return (localStorage.getItem('aideo-fullscreen-layout') as 'stage' | 'zen') || 'stage';
   });
 
-  const [isMuted, setIsMuted] = useState(false);
-  const [prevVolume, setPrevVolume] = useState(playback.volume);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(true);
   const [isHUDHidden, setIsHUDHidden] = useState(false);
 
@@ -147,13 +152,17 @@ export function FullscreenView() {
   // Native Fullscreen on mount, restore on unmount
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    appWindow.setFullscreen(true).catch(err => console.error("Tauri fullscreen error:", err));
+    invoke('enter_borderless_fullscreen', { fullscreen: true }).catch(() => {
+      appWindow.setFullscreen(true).catch(err => console.error("Tauri fullscreen error:", err));
+    });
 
     // Check initial native fullscreen status
     appWindow.isFullscreen().then(setIsNativeFullscreen).catch(() => { });
 
     return () => {
-      appWindow.setFullscreen(false).catch(err => console.error("Tauri restore window error:", err));
+      invoke('enter_borderless_fullscreen', { fullscreen: false }).catch(() => {
+        appWindow.setFullscreen(false).catch(err => console.error("Tauri restore window error:", err));
+      });
     };
   }, []);
 
@@ -171,8 +180,11 @@ export function FullscreenView() {
         e.preventDefault();
         const appWindow = getCurrentWindow();
         appWindow.isFullscreen().then(isFS => {
-          appWindow.setFullscreen(!isFS);
-          setIsNativeFullscreen(!isFS);
+          const nextFS = !isFS;
+          invoke('enter_borderless_fullscreen', { fullscreen: nextFS }).catch(() => {
+            appWindow.setFullscreen(nextFS).catch(() => {});
+          });
+          setIsNativeFullscreen(nextFS);
         });
       } else if (e.code === 'Space' || key === ' ') {
         e.preventDefault();
@@ -206,7 +218,6 @@ export function FullscreenView() {
         e.preventDefault();
         const nextVol = Math.min(1, Math.round((playback.volume + 0.05) * 100) / 100);
         setVolume(nextVol);
-        setIsMuted(false);
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         const nextVol = Math.max(0, Math.round((playback.volume - 0.05) * 100) / 100);
@@ -215,7 +226,7 @@ export function FullscreenView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setView, playback.status, playback.volume, playback.position_secs, trackDuration, isMuted, prevVolume, showRomaji, showTranslation, lyrics.length]);
+  }, [setView, playback.status, playback.volume, playback.position_secs, trackDuration, isMuted, showRomaji, showTranslation, lyrics.length]);
 
   // Autohide HUD timer: 3.5 seconds of inactivity
   useEffect(() => {
@@ -302,14 +313,7 @@ export function FullscreenView() {
 
   // Mute volume helper
   const handleMuteToggle = () => {
-    if (isMuted) {
-      setVolume(prevVolume);
-      setIsMuted(false);
-    } else {
-      setPrevVolume(playback.volume);
-      setVolume(0);
-      setIsMuted(true);
-    }
+    toggleMute();
   };
 
   // Romaji toggle handler
@@ -403,11 +407,17 @@ export function FullscreenView() {
                     <Visualizer mode="circle" />
                   </div>
                 )}
-                <div className="fullscreen-cover-art-wrap" style={{ zIndex: 2, margin: 0 }}>
+                <div className={`fullscreen-cover-art-wrap ${albumArtFit === 'contain' ? 'contain-mode' : ''}`} style={{ zIndex: 2, margin: 0 }}>
+                  {albumArtFit === 'contain' && (
+                    <div 
+                      className="fullscreen-cover-ambient-bg" 
+                      style={{ backgroundImage: `url(${coverArt || defaultCover})` }} 
+                    />
+                  )}
                   <img
                     src={coverArt || defaultCover}
                     alt="Album Artwork"
-                    className="fullscreen-cover-art"
+                    className={`fullscreen-cover-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
                   />
                 </div>
               </div>
@@ -719,7 +729,6 @@ export function FullscreenView() {
                 onChange={(e) => {
                   const vol = parseFloat(e.target.value);
                   setVolume(vol);
-                  if (vol > 0) setIsMuted(false);
                 }}
                 className="fullscreen-hud-volume-slider"
                 style={{

@@ -51,6 +51,82 @@ pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
         .collect()
 }
 
+fn parse_number_value(value: &symphonia::core::meta::Value) -> Option<i32> {
+    match value {
+        symphonia::core::meta::Value::UnsignedInt(v) => Some(*v as i32),
+        symphonia::core::meta::Value::SignedInt(v) => Some(*v as i32),
+        symphonia::core::meta::Value::String(s) => parse_number_str(s),
+        _ => None,
+    }
+}
+
+fn parse_number_str(s: &str) -> Option<i32> {
+    let clean = s.trim_matches('\0').trim();
+    let num_part = clean.split('/').next()?.trim();
+    num_part.parse::<i32>().ok()
+}
+
+fn extract_disc_and_track_from_path(path: &Path) -> (Option<i32>, Option<i32>) {
+    let path_str = path.to_string_lossy();
+    let mut disc = None;
+    let mut track = None;
+
+    let lower = path_str.to_lowercase();
+    if let Some(pos) = lower.find("disc ") {
+        if let Some(c) = lower[pos + 5..].chars().next() {
+            if let Some(d) = c.to_digit(10) {
+                disc = Some(d as i32);
+            }
+        }
+    } else if let Some(pos) = lower.find("disc") {
+        if let Some(c) = lower[pos + 4..].chars().next() {
+            if let Some(d) = c.to_digit(10) {
+                disc = Some(d as i32);
+            }
+        }
+    } else if let Some(pos) = lower.find("cd ") {
+        if let Some(c) = lower[pos + 3..].chars().next() {
+            if let Some(d) = c.to_digit(10) {
+                disc = Some(d as i32);
+            }
+        }
+    } else if let Some(pos) = lower.find("cd") {
+        if let Some(c) = lower[pos + 2..].chars().next() {
+            if let Some(d) = c.to_digit(10) {
+                disc = Some(d as i32);
+            }
+        }
+    }
+
+    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+        let trimmed = stem.trim();
+        if let Some(dash_pos) = trimmed.find('-') {
+            let prefix = trimmed[..dash_pos].trim();
+            let suffix = trimmed[dash_pos + 1..].trim();
+            let suffix_digits: String = suffix.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let (Ok(d), Ok(t)) = (prefix.parse::<i32>(), suffix_digits.parse::<i32>()) {
+                if d > 0 && d < 20 && t > 0 {
+                    if disc.is_none() { disc = Some(d); }
+                    track = Some(t);
+                }
+            }
+        }
+
+        if track.is_none() {
+            let digit_str: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !digit_str.is_empty() && digit_str.len() <= 3 {
+                if let Ok(num) = digit_str.parse::<i32>() {
+                    if num > 0 {
+                        track = Some(num);
+                    }
+                }
+            }
+        }
+    }
+
+    (disc, track)
+}
+
 fn parse_dsf_metadata(path: &Path) -> Option<Track> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = File::open(path).ok()?;
@@ -86,6 +162,8 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
     let mut title = None;
     let mut artist = None;
     let mut album = None;
+    let mut track_number = None;
+    let mut disc_number = None;
 
     if id3_offset > 0 && file.seek(SeekFrom::Start(id3_offset)).is_ok() {
         let mut id3_header = [0u8; 10];
@@ -116,7 +194,7 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                         
                         let data = &frame_data[offset + 10..offset + 10 + frame_size];
                         
-                        // Parse text frames (e.g. TIT2, TPE1, TALB)
+                        // Parse text frames (e.g. TIT2, TPE1, TALB, TRCK, TPOS)
                         if frame_id.starts_with(b"T") {
                             let text = if data.len() > 1 {
                                 let encoding = data[0];
@@ -157,6 +235,10 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                                     artist = Some(clean_text);
                                 } else if frame_id == b"TALB" {
                                     album = Some(clean_text);
+                                } else if frame_id == b"TRCK" {
+                                    track_number = parse_number_str(&clean_text);
+                                } else if frame_id == b"TPOS" {
+                                    disc_number = parse_number_str(&clean_text);
                                 }
                             }
                         }
@@ -166,6 +248,10 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                 }
             }
         }
+
+    let (path_disc, path_track) = extract_disc_and_track_from_path(path);
+    let final_track_number = track_number.or(path_track);
+    let final_disc_number = disc_number.or(path_disc);
 
     let final_title = title.or_else(|| {
         path.file_stem().map(|s| s.to_string_lossy().into_owned())
@@ -189,6 +275,8 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
         bass_ratio: None,
         treble_ratio: None,
         replaygain_gain: None,
+        track_number: final_track_number,
+        disc_number: final_disc_number,
     })
 }
 
@@ -239,6 +327,7 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
     };
 
     let title = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+    let (path_disc, path_track) = extract_disc_and_track_from_path(path);
     
     Some(Track {
         id: 0,
@@ -258,6 +347,8 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
         bass_ratio: None,
         treble_ratio: None,
         replaygain_gain: None,
+        track_number: path_track,
+        disc_number: path_disc,
     })
 }
 
@@ -290,6 +381,8 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
     let mut title = None;
     let mut artist = None;
     let mut album = None;
+    let mut track_number = None;
+    let mut disc_number = None;
 
     if let Some(metadata) = probed.format.metadata().current() {
         for tag in metadata.tags() {
@@ -297,25 +390,47 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                 Some(symphonia::core::meta::StandardTagKey::TrackTitle) => title = Some(tag.value.to_string()),
                 Some(symphonia::core::meta::StandardTagKey::Artist) => artist = Some(tag.value.to_string()),
                 Some(symphonia::core::meta::StandardTagKey::Album) => album = Some(tag.value.to_string()),
-                _ => {}
-            }
-        }
-    }
-
-    if title.is_none() {
-        if let Some(rev) = probed.metadata.get() {
-            if let Some(metadata) = rev.current() {
-                for tag in metadata.tags() {
-                    match tag.std_key {
-                        Some(symphonia::core::meta::StandardTagKey::TrackTitle) => title = Some(tag.value.to_string()),
-                        Some(symphonia::core::meta::StandardTagKey::Artist) => artist = Some(tag.value.to_string()),
-                        Some(symphonia::core::meta::StandardTagKey::Album) => album = Some(tag.value.to_string()),
-                        _ => {}
+                Some(symphonia::core::meta::StandardTagKey::TrackNumber) => track_number = parse_number_value(&tag.value),
+                Some(symphonia::core::meta::StandardTagKey::DiscNumber) => disc_number = parse_number_value(&tag.value),
+                _ => {
+                    let key_upper = tag.key.to_uppercase();
+                    if track_number.is_none() && (key_upper == "TRACKNUMBER" || key_upper == "TRACK" || key_upper == "TRCK") {
+                        track_number = parse_number_value(&tag.value);
+                    } else if disc_number.is_none() && (key_upper == "DISCNUMBER" || key_upper == "DISC" || key_upper == "TPOS") {
+                        disc_number = parse_number_value(&tag.value);
                     }
                 }
             }
         }
     }
+
+    if title.is_none() || track_number.is_none() || disc_number.is_none() {
+        if let Some(rev) = probed.metadata.get() {
+            if let Some(metadata) = rev.current() {
+                for tag in metadata.tags() {
+                    match tag.std_key {
+                        Some(symphonia::core::meta::StandardTagKey::TrackTitle) => if title.is_none() { title = Some(tag.value.to_string()); },
+                        Some(symphonia::core::meta::StandardTagKey::Artist) => if artist.is_none() { artist = Some(tag.value.to_string()); },
+                        Some(symphonia::core::meta::StandardTagKey::Album) => if album.is_none() { album = Some(tag.value.to_string()); },
+                        Some(symphonia::core::meta::StandardTagKey::TrackNumber) => if track_number.is_none() { track_number = parse_number_value(&tag.value); },
+                        Some(symphonia::core::meta::StandardTagKey::DiscNumber) => if disc_number.is_none() { disc_number = parse_number_value(&tag.value); },
+                        _ => {
+                            let key_upper = tag.key.to_uppercase();
+                            if track_number.is_none() && (key_upper == "TRACKNUMBER" || key_upper == "TRACK" || key_upper == "TRCK") {
+                                track_number = parse_number_value(&tag.value);
+                            } else if disc_number.is_none() && (key_upper == "DISCNUMBER" || key_upper == "DISC" || key_upper == "TPOS") {
+                                disc_number = parse_number_value(&tag.value);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let (path_disc, path_track) = extract_disc_and_track_from_path(path);
+    let final_track_number = track_number.or(path_track);
+    let final_disc_number = disc_number.or(path_disc);
 
     let duration = probed.format.default_track().and_then(|track| {
         let tb = track.codec_params.time_base?;
@@ -345,5 +460,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
         bass_ratio: None,
         treble_ratio: None,
         replaygain_gain: None,
+        track_number: final_track_number,
+        disc_number: final_disc_number,
     })
 }

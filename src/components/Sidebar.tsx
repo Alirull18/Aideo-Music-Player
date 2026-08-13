@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
 
 export function Sidebar() {
@@ -21,7 +22,25 @@ export function Sidebar() {
     appMode,
     sidebarCollapsed,
     toggleSidebarCollapsed
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    view: s.view,
+    setView: s.setView,
+    playlists: s.playlists,
+    currentPlaylist: s.currentPlaylist,
+    loadPlaylistTracks: s.loadPlaylistTracks,
+    loadLibrary: s.loadLibrary,
+    createPlaylist: s.createPlaylist,
+    deletePlaylist: s.deletePlaylist,
+    setCustomPrompt: s.setCustomPrompt,
+    setPlaybackError: s.setPlaybackError,
+    lastfmSessionKey: s.lastfmSessionKey,
+    listenbrainzToken: s.listenbrainzToken,
+    sidebarLastfmVisible: s.sidebarLastfmVisible,
+    sidebarListenbrainzVisible: s.sidebarListenbrainzVisible,
+    appMode: s.appMode,
+    sidebarCollapsed: s.sidebarCollapsed,
+    toggleSidebarCollapsed: s.toggleSidebarCollapsed,
+  })));
 
   useEffect(() => {
     if (appMode === 'local' && (view === 'aideo' || view === 'aideo_search' || view === 'loved_streams')) {

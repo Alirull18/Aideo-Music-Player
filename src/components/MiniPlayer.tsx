@@ -1,19 +1,32 @@
-import { useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
-import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, Heart, ThumbsDown, Music } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, VolumeX, Heart, ThumbsDown, Music, Lock, Unlock, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import defaultCover from '../assets/default_cover.png';
 import { baseName } from '../utils';
 
 export function MiniPlayer() {
+  const [isLocked, setIsLocked] = useState<boolean>(() => {
+    return localStorage.getItem('aideo-mini-player-locked') === 'true';
+  });
+
+  const [isPinned, setIsPinned] = useState<boolean>(() => {
+    return localStorage.getItem('aideo-mini-player-pinned') !== 'false';
+  });
+
   const {
     playback,
+    isMuted,
+    toggleMute,
     currentTrack,
     coverArt,
     lyrics,
     lyricOffset,
     showRomaji,
     showTranslation,
+    albumArtFit,
     pauseTrack,
     resumeTrack,
     playNext,
@@ -21,10 +34,79 @@ export function MiniPlayer() {
     setVolume,
     setMiniPlayerMode,
     toggleLoveTrack,
-    toggleDislikeTrack
+    toggleDislikeTrack,
+    translateLyrics,
+    getRomaji,
+    isTranslating
   } = useStore();
 
   const current = currentTrack;
+
+  // Auto Translation & Romaji when toggles are enabled
+  useEffect(() => {
+    if (!currentTrack || lyrics.length === 0 || isTranslating) return;
+
+    const checkAndFetch = async () => {
+      if (showTranslation) {
+        const hasTranslation = lyrics.some(l => l.translation);
+        if (!hasTranslation) {
+          try {
+            await translateLyrics();
+          } catch (err) {
+            console.error('Auto-translation failed:', err);
+          }
+          return;
+        }
+      }
+
+      if (showRomaji) {
+        const hasRomaji = lyrics.some(l => l.romaji);
+        if (!hasRomaji) {
+          try {
+            await getRomaji();
+          } catch (err) {
+            console.error('Auto-romaji failed:', err);
+          }
+        }
+      }
+    };
+
+    checkAndFetch();
+  }, [currentTrack?.path, lyrics.length, showRomaji, showTranslation, isTranslating]);
+
+  useEffect(() => {
+    if (isLocked) {
+      invoke('set_window_resizable', { resizable: false }).catch(() => {});
+    }
+  }, [isLocked]);
+
+  useEffect(() => {
+    invoke('set_window_always_on_top', { alwaysOnTop: isPinned }).catch(() => {
+      try {
+        getCurrentWindow().setAlwaysOnTop(isPinned).catch(() => {});
+      } catch (_) {}
+    });
+  }, [isPinned]);
+
+  const togglePin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextPinned = !isPinned;
+    setIsPinned(nextPinned);
+    localStorage.setItem('aideo-mini-player-pinned', nextPinned ? 'true' : 'false');
+    invoke('set_window_always_on_top', { alwaysOnTop: nextPinned }).catch(() => {
+      try {
+        getCurrentWindow().setAlwaysOnTop(nextPinned).catch(() => {});
+      } catch (_) {}
+    });
+  };
+
+  const toggleLock = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextLocked = !isLocked;
+    setIsLocked(nextLocked);
+    localStorage.setItem('aideo-mini-player-locked', nextLocked ? 'true' : 'false');
+    invoke('set_window_resizable', { resizable: !nextLocked }).catch(() => {});
+  };
 
   const activeLyric = useMemo(() => {
     if (!lyrics || !lyrics.length) return null;
@@ -64,30 +146,58 @@ export function MiniPlayer() {
     return parts.join('\n');
   }, [activeLyric, current?.album]);
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (isLocked || e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('.mini-vol-slider') || target.closest('.mini-btn-restore')) {
+      return;
+    }
+
+    try {
+      getCurrentWindow().startDragging().catch(() => {});
+    } catch (_) {}
+  };
+
   return (
-    <div className="mini-player-container" data-tauri-drag-region>
+    <div 
+      className={`mini-player-container ${isLocked ? 'is-locked' : ''}`}
+      data-tauri-drag-region={!isLocked ? "" : undefined}
+      onMouseDown={handleMouseDown}
+    >
       {/* Background Cover Blur */}
       <div 
         className="mini-player-blur-bg" 
         style={{ backgroundImage: `url(${coverArt || defaultCover})` }} 
       />
 
-      <div className="mini-player-content" data-tauri-drag-region>
+      <div className="mini-player-content" data-tauri-drag-region={!isLocked ? "" : undefined}>
         {/* Cover Art Section */}
-        <div className="mini-cover-wrapper">
-          <img src={coverArt || defaultCover} alt="" className="mini-cover" />
+        <div className={`mini-cover-wrapper ${albumArtFit === 'contain' ? 'contain-mode' : ''}`} data-tauri-drag-region={!isLocked ? "" : undefined}>
+          {albumArtFit === 'contain' && (
+            <div 
+              className="mini-cover-ambient-bg" 
+              style={{ backgroundImage: `url(${coverArt || defaultCover})` }} 
+            />
+          )}
+          <img 
+            src={coverArt || defaultCover} 
+            alt="" 
+            className={`mini-cover ${albumArtFit === 'contain' ? 'contain-art' : ''}`} 
+            draggable={false} 
+          />
           <button 
             className="mini-btn-restore" 
             onClick={() => setMiniPlayerMode(false)}
             title="Restore Player size"
+            aria-label="Restore to Normal Player Size"
           >
-            <Maximize2 size={12} />
+            <Maximize2 size={13} strokeWidth={2.5} color="#ffffff" />
           </button>
         </div>
 
         {/* Info & Controls Section */}
-        <div className="mini-right-panel" data-tauri-drag-region>
-          <div className="mini-info" data-tauri-drag-region>
+        <div className="mini-right-panel">
+          <div className="mini-info">
             <div className="mini-title" title={current?.title || baseName(playback.current_track)}>
               {current?.title || baseName(playback.current_track) || 'Not Playing'}
             </div>
@@ -143,27 +253,62 @@ export function MiniPlayer() {
           </div>
 
           {/* Volume & Feedback Row */}
-          <div className="mini-bottom-row" data-tauri-drag-region>
-            {current && (
-              <div className="mini-feedback">
-                <button 
-                  className={`mini-fb-btn ${current.loved === 1 ? 'loved' : ''}`}
-                  onClick={() => toggleLoveTrack(current.path, current)}
-                  title="Love track"
-                >
-                  <Heart size={11} fill={current.loved === 1 ? '#10b981' : 'transparent'} />
-                </button>
-                <button 
-                  className={`mini-fb-btn ${current.disliked === 1 ? 'disliked' : ''}`}
-                  onClick={() => toggleDislikeTrack(current.path, current)}
-                  title="Dislike track"
-                >
-                  <ThumbsDown size={11} fill={current.disliked === 1 ? '#f43f5e' : 'transparent'} />
-                </button>
-              </div>
-            )}
+          <div className="mini-bottom-row">
+            <div className="mini-feedback">
+              {current && (
+                <>
+                  <button 
+                    className={`mini-fb-btn ${current.loved === 1 ? 'loved' : ''}`}
+                    onClick={() => toggleLoveTrack(current.path, current)}
+                    title="Love track"
+                  >
+                    <Heart size={11} fill={current.loved === 1 ? '#10b981' : 'transparent'} />
+                  </button>
+                  <button 
+                    className={`mini-fb-btn ${current.disliked === 1 ? 'disliked' : ''}`}
+                    onClick={() => toggleDislikeTrack(current.path, current)}
+                    title="Dislike track"
+                  >
+                    <ThumbsDown size={11} fill={current.disliked === 1 ? '#f43f5e' : 'transparent'} />
+                  </button>
+                </>
+              )}
+              <button 
+                className={`mini-fb-btn ${isPinned ? 'pinned' : ''}`}
+                onClick={togglePin}
+                title={isPinned ? "Unpin Mini Player (Window layers behind active apps)" : "Pin Mini Player (Always on Top over games and browsers)"}
+              >
+                {isPinned ? (
+                  <Pin size={11} color="var(--accent)" style={{ transform: 'rotate(45deg)' }} />
+                ) : (
+                  <PinOff size={11} color="var(--text-dim)" />
+                )}
+              </button>
+              <button 
+                className={`mini-fb-btn ${isLocked ? 'locked' : ''}`}
+                onClick={toggleLock}
+                title={isLocked ? "Unlock to move or resize mini player" : "Lock mini player position and size"}
+              >
+                {isLocked ? (
+                  <Lock size={11} color="var(--accent)" />
+                ) : (
+                  <Unlock size={11} color="var(--text-dim)" />
+                )}
+              </button>
+            </div>
             <div className="mini-volume">
-              <Volume2 size={11} color="var(--text-dim)" />
+              <button 
+                className="mini-fb-btn" 
+                onClick={toggleMute} 
+                title={isMuted || playback.volume === 0 ? "Unmute" : "Mute"}
+                style={{ width: 'auto', height: 'auto', padding: 2 }}
+              >
+                {isMuted || playback.volume === 0 ? (
+                  <VolumeX size={11} color="var(--accent)" />
+                ) : (
+                  <Volume2 size={11} color="var(--text-dim)" />
+                )}
+              </button>
               <input 
                 className="mini-vol-slider" 
                 type="range" 

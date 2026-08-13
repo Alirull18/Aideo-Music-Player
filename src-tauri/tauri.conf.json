@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Aideo",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "identifier": "com.alirul.music-player",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -10,12 +10,18 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "trayIcon": {
+      "id": "main-tray",
+      "iconPath": "icons/32x32.png",
+      "tooltip": "Aideo Music Player"
+    },
     "windows": [
       {
         "label": "main",
         "title": "Aideo Music Player",
         "width": 1000,
-        "height": 700
+        "height": 700,
+        "dragDropEnabled": false
       }
     ],
     "security": {
