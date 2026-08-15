@@ -1,45 +1,48 @@
-<!-- code-review-graph MCP tools -->
-## MCP Tools: code-review-graph
+# Aideo Music Player — AGENTS.md
 
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
+Tauri v2 desktop music player. Two separately-built halves: a React 19 + TypeScript frontend (`src/`) and a Rust audio backend (`src-tauri/`).
 
-### Installation (Kilo CLI)
+## Architecture
+- `src/` — React app. Entry: `src/main.tsx` → `src/App.tsx`. State is Zustand, split into slices in `src/store/*`. One file per view under `src/components/`.
+- `src-tauri/` — Rust backend (audio DSP, WASAPI, SQLite), built with Cargo and bundled by Tauri.
+- The frontend reaches the backend only through Tauri IPC/commands (`@tauri-apps/api`) — there is no direct import boundary. Don't add calls that bypass it.
 
-The MCP server is registered in `.kilo/kilo.json` as `code-review-graph`.
-Restart the Kilo session after modifying that file. The graph database
-already exists at `.code-review-graph/` — no `build` needed unless the
-codebase is freshly cloned.
+## Developer commands
+- `npm run dev` — Vite dev server on fixed port **1420** (`strictPort`: fails if busy). For the full desktop app with the Rust backend use `npm run tauri dev`.
+- `npm run build` — runs `tsc` (typecheck, no emit) **then** `vite build` → `dist`. Type errors abort the build.
+- `npm test` — `vitest run src/test` (jsdom, globals on, setup `src/test/setup.ts`).
+- `npm run tauri` — passthrough to the Tauri CLI.
+- **No `lint` script and no ESLint config.** "Linting" is TypeScript's `tsc` strict checks (`noUnusedLocals`, `noUnusedParameters`). Do not run `npm run lint`.
 
-### When to use graph tools FIRST
+## Testing
+- Tests live **only** in `src/test/*.test.ts`; Vitest is configured to run that directory exclusively.
+- Single test: `npx vitest run src/test/<name>.test.ts`.
+- `src/test/setup.ts` is required (globals + jsdom) — do not remove it.
+- **CI does not run frontend tests.** `.github/workflows/check.yml` runs `npx tsc --noEmit` (frontend, Ubuntu) and `cargo check`/`cargo test` (backend, Windows) only. Run `npm test` yourself before relying on it.
 
-- **Exploring code**: `semantic_search_nodes_tool` or `query_graph_tool` instead of Grep
-- **Understanding impact**: `get_impact_radius_tool` instead of manually tracing imports
-- **Code review**: `detect_changes_tool` + `get_review_context_tool` instead of reading entire files
-- **Finding relationships**: `query_graph_tool` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview_tool` + `list_communities_tool`
+## Rust backend build
+- Requires **Rust stable** + **protoc 25.1**. `src-tauri/bin/bin/protoc.exe` is bundled locally but gitignored, so a fresh clone needs protoc installed (CI uses `step-security/setup-protoc@v3`).
+- Check/test: `cargo check --manifest-path src-tauri/Cargo.toml` and `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Release builds target `x86_64-pc-windows-msvc` and need `TAURI_SIGNING_PRIVATE_KEY` (see `publish.yml`).
 
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+## Tauri / runtime quirks
+- Dev URL must be exactly `http://localhost:1420` (matches `tauri.conf.json` `devUrl`). Vite ignores `src-tauri/` in its watcher.
+- Deep-link scheme is `aideo://`; app identifier `com.alirul.music-player`.
+- Styling is Tailwind v4 + daisyui v5 + custom CSS — there is no `tailwind.config.js`; configure via CSS, not a JS config.
 
-### Key Tools
+## Secrets & env
+- `.env` (root) and `src-tauri/.env` hold Supabase keys and signing material. Both are gitignored — never commit them. The Rust build reads `src-tauri/.env`.
 
-| Tool | Use when |
-| ------ | ---------- |
-| `detect_changes_tool` | Reviewing code changes — gives risk-scored analysis |
-| `get_review_context_tool` | Need source snippets for review — token-efficient |
-| `get_impact_radius_tool` | Understanding blast radius of a change |
-| `get_affected_flows_tool` | Finding which execution paths are impacted |
-| `query_graph_tool` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes_tool` | Finding functions/classes by name or keyword |
-| `get_architecture_overview_tool` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
+## MCP tools: code-review-graph
+This repo has a code-review-graph knowledge graph. Prefer its tools over Grep/Glob/Read for code discovery:
+- `search_graph` / `semantic_search_nodes_tool` — find functions/classes by name or keyword.
+- `query_graph_tool` — callers/callees/imports/tests (`pattern="tests_for"` for coverage).
+- `get_impact_radius_tool` / `get_affected_flows_tool` — blast radius of a change.
+- `detect_changes_tool` + `get_review_context_tool` — code review.
+Fall back to Grep/Glob/Read only when the graph doesn't cover it.
 
-### Workflow
-
-1. The graph auto-updates on file changes (via hooks).
-2. Use `detect_changes_tool` for code review.
-3. Use `get_affected_flows_tool` to understand impact.
-4. Use `query_graph_tool` pattern="tests_for" to check coverage.
+## Engineering rules
+- **Think before coding**: state assumptions; ask when unsure or ambiguous; surface simpler approaches.
+- **Simplicity first**: minimal code, no speculative abstractions or unrequested config.
+- **Surgical changes**: touch only what's asked; match existing style; remove only your own orphans.
+- **Goal-driven**: turn tasks into verifiable goals and verify before declaring done.

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "code-review-quality": {
+      "source": "proffesor-for-testing/agentic-qe",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/code-review-quality/SKILL.md",
+      "computedHash": "d8cfe0f830d2c18bce82f16414176811fca35c372f053860507d3e07381ea509"
+    },
+    "github-actions": {
+      "source": "anmolnagpal/devops-skills",
+      "sourceType": "github",
+      "skillPath": "skills/github-actions/SKILL.md",
+      "computedHash": "ea63e6ea8dccd92d19806990a4737bd7ee515ea01e8dc16424e02b400ecf15d6"
+    },
+    "react-performance": {
+      "source": "affaan-m/ecc",
+      "sourceType": "github",
+      "skillPath": "skills/react-performance/SKILL.md",
+      "computedHash": "7b5b19e9c15a6b442fa0e7a0a1cb7ced951ab5872a96ff876b099b6bdfc9ae86"
+    },
+    "vitest-testing": {
+      "source": "secondsky/claude-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/vitest-testing/skills/vitest-testing/SKILL.md",
+      "computedHash": "dccf8d0b193fb62fbe3b4ed69e344aae90db841de6bbaead9204ab5e5768d2d5"
+    }
+  }
+}
