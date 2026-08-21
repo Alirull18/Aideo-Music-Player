@@ -142,6 +142,7 @@ pub struct SonicProfile {
     pub treble_ratio: f64,
     pub integrated_lufs: f64,
     pub lufs_gain_db: f64,
+    pub waveform: Vec<f32>,
 }
 
 // Generate the Acoustid base64 fingerprint and calculate sonic metrics
@@ -223,7 +224,7 @@ pub fn analyze_audio_file(path: &str) -> Result<(String, f64, SonicProfile), Str
 
 fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile {
     if samples.is_empty() {
-        return SonicProfile { bpm: 120.0, energy: 0.5, bass_ratio: 0.33, treble_ratio: 0.33, integrated_lufs: -14.0, lufs_gain_db: 0.0 };
+        return SonicProfile { bpm: 120.0, energy: 0.5, bass_ratio: 0.33, treble_ratio: 0.33, integrated_lufs: -14.0, lufs_gain_db: 0.0, waveform: vec![0.5; 100] };
     }
 
     // 1. RMS Energy
@@ -344,12 +345,9 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile 
     }
 
     // 4. EBU R128 Integrated LUFS & ReplayGain dB Calculation
-    let integrated_lufs = if rms > 1e-6 {
-        (20.0 * (rms as f64).log10() - 0.69).max(-70.0)
-    } else {
-        -70.0
-    };
+    let integrated_lufs = calculate_ebu_r128_lufs(samples, sample_rate);
     let lufs_gain_db = (-14.0 - integrated_lufs).clamp(-12.0, 12.0);
+    let waveform = calculate_waveform_peaks(samples, 100);
 
     SonicProfile {
         bpm,
@@ -358,5 +356,214 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile 
         treble_ratio,
         integrated_lufs,
         lufs_gain_db,
+        waveform,
+    }
+}
+
+fn calculate_waveform_peaks(samples: &[f32], buckets: usize) -> Vec<f32> {
+    if samples.is_empty() || buckets == 0 {
+        return vec![0.5; buckets];
+    }
+    let chunk_size = (samples.len() / buckets).max(1);
+    let mut peaks = Vec::with_capacity(buckets);
+    let mut max_peak = 0.001f32;
+
+    for chunk in samples.chunks(chunk_size).take(buckets) {
+        let peak = chunk.iter().map(|&s| s.abs()).fold(0.0f32, f32::max);
+        max_peak = max_peak.max(peak);
+        peaks.push(peak);
+    }
+    while peaks.len() < buckets {
+        peaks.push(0.0);
+    }
+    peaks.into_iter().map(|p| (p / max_peak).clamp(0.08, 1.0)).collect()
+}
+
+/// Biquad IIR Filter used for EBU R128 / ITU-R BS.1770 K-weighting pre-filtering.
+#[derive(Debug, Clone)]
+pub struct BiquadFilter {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
+}
+
+impl BiquadFilter {
+    /// Stage 1 K-weighting: High-shelf filter (+4 dB at 1.5 kHz, Q = 0.707)
+    pub fn new_high_shelf(sample_rate: f32) -> Self {
+        let v0 = 10.0f32.powf(4.0 / 20.0); // ~1.5848932
+        let k = (std::f32::consts::PI * 1500.0 / sample_rate).tan();
+        let k2 = k * k;
+        let sqrt2 = std::f32::consts::SQRT_2;
+        let sqrt_v0 = v0.sqrt();
+
+        let a0 = 1.0 + sqrt2 * k + k2;
+        let b0 = (v0 + sqrt2 * sqrt_v0 * k + k2) / a0;
+        let b1 = 2.0 * (k2 - v0) / a0;
+        let b2 = (v0 - sqrt2 * sqrt_v0 * k + k2) / a0;
+        let a1 = 2.0 * (k2 - 1.0) / a0;
+        let a2 = (1.0 - sqrt2 * k + k2) / a0;
+
+        Self {
+            b0,
+            b1,
+            b2,
+            a1,
+            a2,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
+        }
+    }
+
+    /// Stage 2 K-weighting: High-pass filter (2nd order Butterworth at 38 Hz, Q = 0.707)
+    pub fn new_high_pass(sample_rate: f32) -> Self {
+        let k = (std::f32::consts::PI * 38.0 / sample_rate).tan();
+        let k2 = k * k;
+        let sqrt2 = std::f32::consts::SQRT_2;
+
+        let a0 = 1.0 + sqrt2 * k + k2;
+        let b0 = 1.0 / a0;
+        let b1 = -2.0 / a0;
+        let b2 = 1.0 / a0;
+        let a1 = 2.0 * (k2 - 1.0) / a0;
+        let a2 = (1.0 - sqrt2 * k + k2) / a0;
+
+        Self {
+            b0,
+            b1,
+            b2,
+            a1,
+            a2,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
+        }
+    }
+
+    #[inline]
+    pub fn process(&mut self, x: f32) -> f32 {
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = x;
+        self.y2 = self.y1;
+        self.y1 = y;
+        y
+    }
+}
+
+/// Calculates standard EBU R128 / ITU-R BS.1770-4 Integrated Loudness (LUFS)
+/// with K-weighting pre-filtering and two-stage gating (absolute -70 LUFS & relative -10 LU).
+pub fn calculate_ebu_r128_lufs(samples: &[f32], sample_rate: usize) -> f64 {
+    if samples.is_empty() || sample_rate == 0 {
+        return -70.0;
+    }
+
+    let sr = sample_rate as f32;
+    let mut stage1 = BiquadFilter::new_high_shelf(sr);
+    let mut stage2 = BiquadFilter::new_high_pass(sr);
+
+    // 1. Apply K-weighting filters
+    let k_weighted: Vec<f32> = samples
+        .iter()
+        .map(|&s| {
+            let s1 = stage1.process(s);
+            stage2.process(s1)
+        })
+        .collect();
+
+    // 2. 400ms blocks with 100ms hop (75% overlap)
+    let block_size = (sample_rate as f32 * 0.4) as usize;
+    let hop_size = (sample_rate as f32 * 0.1) as usize;
+
+    if block_size == 0 || hop_size == 0 || k_weighted.len() < block_size {
+        let sum_sq: f32 = k_weighted.iter().map(|&s| s * s).sum();
+        let ms = sum_sq / k_weighted.len().max(1) as f32;
+        if ms <= 1e-10 {
+            return -70.0;
+        }
+        return (-0.691 + 10.0 * (ms as f64).log10()).clamp(-70.0, 10.0);
+    }
+
+    let mut block_ms = Vec::new();
+    let mut i = 0;
+    while i + block_size <= k_weighted.len() {
+        let block = &k_weighted[i..i + block_size];
+        let sum_sq: f32 = block.iter().map(|&s| s * s).sum();
+        let ms = sum_sq / block_size as f32;
+        block_ms.push(ms);
+        i += hop_size;
+    }
+
+    if block_ms.is_empty() {
+        return -70.0;
+    }
+
+    // Absolute threshold: -70.0 LUFS => z_abs_thresh = 10^((-70 + 0.691) / 10)
+    let abs_thresh_ms = 10.0f64.powf((-70.0 + 0.691) / 10.0) as f32;
+    let abs_pass: Vec<f32> = block_ms.into_iter().filter(|&ms| ms >= abs_thresh_ms).collect();
+
+    if abs_pass.is_empty() {
+        return -70.0;
+    }
+
+    let abs_avg_ms: f32 = abs_pass.iter().sum::<f32>() / abs_pass.len() as f32;
+
+    // Relative threshold: 10 dB below absolute average => z_rel_thresh = abs_avg * 10^(-1.0)
+    let rel_thresh_ms = abs_avg_ms * 0.1;
+    let rel_pass: Vec<f32> = abs_pass.into_iter().filter(|&ms| ms >= rel_thresh_ms).collect();
+
+    if rel_pass.is_empty() {
+        return -70.0;
+    }
+
+    let integrated_ms: f32 = rel_pass.iter().sum::<f32>() / rel_pass.len() as f32;
+    if integrated_ms <= 1e-10 {
+        return -70.0;
+    }
+
+    let lufs = -0.691 + 10.0 * (integrated_ms as f64).log10();
+    lufs.clamp(-70.0, 10.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ebu_r128_empty_returns_minus_70() {
+        assert_eq!(calculate_ebu_r128_lufs(&[], 44100), -70.0);
+    }
+
+    #[test]
+    fn test_ebu_r128_silence_returns_minus_70() {
+        let silence = vec![0.0f32; 44100 * 2];
+        assert_eq!(calculate_ebu_r128_lufs(&silence, 44100), -70.0);
+    }
+
+    #[test]
+    fn test_ebu_r128_sine_wave_lufs() {
+        let sample_rate = 44100;
+        let duration_secs = 3;
+        let freq = 1000.0f32; // 1 kHz sine wave
+        let amplitude = 0.12589f32; // -18 dBFS peak
+
+        let mut samples = Vec::with_capacity(sample_rate * duration_secs);
+        for i in 0..(sample_rate * duration_secs) {
+            let t = i as f32 / sample_rate as f32;
+            let val = amplitude * (2.0 * std::f32::consts::PI * freq * t).sin();
+            samples.push(val);
+        }
+
+        let lufs = calculate_ebu_r128_lufs(&samples, sample_rate);
+        // Standard K-weighted 1 kHz sine wave at -18 dBFS yields ~ -18.5 to -19.5 LUFS
+        assert!(lufs > -22.0 && lufs < -16.0, "Expected LUFS around -19.0, got {:.2}", lufs);
     }
 }

@@ -132,6 +132,15 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS smart_playlists (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            rules_json TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     // Migration: Remove foreign key constraint on track_path from playlist_tracks.
     let has_tracks_fk: bool = {
         let mut stmt = conn.prepare("PRAGMA foreign_key_list(playlist_tracks)")?;
@@ -337,8 +346,8 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
         let hash = track.path_hash.clone().unwrap_or_else(|| format!("{:x}", md5::compute(track.path.as_bytes())));
         track.path_hash = Some(hash.clone());
         tx.execute(
-            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash)
-             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash)
+            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash, replaygain_gain)
+             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash, :replaygain_gain)
              ON CONFLICT(path) DO UPDATE SET
                  title = excluded.title,
                  artist = excluded.artist,
@@ -348,7 +357,8 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                  cover_url = COALESCE(excluded.cover_url, tracks.cover_url),
                  track_number = COALESCE(excluded.track_number, tracks.track_number),
                  disc_number = COALESCE(excluded.disc_number, tracks.disc_number),
-                 path_hash = COALESCE(excluded.path_hash, tracks.path_hash)",
+                 path_hash = COALESCE(excluded.path_hash, tracks.path_hash),
+                 replaygain_gain = COALESCE(excluded.replaygain_gain, tracks.replaygain_gain)",
             rusqlite::named_params! {
                 ":path": &track.path,
                 ":title": &track.title,
@@ -362,6 +372,7 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                 ":track_number": &track.track_number,
                 ":disc_number": &track.disc_number,
                 ":path_hash": &hash,
+                ":replaygain_gain": &track.replaygain_gain,
             },
         )?;
     }
@@ -385,10 +396,10 @@ pub fn update_track_offset(conn: &Connection, path: &str, offset: i32) -> Result
     Ok(())
 }
 
-pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energy: f64, bass_ratio: f64, treble_ratio: f64) -> Result<()> {
+pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energy: f64, bass_ratio: f64, treble_ratio: f64, replaygain_gain: Option<f64>) -> Result<()> {
     conn.execute(
-        "UPDATE tracks SET bpm = ?1, energy = ?2, bass_ratio = ?3, treble_ratio = ?4 WHERE path = ?5",
-        rusqlite::params![bpm, energy, bass_ratio, treble_ratio, path],
+        "UPDATE tracks SET bpm = ?1, energy = ?2, bass_ratio = ?3, treble_ratio = ?4, replaygain_gain = COALESCE(replaygain_gain, ?5) WHERE path = ?6",
+        rusqlite::params![bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path],
     )?;
     Ok(())
 }
@@ -533,6 +544,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
 
 pub fn delete_track(conn: &Connection, path: &str) -> Result<()> {
     conn.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path])?;
+    conn.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path])?;
     Ok(())
 }
 
@@ -549,24 +561,20 @@ pub fn toggle_love_track(
 ) -> Result<()> {
     let loved_int = if loved { 1 } else { 0 };
 
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tracks WHERE path = ?1)",
-        rusqlite::params![path],
-        |row| row.get(0),
-    ).unwrap_or(false);
-
-    if !exists && loved {
-        conn.execute(
-            "INSERT INTO tracks (path, title, artist, album, duration, format, loved, cover_url)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![path, title, artist, album, duration, format, loved_int, cover_url],
-        )?;
-    } else {
-        conn.execute(
-            "UPDATE tracks SET loved = ?1 WHERE path = ?2",
-            rusqlite::params![loved_int, path],
-        )?;
-    }
+    conn.execute(
+        "INSERT INTO tracks (path, title, artist, album, duration, format, loved, disliked, cover_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
+         ON CONFLICT(path) DO UPDATE SET
+             loved = ?7,
+             disliked = CASE WHEN ?7 = 1 THEN 0 ELSE tracks.disliked END,
+             title = COALESCE(excluded.title, tracks.title),
+             artist = COALESCE(excluded.artist, tracks.artist),
+             album = COALESCE(excluded.album, tracks.album),
+             duration = COALESCE(excluded.duration, tracks.duration),
+             format = COALESCE(excluded.format, tracks.format),
+             cover_url = COALESCE(excluded.cover_url, tracks.cover_url)",
+        rusqlite::params![path, title, artist, album, duration, format, loved_int, cover_url],
+    )?;
 
     let playlist_name = "Favorite Songs";
     
@@ -619,45 +627,195 @@ pub fn toggle_dislike_track(
 ) -> Result<()> {
     let disliked_int = if disliked { 1 } else { 0 };
 
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tracks WHERE path = ?1)",
-        rusqlite::params![path],
-        |row| row.get(0),
-    ).unwrap_or(false);
+    conn.execute(
+        "INSERT INTO tracks (path, title, artist, album, duration, format, disliked, loved, cover_url)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
+         ON CONFLICT(path) DO UPDATE SET
+             disliked = ?7,
+             loved = CASE WHEN ?7 = 1 THEN 0 ELSE tracks.loved END,
+             title = COALESCE(excluded.title, tracks.title),
+             artist = COALESCE(excluded.artist, tracks.artist),
+             album = COALESCE(excluded.album, tracks.album),
+             duration = COALESCE(excluded.duration, tracks.duration),
+             format = COALESCE(excluded.format, tracks.format),
+             cover_url = COALESCE(excluded.cover_url, tracks.cover_url)",
+        rusqlite::params![path, title, artist, album, duration, format, disliked_int, cover_url],
+    )?;
 
-    if !exists && disliked {
-        conn.execute(
-            "INSERT INTO tracks (path, title, artist, album, duration, format, disliked, loved, cover_url)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)",
-            rusqlite::params![path, title, artist, album, duration, format, disliked_int, cover_url],
-        )?;
-    } else {
-        if disliked {
-            conn.execute(
-                "UPDATE tracks SET disliked = ?1, loved = 0 WHERE path = ?2",
-                rusqlite::params![disliked_int, path],
-            )?;
-            
-            // Delete from Favorite Songs playlist if it was there
-            if let Ok(playlist_id) = conn.query_row(
-                "SELECT id FROM playlists WHERE name = 'Favorite Songs'",
-                [],
-                |row| row.get::<_, i32>(0),
-            ) {
-                let _ = conn.execute(
-                    "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
-                    rusqlite::params![playlist_id, path],
-                );
-            }
-        } else {
-            conn.execute(
-                "UPDATE tracks SET disliked = ?1 WHERE path = ?2",
-                rusqlite::params![disliked_int, path],
-            )?;
+    if disliked {
+        // Delete from Favorite Songs playlist if it was there
+        if let Ok(playlist_id) = conn.query_row(
+            "SELECT id FROM playlists WHERE name = 'Favorite Songs'",
+            [],
+            |row| row.get::<_, i32>(0),
+        ) {
+            let _ = conn.execute(
+                "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
+                rusqlite::params![playlist_id, path],
+            );
         }
     }
 
     Ok(())
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SmartRule {
+    pub field: String,
+    pub operator: String,
+    pub value: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SmartPlaylistDef {
+    pub match_all: bool,
+    pub rules: Vec<SmartRule>,
+    pub limit: Option<usize>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SmartPlaylist {
+    pub id: i32,
+    pub name: String,
+    pub rules_json: String,
+}
+
+pub fn create_smart_playlist(conn: &Connection, name: &str, rules_json: &str) -> Result<i32> {
+    conn.execute(
+        "INSERT INTO smart_playlists (name, rules_json) VALUES (?1, ?2)",
+        params![name, rules_json],
+    )?;
+    Ok(conn.last_insert_rowid() as i32)
+}
+
+pub fn get_smart_playlists(conn: &Connection) -> Result<Vec<SmartPlaylist>> {
+    let mut stmt = conn.prepare("SELECT id, name, rules_json FROM smart_playlists ORDER BY name ASC")?;
+    let iter = stmt.query_map([], |row| {
+        Ok(SmartPlaylist {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            rules_json: row.get(2)?,
+        })
+    })?;
+    let mut list = Vec::new();
+    for item in iter {
+        if let Ok(sp) = item {
+            list.push(sp);
+        }
+    }
+    Ok(list)
+}
+
+pub fn delete_smart_playlist(conn: &Connection, id: i32) -> Result<()> {
+    conn.execute("DELETE FROM smart_playlists WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn execute_smart_rules(conn: &Connection, rules_json: &str) -> Result<Vec<Track>> {
+    let def: SmartPlaylistDef = serde_json::from_str(rules_json)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+    let mut where_clauses = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    for rule in &def.rules {
+        let col = match rule.field.to_lowercase().as_str() {
+            "title" => "t.title",
+            "artist" => "t.artist",
+            "album" => "t.album",
+            "format" => "t.format",
+            "loved" => "t.loved",
+            "disliked" => "t.disliked",
+            "bpm" => "t.bpm",
+            "duration" => "t.duration",
+            _ => continue,
+        };
+
+        match rule.operator.to_lowercase().as_str() {
+            "contains" | "like" => {
+                where_clauses.push(format!("{} LIKE ?", col));
+                params.push(Box::new(format!("%{}%", rule.value)));
+            }
+            "equals" | "=" => {
+                if let Ok(num) = rule.value.parse::<i32>() {
+                    where_clauses.push(format!("{} = ?", col));
+                    params.push(Box::new(num));
+                } else if let Ok(num) = rule.value.parse::<f64>() {
+                    where_clauses.push(format!("{} = ?", col));
+                    params.push(Box::new(num));
+                } else {
+                    where_clauses.push(format!("{} = ?", col));
+                    params.push(Box::new(rule.value.clone()));
+                }
+            }
+            "greater_than" | ">" | ">=" => {
+                if let Ok(num) = rule.value.parse::<f64>() {
+                    where_clauses.push(format!("{} >= ?", col));
+                    params.push(Box::new(num));
+                }
+            }
+            "less_than" | "<" | "<=" => {
+                if let Ok(num) = rule.value.parse::<f64>() {
+                    where_clauses.push(format!("{} <= ?", col));
+                    params.push(Box::new(num));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let join_op = if def.match_all { " AND " } else { " OR " };
+    let where_sql = if where_clauses.is_empty() {
+        "1=1".to_string()
+    } else {
+        where_clauses.join(join_op)
+    };
+
+    let limit_clause = match def.limit {
+        Some(l) if l > 0 => format!(" LIMIT {}", l),
+        _ => "".to_string(),
+    };
+
+    let query_str = format!(
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.track_number, t.disc_number FROM tracks t WHERE ({}) ORDER BY t.title ASC{}",
+        where_sql, limit_clause
+    );
+
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&query_str)?;
+    let track_iter = stmt.query_map(param_refs.as_slice(), |row| {
+        let path: String = row.get(1)?;
+        let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
+        Ok(Track {
+            id: row.get::<_, Option<i32>>(0)?.unwrap_or(0),
+            path,
+            title: row.get(2)?,
+            artist: row.get(3)?,
+            album: row.get(4)?,
+            duration: row.get(5)?,
+            format: row.get(6)?,
+            lyric_offset: row.get::<_, Option<i32>>(7)?.unwrap_or(0),
+            loved: Some(row.get::<_, Option<i32>>(8)?.unwrap_or(0)),
+            disliked: Some(row.get::<_, Option<i32>>(9)?.unwrap_or(0)),
+            cover_url: row.get(10).ok(),
+            path_hash,
+            bpm: row.get(11).ok(),
+            energy: row.get(12).ok(),
+            bass_ratio: row.get(13).ok(),
+            treble_ratio: row.get(14).ok(),
+            replaygain_gain: row.get(15).ok(),
+            track_number: row.get(16).ok(),
+            disc_number: row.get(17).ok(),
+        })
+    })?;
+
+    let mut tracks = Vec::new();
+    for t in track_iter {
+        if let Ok(tr) = t {
+            tracks.push(tr);
+        }
+    }
+    Ok(tracks)
 }
 
 pub fn reset_disliked_tracks(conn: &Connection) -> Result<()> {

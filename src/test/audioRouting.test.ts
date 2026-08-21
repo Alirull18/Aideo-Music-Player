@@ -60,4 +60,24 @@ describe('Playback Engine, Queue & Audio Routing', () => {
     expect(useStore.getState().playback.volume).toBe(0.85);
     expect(useStore.getState().isMuted).toBe(false);
   });
+
+  it('preserves bit-perfect mode when setDSP is called with false/disabled parameters', async () => {
+    const store = useStore.getState();
+    useStore.setState({
+      playback: {
+        ...useStore.getState().playback,
+        bit_perfect: true,
+      },
+      dsp: {
+        ...useStore.getState().dsp,
+        enabled: false,
+      },
+    });
+
+    await store.setDSP({ eq_enabled: false });
+    expect(useStore.getState().playback.bit_perfect).toBe(true);
+
+    await store.setDSP({ spatial_enabled: false, crossfeed_enabled: false });
+    expect(useStore.getState().playback.bit_perfect).toBe(true);
+  });
 });

@@ -16,7 +16,11 @@ describe('syncEngine non-destructive sync', () => {
         if (table === 'liked_tracks') {
           return {
             upsert: upsertMock,
-            delete: vi.fn(),
+            delete: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({ error: null })
+              })
+            }),
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockResolvedValue({ data: [], error: null })
           };

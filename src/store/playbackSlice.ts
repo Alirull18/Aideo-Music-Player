@@ -11,7 +11,9 @@ let pendingDspState: any = null;
 let chromecastTickCount = 0;
 let queueOperationPromise = Promise.resolve();
 export const chainQueueOperation = (op: () => Promise<any>): Promise<any> => {
-  queueOperationPromise = queueOperationPromise.then(op);
+  queueOperationPromise = queueOperationPromise.then(() => op().catch((err) => {
+    console.error('Queue operation error:', err);
+  }));
   return queueOperationPromise;
 };
 
@@ -151,6 +153,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   pauseTrack: async () => {
     try {
+      // Persist resume position before pausing so the next launch can continue where left off
+      const pos = get().playback.position_secs;
+      const path = get().playback.current_track;
+      if (path && pos > 30) {
+        try { localStorage.setItem('aideo_resume_position', String(Math.floor(pos))); } catch {}
+      }
       if (get().chromecast_connected) {
         await invoke('chromecast_control', { action: 'pause' });
       } else {
@@ -207,6 +215,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
       
       localStorage.removeItem('aideo_current_track');
+      localStorage.removeItem('aideo_resume_position');
       set({
         currentTrack: null,
         playback: { 
@@ -289,6 +298,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // Query actual Chromecast device status every 5 ticks (1 second) to correct drift
       if (chromecastTickCount >= 5) {
         chromecastTickCount = 0;
+        if (isPolling) return;
+        isPolling = true;
         const lastSeekTime = get().playback.last_seek_time || 0;
         const lastSkipTime = get().playback.last_skip_time || 0;
         const now = Date.now();
@@ -310,18 +321,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
                 }, 100);
               }
               
+              const nextVol = typeof status.volume === 'number' && !isNaN(status.volume)
+                ? Math.max(0, Math.min(1, status.volume))
+                : s.playback.volume;
+
               return {
                 playback: {
                   ...s.playback,
                   status: nextStatus,
                   position_secs: nextPos,
-                  volume: status.volume,
+                  volume: nextVol,
                 }
               };
             });
           }
         } catch (e) {
           console.error('Failed to get Chromecast status:', e);
+        } finally {
+          isPolling = false;
         }
       }
       return;
@@ -482,13 +499,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       'stream_engine', 'lookahead_prebuffer_enabled'
     ];
     const isActivatingDSP = dspKeys.some(key => {
+      const val = (newDSP as any)[key];
+      if (val === undefined) return false;
+      if (typeof val === 'boolean') {
+        return val === true;
+      }
       if (key === 'upsample_rate') {
-        return newDSP.upsample_rate !== undefined && newDSP.upsample_rate > 0;
+        return typeof val === 'number' && val > 0;
       }
-      if (key === 'enabled') {
-        return newDSP.enabled === true;
-      }
-      return (newDSP as any)[key] !== undefined;
+      return true;
     });
 
     if (isActivatingDSP && get().playback.bit_perfect) {
@@ -608,20 +627,22 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   toggleExclusive: async () => {
     try {
-      const res: boolean = await invoke('toggle_exclusive_mode');
-      if (res) await get().setDSP({ enabled: false });
-      set(s => ({ playback: { ...s.playback, exclusive: res } }));
+      const res = await invoke<boolean>('toggle_exclusive_mode');
+      const nextMode = typeof res === 'boolean' ? res : !get().playback.exclusive;
+      if (nextMode) await get().setDSP({ enabled: false });
+      set(s => ({ playback: { ...s.playback, exclusive: nextMode } }));
     } catch (e) { console.error(e); }
   },
 
   toggleBitPerfect: async () => {
     try {
-      const res: boolean = await invoke('toggle_bit_perfect_mode');
-      if (res) {
+      const res = await invoke<boolean>('toggle_bit_perfect_mode');
+      const nextMode = typeof res === 'boolean' ? res : !get().playback.bit_perfect;
+      if (nextMode) {
         await get().setDSP({ enabled: false, upsample_rate: 0 });
         await get().setVolume(1.0);
       }
-      set(s => ({ playback: { ...s.playback, bit_perfect: res } }));
+      set(s => ({ playback: { ...s.playback, bit_perfect: nextMode } }));
     } catch (e) { console.error(e); }
   },
 
@@ -669,11 +690,46 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   setAudioDevice: async (name: string) => {
     try {
+      const prevDeviceKey = get().currentDevice || 'Default';
+      const currentVol = get().playback.volume;
+      const currentDsp = get().dsp;
+
+      // Persist profile for current output device before switching
+      safeSetStorage(`aideo_dev_vol_${prevDeviceKey}`, String(currentVol));
+      safeSetStorage(`aideo_dev_dsp_${prevDeviceKey}`, JSON.stringify(currentDsp));
+
       await invoke('set_audio_device', { name });
       localStorage.setItem('aideo_target_device', name);
       const devName = (name === '[System Default Device]' || name === 'Default Device' || name === 'System Default Device') ? '' : name;
+      const newDeviceKey = devName || 'Default';
       set({ currentDevice: devName });
+
+      // Restore target device profile if previously saved
+      const savedVol = safeGetStorage(`aideo_dev_vol_${newDeviceKey}`);
+      if (savedVol !== null) {
+        const parsedVol = parseFloat(savedVol);
+        if (!isNaN(parsedVol)) {
+          get().setVolume(Math.max(0, Math.min(1, parsedVol)));
+        }
+      }
+
+      const savedDsp = safeGetStorage(`aideo_dev_dsp_${newDeviceKey}`);
+      if (savedDsp !== null) {
+        try {
+          const parsedDsp = JSON.parse(savedDsp);
+          get().setDSP(parsedDsp);
+        } catch (_) {}
+      }
     } catch (e) { console.error(e); }
+  },
+
+  playbackRate: 1.0,
+  setPlaybackRate: async (rate: number) => {
+    const clamped = Math.max(0.5, Math.min(2.0, rate));
+    set({ playbackRate: clamped });
+    try {
+      await invoke('set_playback_rate', { rate: clamped });
+    } catch (e) { console.error('Failed to set playback rate:', e); }
   },
 
   setDriverType: (type: 'WASAPI' | 'ASIO') => {
@@ -705,7 +761,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         // Remove from the Rust backend queue in reverse order
         for (let i = matchingIndices.length - 1; i >= 0; i--) {
           const indexToRemove = matchingIndices[i];
-          invoke('remove_from_queue', { index: indexToRemove }).catch(console.error);
+          chainQueueOperation(() => invoke('remove_from_queue', { index: indexToRemove }));
         }
       }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -30,6 +30,7 @@ export function ChartsView() {
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [heroColor, setHeroColor] = useState<string>('rgba(168, 85, 247, 0.25)');
+  const fetchSeq = useRef(0);
 
   const chartSources = [
     { id: 'lastfm', label: '📻 Last.fm Realtime' },
@@ -63,6 +64,7 @@ export function ChartsView() {
   const [hasMore, setHasMore] = useState(true);
 
   const fetchLeaderboard = async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     setHasMore(true);
     try {
@@ -73,21 +75,27 @@ export function ChartsView() {
         offset: 0,
         limit: 15,
       });
+      if (seq !== fetchSeq.current) return;
       setLeaderboard(res || []);
       if (!res || res.length < 15) {
         setHasMore(false);
       }
 
       if (res && res.length > 0 && res[0].cover_url) {
-        extractDominantColor(res[0].cover_url).then(setHeroColor);
+        extractDominantColor(res[0].cover_url).then(c => {
+          if (seq === fetchSeq.current) setHeroColor(c);
+        });
       } else {
         setHeroColor('rgba(168, 85, 247, 0.25)');
       }
     } catch (e) {
+      if (seq !== fetchSeq.current) return;
       console.error('Failed to fetch leaderboard:', e);
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to load charts: ${e}`, type: 'error' } }));
     } finally {
-      setLoading(false);
+      if (seq === fetchSeq.current) {
+        setLoading(false);
+      }
     }
   };
 

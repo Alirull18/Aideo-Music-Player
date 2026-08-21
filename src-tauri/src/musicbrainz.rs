@@ -3,7 +3,7 @@ use serde_json::Value;
 const USER_AGENT: &str = concat!("AideoMusicPlayer/", env!("CARGO_PKG_VERSION"), " ( https://github.com/Alirull18/Aideo-Music-Player )");
 
 lazy_static::lazy_static! {
-    static ref RE_TITLE_CLEAN: regex::Regex = regex::Regex::new(r"(?i)\[.*?\]|\(.*?\)|(official\s*(music\s*)?video)|(audio)|(lyric\s*video)|(lyrics)").unwrap();
+    static ref RE_TITLE_CLEAN: regex::Regex = regex::Regex::new(r"(?i)\[.*?\]|\(.*?\)|(\bofficial\s*(music\s*)?video\b)|(\baudio\b)|(\blyric\s*video\b)|(\blyrics\b)").unwrap();
 }
 
 pub async fn search_recording(title: &str, artist: &str) -> Result<Value, String> {

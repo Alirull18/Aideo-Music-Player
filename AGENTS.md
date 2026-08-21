@@ -46,3 +46,9 @@ Fall back to Grep/Glob/Read only when the graph doesn't cover it.
 - **Simplicity first**: minimal code, no speculative abstractions or unrequested config.
 - **Surgical changes**: touch only what's asked; match existing style; remove only your own orphans.
 - **Goal-driven**: turn tasks into verifiable goals and verify before declaring done.
+
+## Verification gate
+- Never declare a fix done without running, all green: `npx tsc --noEmit`, `npx vitest run src/test`, `cargo check --manifest-path src-tauri/Cargo.toml`, `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Audio/DSP/parse fixes ship with a unit test locking the behavior in (see `src-tauri/src/player/dsp_tests.rs`, `scanner.rs`, `updater.rs` tests).
+- When auditing AI-generated changes: `git diff HEAD` is ground truth — never trust changelogs or "VERIFIED" labels without the snippet.
+- Run `git status` before verifying claims about the repo state — uncommitted working-tree changes have caused false "already fixed" conclusions before.

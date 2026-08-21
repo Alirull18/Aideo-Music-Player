@@ -138,6 +138,9 @@ function AideoApp() {
     const initialDiscordEnabled = localStorage.getItem('aideo_discord_enabled') !== 'false';
     invoke('set_discord_enabled', { enabled: initialDiscordEnabled }).catch(e => console.error("set_discord_enabled on startup error:", e));
 
+    // Restore user-configured global hotkeys (works when app is minimized)
+    useStore.getState().initGlobalHotkeys();
+
     // Ensure window is always centered and safely on-screen on startup
     invoke('center_window').catch(() => {});
 
@@ -377,34 +380,37 @@ function AideoApp() {
     // Global Keyboard Shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
 
       const state = useStore.getState();
+      if (state.view === 'fullscreen') return;
+
       const userShortcuts = state.shortcuts || {};
       const keyName = e.key === ' ' ? 'Space' : e.key;
 
-      if (keyName === userShortcuts.playPause) {
+      if (keyName === (userShortcuts.playPause ?? 'Space')) {
         e.preventDefault();
         if (state.playback.status === 'Playing') state.pauseTrack();
         else state.resumeTrack();
-      } else if (keyName === userShortcuts.next) {
+      } else if (keyName === (userShortcuts.next ?? 'ArrowRight')) {
         e.preventDefault();
         state.playNext();
-      } else if (keyName === userShortcuts.prev) {
+      } else if (keyName === (userShortcuts.prev ?? 'ArrowLeft')) {
         e.preventDefault();
         state.playPrev();
-      } else if (keyName === userShortcuts.volumeUp) {
+      } else if (keyName === (userShortcuts.volumeUp ?? 'ArrowUp')) {
         e.preventDefault();
         const currentVol = state.playback.volume;
         state.setVolume(Math.min(currentVol + 0.05, 1));
-      } else if (keyName === userShortcuts.volumeDown) {
+      } else if (keyName === (userShortcuts.volumeDown ?? 'ArrowDown')) {
         e.preventDefault();
         const currentVol = state.playback.volume;
         state.setVolume(Math.max(currentVol - 0.05, 0));
-      } else if (e.key.toLowerCase() === 'b' || keyName === (userShortcuts.dspBypass || 'b')) {
+      } else if (keyName === (userShortcuts.dspBypass ?? 'b')) {
         e.preventDefault();
         state.toggleDspAB();
-      } else if (e.key.toLowerCase() === 'm' || keyName === (userShortcuts.mute || 'm')) {
+      } else if (keyName === (userShortcuts.mute ?? 'm')) {
         e.preventDefault();
         state.toggleMute();
       }

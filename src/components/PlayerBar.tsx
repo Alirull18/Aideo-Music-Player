@@ -5,6 +5,7 @@ import { SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, V
 import defaultCover from '../assets/default_cover.png';
 import { CastSelector } from './CastSelector';
 import { fmt, baseName, getStreamName } from '../utils';
+import { generateWaveformPeaks } from '../utils/waveform';
 
 const isRadioStream = (track: any): boolean => {
   if (!track) return false;
@@ -40,6 +41,10 @@ export function PlayerBar() {
   const current = currentTrack;
   const duration = current?.duration ?? 0;
   const pct = duration > 0 ? (playback.position_secs / duration) * 100 : 0;
+
+  const waveformPeaks = useMemo(() => {
+    return generateWaveformPeaks(current?.path || current?.title || 'aideo', 48);
+  }, [current?.path, current?.title]);
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -102,7 +107,7 @@ export function PlayerBar() {
               />
             )}
           </div>
-          <div className="pb-artist" style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: 0.6 }}>
+          <div className="pb-artist" style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#a1a1aa' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {current?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—')}
             </span>
@@ -225,8 +230,32 @@ export function PlayerBar() {
               </div>
             </div>
           ) : (
-            <div className="prog-track" onClick={handleSeek}>
-              <div className="prog-fill" style={{ width: `${pct}%` }} />
+            <div className="prog-track" onClick={handleSeek} style={{ position: 'relative', overflow: 'hidden' }}>
+              {playback.current_track?.startsWith('http') ? (
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(255, 255, 255, 0.08)' }} />
+              ) : waveformPeaks.length > 0 ? (
+                <div className="waveform-bar-container" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, padding: '0 4px', pointerEvents: 'none', zIndex: 1 }}>
+                  {waveformPeaks.map((peak, idx) => {
+                    const barPct = (idx / waveformPeaks.length) * 100;
+                    const isPlayed = barPct <= pct;
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          flex: 1,
+                          height: `${Math.max(25, peak * 100)}%`,
+                          background: isPlayed ? 'var(--accent)' : 'rgba(255, 255, 255, 0.22)',
+                          borderRadius: 1,
+                          transition: 'background 0.1s ease',
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(255, 255, 255, 0.08)' }} />
+              )}
+              <div className="prog-fill" style={{ width: `${pct}%`, opacity: 0.25 }} />
             </div>
           )}
           <span className="prog-time">{playback.current_track?.startsWith('http') && !duration ? 'LIVE' : fmt(duration)}</span>

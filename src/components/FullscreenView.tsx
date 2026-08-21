@@ -23,6 +23,7 @@ import {
 import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
 import { Visualizer } from './Visualizer';
+import { generateWaveformPeaks } from '../utils/waveform';
 import { baseName, getStreamName } from '../utils';
 
 export function FullscreenView() {
@@ -48,9 +49,7 @@ export function FullscreenView() {
     liquidBackgroundEnabled,
     toggleLiquidBackground,
     showRomaji,
-    setShowRomaji,
     showTranslation,
-    setShowTranslation,
     translateLyrics,
     isTranslating,
     getRomaji,
@@ -172,6 +171,7 @@ export function FullscreenView() {
       const targetTag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       if (targetTag === 'input' || targetTag === 'textarea') return;
 
+      const state = useStore.getState();
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -188,7 +188,11 @@ export function FullscreenView() {
         });
       } else if (e.code === 'Space' || key === ' ') {
         e.preventDefault();
-        handlePlayPause();
+        if (state.playback.status === 'Playing') {
+          state.pauseTrack();
+        } else {
+          state.resumeTrack();
+        }
       } else if (key === 'l') {
         e.preventDefault();
         setLayout(prev => prev === 'stage' ? 'zen' : 'stage');
@@ -207,26 +211,27 @@ export function FullscreenView() {
         handleRomajiToggle();
       } else if (key === 'm') {
         e.preventDefault();
-        handleMuteToggle();
+        state.toggleMute();
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        seek(Math.max(0, playback.position_secs - 5));
+        state.seek(Math.max(0, state.playback.position_secs - 5));
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        seek(Math.min(trackDuration, playback.position_secs + 5));
+        const duration = state.currentTrack?.duration || 0;
+        state.seek(Math.min(duration, state.playback.position_secs + 5));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        const nextVol = Math.min(1, Math.round((playback.volume + 0.05) * 100) / 100);
-        setVolume(nextVol);
+        const nextVol = Math.min(1, Math.round((state.playback.volume + 0.05) * 100) / 100);
+        state.setVolume(nextVol);
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        const nextVol = Math.max(0, Math.round((playback.volume - 0.05) * 100) / 100);
-        setVolume(nextVol);
+        const nextVol = Math.max(0, Math.round((state.playback.volume - 0.05) * 100) / 100);
+        state.setVolume(nextVol);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setView, playback.status, playback.volume, playback.position_secs, trackDuration, isMuted, showRomaji, showTranslation, lyrics.length]);
+  }, [setView]);
 
   // Autohide HUD timer: 3.5 seconds of inactivity
   useEffect(() => {
@@ -318,36 +323,42 @@ export function FullscreenView() {
 
   // Romaji toggle handler
   const handleRomajiToggle = async () => {
-    const hasRomaji = lyrics.some(l => l.romaji);
-    if (!hasRomaji && lyrics.length > 0) {
+    const s = useStore.getState();
+    const hasRomaji = s.lyrics.some(l => l.romaji);
+    if (!hasRomaji && s.lyrics.length > 0) {
       try {
-        await getRomaji();
-        setShowRomaji(true);
+        await s.getRomaji();
+        s.setShowRomaji(true);
       } catch (err) {
         console.error("Failed to fetch Romaji:", err);
       }
     } else {
-      setShowRomaji(!showRomaji);
+      s.setShowRomaji(!s.showRomaji);
     }
   };
 
   // Translate toggle handler
   const handleTranslate = async () => {
-    const hasTranslation = lyrics.some(l => l.translation);
-    if (!hasTranslation && lyrics.length > 0) {
+    const s = useStore.getState();
+    const hasTranslation = s.lyrics.some(l => l.translation);
+    if (!hasTranslation && s.lyrics.length > 0) {
       try {
-        await translateLyrics();
-        setShowTranslation(true);
+        await s.translateLyrics();
+        s.setShowTranslation(true);
       } catch (err) {
         console.error("Translation failed:", err);
       }
     } else {
-      setShowTranslation(!showTranslation);
+      s.setShowTranslation(!s.showTranslation);
     }
   };
 
   // Safe track progress values
   const progressPercent = trackDuration > 0 ? (playback.position_secs / trackDuration) * 100 : 0;
+
+  const waveformPeaks = useMemo(() => {
+    return generateWaveformPeaks(currentTrack?.path || currentTrack?.title || 'aideo-fs', 60);
+  }, [currentTrack?.path, currentTrack?.title]);
 
   // Simple formatting helper
   const formatTime = (secs: number) => {
@@ -626,17 +637,41 @@ export function FullscreenView() {
         {/* Progress Bar & Durations */}
         <div className="fullscreen-hud-progress-wrap">
           <span className="fullscreen-hud-time">{formatTime(playback.position_secs)}</span>
-          <input
-            type="range"
-            min={0}
-            max={trackDuration || 100}
-            value={playback.position_secs}
-            onChange={(e) => seek(parseFloat(e.target.value))}
-            className="fullscreen-hud-progress-bar"
-            style={{
-              background: `linear-gradient(to right, ${accentColor} ${progressPercent}%, rgba(255, 255, 255, 0.1) ${progressPercent}%)`
-            }}
-          />
+          <div style={{ flex: 1, position: 'relative', height: 24, display: 'flex', alignItems: 'center' }}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, pointerEvents: 'none', padding: '0 2px' }}>
+              {waveformPeaks.map((peak, idx) => {
+                const barPct = (idx / waveformPeaks.length) * 100;
+                const isPlayed = barPct <= progressPercent;
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      flex: 1,
+                      height: `${Math.max(25, peak * 100)}%`,
+                      background: isPlayed ? accentColor : 'rgba(255, 255, 255, 0.22)',
+                      borderRadius: 1,
+                      transition: 'background 0.1s ease',
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={trackDuration || 100}
+              value={playback.position_secs}
+              onChange={(e) => seek(parseFloat(e.target.value))}
+              className="fullscreen-hud-progress-bar"
+              style={{
+                width: '100%',
+                opacity: 0,
+                cursor: 'pointer',
+                position: 'relative',
+                zIndex: 2,
+              }}
+            />
+          </div>
           <span className="fullscreen-hud-time">{formatTime(trackDuration)}</span>
         </div>
 

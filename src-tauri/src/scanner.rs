@@ -43,7 +43,7 @@ pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
                 Err(e) => {
                     let msg = format!("Failed to read file: {:?}. Error: {:?}", path_owned, e);
                     eprintln!("[scanner] {}", msg);
-                    let _ = app_handle.emit("playback-error", msg);
+                    let _ = app_handle.emit("scanner-error", msg);
                     None
                 }
             }
@@ -58,6 +58,16 @@ fn parse_number_value(value: &symphonia::core::meta::Value) -> Option<i32> {
         symphonia::core::meta::Value::String(s) => parse_number_str(s),
         _ => None,
     }
+}
+
+fn parse_replaygain_value(value: &symphonia::core::meta::Value) -> Option<f64> {
+    let s = match value {
+        symphonia::core::meta::Value::String(s) => s.as_str(),
+        _ => return None,
+    };
+    let clean = s.trim_matches('\0').trim();
+    let num_part = clean.split_whitespace().next()?.trim_end_matches("dB").trim();
+    num_part.parse::<f64>().ok()
 }
 
 fn parse_number_str(s: &str) -> Option<i32> {
@@ -168,6 +178,7 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
     if id3_offset > 0 && file.seek(SeekFrom::Start(id3_offset)).is_ok() {
         let mut id3_header = [0u8; 10];
             if file.read_exact(&mut id3_header).is_ok() && &id3_header[0..3] == b"ID3" {
+                let is_v2_4 = id3_header[3] >= 4;
                 let id3_size = ((id3_header[6] as usize) << 21) |
                                ((id3_header[7] as usize) << 14) |
                                ((id3_header[8] as usize) << 7) |
@@ -181,12 +192,19 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                     let mut offset = 0;
                     while offset + 10 < id3_size {
                         let frame_id = &frame_data[offset..offset + 4];
-                        if frame_id[0] == 0 { break; } // ID3 Padding boundary
+                        if frame_id[0] == 0 { break; } 
                         
-                        let frame_size = ((frame_data[offset + 4] as usize) << 24) |
-                                         ((frame_data[offset + 5] as usize) << 16) |
-                                         ((frame_data[offset + 6] as usize) << 8) |
-                                         (frame_data[offset + 7] as usize);
+                        let frame_size = if is_v2_4 {
+                            (((frame_data[offset + 4] as usize) & 0x7F) << 21) |
+                            (((frame_data[offset + 5] as usize) & 0x7F) << 14) |
+                            (((frame_data[offset + 6] as usize) & 0x7F) << 7) |
+                            ((frame_data[offset + 7] as usize) & 0x7F)
+                        } else {
+                            ((frame_data[offset + 4] as usize) << 24) |
+                            ((frame_data[offset + 5] as usize) << 16) |
+                            ((frame_data[offset + 6] as usize) << 8) |
+                            (frame_data[offset + 7] as usize)
+                        };
                         
                         if offset + 10 + frame_size > id3_size {
                             break;
@@ -194,7 +212,6 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                         
                         let data = &frame_data[offset + 10..offset + 10 + frame_size];
                         
-                        // Parse text frames (e.g. TIT2, TPE1, TALB, TRCK, TPOS)
                         if frame_id.starts_with(b"T") {
                             let text = if data.len() > 1 {
                                 let encoding = data[0];
@@ -213,7 +230,7 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                                             }).collect();
                                             String::from_utf16_lossy(&u16s)
                                         } else {
-                                            String::from_utf8_lossy(bytes).into_owned()
+                                            String::new()
                                         }
                                     }
                                     2 => {
@@ -227,19 +244,14 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
                                 String::new()
                             };
                             
-                            let clean_text = text.trim_matches('\0').trim().to_string();
-                            if !clean_text.is_empty() {
-                                if frame_id == b"TIT2" {
-                                    title = Some(clean_text);
-                                } else if frame_id == b"TPE1" {
-                                    artist = Some(clean_text);
-                                } else if frame_id == b"TALB" {
-                                    album = Some(clean_text);
-                                } else if frame_id == b"TRCK" {
-                                    track_number = parse_number_str(&clean_text);
-                                } else if frame_id == b"TPOS" {
-                                    disc_number = parse_number_str(&clean_text);
-                                }
+                            let trimmed = text.trim_matches('\0').trim().to_string();
+                            match frame_id {
+                                b"TIT2" => title = Some(trimmed),
+                                b"TPE1" => artist = Some(trimmed),
+                                b"TALB" => album = Some(trimmed),
+                                b"TRCK" => track_number = trimmed.split('/').next().and_then(|s| s.trim().parse::<i32>().ok()),
+                                b"TPOS" => disc_number = trimmed.split('/').next().and_then(|s| s.trim().parse::<i32>().ok()),
+                                _ => {}
                             }
                         }
                         
@@ -280,38 +292,41 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
     })
 }
 
+/// Parse DSDIFF (DFF) sample rate and channels from raw header bytes.
+/// DSDIFF 1.5 chunk layout: ckID(4) + ckSize(8: u32 high + u32 low, big-endian) + data.
+/// The "FS  " chunk data is a big-endian u32 sample rate at pos+12.
+/// The "CHNL" chunk data starts with a big-endian u16 channel count at pos+12.
+fn parse_dff_props(buffer: &[u8]) -> (u32, u16) {
+    let mut sample_rate = 0u32;
+    let mut channels = 0u16;
+
+    if let Some(pos) = buffer.windows(4).position(|w| w == b"FS  ") {
+        if pos + 16 <= buffer.len() {
+            sample_rate = u32::from_be_bytes(buffer[pos + 12..pos + 16].try_into().unwrap_or([0; 4]));
+        }
+    }
+
+    if let Some(pos) = buffer.windows(4).position(|w| w == b"CHNL") {
+        if pos + 14 <= buffer.len() {
+            channels = u16::from_be_bytes(buffer[pos + 12..pos + 14].try_into().unwrap_or([0; 2]));
+        }
+    }
+
+    (sample_rate, channels)
+}
+
 fn parse_dff_metadata(path: &Path) -> Option<Track> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = File::open(path).ok()?;
-    
-    let mut header = [0u8; 12];
-    file.read_exact(&mut header).ok()?;
-    
-    if &header[0..4] != b"FRM8" || &header[8..12] != b"DSD " {
-        return None;
-    }
-    
-    let mut sample_rate = 0u32;
-    let mut channels = 0u16;
     
     let mut buffer = vec![0u8; 4096];
     file.seek(SeekFrom::Start(0)).ok()?;
     let bytes_read = file.read(&mut buffer).unwrap_or(0);
     
-    if let Some(pos) = buffer[0..bytes_read].windows(4).position(|w| w == b"FS  ") {
-        if pos + 8 <= bytes_read {
-            sample_rate = u32::from_be_bytes(buffer[pos + 4..pos + 8].try_into().unwrap_or([0; 4]));
-        }
-    }
-    
-    if let Some(pos) = buffer[0..bytes_read].windows(4).position(|w| w == b"CHNL") {
-        if pos + 6 <= bytes_read {
-            channels = u16::from_be_bytes(buffer[pos + 4..pos + 6].try_into().unwrap_or([0; 2]));
-        }
-    }
+    let (mut sample_rate, mut channels) = parse_dff_props(&buffer[..bytes_read]);
     
     if sample_rate == 0 {
-        sample_rate = 2822400; // Standard DSD64 baseline rate
+        sample_rate = 2822400; 
     }
     if channels == 0 {
         channels = 2;
@@ -352,6 +367,78 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::parse_dff_props;
+
+    fn dff_header(sample_rate: u32, channels: u16) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"FRM8");
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend_from_slice(b"DSD ");
+        // PROP chunk
+        b.extend_from_slice(b"PROP");
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend_from_slice(b"SND ");
+        // FS   chunk: ckID(4) + ckSize(8) + u32 BE sample rate
+        b.extend_from_slice(b"FS  ");
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend_from_slice(&sample_rate.to_be_bytes());
+        // CHNL chunk: ckID(4) + ckSize(8) + u16 BE channels
+        b.extend_from_slice(b"CHNL");
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend_from_slice(&channels.to_be_bytes());
+        b
+    }
+
+    #[test]
+    fn test_dff_parses_spec_sample_rate_and_channels() {
+        let buf = dff_header(5644800, 2);
+        assert_eq!(parse_dff_props(&buf), (5644800, 2));
+    }
+
+    #[test]
+    fn test_dff_parses_multichannel() {
+        let buf = dff_header(2822400, 6);
+        assert_eq!(parse_dff_props(&buf), (2822400, 6));
+    }
+
+    #[test]
+    fn test_dff_truncated_returns_zeros() {
+        let buf = dff_header(2822400, 2);
+        // Truncate the entire CHNL chunk (last 14 bytes): FS still parses, channels don't
+        let truncated = &buf[..buf.len() - 14];
+        let (rate, ch) = parse_dff_props(truncated);
+        assert_eq!(rate, 2822400);
+        assert_eq!(ch, 0);
+    }
+
+    #[test]
+    fn test_dff_garbage_returns_zeros() {
+        let (rate, ch) = parse_dff_props(&[0u8; 64]);
+        assert_eq!(rate, 0);
+        assert_eq!(ch, 0);
+    }
+
+    #[test]
+    fn test_scanner_metadata_corrupt_file_returns_none_safely() {
+        use super::extract_metadata;
+        use std::path::PathBuf;
+
+        // Non-existent path
+        let non_existent = PathBuf::from("non_existent_audio_file.flac");
+        assert!(extract_metadata(&non_existent).is_none());
+
+        // Create temporary invalid/corrupted file
+        let mut temp_path = std::env::temp_dir();
+        temp_path.push("corrupted_test_audio.mp3");
+        std::fs::write(&temp_path, b"CORRUPTED_NOT_AUDIO_DATA_12345").unwrap();
+        let result = extract_metadata(&temp_path);
+        let _ = std::fs::remove_file(&temp_path);
+        assert!(result.is_none());
+    }
+}
+
 pub fn extract_metadata(path: &Path) -> Option<Track> {
     let extension = path.extension().map(|e| e.to_string_lossy().to_uppercase());
     if let Some(ref ext) = extension {
@@ -383,6 +470,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
     let mut album = None;
     let mut track_number = None;
     let mut disc_number = None;
+    let mut replaygain_gain = None;
 
     if let Some(metadata) = probed.format.metadata().current() {
         for tag in metadata.tags() {
@@ -392,19 +480,22 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                 Some(symphonia::core::meta::StandardTagKey::Album) => album = Some(tag.value.to_string()),
                 Some(symphonia::core::meta::StandardTagKey::TrackNumber) => track_number = parse_number_value(&tag.value),
                 Some(symphonia::core::meta::StandardTagKey::DiscNumber) => disc_number = parse_number_value(&tag.value),
+                Some(symphonia::core::meta::StandardTagKey::ReplayGainTrackGain) => replaygain_gain = parse_replaygain_value(&tag.value),
                 _ => {
                     let key_upper = tag.key.to_uppercase();
                     if track_number.is_none() && (key_upper == "TRACKNUMBER" || key_upper == "TRACK" || key_upper == "TRCK") {
                         track_number = parse_number_value(&tag.value);
                     } else if disc_number.is_none() && (key_upper == "DISCNUMBER" || key_upper == "DISC" || key_upper == "TPOS") {
                         disc_number = parse_number_value(&tag.value);
+                    } else if replaygain_gain.is_none() && (key_upper == "REPLAYGAIN_TRACK_GAIN" || key_upper == "R128_TRACK_GAIN" || key_upper == "REPLAYGAIN_TRACK_GAIN_DB") {
+                        replaygain_gain = parse_replaygain_value(&tag.value);
                     }
                 }
             }
         }
     }
 
-    if title.is_none() || track_number.is_none() || disc_number.is_none() {
+    if title.is_none() || track_number.is_none() || disc_number.is_none() || replaygain_gain.is_none() {
         if let Some(rev) = probed.metadata.get() {
             if let Some(metadata) = rev.current() {
                 for tag in metadata.tags() {
@@ -414,12 +505,15 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                         Some(symphonia::core::meta::StandardTagKey::Album) => if album.is_none() { album = Some(tag.value.to_string()); },
                         Some(symphonia::core::meta::StandardTagKey::TrackNumber) => if track_number.is_none() { track_number = parse_number_value(&tag.value); },
                         Some(symphonia::core::meta::StandardTagKey::DiscNumber) => if disc_number.is_none() { disc_number = parse_number_value(&tag.value); },
+                        Some(symphonia::core::meta::StandardTagKey::ReplayGainTrackGain) => if replaygain_gain.is_none() { replaygain_gain = parse_replaygain_value(&tag.value); },
                         _ => {
                             let key_upper = tag.key.to_uppercase();
                             if track_number.is_none() && (key_upper == "TRACKNUMBER" || key_upper == "TRACK" || key_upper == "TRCK") {
                                 track_number = parse_number_value(&tag.value);
                             } else if disc_number.is_none() && (key_upper == "DISCNUMBER" || key_upper == "DISC" || key_upper == "TPOS") {
                                 disc_number = parse_number_value(&tag.value);
+                            } else if replaygain_gain.is_none() && (key_upper == "REPLAYGAIN_TRACK_GAIN" || key_upper == "R128_TRACK_GAIN" || key_upper == "REPLAYGAIN_TRACK_GAIN_DB") {
+                                replaygain_gain = parse_replaygain_value(&tag.value);
                             }
                         }
                     }
@@ -459,7 +553,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
         energy: None,
         bass_ratio: None,
         treble_ratio: None,
-        replaygain_gain: None,
+        replaygain_gain,
         track_number: final_track_number,
         disc_number: final_disc_number,
     })

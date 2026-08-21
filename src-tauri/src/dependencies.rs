@@ -42,7 +42,11 @@ async fn download_with_progress(
 ) -> Result<(), String> {
     if let Ok(parsed) = url::Url::parse(url) {
         let host = parsed.host_str().unwrap_or("").to_lowercase();
-        if !host.ends_with("github.com") && !host.ends_with("githubusercontent.com") {
+        let is_allowed = host == "github.com" 
+            || host.ends_with(".github.com") 
+            || host == "githubusercontent.com" 
+            || host.ends_with(".githubusercontent.com");
+        if !is_allowed {
             return Err("Security error: Dependency download domain not allowed.".to_string());
         }
     } else {
@@ -56,6 +60,10 @@ async fn download_with_progress(
         .send()
         .await
         .map_err(|e| format!("Network request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Dependency download failed with HTTP status: {}", res.status()));
+    }
 
     let total_size = res
         .content_length()

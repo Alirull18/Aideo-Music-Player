@@ -252,7 +252,7 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
     if let Some(mut sess) = current_sess {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         // If force is true, or the token expires in less than 5 minutes, try to refresh it
@@ -292,13 +292,13 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
                     } else {
                         let status = res.status();
                         println!("{BOLD}{RED}✘ [TIDAL ENGINE] Refresh rejected ({}).{RESET}", status);
-                        if force || status.is_client_error() {
+                        if is_permanent_auth_failure(status) {
                             TidalState::clear_session(app_handle);
                             *state.logged_in.lock().unwrap() = false;
                             *state.session.lock().unwrap() = None;
                             return Err("Tidal session has expired. Please logout and connect again under Settings/Search panel.".to_string());
                         }
-                        return Ok(sess.access_token);
+                        return Err(format!("Tidal token refresh temporary failure ({}). Session preserved.", status));
                     }
                 }
                 Err(e) => {
@@ -360,7 +360,8 @@ pub async fn tidal_login_start(
     if !verification_uri_complete.starts_with("http://") && !verification_uri_complete.starts_with("https://") {
         verification_uri_complete = format!("https://{}", verification_uri_complete);
     }
-    let interval = auth_info["interval"].as_u64().unwrap_or(5);
+    let raw_interval = auth_info["interval"].as_u64().unwrap_or(5);
+    let (interval, iterations) = compute_poll_params(raw_interval);
 
     println!("[TIDAL ENGINE] User Code to display: {}", user_code);
     println!("[TIDAL ENGINE] Complete validation URL: {}", verification_uri_complete);
@@ -380,7 +381,7 @@ pub async fn tidal_login_start(
             ("scope", "r_usr w_usr w_sub"),
         ];
 
-        for _ in 0..(300 / interval) {
+        for _ in 0..iterations {
             sleep(Duration::from_secs(interval)).await;
 
             let poll_res = client.post("https://auth.tidal.com/v1/oauth2/token")
@@ -399,7 +400,7 @@ pub async fn tidal_login_start(
                         
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_secs();
 
                         let session = TidalSession {
@@ -1170,3 +1171,58 @@ pub async fn get_tidal_autoplay_recommendations(
         }
     }
 }
+
+/// Clamps polling interval to safe bounds (1..=60) and computes iteration count for 300-second timeout.
+pub fn compute_poll_params(raw_interval: u64) -> (u64, u64) {
+    let interval = raw_interval.clamp(1, 60);
+    let iterations = 300 / interval;
+    (interval, iterations)
+}
+
+/// Determines whether a token refresh HTTP status code indicates permanent authentication failure
+/// (requiring session purge) vs transient errors (rate limit 429, server errors 5xx).
+pub fn is_permanent_auth_failure(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::BAD_REQUEST
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tidal_poll_interval_zero_clamps_to_1() {
+        let (interval, iterations) = compute_poll_params(0);
+        assert_eq!(interval, 1);
+        assert_eq!(iterations, 300);
+    }
+
+    #[test]
+    fn test_tidal_poll_interval_standard_5() {
+        let (interval, iterations) = compute_poll_params(5);
+        assert_eq!(interval, 5);
+        assert_eq!(iterations, 60);
+    }
+
+    #[test]
+    fn test_tidal_poll_interval_large_clamps_to_60() {
+        let (interval, iterations) = compute_poll_params(120);
+        assert_eq!(interval, 60);
+        assert_eq!(iterations, 5);
+    }
+
+    #[test]
+    fn test_tidal_refresh_status_code_classification() {
+        // Permanent auth failures -> clear session
+        assert!(is_permanent_auth_failure(reqwest::StatusCode::UNAUTHORIZED));
+        assert!(is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST));
+
+        // Transient errors / rate limits -> preserve session
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::BAD_GATEWAY));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::SERVICE_UNAVAILABLE));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::GATEWAY_TIMEOUT));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::FORBIDDEN));
+    }
+}
+

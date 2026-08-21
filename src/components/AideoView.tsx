@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, ChevronDown, Flame, Disc } from 'lucide-react';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, ChevronDown, Flame, Disc, RotateCcw } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { YoutubeMix } from '../store/types';
 
@@ -306,9 +306,11 @@ const PopularTrackRow = memo(({
   );
 });
 
+import { SimpleLRU } from '../utils/lruCache';
+
 // Artwork caching
-const coverArtCache = new Map<string, string | null>();
-const pendingArtRequests = new Map<string, Promise<any>>();
+const coverArtCache = new SimpleLRU<string, string | null>(300);
+const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
 
 // Helper to get premium CSS class for recommendation source badges
 function getBadgeClass(source: string) {
@@ -393,7 +395,10 @@ export function AideoView() {
     setActiveDiscoveryTab,
     addToQueue,
     triggerAutoplayRadio,
-    appMode
+    appMode,
+    resumePosition,
+    resumeLastSession,
+    dismissResumePrompt
   } = useStore(useShallow(s => ({
     tracks: s.tracks,
     playHistory: s.playHistory,
@@ -417,6 +422,9 @@ export function AideoView() {
     addToQueue: s.addToQueue,
     triggerAutoplayRadio: s.triggerAutoplayRadio,
     appMode: s.appMode,
+    resumePosition: s.resumePosition,
+    resumeLastSession: s.resumeLastSession,
+    dismissResumePrompt: s.dismissResumePrompt,
   })));
   const [greeting, setGreeting] = useState('Good morning');
   const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
@@ -2395,6 +2403,44 @@ export function AideoView() {
             </div>
           </div>
 
+          {/* Continue Where You Left Off */}
+          {resumePosition > 0 && currentTrack && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', marginBottom: 24, borderRadius: 16, background: 'var(--glass)', border: '1px solid var(--glass-border)', cursor: 'default' }}
+            >
+              <div style={{ width: 46, height: 46, borderRadius: 10, overflow: 'hidden', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}>
+                <TrackCardThumbnail path={currentTrack.path} coverUrl={currentTrack.cover_url} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--accent)', marginBottom: 2 }}>Continue where you left off</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {currentTrack.title || baseName(currentTrack.path)}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                  {currentTrack.artist || 'Unknown Artist'} · paused at {fmt(resumePosition)}
+                  {currentTrack.duration ? ` of ${fmt(currentTrack.duration)}` : ''}
+                </div>
+              </div>
+              <button
+                className="btn btn-primary"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', fontSize: 12, flexShrink: 0 }}
+                onClick={() => { resumeLastSession(); setView('nowplaying'); }}
+              >
+                <RotateCcw size={14} />
+                Resume
+              </button>
+              <button
+                onClick={dismissResumePrompt}
+                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, flexShrink: 0 }}
+                title="Dismiss"
+              >
+                <X size={16} />
+              </button>
+            </motion.div>
+          )}
+
 
 
           {/* Section: Aideo Discovery Hub */}
@@ -2793,26 +2839,25 @@ export function AideoView() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {['Energetic', 'Chill', 'Focus', 'Melancholic', 'Happy'].map(m => {
                     const active = activeMood === m;
-                    const emoji = m === 'Energetic' ? '⚡' : m === 'Chill' ? '☕' : m === 'Focus' ? '🎯' : m === 'Melancholic' ? '🌧️' : '☀️';
                     return (
                       <button
                         key={m}
                         onClick={() => setActiveMood(m)}
                         style={{
-                          background: active ? 'var(--accent)' : 'var(--glass)',
+                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
                           border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
-                          borderRadius: 10,
-                          padding: '8px 14px',
-                          color: active ? 'white' : 'var(--text)',
-                          fontSize: 13,
+                          borderRadius: 8,
+                          padding: '6px 12px',
+                          color: active ? 'white' : 'var(--text-dim)',
+                          fontSize: 12,
                           fontWeight: 600,
                           cursor: 'pointer',
                           transition: 'all 0.2s',
                         }}
                         onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
-                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass)'; }}
+                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
                       >
-                        {emoji} {m}
+                        {m}
                       </button>
                     );
                   })}
@@ -2825,26 +2870,25 @@ export function AideoView() {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {['Library History', 'Last.fm Trends', 'ListenBrainz Scrobbles'].map(s => {
                     const active = activeSource === s;
-                    const icon = s.includes('Library') ? '💿' : s.includes('Last.fm') ? '📻' : '🎵';
                     return (
                       <button
                         key={s}
                         onClick={() => setActiveSource(s)}
                         style={{
-                          background: active ? 'var(--accent)' : 'var(--glass)',
+                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
                           border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
-                          borderRadius: 10,
-                          padding: '8px 14px',
-                          color: active ? 'white' : 'var(--text)',
-                          fontSize: 13,
+                          borderRadius: 8,
+                          padding: '6px 12px',
+                          color: active ? 'white' : 'var(--text-dim)',
+                          fontSize: 12,
                           fontWeight: 600,
                           cursor: 'pointer',
                           transition: 'all 0.2s',
                         }}
                         onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
-                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass)'; }}
+                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
                       >
-                        {icon} {s}
+                        {s}
                       </button>
                     );
                   })}

@@ -287,7 +287,8 @@ where
         // Give the main thread a brief head start (50ms) to fill the ringbuffer
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        if client.start_stream().is_err() {
+        if let Err(e) = client.start_stream() {
+            on_error(format!("WASAPI exclusive start_stream failed: {}", e));
             return;
         }
 

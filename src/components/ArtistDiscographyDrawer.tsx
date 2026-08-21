@@ -5,9 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { X, Play, Shuffle, User, Disc, Music } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { sortAlbumTracks } from '../utils/albumUtils';
+import { SimpleLRU } from '../utils/lruCache';
 
-const coverArtCache = new Map<string, string | null>();
-const pendingArtRequests = new Map<string, Promise<any>>();
+const coverArtCache = new SimpleLRU<string, string | null>(300);
+const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
 
 function AlbumThumbnail({ sampleTrack, title }: { sampleTrack: any; title: string }) {
   const targetPath = sampleTrack?.cover_url || sampleTrack?.path || sampleTrack?.stream_url;

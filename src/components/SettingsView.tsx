@@ -108,7 +108,8 @@ export function SettingsView() {
     discoverCastDevices,
     resetDislikedTracks,
     colorScheme, setColorScheme, shortcuts, setShortcut,
-    albumArtFit, setAlbumArtFit
+    albumArtFit, setAlbumArtFit,
+    globalHotkeys, setGlobalHotkey
   } = useStore(useShallow(s => ({
     scanDirs: s.scanDirs,
     addScanDir: s.addScanDir,
@@ -182,11 +183,57 @@ export function SettingsView() {
     setShortcut: s.setShortcut,
     albumArtFit: s.albumArtFit,
     setAlbumArtFit: s.setAlbumArtFit,
+    globalHotkeys: s.globalHotkeys,
+    setGlobalHotkey: s.setGlobalHotkey,
   })));
 
   // Tab navigation State
   const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account' | 'shortcuts'>('appearance');
   const [recordingAction, setRecordingAction] = useState<string | null>(null);
+  const [recordingGlobalAction, setRecordingGlobalAction] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!recordingGlobalAction) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        setRecordingGlobalAction(null);
+        return;
+      }
+      if (e.key === 'Backspace') {
+        setGlobalHotkey(recordingGlobalAction, null);
+        setRecordingGlobalAction(null);
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: 'Global hotkey cleared', type: 'info' }
+        }));
+        return;
+      }
+      const parts: string[] = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.altKey) parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+      let keyName = e.key === ' ' ? 'Space' : e.key;
+      if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return; // wait for the actual key
+      if (keyName.length === 1) keyName = keyName.toUpperCase();
+      const binding = [...parts, keyName].join('+');
+      if (parts.length === 0) {
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: 'Global hotkeys need a modifier (Ctrl/Alt/Shift)', type: 'warning' }
+        }));
+        return;
+      }
+      setGlobalHotkey(recordingGlobalAction, binding);
+      setRecordingGlobalAction(null);
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Global hotkey bound to ${binding}`, type: 'success' }
+      }));
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [recordingGlobalAction, setGlobalHotkey]);
 
   // Cache Size & Usage State
   const [cacheInfo, setCacheInfo] = useState<{ bytes: number; formatted: string; count: number }>({ bytes: 0, formatted: 'Calculating...', count: 0 });
@@ -231,6 +278,8 @@ export function SettingsView() {
     setShortcut('prev', 'ArrowLeft');
     setShortcut('volumeUp', 'ArrowUp');
     setShortcut('volumeDown', 'ArrowDown');
+    setShortcut('dspBypass', 'b');
+    setShortcut('mute', 'm');
     window.dispatchEvent(new CustomEvent('ui-toast', { 
       detail: { message: 'Keyboard shortcuts restored to defaults', type: 'info' } 
     }));
@@ -333,9 +382,10 @@ export function SettingsView() {
   };
 
   const resetScrobbling = () => {
-    if (lastfmSessionKey) toggleScrobble();
-    if (listenbrainzToken) setListenbrainzToken(null);
-    if (!listenbrainzEnabled) toggleListenbrainzScrobble();
+    setLastFmSession(null);
+    localStorage.removeItem('lastfm_scrobble_enabled');
+    setListenbrainzToken(null);
+    localStorage.removeItem('listenbrainz_enabled');
     setScrobbleThreshold(50);
     window.dispatchEvent(new CustomEvent('ui-toast', { 
       detail: { message: 'Scrobbling statistics & user tokens cleared.', type: 'success' } 
@@ -630,6 +680,72 @@ export function SettingsView() {
       )
     },
     {
+      id: 'global-hotkeys-config',
+      title: 'Global Hotkeys (System-Wide)',
+      description: 'Bind system-wide shortcuts that control playback even when Aideo is minimized to the tray or not focused.',
+      keywords: 'global hotkey shortcut system wide minimized tray background play pause next prev control',
+      tab: 'shortcuts',
+      element: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--glass-border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+            These work anywhere in Windows. Press Record, then a key combination with at least one modifier (Ctrl / Alt / Shift). Press Backspace while recording to clear a binding.
+          </div>
+          {[
+            { id: 'playPause', label: 'Play / Pause' },
+            { id: 'next', label: 'Next Track' },
+            { id: 'prev', label: 'Previous Track' }
+          ].map(action => {
+            const isRecording = recordingGlobalAction === action.id;
+            const binding = globalHotkeys[action.id];
+            return (
+              <div
+                key={action.id}
+                className="settings-ctrl-card"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: isRecording ? 'rgba(var(--accent-rgb), 0.05)' : '',
+                  borderColor: isRecording ? 'var(--accent)' : '',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{action.label}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    Works globally, even when Aideo is in the tray.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      padding: '6px 12px',
+                      background: 'rgba(0,0,0,0.3)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      fontFamily: 'monospace',
+                      color: isRecording ? 'var(--accent)' : binding ? 'var(--text)' : 'var(--text-dim)'
+                    }}
+                  >
+                    {isRecording ? 'Press Ctrl/Alt/Shift + key...' : binding || 'Not set'}
+                  </div>
+                  <button
+                    className={`btn ${isRecording ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: 11, padding: '6px 12px' }}
+                    onClick={() => setRecordingGlobalAction(isRecording ? null : action.id)}
+                  >
+                    {isRecording ? 'Cancel' : binding ? 'Rebind' : 'Record'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )
+    },
+    {
       id: 'keyboard-shortcuts-config',
       title: 'Keyboard Shortcuts Remapper',
       description: 'Remap custom keys to control player operations like Play/Pause, Next Track, Previous Track, Volume Up, and Volume Down.',
@@ -643,7 +759,8 @@ export function SettingsView() {
             { id: 'prev', label: 'Previous Track' },
             { id: 'volumeUp', label: 'Volume Up' },
             { id: 'volumeDown', label: 'Volume Down' },
-            { id: 'mute', label: 'Mute / Unmute' }
+            { id: 'mute', label: 'Mute / Unmute' },
+            { id: 'dspBypass', label: 'DSP A/B Bypass Toggle' }
           ].map(action => {
             const isRecording = recordingAction === action.id;
             return (

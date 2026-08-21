@@ -4,6 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
 import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
+import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
+import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
 
 let isTransitioning = false;
 let lastPlayedPathFromUI: string | null = null;
@@ -140,6 +142,19 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   repeat: (localStorage.getItem('aideo_repeat') as 'none' | 'all' | 'one') || 'none',
   currentHistoryId: null,
   autoplayEnabled: localStorage.getItem('aideo_autoplay') !== 'false',
+  resumePosition: (() => {
+    try {
+      const savedTrack = localStorage.getItem('aideo_current_track');
+      if (!savedTrack) return 0;
+      const pos = parseInt(localStorage.getItem('aideo_resume_position') || '0');
+      const tr = JSON.parse(savedTrack);
+      // Only meaningful if the position is at least 30s into a track with room left to play
+      if (!isNaN(pos) && pos >= 30 && (!tr.duration || pos < tr.duration - 10)) return pos;
+      return 0;
+    } catch {
+      return 0;
+    }
+  })(),
   autoplayDiscoveryLevel: (localStorage.getItem('aideo_autoplay_discovery_level') as 'familiarity' | 'balanced' | 'discovery') || 'balanced',
   autoplayAlgorithm: (localStorage.getItem('aideo_autoplay_algorithm') as 'v1' | 'v2') || 'v2',
   autoplaySeedTrack: null,
@@ -181,6 +196,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   playCounts: JSON.parse(localStorage.getItem('aideo_play_counts') || '{}'),
   scanDirs: JSON.parse(localStorage.getItem('aideo_scan_dirs') || '[]'),
   scanStatus: '',
+  librarySearchQuery: '',
+  setLibrarySearchQuery: (query: string) => set({ librarySearchQuery: query }),
   playlists: [],
   currentPlaylist: null,
   cachedCloudHashes: [],
@@ -221,6 +238,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const count: number = await invoke('scan_and_save', { dirs });
       await get().loadLibrary();
       set({ scanStatus: `Found ${count} tracks` });
+      invoke('sync_watch_folders', { dirs }).catch(console.error);
     } catch (e: any) { set({ scanStatus: 'Scan failed: ' + e }); }
   },
 
@@ -228,6 +246,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     try {
       const tracks: Track[] = await invoke('get_library');
       set({ tracks });
+      invoke('sync_watch_folders', { dirs: get().scanDirs }).catch(console.error);
+      get().fetchSmartPlaylists().catch(console.error);
 
       // Synchronize currently playing track tags instantly
       const current = get().currentTrack;
@@ -371,13 +391,19 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const counts = { ...get().playCounts };
       counts[track.path] = (counts[track.path] || 0) + 1;
       localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
+      markShufflePlayed(track.path);
 
-      const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://');
-      if (isOnline) {
+      const isHttpUrl = track.path.startsWith('http://') || track.path.startsWith('https://');
+      if (isHttpUrl) {
         onlineTrackCache.set(track.path, track);
       }
 
       localStorage.setItem('aideo_current_track', JSON.stringify(track));
+      if (startPos && startPos > 0) {
+        safeSetStorage('aideo_resume_position', String(Math.floor(startPos)));
+      } else {
+        localStorage.removeItem('aideo_resume_position');
+      }
 
       set({
         currentTrackIndex: index,
@@ -479,6 +505,26 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         get().preCacheNextTracks().catch(console.error);
       }, 500);
 
+      // OS notification on track change (useful while minimized to tray)
+      if (get().notificationsEnabled && !isHistory) {
+        try {
+          const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification');
+          let granted = await isPermissionGranted();
+          if (!granted) {
+            granted = (await requestPermission()) === 'granted';
+          }
+          if (granted) {
+            sendNotification({
+              title: track.title || baseName(track.path),
+              body: track.artist || 'Unknown Artist',
+              icon: track.cover_url || undefined
+            });
+          }
+        } catch (e) {
+          console.error('Track notification failed:', e);
+        }
+      }
+
       await fetchTrackMetadataAndLyrics(track, set, get, isOnline || track.format === 'Tidal FLAC');
 
     } catch (e) {
@@ -522,7 +568,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       } else if (state.repeat === 'none') {
         // Repeat None: don't queue if we're at the last track
         const nextIndex = state.shuffle
-          ? Math.floor(Math.random() * state.tracks.length)
+          ? pickShuffleIndex(state.tracks.map(t => t.path), state.currentTrackIndex)
           : state.currentTrackIndex + 1;
         if (nextIndex < state.tracks.length) {
           try { await invoke('add_to_queue', { path: state.tracks[nextIndex].path }); } catch (e) { }
@@ -530,12 +576,31 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       } else {
         // Repeat All: wrap around
         const nextIndex = state.shuffle
-          ? Math.floor(Math.random() * state.tracks.length)
+          ? pickShuffleIndex(state.tracks.map(t => t.path), state.currentTrackIndex)
           : (state.currentTrackIndex + 1) % state.tracks.length;
         try { await invoke('add_to_queue', { path: state.tracks[nextIndex].path }); } catch (e) { }
       }
     }
     get().updateDiscordPresence();
+  },
+
+  resumeLastSession: async () => {
+    const saved = get().currentTrack;
+    if (!saved || !saved.path) return false;
+    const pos = get().resumePosition || 0;
+    // Resolve the freshest track object (library entry, queue entry, or saved copy)
+    let track: Track | undefined = get().tracks.find(t => pathsEqual(t.path, saved.path));
+    if (!track) track = get().queue.find(t => pathsEqual(t.path, saved.path));
+    if (!track) track = saved;
+    await get().playTrack(track, undefined, true, undefined, pos > 0 ? pos : undefined);
+    set({ resumePosition: 0 });
+    safeRemoveStorage('aideo_resume_position');
+    return true;
+  },
+
+  dismissResumePrompt: () => {
+    set({ resumePosition: 0 });
+    safeRemoveStorage('aideo_resume_position');
   },
 
   handleTrackTransition: async (path: string) => {
@@ -636,7 +701,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         } else if (newState.repeat === 'none') {
           // Repeat None: don't queue past the last track
           const nextIndex = newState.shuffle
-            ? Math.floor(Math.random() * activeTracks.length)
+            ? pickShuffleIndex(activeTracks.map(t => t.path), index)
             : index + 1;
           if (nextIndex < activeTracks.length) {
             try { await invoke('add_to_queue', { path: activeTracks[nextIndex].path }); } catch (e) { }
@@ -644,7 +709,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         } else {
           // Repeat All: wrap around
           const nextIndex = newState.shuffle
-            ? Math.floor(Math.random() * activeTracks.length)
+            ? pickShuffleIndex(activeTracks.map(t => t.path), index)
             : (index + 1) % activeTracks.length;
           try { await invoke('add_to_queue', { path: activeTracks[nextIndex].path }); } catch (e) { }
         }
@@ -780,8 +845,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
                 return secs > 0 ? secs : 180;
               };
 
-              recommendedTracks = tracks.map(t => ({
-                id: -30000,
+              recommendedTracks = tracks.map((t, idx) => ({
+                id: -30000 - Math.floor(Math.random() * 1000000) - idx,
                 path: t.url,
                 title: t.title,
                 artist: t.artist,
@@ -872,7 +937,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const currentActiveIdx = activeTracks.findIndex(t => pathsEqual(t.path, currentTrack?.path || ''));
 
       if (shuffle) {
-        const nextIndex = Math.floor(Math.random() * activeTracks.length);
+        const nextIndex = pickShuffleIndex(activeTracks.map(t => t.path), currentActiveIdx);
         await playTrack(activeTracks[nextIndex], undefined, false);
         return;
       }
@@ -1159,8 +1224,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           return secs > 0 ? secs : 180;
         };
 
-        recommendedTracks = tracks.map(t => ({
-          id: -30000,
+        recommendedTracks = tracks.map((t, idx) => ({
+          id: -30000 - Math.floor(Math.random() * 1000000) - idx,
           path: t.url,
           title: t.title,
           artist: t.artist,
@@ -1304,6 +1369,36 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     } catch (e) { console.error(e); }
   },
 
+  smartPlaylists: [],
+  fetchSmartPlaylists: async () => {
+    try {
+      const smartPlaylists = await invoke<any[]>('get_smart_playlists');
+      set({ smartPlaylists });
+    } catch (e) { console.error(e); }
+  },
+
+  createSmartPlaylist: async (name: string, rules: any) => {
+    try {
+      const rulesJson = typeof rules === 'string' ? rules : JSON.stringify(rules);
+      await invoke('create_smart_playlist', { name, rulesJson });
+      await get().fetchSmartPlaylists();
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Created Smart Playlist "${name}"`, type: 'success' }
+      }));
+    } catch (e: any) {
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Failed to create Smart Playlist: ${e}`, type: 'error' }
+      }));
+    }
+  },
+
+  deleteSmartPlaylist: async (id: number) => {
+    try {
+      await invoke('delete_smart_playlist', { id });
+      await get().fetchSmartPlaylists();
+    } catch (e) { console.error(e); }
+  },
+
   createPlaylist: async (name: string) => {
     try {
       await invoke('create_playlist', { name });
@@ -1341,13 +1436,27 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   reorderPlaylistTracks: async (playlistId: number, fromIndex: number, toIndex: number) => {
-    const currentTracks = [...get().tracks];
+    const isCurrent = get().currentPlaylist?.id === playlistId;
+    let currentTracks: Track[] = [];
+    if (isCurrent) {
+      currentTracks = [...get().tracks];
+    } else {
+      try {
+        currentTracks = await invoke<Track[]>('get_playlist_tracks', { playlistId });
+      } catch (e) {
+        console.error('Failed to fetch playlist tracks for reordering:', e);
+        return;
+      }
+    }
+
     if (fromIndex < 0 || fromIndex >= currentTracks.length || toIndex < 0 || toIndex >= currentTracks.length || fromIndex === toIndex) return;
 
     const [movedTrack] = currentTracks.splice(fromIndex, 1);
     currentTracks.splice(toIndex, 0, movedTrack);
 
-    set({ tracks: currentTracks });
+    if (isCurrent) {
+      set({ tracks: currentTracks });
+    }
 
     try {
       await invoke('reorder_playlist', {
@@ -1356,7 +1465,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       });
     } catch (e) {
       console.error('Failed to save reordered playlist:', e);
-      await get().loadPlaylistTracks(playlistId);
+      if (isCurrent) {
+        await get().loadPlaylistTracks(playlistId);
+      }
     }
   },
 
@@ -1409,6 +1520,22 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         return q;
       });
       set({ queue: updatedQueue });
+
+      if (isLovedNow === 0) {
+        try {
+          const tombstones: string[] = JSON.parse(localStorage.getItem('aideo_unliked_tombstones') || '[]');
+          if (!tombstones.some(p => pathsEqual(p, path))) {
+            tombstones.push(path);
+            localStorage.setItem('aideo_unliked_tombstones', JSON.stringify(tombstones));
+          }
+        } catch (_) {}
+      } else {
+        try {
+          const tombstones: string[] = JSON.parse(localStorage.getItem('aideo_unliked_tombstones') || '[]');
+          const filtered = tombstones.filter((p: string) => !pathsEqual(p, path));
+          localStorage.setItem('aideo_unliked_tombstones', JSON.stringify(filtered));
+        } catch (_) {}
+      }
 
       await get().fetchPlaylists();
 
@@ -1641,21 +1768,19 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       // 4. Create/Sync a local playlist named "AI Smart Mix - [Mood]"
       const playlistName = `AI Smart Mix - ${mood}`;
+      await get().fetchPlaylists();
+      const existingPlaylist = get().playlists.find(p => p.name === playlistName);
+      if (existingPlaylist) {
+        await invoke('delete_playlist', { id: existingPlaylist.id });
+      }
       await invoke('create_playlist', { name: playlistName });
       await get().fetchPlaylists();
 
       // Find the playlist ID
       const targetPlaylist = get().playlists.find(p => p.name === playlistName);
       if (targetPlaylist) {
-        // Clear old tracks in this playlist
-        await invoke('delete_playlist', { id: targetPlaylist.id });
-        await invoke('create_playlist', { name: playlistName });
-        await get().fetchPlaylists();
-        const reCreated = get().playlists.find(p => p.name === playlistName);
-        if (reCreated) {
-          for (const t of selectedMix) {
-            await invoke('add_to_playlist', { playlistId: reCreated.id, path: t.path });
-          }
+        for (const t of selectedMix) {
+          await invoke('add_to_playlist', { playlistId: targetPlaylist.id, path: t.path });
         }
       }
 

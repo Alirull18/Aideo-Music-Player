@@ -181,9 +181,10 @@ fn parse_line_words(line_start_secs: f64, text: &str) -> (String, Option<Vec<Lyr
                 let ts_str = &part[..close_idx];
                 let word_text = &part[close_idx + 1..];
                 if let Some(ts) = parse_timestamp(ts_str) {
+                    let abs_ts = if ts < line_start_secs { line_start_secs + ts } else { ts };
                     if !word_text.is_empty() {
                         words.push(LyricWord {
-                            time_secs: ts,
+                            time_secs: abs_ts,
                             text: word_text.to_string(),
                         });
                         clean_text_parts.push(word_text.to_string());
@@ -275,5 +276,108 @@ fn parse_timestamp(ts: &str) -> Option<f64> {
         Some(minutes * 60.0 + seconds)
     } else {
         ts.parse::<f64>().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_lrc_enhanced_relative_timestamps() {
+        let content = "[01:30.00] <00:01.00>Hello <00:02.50>world";
+        let lines = parse_lrc(content);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_secs, 90.0);
+        let words = lines[0].words.as_ref().expect("words should be present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "Hello ");
+        assert_eq!(words[0].time_secs, 91.0);
+        assert_eq!(words[1].text, "world");
+        assert_eq!(words[1].time_secs, 92.5);
+    }
+
+    #[test]
+    fn test_parse_lrc_enhanced_absolute_timestamps() {
+        let content = "[01:30.00] <01:31.00>Hello <01:32.50>world";
+        let lines = parse_lrc(content);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_secs, 90.0);
+        let words = lines[0].words.as_ref().expect("words should be present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "Hello ");
+        assert_eq!(words[0].time_secs, 91.0);
+        assert_eq!(words[1].text, "world");
+        assert_eq!(words[1].time_secs, 92.5);
+    }
+
+    #[test]
+    fn test_parse_lrc_subsecond_relative_timestamps() {
+        let content = "[00:45.00] <0.50>Quick <1.20>fox";
+        let lines = parse_lrc(content);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_secs, 45.0);
+        let words = lines[0].words.as_ref().expect("words should be present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "Quick ");
+        assert_eq!(words[0].time_secs, 45.5);
+        assert_eq!(words[1].text, "fox");
+        assert_eq!(words[1].time_secs, 46.2);
+    }
+
+    #[test]
+    fn test_parse_lrc_netease_parentheses_timestamps() {
+        let content = "[00:10.00] (500,300)Test (800,200)word";
+        let lines = parse_lrc(content);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_secs, 10.0);
+        let words = lines[0].words.as_ref().expect("words should be present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "Test ");
+        assert_eq!(words[0].time_secs, 10.5);
+        assert_eq!(words[1].text, "word");
+        assert_eq!(words[1].time_secs, 10.8);
+    }
+
+    #[test]
+    fn test_parse_lrc_boundary_zero_timestamp() {
+        let content = "[00:00.00] <00:00.00>Start <00:01.50>Next";
+        let lines = parse_lrc(content);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_secs, 0.0);
+        let words = lines[0].words.as_ref().expect("words should be present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "Start ");
+        assert_eq!(words[0].time_secs, 0.0);
+        assert_eq!(words[1].text, "Next");
+        assert_eq!(words[1].time_secs, 1.5);
+    }
+
+    #[test]
+    fn test_parse_lrc_boundary_relative_zero_on_non_zero_line() {
+        let content = "[00:15.00] <00:00.00>First <00:02.00>Second";
+        let lines = parse_lrc(content);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_secs, 15.0);
+        let words = lines[0].words.as_ref().expect("words should be present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "First ");
+        assert_eq!(words[0].time_secs, 15.0);
+        assert_eq!(words[1].text, "Second");
+        assert_eq!(words[1].time_secs, 17.0);
+    }
+
+    #[test]
+    fn test_parse_lrc_boundary_absolute_exact_match_line_start() {
+        let content = "[00:15.00] <00:15.00>First <00:17.00>Second";
+        let lines = parse_lrc(content);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].time_secs, 15.0);
+        let words = lines[0].words.as_ref().expect("words should be present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].text, "First ");
+        assert_eq!(words[0].time_secs, 15.0);
+        assert_eq!(words[1].text, "Second");
+        assert_eq!(words[1].time_secs, 17.0);
     }
 }

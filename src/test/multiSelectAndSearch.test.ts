@@ -54,6 +54,41 @@ describe('Scoped Search Query Parser', () => {
     expect(matchesSearchQuery(track, '')).toBe(true);
     expect(matchesSearchQuery(track, '   ')).toBe(true);
   });
+
+  it('preserves URLs as free text instead of swallowing them as scoped keys', () => {
+    const q = parseSearchQuery('http://stream.example.com/play');
+    expect(q.freeText).toContain('http://stream.example.com/play');
+    expect(q.artist).toBeUndefined();
+    expect(q.format).toBeUndefined();
+
+    // A URL token should behave like normal free text when matched against a path
+    const track = {
+      title: 'Mix',
+      artist: 'DJ',
+      album: '',
+      format: 'URL',
+      path: 'http://stream.example.com/play',
+      loved: 0
+    };
+    expect(matchesSearchQuery(track, 'http://stream.example.com/play')).toBe(true);
+    expect(matchesSearchQuery(track, 'http://other.example.com/x')).toBe(false);
+  });
+
+  it('does not treat words merely ending in alias keys as scoped filters', () => {
+    const q = parseSearchQuery('bar:something');
+    expect(q.artist).toBeUndefined();
+    expect(q.freeText).toContain('bar:something');
+
+    const q2 = parseSearchQuery('mental:health');
+    expect(q2.album).toBeUndefined();
+    expect(q2.freeText).toContain('mental:health');
+  });
+
+  it('still recognizes genuine aliases at word boundaries', () => {
+    const q = parseSearchQuery('ar:daft al:discovery');
+    expect(q.artist).toBe('daft');
+    expect(q.album).toBe('discovery');
+  });
 });
 
 describe('Multi-Select Logic', () => {

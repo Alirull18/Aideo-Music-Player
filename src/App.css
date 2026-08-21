@@ -181,14 +181,15 @@ input[type=range] {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 14px;
-  border-radius: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, width 0.3s, padding 0.3s, gap 0.3s;
   color: var(--text-dim);
   font-weight: 500;
   font-size: 14px;
   margin-bottom: 2px;
+  position: relative;
 }
 
 .sidebar-collapsed .nav-item {
@@ -206,9 +207,21 @@ input[type=range] {
 }
 
 .nav-item.active {
-  color: var(--text);
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  color: white;
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid transparent;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 60%;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 3px;
 }
 
 /* exclusive toggle */
@@ -3687,7 +3700,7 @@ input[type=range] {
 }
 
 .fullscreen-track-title {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 800;
   letter-spacing: -0.5px;
   margin-bottom: 8px;
@@ -3699,9 +3712,8 @@ input[type=range] {
 .fullscreen-track-artist {
   font-size: 18px;
   font-weight: 500;
-  color: var(--text-dim);
+  color: #a1a1aa;
   margin-bottom: 20px;
-  opacity: 0.85;
 }
 
 /* Telemetry Badge */
@@ -3896,7 +3908,7 @@ input[type=range] {
 
 .fullscreen-zen-art-artist {
   font-size: 11px;
-  color: var(--text-dim);
+  color: #a1a1aa;
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;

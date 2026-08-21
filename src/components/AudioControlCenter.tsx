@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Activity, Settings2, RefreshCw, X, Volume2, Settings, AudioLines, Sparkles, Wifi, Globe, Gauge, Database, Clock } from 'lucide-react';
 
 export function AudioControlCenter() {
-  const { dsp, setDSP, toggleDspAB, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry, sleepTimer, startSleepTimer, stopSleepTimer } = useStore(useShallow(s => ({
+  const { dsp, setDSP, toggleDspAB, resetProMode, playback, toggleExclusive, devices, currentDevice, setAudioDevice, showControlCenter, toggleControlCenter, fetchDevices, networkTelemetry, sleepTimer, startSleepTimer, stopSleepTimer, playbackRate, setPlaybackRate } = useStore(useShallow(s => ({
     dsp: s.dsp,
     setDSP: s.setDSP,
     toggleDspAB: s.toggleDspAB,
@@ -23,6 +23,8 @@ export function AudioControlCenter() {
     sleepTimer: s.sleepTimer,
     startSleepTimer: s.startSleepTimer,
     stopSleepTimer: s.stopSleepTimer,
+    playbackRate: s.playbackRate,
+    setPlaybackRate: s.setPlaybackRate,
   })));
   const [devOpen, setDevOpen] = useState(false);
 
@@ -355,6 +357,52 @@ export function AudioControlCenter() {
                       ))}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Playback Speed Control */}
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Playback Speed</div>
+                <div style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Rate</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)', fontFamily: 'monospace' }}>
+                      {playbackRate.toFixed(2)}x
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map(rate => (
+                      <button
+                        key={rate}
+                        className={`rate-chip ${playbackRate === rate ? 'active' : ''}`}
+                        onClick={() => setPlaybackRate(rate)}
+                        style={{
+                          flex: 1,
+                          padding: '6px 0',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 6,
+                          border: '1px solid var(--glass-border)',
+                          cursor: 'pointer',
+                          background: playbackRate === rate ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                          color: playbackRate === rate ? 'white' : 'var(--text-dim)',
+                          textAlign: 'center',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2.0}
+                    step={0.05}
+                    value={playbackRate}
+                    onChange={e => setPlaybackRate(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--accent)' }}
+                  />
                 </div>
               </div>
 

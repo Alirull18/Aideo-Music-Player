@@ -78,20 +78,25 @@ export function OnboardingWizard() {
   };
 
   useEffect(() => {
+    let isCancelled = false;
     fetchDepStatus();
 
     const unlisten = listen<any>('dependency-download-progress', (event) => {
+      if (isCancelled) return;
       const { id, percent, downloaded, total } = event.payload;
       setDepDownloads((prev: any) => ({
         ...prev,
         [id]: { percent, downloaded, total, active: percent < 100 }
       }));
       if (percent >= 100) {
-        setTimeout(fetchDepStatus, 1000);
+        setTimeout(() => {
+          if (!isCancelled) fetchDepStatus();
+        }, 1000);
       }
     });
 
     return () => {
+      isCancelled = true;
       unlisten.then(f => f());
     };
   }, []);

@@ -45,7 +45,7 @@ export async function syncToCloud(): Promise<void> {
 
     // 2. Sync liked tracks
     const lovedTracks = state.tracks.filter(t => t.loved === 1);
-    console.log('[Sync] Found liked tracks in state.tracks:', lovedTracks.length, lovedTracks.map(t => t.path));
+    console.log('[Sync] Found liked tracks in state.tracks:', lovedTracks.length);
     
     // First, sync local loved tracks
     if (lovedTracks.length > 0) {
@@ -69,8 +69,37 @@ export async function syncToCloud(): Promise<void> {
       } else {
         console.log('[Sync] Liked tracks synced to Supabase successfully.');
       }
-    } else {
-      console.log('[Sync] No liked tracks to sync to Supabase.');
+    }
+
+    // Delete unliked tracks from cloud using persistent tombstones.
+    // Only tombstoned paths (explicit un-like actions) are deleted — NOT every
+    // non-loved library track, which would exceed PostgREST URL limits on large
+    // libraries and delete cloud likes for tracks simply not yet scanned locally.
+    let tombstones: string[] = [];
+    try {
+      tombstones = JSON.parse(localStorage.getItem('aideo_unliked_tombstones') || '[]');
+    } catch (_) {
+      tombstones = [];
+    }
+
+    if (tombstones.length > 0) {
+      const CHUNK_SIZE = 500; // stay under PostgREST/Supabase URL length limits
+      let allSucceeded = true;
+      for (let i = 0; i < tombstones.length; i += CHUNK_SIZE) {
+        const chunk = tombstones.slice(i, i + CHUNK_SIZE);
+        const { error } = await supabase
+          .from('liked_tracks')
+          .delete()
+          .eq('user_id', userId)
+          .in('track_path', chunk);
+        if (error) {
+          allSucceeded = false;
+          console.error('[Sync] Error removing unliked tracks from cloud:', error.message);
+        }
+      }
+      if (allSucceeded) {
+        localStorage.removeItem('aideo_unliked_tombstones');
+      }
     }
 
     // 3. Sync Playlists
@@ -90,6 +119,11 @@ export async function syncToCloud(): Promise<void> {
       if (cloudPlaylistId) {
         try {
           const tracks = await invoke<any[]>('get_playlist_tracks', { playlistId: pl.id });
+          const { error: delError } = await supabase.from('playlist_tracks').delete().eq('playlist_id', cloudPlaylistId);
+          if (delError) {
+            console.error(`[Sync] Error clearing cloud playlist tracks for ${pl.name}:`, delError.message);
+            continue;
+          }
           if (tracks && tracks.length > 0) {
             const trackPayload = tracks.map((t, idx) => ({
               playlist_id: cloudPlaylistId,
@@ -99,8 +133,10 @@ export async function syncToCloud(): Promise<void> {
               artist: t.artist || 'Unknown Artist'
             }));
 
-            await supabase.from('playlist_tracks').delete().eq('playlist_id', cloudPlaylistId);
-            await supabase.from('playlist_tracks').insert(trackPayload);
+            const { error: insError } = await supabase.from('playlist_tracks').insert(trackPayload);
+            if (insError) {
+              console.error(`[Sync] Error inserting cloud playlist tracks for ${pl.name}:`, insError.message);
+            }
           }
         } catch (e) {
           console.error('[Sync] Error fetching playlist tracks:', e);

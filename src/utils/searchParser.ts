@@ -19,9 +19,9 @@ export function parseSearchQuery(query: string): ScopedSearchCriteria {
 
   const criteria: ScopedSearchCriteria = { freeText: [] };
   
-  // Regex to match scoped keys with either quoted or unquoted values:
+  // Regex to match supported scoped keys with either quoted or unquoted values:
   // e.g. artist:"Daft Punk", album:Discovery, format:flac, loved:true
-  const scopedRegex = /(?:(\w+):(?:"([^"]+)"|(\S+)))/g;
+  const scopedRegex = /(?<![a-z0-9])(artist|ar|album|al|title|track|ti|format|ext|loved|favorite|liked):(?:"([^"]+)"|(\S+))/gi;
   let match: RegExpExecArray | null;
 
   // Track parts that were captured as scoped criteria

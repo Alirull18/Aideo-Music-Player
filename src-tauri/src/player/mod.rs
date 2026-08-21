@@ -415,7 +415,6 @@ fn spawn_youtube_downloader(
                     "--force-ipv4",
                     "--no-check-formats",
                     "--no-playlist",
-                    "--no-check-certificate",
                     "--sleep-interval", "0",
                     "--max-sleep-interval", "0",
                     "--sleep-requests", "0",
@@ -571,7 +570,10 @@ fn spawn_youtube_downloader(
                     break;
                 }
                 
-                let mut lock = child_ref_clone.lock().unwrap();
+                let mut lock = match child_ref_clone.lock() {
+                    Ok(l) => l,
+                    Err(e) => e.into_inner(),
+                };
                 if let Some(ref mut child_proc) = *lock {
                     match child_proc.try_wait() {
                         Ok(None) => {
@@ -855,7 +857,6 @@ pub fn resolve_youtube_url(url: &str) -> String {
         "--force-ipv4".to_string(),
         "--no-check-formats".to_string(),
         "--no-playlist".to_string(),
-        "--no-check-certificate".to_string(),
         "--sleep-interval".to_string(), "0".to_string(),
         "--max-sleep-interval".to_string(), "0".to_string(),
         "--sleep-requests".to_string(), "0".to_string(),
@@ -901,7 +902,6 @@ pub fn resolve_youtube_url(url: &str) -> String {
         "--force-ipv4".to_string(),
         "--no-check-formats".to_string(),
         "--no-playlist".to_string(),
-        "--no-check-certificate".to_string(),
         "--sleep-interval".to_string(), "0".to_string(),
         "--max-sleep-interval".to_string(), "0".to_string(),
         "--sleep-requests".to_string(), "0".to_string(),
@@ -1181,6 +1181,9 @@ fn prepare_decoder(
                     }
                     if start_time.elapsed().as_secs() > 20 {
                         let _ = app_handle.emit("stream-buffering-end", path);
+                        if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+                            active.remove(&hash);
+                        }
                         return Err("Buffering timed out. Please check your internet connection and verify that the yt-dlp plugin is working.".to_string());
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -1510,7 +1513,6 @@ fn prepare_decoder(
                 "--force-ipv4",
                 "--no-check-formats",
                 "--no-playlist",
-                "--no-check-certificate",
                 "--sleep-interval", "0",
                 "--max-sleep-interval", "0",
                 "--sleep-requests", "0",
@@ -1745,6 +1747,7 @@ pub struct DSPState {
     pub subsonic_enabled: bool,
     pub night_mode_enabled: bool,
     pub r128_enabled: bool,
+    pub track_replaygain_gain: f32,
 
     // Aideo Filter
     pub aideo_filter_enabled: bool,
@@ -1758,6 +1761,68 @@ pub struct DSPState {
     pub crossfade_transition_duration: f32,
     pub stream_engine: String,
     pub lookahead_prebuffer_enabled: bool,
+    pub playback_rate: f64,
+}
+
+impl Default for DSPState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            low_spec_mode: false,
+            audio_profile: "normal".to_string(),
+            resampler_interpolation: "linear".to_string(),
+            resampler_sinc_len: 128,
+            resampler_oversampling: 256,
+            ffmpeg_transcode_quality: "studio".to_string(),
+            width: 1.0,
+            upsample_rate: 0,
+            dither: false,
+            exclusive_mode_timing: "polling".to_string(),
+            preamp_gain: 0.0,
+            limiter_threshold: -0.1,
+            resampler_phase_mode: "linear".to_string(),
+            eq_enabled: false,
+            eq_parametric: false,
+            eq_graphic_gains: vec![0.0; 10],
+            eq_parametric_bands: vec![
+                EQBand { freq: 80.0, gain: 0.0, q: 0.7, band_type: "lowshelf".to_string() },
+                EQBand { freq: 120.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
+                EQBand { freq: 240.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
+                EQBand { freq: 400.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
+                EQBand { freq: 750.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
+                EQBand { freq: 1500.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
+                EQBand { freq: 2200.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
+                EQBand { freq: 4000.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
+                EQBand { freq: 6000.0, gain: 0.0, q: 0.7, band_type: "highshelf".to_string() },
+                EQBand { freq: 10000.0, gain: 0.0, q: 0.7, band_type: "peaking".to_string() },
+            ],
+            crossfeed_enabled: false,
+            crossfeed_level: -6.0,
+            crossfeed_corner: 700.0,
+            spatial_enabled: false,
+            spatial_haas_delay: 7.5,
+            spatial_wet: 0.15,
+            convolution_enabled: false,
+            convolution_ir_path: String::new(),
+            convolution_wet: 0.5,
+            subsonic_enabled: false,
+            night_mode_enabled: false,
+            r128_enabled: false,
+            track_replaygain_gain: 0.0,
+            aideo_filter_enabled: false,
+            aideo_filter_room_size: 0.85,
+            aideo_filter_bass_thump: 6.0,
+            aideo_filter_dampening: 0.5,
+            auto_headroom: false,
+            saturation_enabled: false,
+            saturation_drive: 0.0,
+            crossfade_transition_enabled: true,
+            crossfade_transition_duration: 3.0,
+            stream_engine: "auto".to_string(),
+            lookahead_prebuffer_enabled: true,
+            playback_rate: 1.0,
+        }
+    }
 }
 fn find_ffmpeg_path() -> String {
 
@@ -1925,70 +1990,7 @@ impl Player {
         let position_secs = Arc::new(AtomicU64::new(0.0f64.to_bits()));
         let volume = Arc::new(AtomicU32::new(1.0f32.to_bits()));
         let exclusive_mode = Arc::new(AtomicBool::new(false));
-        let dsp_state = Arc::new(Mutex::new(DSPState {
-            enabled: false,
-            low_spec_mode: false,
-            audio_profile: "normal".to_string(),
-            resampler_interpolation: "linear".to_string(),
-            resampler_sinc_len: 128,
-            resampler_oversampling: 256,
-            ffmpeg_transcode_quality: "studio".to_string(),
-            width: 1.0,
-            upsample_rate: 0,
-            dither: false,
-            exclusive_mode_timing: "polling".to_string(),
-            preamp_gain: 0.0,
-            limiter_threshold: -0.1,
-            resampler_phase_mode: "linear".to_string(),
-
-            // EQ
-            eq_enabled: false,
-            eq_parametric: false,
-            eq_graphic_gains: vec![0.0; 10],
-            eq_parametric_bands: vec![
-                EQBand { freq: 80.0, gain: 0.0, q: 0.7, band_type: "lowshelf".to_string() },
-                EQBand { freq: 120.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
-                EQBand { freq: 240.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
-                EQBand { freq: 400.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
-                EQBand { freq: 750.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
-                EQBand { freq: 1500.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
-                EQBand { freq: 2200.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
-                EQBand { freq: 4000.0, gain: 0.0, q: 1.0, band_type: "peaking".to_string() },
-                EQBand { freq: 6000.0, gain: 0.0, q: 0.7, band_type: "highshelf".to_string() },
-                EQBand { freq: 10000.0, gain: 0.0, q: 0.7, band_type: "peaking".to_string() },
-            ],
-
-            // Crossfeed
-            crossfeed_enabled: false,
-            crossfeed_level: -6.0,
-            crossfeed_corner: 700.0,
-
-            // Soundstage
-            spatial_enabled: false,
-            spatial_haas_delay: 7.5,
-            spatial_wet: 0.15,
-            convolution_enabled: false,
-            convolution_ir_path: String::new(),
-            convolution_wet: 0.5,
-
-            // Dynamics
-            subsonic_enabled: false,
-            night_mode_enabled: false,
-            r128_enabled: false,
-
-            // Aideo Filter
-            aideo_filter_enabled: false,
-            aideo_filter_room_size: 0.85,
-            aideo_filter_bass_thump: 6.0,
-            aideo_filter_dampening: 0.5,
-            auto_headroom: false,
-            saturation_enabled: false,
-            saturation_drive: 0.0,
-            crossfade_transition_enabled: false,
-            crossfade_transition_duration: 5.0,
-            stream_engine: "yt-dlp".to_string(),
-            lookahead_prebuffer_enabled: true,
-        }));
+        let dsp_state = Arc::new(Mutex::new(DSPState::default()));
         let target_device = Arc::new(Mutex::new(None::<String>));
         let queue = Arc::new(Mutex::new(VecDeque::new()));
         let current_process = Arc::new(Mutex::new(None::<std::process::Child>));
@@ -2254,6 +2256,11 @@ impl LookaheadLimiter {
         let threshold = 10.0f32.powf(threshold_db / 20.0);
         let chs = samples.len();
         
+        while self.delay_buffers.len() < chs {
+            let cap = self.delay_buffers.first().map(|b| b.capacity()).unwrap_or(256);
+            self.delay_buffers.push(std::collections::VecDeque::with_capacity(cap));
+        }
+
         // 1. Push input samples to delay lines
         for ch in 0..chs {
             self.delay_buffers[ch].push_back(samples[ch]);
@@ -2403,6 +2410,9 @@ impl AudioNode for PreampNode {
     fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
         self.enabled = dsp.enabled;
         let mut gain_db = dsp.preamp_gain;
+        if dsp.r128_enabled {
+            gain_db += dsp.track_replaygain_gain;
+        }
         if dsp.auto_headroom && dsp.eq_enabled {
             let mut max_boost = 0.0f32;
             if dsp.eq_parametric {
@@ -3283,6 +3293,24 @@ fn play_file(
     *safe_lock(&current_track) = Some(path.to_string());
     
     let resolved_path = path.to_string();
+
+    let track_rg_gain: f32 = if let Some(app_state) = app_handle.try_state::<crate::AppState>() {
+        let conn = safe_lock(&app_state.db);
+        conn.query_row(
+            "SELECT replaygain_gain FROM tracks WHERE path = ?1",
+            rusqlite::params![path],
+            |r| r.get::<_, Option<f64>>(0),
+        )
+        .unwrap_or(None)
+        .unwrap_or(0.0) as f32
+    } else {
+        0.0f32
+    };
+
+    {
+        let mut dsp = safe_lock(&dsp_state);
+        dsp.track_replaygain_gain = track_rg_gain;
+    }
 
     let dsp_now = safe_lock(&dsp_state).clone();
     let transcode_quality = dsp_now.ffmpeg_transcode_quality.clone();
@@ -4367,6 +4395,15 @@ fn play_file(
                 Ok(PlayerCommand::Resume) => { status.store(1, Ordering::Relaxed); }
                 Ok(PlayerCommand::Play(p, pos)) => { abort_background_downloads(); running = false; next_track_info = Some((p, pos)); break; }
                 Ok(PlayerCommand::Seek(secs)) => {
+                    // Reset crossfade transition states to prevent stale next-track bleed
+                    crossfade_frame_counter = 0;
+                    crossfade_triggered = false;
+                    next_track_path = None;
+                    next_decoder_rx = None;
+                    next_decoder_info = None;
+                    next_resampler = None;
+                    next_pending.iter_mut().for_each(|ch| ch.clear());
+
                     if let Some(samples_arc) = &decoded_samples {
                         let lock = safe_lock(samples_arc);
                         ram_cursor = (secs * file_rate as f64) as usize;
@@ -4665,7 +4702,8 @@ fn play_file(
                     // Dynamic Clock Drift Correction (Milestone 5)
                     // In Exclusive Mode, there is only one hardware clock, so drift is impossible.
                     // In Shared Mode, apply a 5% deadband to prevent constant micro-fluctuations from updating Rubato.
-                    let rel_ratio = if is_exclusive {
+                    let rate = dsp_now.playback_rate.clamp(0.5, 2.0);
+                    let base_ratio = if is_exclusive {
                         1.0
                     } else {
                         let capacity = prod.capacity() as f64;
@@ -4679,6 +4717,7 @@ fn play_file(
                             1.0
                         }
                     };
+                    let rel_ratio = base_ratio / rate;
 
                     // Thread-local cache to only call set_resample_ratio_relative when ratio changes significantly
                     thread_local! {
@@ -4780,12 +4819,32 @@ fn play_file(
                 (processed, len)
             };
 
-            // Subtle +1.15x (+1.2dB) gain boost in Exclusive Mode to psychoacoustically enhance detail perception.
-            if is_exclusive {
-                for ch in 0..out_planar.len() {
-                    for val in out_planar[ch].iter_mut().take(n_out) {
-                        *val *= 1.15;
+            // Multichannel folddown / downmix to stereo when outputting to 2-channel hardware
+            if out_planar.len() >= 6 && dev_ch == 2 {
+                let inv_norm = 1.0 / (1.0 + 0.7071 + 0.7071);
+                for i in 0..n_out {
+                    let l = out_planar[0][i];
+                    let r = out_planar[1][i];
+                    let c = out_planar[2][i];
+                    let ls = out_planar[4][i];
+                    let rs = out_planar[5][i];
+                    out_planar[0][i] = (l + 0.7071 * c + 0.7071 * ls) * inv_norm;
+                    out_planar[1][i] = (r + 0.7071 * c + 0.7071 * rs) * inv_norm;
+                }
+            } else if out_planar.len() > 2 && dev_ch == 2 {
+                let norm = 1.0 / (out_planar.len() as f32).sqrt();
+                for i in 0..n_out {
+                    let mut sum_l = out_planar[0][i];
+                    let mut sum_r = out_planar[1][i];
+                    for ch in 2..out_planar.len() {
+                        if ch % 2 == 0 {
+                            sum_l += out_planar[ch][i] * 0.7071;
+                        } else {
+                            sum_r += out_planar[ch][i] * 0.7071;
+                        }
                     }
+                    out_planar[0][i] = sum_l * norm;
+                    out_planar[1][i] = sum_r * norm;
                 }
             }
 

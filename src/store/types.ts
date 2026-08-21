@@ -202,6 +202,8 @@ export interface PlayerState {
   currentDevice: string | null;
   scanDirs: string[];
   scanStatus: string;
+  librarySearchQuery: string;
+  setLibrarySearchQuery: (query: string) => void;
   isTranslating: boolean;
   showRomaji: boolean;
   showTranslation: boolean;
@@ -297,6 +299,9 @@ export interface PlayerState {
   triggerAutoplayRadio: (track: Track, forceReset?: boolean) => Promise<void>;
   pauseTrack: () => Promise<void>;
   resumeTrack: () => Promise<void>;
+  resumeLastSession: () => Promise<boolean>;
+  resumePosition: number;
+  dismissResumePrompt: () => void;
   stopTrack: () => Promise<void>;
   setVolume: (vol: number) => Promise<void>;
   toggleMute: () => Promise<void>;
@@ -311,6 +316,8 @@ export interface PlayerState {
   toggleBitPerfect: () => Promise<void>;
   fetchDevices: () => Promise<void>;
   setAudioDevice: (name: string) => Promise<void>;
+  playbackRate: number;
+  setPlaybackRate: (rate: number) => Promise<void>;
   adjustLyricOffset: (ms: number) => void;
   setLyricOffset: (ms: number) => void;
   saveLyrics: (path: string, lrc: string) => Promise<void>;
@@ -321,6 +328,10 @@ export interface PlayerState {
   fetchPlaylists: () => Promise<void>;
   createPlaylist: (name: string) => Promise<void>;
   deletePlaylist: (id: number) => Promise<void>;
+  smartPlaylists: any[];
+  fetchSmartPlaylists: () => Promise<void>;
+  createSmartPlaylist: (name: string, rules: any) => Promise<void>;
+  deleteSmartPlaylist: (id: number) => Promise<void>;
   addToPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
   removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
   reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void>;
@@ -419,6 +430,11 @@ export interface PlayerState {
   // Keyboard Shortcuts
   shortcuts: Record<string, string>;
   setShortcut: (action: string, binding: string) => void;
+
+  // Global Hotkeys (work when app is not focused)
+  globalHotkeys: Record<string, string | null>;
+  setGlobalHotkey: (action: string, binding: string | null) => void;
+  initGlobalHotkeys: () => void;
 
   // Sleep Timer
   sleepTimer: { duration: number; remaining: number; active: boolean };

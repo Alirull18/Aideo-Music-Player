@@ -1,5 +1,7 @@
+import { SimpleLRU } from './lruCache';
+
 // Canvas-based dominant color extraction utility for dynamic ambient backdrops
-const colorCache = new Map<string, string>();
+const colorCache = new SimpleLRU<string, string>(300);
 
 export function extractDominantColor(imageUrl: string | null | undefined): Promise<string> {
   if (!imageUrl) {

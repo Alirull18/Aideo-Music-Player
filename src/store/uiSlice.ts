@@ -24,6 +24,21 @@ const getSavedShortcuts = () => {
   return defaults;
 };
 
+const getSavedGlobalHotkeys = (): Record<string, string | null> => {
+  const defaults: Record<string, string | null> = {
+    playPause: 'Ctrl+Alt+P',
+    next: 'Ctrl+Alt+Right',
+    prev: 'Ctrl+Alt+Left'
+  };
+  const raw = safeGetStorage('aideo-global-hotkeys');
+  if (raw) {
+    try {
+      return { ...defaults, ...JSON.parse(raw) };
+    } catch (_) {}
+  }
+  return defaults;
+};
+
 export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   view: (safeGetStorage('aideo-last-view') as any) || 'aideo',
   accentColor: '#8b5cf6',
@@ -56,6 +71,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   miniPlayerMode: false,
   shortcuts: getSavedShortcuts(),
+  globalHotkeys: getSavedGlobalHotkeys(),
   sleepTimer: { duration: 0, remaining: 0, active: false },
   colorScheme: (safeGetStorage('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
   albumArtFit: (safeGetStorage('aideo-album-art-fit') as 'cover' | 'contain') || 'contain',
@@ -256,5 +272,34 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setAlbumArtFit: (fit: 'cover' | 'contain') => {
     localStorage.setItem('aideo-album-art-fit', fit);
     set({ albumArtFit: fit });
+  },
+
+  setGlobalHotkey: (action: string, binding: string | null) => {
+    const next = { ...get().globalHotkeys, [action]: binding };
+    safeSetStorage('aideo-global-hotkeys', JSON.stringify(next));
+    set({ globalHotkeys: next });
+    const payload: Record<string, string | null> = {};
+    Object.entries(next).forEach(([k, v]) => {
+      payload[k] = v && v.length > 0 ? v : null;
+    });
+    invoke('set_global_shortcuts', { bindings: payload }).catch(e => {
+      console.error('Failed to apply global shortcut:', e);
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Global hotkey failed: ${e}`, type: 'error' }
+      }));
+    });
+  },
+
+  initGlobalHotkeys: () => {
+    const next = get().globalHotkeys;
+    const hasAny = Object.values(next).some(v => v && v.length > 0);
+    if (!hasAny) return;
+    const payload: Record<string, string | null> = {};
+    Object.entries(next).forEach(([k, v]) => {
+      payload[k] = v && v.length > 0 ? v : null;
+    });
+    invoke('set_global_shortcuts', { bindings: payload }).catch(e => {
+      console.error('Failed to restore global shortcuts:', e);
+    });
   },
 });

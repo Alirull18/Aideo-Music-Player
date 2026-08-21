@@ -38,6 +38,9 @@ pub mod dependencies;
 pub mod chromecast;
 pub mod sonic_analyzer;
 pub mod remote_server;
+mod hotkeys;
+mod m3u;
+pub mod watcher;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -486,7 +489,7 @@ fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> 
     #[cfg(feature = "asio")]
     #[cfg(target_os = "windows")]
     {
-        if !is_playing || cache.is_empty() {
+        if !_is_playing || cache.is_empty() {
             if let Ok(asio_host) = cpal::host_from_id(cpal::HostId::Asio) {
                 if let Ok(devices) = asio_host.output_devices() {
                     for d in devices {
@@ -570,15 +573,6 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
             list
         };
 
-        let mut paths_to_delete = Vec::new();
-        for (_, path) in &db_tracks {
-            if !path.starts_with("http://") && !path.starts_with("https://") {
-                if !std::path::Path::new(path).exists() {
-                    paths_to_delete.push(path.clone());
-                }
-            }
-        }
-
         let mut conn = safe_lock(&db_conn_arc);
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         
@@ -604,21 +598,26 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
             } else {
                 tx.execute(
                     "UPDATE tracks SET 
-                        track_number = COALESCE(?1, track_number),
-                        disc_number = COALESCE(?2, disc_number)
-                     WHERE path = ?3",
+                        title = COALESCE(NULLIF(?1, ''), title),
+                        artist = COALESCE(NULLIF(?2, ''), artist),
+                        album = COALESCE(NULLIF(?3, ''), album),
+                        duration = COALESCE(?4, duration),
+                        format = COALESCE(?5, format),
+                        track_number = COALESCE(?6, track_number),
+                        disc_number = COALESCE(?7, disc_number)
+                     WHERE path = ?8",
                     rusqlite::params![
+                        track.title,
+                        track.artist,
+                        track.album,
+                        track.duration,
+                        track.format,
                         track.track_number,
                         track.disc_number,
                         track.path,
                     ],
                 ).map_err(|e| e.to_string())?;
             }
-        }
-        
-        for path in paths_to_delete {
-            tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
-            tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
         }
         
         tx.commit().map_err(|e| e.to_string())?;
@@ -858,6 +857,14 @@ fn get_lyrics(path: String) -> Result<Vec<lyrics::LyricLine>, String> {
 #[tauri::command]
 async fn get_cover_art(path: String) -> Result<Option<String>, String> {
     if path.starts_with("http://") || path.starts_with("https://") {
+        if let Ok(parsed) = url::Url::parse(&path) {
+            if parsed.scheme() != "http" && parsed.scheme() != "https" {
+                return Ok(None);
+            }
+        } else {
+            return Ok(None);
+        }
+
         let client = get_http_client();
         match client.get(&path)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -870,9 +877,11 @@ async fn get_cover_art(path: String) -> Result<Option<String>, String> {
                         .unwrap_or("image/jpeg")
                         .to_string();
                     if let Ok(bytes) = res.bytes().await {
-                        use base64::Engine;
-                        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                        return Ok(Some(format!("data:{content_type};base64,{encoded}")));
+                        if bytes.len() <= 15 * 1024 * 1024 {
+                            use base64::Engine;
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            return Ok(Some(format!("data:{content_type};base64,{encoded}")));
+                        }
                     }
                 }
             }
@@ -893,10 +902,29 @@ fn save_lyrics_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
+    if let Ok(parsed) = url::Url::parse(&url) {
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
+            return Err("Invalid image URL scheme".to_string());
+        }
+    } else {
+        return Err("Invalid image URL".to_string());
+    }
+
     let client = get_http_client();
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("Failed to download cover image: HTTP {}", res.status()));
+    }
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > 15 * 1024 * 1024 {
+        return Err("Cover image exceeds 15MB size limit".to_string());
+    }
 
     let audio_path = std::path::Path::new(&path);
     let parent = audio_path.parent().ok_or("Invalid path")?;
@@ -1480,8 +1508,13 @@ fn stop_track(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_volume(volume: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let clamped = if volume.is_finite() {
+        volume.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
     let player = safe_lock(&state.player);
-    player.volume.store(volume.to_bits(), Ordering::Relaxed);
+    player.volume.store(clamped.to_bits(), Ordering::Relaxed);
     Ok(())
 }
 
@@ -1493,6 +1526,67 @@ fn seek_track(secs: f64, state: State<'_, AppState>) -> Result<(), String> {
         .send(player::PlayerCommand::Seek(secs))
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn set_playback_rate(rate: f64, state: State<'_, AppState>) -> Result<(), String> {
+    let clamped = if rate.is_finite() { rate.clamp(0.5, 2.0) } else { 1.0 };
+    let player = safe_lock(&state.player);
+    let mut dsp = safe_lock(&player.dsp_state);
+    dsp.playback_rate = clamped;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_smart_playlist(name: String, rules_json: String, state: State<'_, AppState>) -> Result<i32, String> {
+    let conn = safe_lock(&state.db);
+    db::create_smart_playlist(&conn, &name, &rules_json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_smart_playlists(state: State<'_, AppState>) -> Result<Vec<db::SmartPlaylist>, String> {
+    let conn = safe_lock(&state.db);
+    db::get_smart_playlists(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_smart_playlist(id: i32, state: State<'_, AppState>) -> Result<(), String> {
+    let conn = safe_lock(&state.db);
+    db::delete_smart_playlist(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn execute_smart_playlist(rules_json: String, state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
+    let conn = safe_lock(&state.db);
+    db::execute_smart_rules(&conn, &rules_json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_global_shortcuts(
+    bindings: std::collections::HashMap<String, Option<String>>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let list: Vec<(String, Option<String>)> = bindings.into_iter().collect();
+    hotkeys::apply_shortcuts(&app_handle, &list)
+}
+
+#[tauri::command]
+fn export_playlist_m3u(playlist_id: i32, dest_path: String, state: State<'_, AppState>) -> Result<usize, String> {
+    let conn = safe_lock(&state.db);
+    m3u::export_playlist_m3u(&conn, playlist_id, &dest_path)
+}
+
+#[tauri::command]
+fn import_playlist_m3u(src_path: String, playlist_name: Option<String>, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut conn = safe_lock(&state.db);
+    let name = playlist_name.unwrap_or_else(|| {
+        std::path::Path::new(&src_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Imported Playlist".to_string())
+    });
+    let result = m3u::import_playlist_m3u(&mut conn, &src_path, &name)?;
+    Ok(serde_json::json!({ "resolved": result.resolved, "skipped": result.skipped }))
 }
 
 #[tauri::command]
@@ -1687,6 +1781,7 @@ async fn acoustid_identify_track(state: State<'_, AppState>, path: String) -> Re
             profile.energy,
             profile.bass_ratio,
             profile.treble_ratio,
+            Some(profile.lufs_gain_db),
         );
     }
 
@@ -1994,6 +2089,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let _ = app.emit("deep-link", argv);
             if let Some(w) = app.get_webview_window("main") {
@@ -2037,33 +2134,6 @@ pub fn run() {
                 _ => {}
             }
         })
-        .setup(|app| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.set_skip_taskbar(false);
-                let _ = w.show();
-                let _ = w.unminimize();
-                let _ = w.center();
-                let _ = w.set_focus();
-            }
-
-            let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
-                use tauri::menu::{Menu, MenuItem};
-
-                let show_i = MenuItem::with_id(app, "show", "Show Aideo", true, None::<&str>)?;
-                let quit_i = MenuItem::with_id(app, "quit", "Quit Aideo", true, None::<&str>)?;
-                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
-
-                if let Some(tray) = app.tray_by_id("main-tray") {
-                    let _ = tray.set_menu(Some(menu));
-                    let _ = tray.set_show_menu_on_left_click(false);
-                    let _ = tray.set_tooltip(Some("Aideo Music Player"));
-                }
-
-                Ok(())
-            })();
-
-            Ok(())
-        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" && CLOSE_TO_TRAY.load(std::sync::atomic::Ordering::Relaxed) {
@@ -2098,8 +2168,18 @@ pub fn run() {
             get_lyrics,
             get_cover_art,
             save_lyrics_file,
+            write_text_file,
             set_volume,
             seek_track,
+            set_playback_rate,
+            set_global_shortcuts,
+            export_playlist_m3u,
+            import_playlist_m3u,
+            watcher::sync_watch_folders,
+            create_smart_playlist,
+            get_smart_playlists,
+            delete_smart_playlist,
+            execute_smart_playlist,
             pre_resolve_youtube_url,
             toggle_exclusive_mode,
             get_exclusive_mode,
@@ -2216,6 +2296,30 @@ pub fn run() {
             chromecast::chromecast_get_status,
         ])
         .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_skip_taskbar(false);
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.center();
+                let _ = w.set_focus();
+            }
+
+            let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
+                use tauri::menu::{Menu, MenuItem};
+
+                let show_i = MenuItem::with_id(app, "show", "Show Aideo", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "quit", "Quit Aideo", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+
+                if let Some(tray) = app.tray_by_id("main-tray") {
+                    let _ = tray.set_menu(Some(menu));
+                    let _ = tray.set_show_menu_on_left_click(false);
+                    let _ = tray.set_tooltip(Some("Aideo Music Player"));
+                }
+
+                Ok(())
+            })();
+
             #[cfg(target_os = "windows")]
             {
                 let (tx, rx) = std::sync::mpsc::channel::<bool>();

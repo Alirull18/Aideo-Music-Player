@@ -6,12 +6,23 @@ dist-ssr
 src-tauri/target
 src-tauri/bin/
 src-tauri/gen/
+target/
+.turbo/
+.parcel-cache/
+.cache/
+*.tsbuildinfo
+.eslintcache
 
 # Database & Storage
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
 src-tauri/*.db
 src-tauri/*.db-journal
 
@@ -24,6 +35,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 build_errors.txt
+coverage/
+*.lcov
+.nyc_output/
 
 # Environment & Sensitive Keys
 .env
@@ -35,6 +49,14 @@ tauri.key*
 *.key*
 tauri.key.password
 final_aideo.key
+*.pem
+*.crt
+*.pfx
+*.p12
+*.cer
+*.der
+*.token
+*.session
 
 # Editor & OS Files
 .vscode/*
@@ -47,6 +69,10 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+*.bak
+*.backup
+*.tmp
+*.temp
 
 # Executables & Binaries
 ffmpeg.exe
@@ -67,14 +93,22 @@ patch_player.py
 patch_player.ps1
 Untitled-1.txt
 
-# Agent & Graph Caches
+# Agent, Tools & IDE Caches
 .agents/
+.agent/
 .kilo/
+.opencode/
+opencode.json
 handler.md
 task.md
 docs/AI_CONTEXT.md
 docs/ARCHITECTURE.md
 .code-review-graph/
 ponytail/
+AUDIT_REPORT.md
+WEB_STREAM_AUDIT.md
+*AUDIT*.md
+*_audit.md
+
 
 

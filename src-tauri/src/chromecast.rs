@@ -27,6 +27,39 @@ fn get_local_ip() -> Option<String> {
     socket.local_addr().ok().map(|addr| addr.ip().to_string())
 }
 
+// Canonical-path allowlist cache so each HTTP request is a set lookup instead of
+// canonicalizing every DB row. Invalidated when the track table changes size.
+lazy_static! {
+    static ref SAFE_PATH_CACHE: std::sync::Mutex<(i64, std::collections::HashSet<std::path::PathBuf>)> =
+        std::sync::Mutex::new((0, std::collections::HashSet::new()));
+}
+
+fn build_safe_path_set(app_state: &crate::AppState) -> std::collections::HashSet<std::path::PathBuf> {
+    let conn = crate::safe_lock(&app_state.db);
+    let mut stmt = match conn.prepare("SELECT path, cover_url FROM tracks") {
+        Ok(s) => s,
+        Err(_) => return std::collections::HashSet::new(),
+    };
+    let mut rows = match stmt.query([]) {
+        Ok(r) => r,
+        Err(_) => return std::collections::HashSet::new(),
+    };
+    let mut set = std::collections::HashSet::new();
+    while let Ok(Some(row)) = rows.next() {
+        if let Ok(p) = row.get::<_, String>(0) {
+            if let Ok(canon) = Path::new(&p).canonicalize() {
+                set.insert(canon);
+            }
+        }
+        if let Ok(Some(cov)) = row.get::<_, Option<String>>(1) {
+            if let Ok(canon) = Path::new(&cov).canonicalize() {
+                set.insert(canon);
+            }
+        }
+    }
+    set
+}
+
 // Local HTTP server task to stream audio files to Chromecast devices
 fn is_path_safe(app_state: &crate::AppState, filepath: &str) -> bool {
     let path = Path::new(filepath);
@@ -48,44 +81,21 @@ fn is_path_safe(app_state: &crate::AppState, filepath: &str) -> bool {
         }
     }
 
-    let is_in_db = {
+    let track_count: i64 = {
         let conn = crate::safe_lock(&app_state.db);
-        let mut stmt = match conn.prepare("SELECT 1 FROM tracks WHERE path = ?1 OR cover_url = ?1") {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-        stmt.exists([filepath]).unwrap_or(false)
+        conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(-1)
     };
-    if is_in_db {
-        return true;
-    }
 
-    if let Some(_parent) = canonical.parent() {
-        let conn = crate::safe_lock(&app_state.db);
-        let mut stmt = match conn.prepare("SELECT path FROM tracks") {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
-        
-        let track_paths: Vec<String> = stmt
-            .query_map([], |row| row.get(0))
-            .ok()
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default();
-
-        for db_path_str in track_paths {
-            if let Ok(db_canonical) = std::path::Path::new(&db_path_str).canonicalize() {
-                if let Some(db_parent) = db_canonical.parent() {
-                    if canonical.starts_with(db_parent) {
-                        return true;
-                    }
-                }
-            }
+    if let Ok(mut cache) = SAFE_PATH_CACHE.lock() {
+        if cache.0 != track_count {
+            cache.1 = build_safe_path_set(app_state);
+            cache.0 = track_count;
         }
-        false
-    } else {
-        false
+        return cache.1.contains(&canonical);
     }
+
+    // Cache lock poisoned — fall back to a direct scan
+    build_safe_path_set(app_state).contains(&canonical)
 }
 
 // Local HTTP server task to stream audio files to Chromecast devices
@@ -432,16 +442,19 @@ pub async fn chromecast_play(
     duration: Option<f64>,
     start_time: Option<f64>,
 ) -> Result<(), String> {
-    let mut client_lock = CAST_CLIENT.lock().await;
-    let client = client_lock.as_mut().ok_or("No active Chromecast session")?;
-    
-    // If it's a YouTube link, resolve it to a direct audio stream URL using ytdlp
+    // If it's a YouTube link, resolve it to a direct audio stream URL using ytdlp outside the async mutex lock
+    let path_clone = path.clone();
     let resolved_path = if path.contains("youtube.com") || path.contains("youtu.be") {
-        println!("[chromecast] YouTube URL detected. Extracting direct audio stream...");
-        crate::player::resolve_youtube_url(&path)
+        println!("[chromecast] YouTube URL detected. Extracting direct audio stream in blocking task...");
+        tokio::task::spawn_blocking(move || crate::player::resolve_youtube_url(&path_clone))
+            .await
+            .map_err(|e| format!("Failed to execute background resolve: {}", e))?
     } else {
         path.clone()
     };
+
+    let mut client_lock = CAST_CLIENT.lock().await;
+    let client = client_lock.as_mut().ok_or("No active Chromecast session")?;
     
     let is_remote = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
     

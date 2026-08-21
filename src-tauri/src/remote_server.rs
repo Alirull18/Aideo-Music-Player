@@ -11,10 +11,27 @@ pub static REMOTE_PIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn get_or_init_pin() -> &'static str {
     REMOTE_PIN.get_or_init(|| {
-        let token = format!("{:032x}", rand::random::<u128>());
-        println!("[Aideo Connect] Generated secure remote authorization token: {}", token);
-        token
+        format!("{:032x}", rand::random::<u128>())
     })
+}
+
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn extract_pin_from_query(query: &str) -> Option<&str> {
+    for pair in query.split('&') {
+        let mut parts = pair.splitn(2, '=');
+        if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
+            if k == "pin" {
+                return Some(v);
+            }
+        }
+    }
+    None
 }
 
 pub async fn start_remote_server(app_handle: AppHandle, app_state: Arc<crate::AppState>) {
@@ -76,16 +93,17 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, app_handle: AppH
             let query = uri.query().unwrap_or("");
             let expected_pin = get_or_init_pin();
             
-            if query.contains(&format!("pin={}", expected_pin)) {
-                pin_valid = true;
-                Ok(response)
-            } else {
-                let err_response = tokio_tungstenite::tungstenite::http::Response::builder()
-                    .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
-                    .body(Some("Forbidden - Invalid or missing PIN".to_string()))
-                    .unwrap();
-                Err(err_response)
+            if let Some(pin) = extract_pin_from_query(query) {
+                if constant_time_eq(pin, expected_pin) {
+                    pin_valid = true;
+                    return Ok(response);
+                }
             }
+            let err_response = tokio_tungstenite::tungstenite::http::Response::builder()
+                .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
+                .body(Some("Forbidden - Invalid or missing PIN".to_string()))
+                .unwrap();
+            Err(err_response)
         };
 
         let ws_stream = match tokio_tungstenite::accept_hdr_async(stream, callback).await {
@@ -105,9 +123,15 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, app_handle: AppH
 }
 
 async fn handle_http(mut stream: TcpStream, request_str: std::borrow::Cow<'_, str>) {
-    // Validate the PIN
+    // Validate the PIN from the request line
     let expected_pin = get_or_init_pin();
-    let has_valid_pin = request_str.contains(&format!("pin={}", expected_pin));
+    let first_line = request_str.lines().next().unwrap_or("");
+    let path_and_query = first_line.split_whitespace().nth(1).unwrap_or("");
+    let query_str = path_and_query.splitn(2, '?').nth(1).unwrap_or("");
+
+    let has_valid_pin = extract_pin_from_query(query_str)
+        .map(|pin| constant_time_eq(pin, expected_pin))
+        .unwrap_or(false);
 
     let (status_line, content) = if !has_valid_pin {
         ("HTTP/1.1 403 FORBIDDEN\r\nContent-Type: text/html; charset=utf-8\r\n",
@@ -115,7 +139,7 @@ async fn handle_http(mut stream: TcpStream, request_str: std::borrow::Cow<'_, st
          <body style=\"background-color:#09090e;color:#f3f4f6;font-family:sans-serif;text-align:center;padding:50px;\">\
          <h1>403 Forbidden</h1><p>Invalid or missing PIN. Please scan the QR code in Aideo Settings.</p>\
          </body></html>".to_string())
-    } else if request_str.starts_with("GET /") {
+    } else if path_and_query.starts_with('/') {
         ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n", get_remote_html())
     } else {
         ("HTTP/1.1 404 NOT FOUND\r\n", "Not Found".to_string())
@@ -276,8 +300,11 @@ async fn handle_websocket(
                         }
                         "volume" => {
                             if let Some(vol) = val.get("value").and_then(|v| v.as_f64()) {
-                                let player = crate::safe_lock(&state.player);
-                                player.volume.store((vol as f32).to_bits(), std::sync::atomic::Ordering::Relaxed);
+                                if vol.is_finite() {
+                                    let clamped = (vol as f32).clamp(0.0, 1.0);
+                                    let player = crate::safe_lock(&state.player);
+                                    player.volume.store(clamped.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                                }
                             }
                         }
                         "seek" => {

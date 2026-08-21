@@ -11,6 +11,14 @@ import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { matchesSearchQuery } from '../utils/searchParser';
 import { useRef } from 'react';
 import { AlbumsView } from './AlbumsView';
+import { SimpleLRU } from '../utils/lruCache';
+
+const persistQueueState = (newQueue: any[], otherState?: Record<string, any>) => {
+  useStore.setState({ queue: newQueue, ...otherState });
+  try {
+    localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+  } catch (_) {}
+};
 
 
 const isStreamTrack = (path: string, format?: string | null) => {
@@ -168,8 +176,8 @@ function CloudCacheButton({ streamUrl, cacheCloudTrack, deleteCachedTrack, cache
   );
 }
 
-const coverArtCache = new Map<string, string | null>();
-const pendingArtRequests = new Map<string, Promise<any>>();
+const coverArtCache = new SimpleLRU<string, string | null>(300);
+const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
 
 function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | null }) {
   const targetPath = coverUrl || path;
@@ -264,7 +272,7 @@ interface TrackRowProps {
 }
 
 const TrackRow = memo(({ 
-  t, i, totalTracks, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
+  t, i, totalTracks: _totalTracks, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
   playTrack, setView, setMenuOpenFor, playNextInQueue, addToQueue, matchMetadata, 
   setMatchData, setIsMatching, removeFromPlaylist, reorderPlaylistTracks, setPlaylistModalFor, setEditModalFor,
   toggleLoveTrack, toggleDislikeTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes,
@@ -573,46 +581,53 @@ const TrackRow = memo(({
                   </div>
                   <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
 
-                  {currentPlaylist ? (
-                    <>
-                      {i > 0 && (
+                  {currentPlaylist ? (() => {
+                    const currentPlaylistTracks = useStore.getState().tracks;
+                    const realIdx = currentPlaylistTracks.findIndex((item: any) => item.path === t.path);
+                    const effectiveIdx = realIdx !== -1 ? realIdx : i;
+                    const maxIdx = currentPlaylistTracks.length - 1;
+
+                    return (
+                      <>
+                        {effectiveIdx > 0 && (
+                          <div
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              reorderPlaylistTracks(currentPlaylist.id, effectiveIdx, effectiveIdx - 1); 
+                              setMenuOpenFor(null); 
+                            }}
+                            style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <ArrowUp size={14} /> Move Up
+                          </div>
+                        )}
+                        {effectiveIdx < maxIdx && (
+                          <div
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              reorderPlaylistTracks(currentPlaylist.id, effectiveIdx, effectiveIdx + 1); 
+                              setMenuOpenFor(null); 
+                            }}
+                            style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <ArrowDown size={14} /> Move Down
+                          </div>
+                        )}
                         <div
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            reorderPlaylistTracks(currentPlaylist.id, i, i - 1); 
-                            setMenuOpenFor(null); 
-                          }}
-                          style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                          onClick={(e) => { e.stopPropagation(); removeFromPlaylist(currentPlaylist.id, t.path); setMenuOpenFor(null); }}
+                          style={{ padding: '10px 14px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
                           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                         >
-                          <ArrowUp size={14} /> Move Up
+                          Remove from Playlist
                         </div>
-                      )}
-                      {i < totalTracks - 1 && (
-                        <div
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            reorderPlaylistTracks(currentPlaylist.id, i, i + 1); 
-                            setMenuOpenFor(null); 
-                          }}
-                          style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                        >
-                          <ArrowDown size={14} /> Move Down
-                        </div>
-                      )}
-                      <div
-                        onClick={(e) => { e.stopPropagation(); removeFromPlaylist(currentPlaylist.id, t.path); setMenuOpenFor(null); }}
-                        style={{ padding: '10px 14px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                      >
-                        Remove from Playlist
-                      </div>
-                    </>
-                  ) : (
+                      </>
+                    );
+                  })() : (
                     <div
                       onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setPlaylistModalFor(t); }}
                       style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
@@ -778,7 +793,7 @@ export function LibraryView() {
     matchMetadata, addToQueue, playNextInQueue, playlists, addToPlaylist,
     subsonicUrl, subsonicUser, subsonicConnected, subsonicPass,
     jellyfinUrl, jellyfinConnected, toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
-    setCoverArtModalTrack
+    setCoverArtModalTrack, librarySearchQuery, setLibrarySearchQuery
   } = useStore(useShallow(s => ({
     view: s.view,
     tracks: s.tracks,
@@ -807,6 +822,8 @@ export function LibraryView() {
     cachedCloudHashes: s.cachedCloudHashes,
     fetchCachedCloudHashes: s.fetchCachedCloudHashes,
     setCoverArtModalTrack: s.setCoverArtModalTrack,
+    librarySearchQuery: s.librarySearchQuery,
+    setLibrarySearchQuery: s.setLibrarySearchQuery,
   })));
 
   useEffect(() => {
@@ -852,9 +869,17 @@ export function LibraryView() {
   const [editTitle, setEditTitle] = useState('');
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(librarySearchQuery || '');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(librarySearchQuery || '');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Sync with store-level librarySearchQuery navigation
+  useEffect(() => {
+    if (librarySearchQuery !== undefined && librarySearchQuery !== searchQuery) {
+      setSearchQuery(librarySearchQuery);
+      setDebouncedSearchQuery(librarySearchQuery);
+    }
+  }, [librarySearchQuery]);
 
   // Multi-Select state & bulk actions
   const [selectedTrackPaths, setSelectedTrackPaths] = useState<string[]>([]);
@@ -1040,7 +1065,8 @@ export function LibraryView() {
     const remainingCloudTracks = clickedIndex !== -1 ? currentList.slice(clickedIndex + 1) : [];
     const tracksToQueue = remainingCloudTracks.map(cloudTrackToVirtualTrack);
 
-    useStore.setState({ queue: tracksToQueue });
+    const vt = cloudTrackToVirtualTrack(ct);
+    persistQueueState(tracksToQueue);
     
     // Sync the queue to the backend immediately to prevent duplicates/desyncs
     try {
@@ -1053,7 +1079,6 @@ export function LibraryView() {
       console.error('Failed to sync cloud queue to backend:', e);
     }
 
-    const vt = cloudTrackToVirtualTrack(ct);
     await playTrack(vt);
     
     if (ct.cover_url) {
@@ -1083,11 +1108,11 @@ export function LibraryView() {
       }
       firstTrack = shuffled[0];
       tracksToQueue = shuffled.slice(1);
-      useStore.setState({ shuffle: true, queue: tracksToQueue });
+      persistQueueState(tracksToQueue, { shuffle: true });
     } else {
       firstTrack = virtualTracks[0];
       tracksToQueue = virtualTracks.slice(1);
-      useStore.setState({ shuffle: false, queue: tracksToQueue });
+      persistQueueState(tracksToQueue, { shuffle: false });
     }
     
     // Sync the queue to the backend immediately to prevent duplicates/desyncs
@@ -1147,6 +1172,7 @@ export function LibraryView() {
   // Multi-Select keyboard shortcuts (Ctrl+A / Esc)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (view !== 'library') return;
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
@@ -1160,7 +1186,7 @@ export function LibraryView() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [filteredTracks]);
+  }, [view, filteredTracks]);
 
   const handleTrackRowClick = (t: any, index: number, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -1194,7 +1220,7 @@ export function LibraryView() {
     if (selected.length === 0) return;
     const first = selected[0];
     const rest = selected.slice(1);
-    useStore.setState({ queue: rest, shuffle: false });
+    persistQueueState(rest, { shuffle: false });
     try {
       await invoke('clear_queue');
       if (rest.length > 0) {
@@ -1210,7 +1236,7 @@ export function LibraryView() {
     const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
     if (selected.length === 0) return;
     const currentQ = useStore.getState().queue;
-    useStore.setState({ queue: [...currentQ, ...selected] });
+    persistQueueState([...currentQ, ...selected]);
     try {
       const paths = selected.map((t: any) => t.path);
       await invoke('add_to_queue_bulk', { paths });
@@ -1414,7 +1440,10 @@ export function LibraryView() {
                   type="text" 
                   placeholder={viewMode === 'albums' ? "Search albums or artists..." : "Find song..."} 
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setLibrarySearchQuery(e.target.value);
+                  }}
                   style={{
                     width: '100%',
                     background: 'rgba(255, 255, 255, 0.05)',
@@ -1441,7 +1470,10 @@ export function LibraryView() {
                 />
                 {searchQuery && (
                   <button 
-                    onClick={() => setSearchQuery('')}
+                    onClick={() => {
+                      setSearchQuery('');
+                      setLibrarySearchQuery('');
+                    }}
                     style={{
                       position: 'absolute',
                       right: 10,
@@ -1520,7 +1552,7 @@ export function LibraryView() {
                   }
                   const firstTrack = shuffled[0];
                   const restTracks = shuffled.slice(1);
-                  useStore.setState({ shuffle: true, queue: restTracks });
+                  persistQueueState(restTracks, { shuffle: true });
 
                   invoke('clear_queue').then(() => {
                     if (restTracks.length > 0) {
@@ -1533,7 +1565,7 @@ export function LibraryView() {
                 } else if (isCloudTab) {
                   handlePlayAllCloud(true);
                 } else {
-                  useStore.setState({ shuffle: true, queue: [] });
+                  persistQueueState([], { shuffle: true });
                   const randomIdx = Math.floor(Math.random() * sourceTracks.length);
                   playTrack(sourceTracks[randomIdx]);
                   setView('nowplaying');

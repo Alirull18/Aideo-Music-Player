@@ -70,18 +70,24 @@ export function ListeningInsightsView() {
 
   // Timer reference for slide transitions
   const slideTimerRef = useRef<number | null>(null);
+  const fetchSeq = useRef(0);
 
   const fetchInsights = async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await invoke<ListeningInsightsPayload>('get_listening_insights', { range });
+      if (seq !== fetchSeq.current) return;
       setInsights(res);
     } catch (err: any) {
+      if (seq !== fetchSeq.current) return;
       console.error(err);
       setError(err?.toString() || 'Failed to aggregate listening data.');
     } finally {
-      setLoading(false);
+      if (seq === fetchSeq.current) {
+        setLoading(false);
+      }
     }
   };
 

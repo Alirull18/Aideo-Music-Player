@@ -1,0 +1,45 @@
+# Aideo Music Player
+
+> A high-performance, audiophile-grade desktop music player for Windows 10 & 11 built with Tauri v2, Rust, and React 19.
+
+## Overview
+Aideo Music Player is an open-source desktop audio engine engineered for audiophiles and music enthusiasts. It bypasses the Windows Shared Audio Engine using WASAPI Exclusive mode for bit-perfect audio playback up to 32-bit / 384kHz, integrates Jaakko Pasanen's 4,000+ AutoEQ headphone calibration profiles with parametric biquad DSP, supports synchronized lyrics with Japanese Romaji transliteration, and combines local FLAC/DSD library management with YouTube Music, Tidal, and Subsonic/Jellyfin cloud streaming.
+
+## Core Features & Capabilities
+
+### 1. Bit-Perfect Hardware Transport
+- **WASAPI Exclusive Mode**: Direct hardware transport locking DAC clock rates, bypassing Windows mixer sample rate conversion (SRC) and CAudioLimiter compression.
+- **Pure 32-Bit Decoding**: Native audio decoding via Symphonia in pure Rust for FLAC, WAV, ALAC, AAC, MP3, and Vorbis.
+- **Ultra-Low Latency Jitter**: Sub-0.3ms buffer jitter via dedicated audio polling thread.
+- **Anti-Pop Soft Ramping**: 256-frame soft volume ramping preventing audible pops and transients during track switching.
+
+### 2. Digital Signal Processing (DSP) & AutoEQ
+- **4,000+ AutoEQ Calibrations**: Automated download and calculation of Harman/target-curve biquad filters for over 4,000 headphone and IEM models.
+- **5 & 10-Band Parametric Equalizer**: Draggable biquad filter nodes with real-time logarithmic frequency graphing (20Hz - 20kHz).
+- **Linkwitz Crossfeed Delay**: Natural stereo soundstage crossfeed simulation for fatigue-free headphone listening.
+- **Equalizer APO Compatibility**: Instant 1-click export of parametric configurations for system-wide use.
+
+### 3. Synchronized Lyrics & Language Intelligence
+- **Multi-Source Synchronization**: Automated lyric fetching across LRCLIB, NetEase, and QQ Music.
+- **Japanese Romaji Transliteration**: 1-click conversion of Japanese Kanji/Kana to Romanized pronunciation via Wanakana.
+- **Real-Time Translation**: Synchronized line-by-line lyric translations.
+
+### 4. Hybrid Library & Remote Control
+- **Hybrid Streaming**: Seamless playback of local lossless audio files (FLAC, DSD, WAV) alongside YouTube Music and Tidal lossless streams.
+- **Aideo Connect**: Mobile LAN remote control enabling playback control from any smartphone browser on the same Wi-Fi network.
+- **0.0% Idle Power Engine**: Smart sleeping cycles that completely halt visualizers and timers when paused.
+- **Aideo Insights & Offline Wrapped**: 100% private offline listening analytics and interactive Spotify-style Wrapped slide presentation.
+
+## Technical Specifications
+- **Operating System**: Windows 10 (64-bit), Windows 11 (64-bit)
+- **Frontend Architecture**: React 19, TypeScript, Framer Motion, Zustand
+- **Backend Architecture**: Rust, Tauri v2, Tokio, WASAPI, CPAL
+- **Audio Codec Engine**: Symphonia (Pure Rust)
+- **Database**: SQLite (rusqlite) with column-virtualized indexing
+- **Licensing**: Open Source (MIT License)
+
+## Resources & Documentation
+- Official Website: https://alirull18.github.io/Aideo-Music-Player/
+- GitHub Repository: https://github.com/Alirull18/Aideo-Music-Player
+- Latest Releases: https://github.com/Alirull18/Aideo-Music-Player/releases/latest
+- Release Notes: https://github.com/Alirull18/Aideo-Music-Player/blob/main/README.md

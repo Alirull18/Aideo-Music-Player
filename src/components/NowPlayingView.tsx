@@ -25,7 +25,7 @@ export function NowPlayingView() {
     playback, currentDevice, coverArt, accentColor, dsp, 
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
     setView, toggleLoveTrack, toggleDislikeTrack, toggleControlCenter,
-    albumArtFit, cachedCloudHashes
+    albumArtFit, cachedCloudHashes, setLibrarySearchQuery
   } = useStore();
   const current = currentTrack;
 
@@ -455,7 +455,16 @@ export function NowPlayingView() {
             cursor: 'pointer',
             textDecoration: 'underline'
           }}
-            onClick={() => playback.current_track && openUrl(playback.current_track)}>
+            onClick={() => {
+              if (!playback.current_track) return;
+              const isWebStream = playback.current_track.startsWith('http://') || playback.current_track.startsWith('https://');
+              if (isWebStream) {
+                openUrl(playback.current_track);
+              } else if (current?.artist) {
+                setLibrarySearchQuery(current.artist);
+                setView('library');
+              }
+            }}>
             {current?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—')}
           </div>
         </div>

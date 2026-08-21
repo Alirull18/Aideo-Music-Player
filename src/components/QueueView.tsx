@@ -1,10 +1,12 @@
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Trash2, GripVertical, ArrowUp, ArrowDown, CheckCircle2 } from 'lucide-react';
+import { X, Trash2, GripVertical, ArrowUp, ArrowDown, CheckCircle2, Copy, Download } from 'lucide-react';
 import { useState } from 'react';
 import { fmt, isStreamTrack } from '../utils';
 import { useVirtualList } from '../utils/useVirtualList';
+import { save } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 
 
 export function QueueView() {
@@ -29,7 +31,7 @@ export function QueueView() {
     bottomSpacerHeight: bottomQueueSpacer,
     startIndex: queueStartIndex,
   } = useVirtualList(queue, {
-    itemHeight: 64,
+    itemHeight: 72,
   });
 
   const startPointerDrag = (startIdx: number, e: React.PointerEvent) => {
@@ -71,6 +73,46 @@ export function QueueView() {
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
+  };
+
+  const handleCopyQueue = async () => {
+    if (queue.length === 0) return;
+    const text = queue.map(t => `${t.artist ? t.artist + ' - ' : ''}${t.title || t.path.split(/[\\/]/).pop()}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Copied ${queue.length} tracks to clipboard`, type: 'success' }
+      }));
+    } catch {
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: 'Clipboard unavailable', type: 'error' }
+      }));
+    }
+  };
+
+  const handleExportQueue = async () => {
+    if (queue.length === 0) return;
+    try {
+      const dest = await save({
+        title: 'Export Queue as M3U8',
+        defaultPath: 'aideo-queue.m3u8',
+        filters: [{ name: 'M3U Playlist', extensions: ['m3u8', 'm3u'] }]
+      });
+      if (!dest) return;
+      const m3u = '#EXTM3U\n' + queue.map(t => {
+        const display = t.artist && t.title ? `${t.artist} - ${t.title}` : (t.title || t.path.split(/[\\/]/).pop() || t.path);
+        const secs = t.duration ? Math.round(t.duration) : -1;
+        return `#EXTINF:${secs},${display}\n${t.path}`;
+      }).join('\n');
+      await invoke('write_text_file', { path: dest, content: m3u + '\n' });
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Exported ${queue.length} tracks to ${dest.split(/[\\/]/).pop()}`, type: 'success' }
+      }));
+    } catch (e: any) {
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Export failed: ${e}`, type: 'error' }
+      }));
+    }
   };
 
   return (
@@ -116,15 +158,37 @@ export function QueueView() {
               <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Up Next</h2>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                 {queue.length > 0 && (
-                  <button 
-                    onClick={() => clearQueue()}
-                    style={{ 
-                      background: 'none', border: 'none', color: 'var(--text-dim)', 
-                      fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 
-                    }}
-                  >
-                    <Trash2 size={14} /> Clear
-                  </button>
+                  <>
+                    <button
+                      onClick={handleCopyQueue}
+                      style={{
+                        background: 'none', border: 'none', color: 'var(--text-dim)',
+                        fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+                      }}
+                      title="Copy queue as text list"
+                    >
+                      <Copy size={14} /> Copy
+                    </button>
+                    <button
+                      onClick={handleExportQueue}
+                      style={{
+                        background: 'none', border: 'none', color: 'var(--text-dim)',
+                        fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+                      }}
+                      title="Export queue as M3U8"
+                    >
+                      <Download size={14} /> Export
+                    </button>
+                    <button
+                      onClick={() => clearQueue()}
+                      style={{
+                        background: 'none', border: 'none', color: 'var(--text-dim)',
+                        fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+                      }}
+                    >
+                      <Trash2 size={14} /> Clear
+                    </button>
+                  </>
                 )}
                 <button className="modal-close" onClick={toggleQueue}><X size={18} /></button>
               </div>
@@ -147,7 +211,7 @@ export function QueueView() {
 
                     return (
                       <div
-                        key={t.id || t.path || `q-${i}`}
+                        key={`${t.path}-${i}`}
                         data-queue-index={i}
                         onMouseEnter={() => setHoveredIdx(i)}
                         onMouseLeave={() => setHoveredIdx(null)}
