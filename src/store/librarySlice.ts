@@ -15,22 +15,27 @@ const isStreamTrack = (path: string, format?: string | null): boolean => {
   return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
 };
 
+let metadataFetchSeq = 0;
+
 const fetchTrackMetadataAndLyrics = async (
   track: Track,
   set: any,
   get: any,
   isOnline: boolean
 ) => {
+  const seq = ++metadataFetchSeq;
   const path = track.path;
+  const isCurrent = () => seq === metadataFetchSeq && (pathsEqual(get().playback.current_track, path) || pathsEqual(get().currentTrack?.path, path));
+
   if (track.cover_url) {
     if (track.cover_url.startsWith('http://') || track.cover_url.startsWith('https://')) {
       invoke('get_cover_art', { path: track.cover_url }).then(async (art: any) => {
-        if (!pathsEqual(get().playback.current_track, path)) return;
+        if (!isCurrent()) return;
         if (art && typeof art === 'string') {
           set({ coverArt: art });
           try {
             const color = await extractDominantColor(art);
-            set({ accentColor: color });
+            if (isCurrent()) set({ accentColor: color });
           } catch (_) {}
           invoke('update_media_metadata', {
             title: track.title || path.split(/[\\/]/).pop(),
@@ -42,12 +47,12 @@ const fetchTrackMetadataAndLyrics = async (
           // Fallback to local cover if online retrieval returned null/empty and it is a local path
           if (!path.startsWith('http://') && !path.startsWith('https://')) {
             invoke('get_cover_art', { path }).then(async (localArt: any) => {
-              if (!pathsEqual(get().playback.current_track, path)) return;
+              if (!isCurrent()) return;
               if (localArt && typeof localArt === 'string') {
                 set({ coverArt: localArt });
                 try {
                   const color = await extractDominantColor(localArt);
-                  set({ accentColor: color });
+                  if (isCurrent()) set({ accentColor: color });
                 } catch (_) {}
               }
             }).catch(() => {});
@@ -57,12 +62,12 @@ const fetchTrackMetadataAndLyrics = async (
         // Fallback to local cover on connection failure/error
         if (!path.startsWith('http://') && !path.startsWith('https://')) {
           invoke('get_cover_art', { path }).then(async (localArt: any) => {
-            if (!pathsEqual(get().playback.current_track, path)) return;
+            if (!isCurrent()) return;
             if (localArt && typeof localArt === 'string') {
               set({ coverArt: localArt });
               try {
                 const color = await extractDominantColor(localArt);
-                set({ accentColor: color });
+                if (isCurrent()) set({ accentColor: color });
               } catch (_) {}
             }
           }).catch(() => {});
@@ -70,7 +75,7 @@ const fetchTrackMetadataAndLyrics = async (
       });
     } else {
       extractDominantColor(track.cover_url).then((color) => {
-        set({ accentColor: color });
+        if (isCurrent()) set({ accentColor: color });
       }).catch(() => {});
     }
   }
@@ -84,12 +89,12 @@ const fetchTrackMetadataAndLyrics = async (
 
   if (!isOnline && !track.cover_url) {
     invoke('get_cover_art', { path }).then(async (art: any) => {
-      if (!pathsEqual(get().playback.current_track, path)) return;
+      if (!isCurrent()) return;
       if (art && typeof art === 'string') {
         set({ coverArt: art });
         try {
           const color = await extractDominantColor(art);
-          set({ accentColor: color });
+          if (isCurrent()) set({ accentColor: color });
         } catch (_) { }
         invoke('update_media_metadata', {
           title: track.title || path.split(/[\\/]/).pop(),
@@ -101,21 +106,21 @@ const fetchTrackMetadataAndLyrics = async (
         set({ coverArt: null, accentColor: '#8b5cf6' });
       }
     }).catch(() => {
-      if (pathsEqual(get().playback.current_track, path)) {
+      if (isCurrent()) {
         set({ coverArt: null, accentColor: '#8b5cf6' });
       }
     });
   }
 
   invoke('get_lyrics', { path }).then((lrc: any) => {
-    if (!pathsEqual(get().playback.current_track, path)) return;
+    if (!isCurrent()) return;
     if (Array.isArray(lrc) && lrc.length > 0) {
       set({ lyrics: lrc, lyricStatus: 'found' });
     } else {
-      get().autoFetchLyricsOnline(track);
+      if (isCurrent()) get().autoFetchLyricsOnline(track);
     }
   }).catch(() => {
-    if (pathsEqual(get().playback.current_track, path)) get().autoFetchLyricsOnline(track);
+    if (isCurrent()) get().autoFetchLyricsOnline(track);
   });
 };
 

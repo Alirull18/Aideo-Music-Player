@@ -2700,16 +2700,21 @@ impl AudioNode for SpatializerNode {
         if !self.enabled || samples.len() < 2 {
             return;
         }
+        let wet = self.spatial_wet.clamp(0.0, 1.0);
+        if wet <= 0.0001 {
+            return;
+        }
+
         let (left, right) = samples.split_at_mut(1);
         let l_channel = &mut left[0];
         let r_channel = &mut right[0];
 
         for i in 0..l_channel.len() {
-            let mut l = l_channel[i];
-            let mut r = r_channel[i];
+            let l_dry = l_channel[i];
+            let r_dry = r_channel[i];
 
-            let mid = (l + r) * 0.5;
-            let side = (l - r) * 0.5;
+            let mid = (l_dry + r_dry) * 0.5;
+            let side = (l_dry - r_dry) * 0.5;
 
             self.spatial_delay_side.push(side);
 
@@ -2723,22 +2728,21 @@ impl AudioNode for SpatializerNode {
             let ref3 = self.spatial_delay_side.read_delayed(ref3_samples) * 0.04;
             let ref4 = self.spatial_delay_side.read_delayed(ref4_samples) * -0.03;
 
-            let reflections = (ref1 + ref2 + ref3 + ref4) * self.spatial_wet;
+            let reflections = (ref1 + ref2 + ref3 + ref4) * wet;
 
             let haas_samples = ((self.spatial_haas_delay * 0.001 * sample_rate).round() as usize).clamp(1, 2047);
             let side_delayed = self.spatial_delay_side.read_delayed(haas_samples);
             let side_room = side_delayed + reflections;
 
-            let intensity = self.spatial_wet;
-            let theta = (intensity * std::f32::consts::FRAC_PI_4).clamp(0.0, std::f32::consts::FRAC_PI_2);
+            let theta = (wet * std::f32::consts::FRAC_PI_4).clamp(0.0, std::f32::consts::FRAC_PI_2);
             let cos_t = theta.cos();
             let sin_t = theta.sin();
 
-            l = mid * cos_t + side_room * sin_t;
-            r = mid * cos_t - side_room * sin_t;
+            let l_spat = mid * cos_t + side_room * sin_t;
+            let r_spat = mid * cos_t - side_room * sin_t;
 
-            l_channel[i] = l;
-            r_channel[i] = r;
+            l_channel[i] = l_dry * (1.0 - wet) + l_spat * wet;
+            r_channel[i] = r_dry * (1.0 - wet) + r_spat * wet;
         }
     }
     fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
@@ -2978,10 +2982,15 @@ impl AudioNode for NormalizerNode {
 
             self.r128_slow_rms = self.r128_slow_rms * rms_alpha + max_sq * (1.0 - rms_alpha);
 
+            let is_silent = max_sq < 1e-6;
             let cur_lufs = 10.0 * self.r128_slow_rms.log10().max(-100.0) - 0.69;
             let diff = target_lufs - cur_lufs;
 
-            let target_gain = 10.0f32.powf(diff / 20.0).clamp(0.25, 2.0);
+            let target_gain = if is_silent || cur_lufs < -50.0 {
+                1.0f32
+            } else {
+                10.0f32.powf(diff / 20.0).clamp(0.25, 2.0)
+            };
             if self.r128_agc_gain < target_gain {
                 self.r128_agc_gain = (self.r128_agc_gain + step).min(target_gain);
             } else if self.r128_agc_gain > target_gain {
@@ -4373,12 +4382,13 @@ fn play_file(
     let last_aideo_filter_room_size = current_dsp.aideo_filter_room_size;
     let last_aideo_filter_bass_thump = current_dsp.aideo_filter_bass_thump;
     let last_aideo_filter_dampening = current_dsp.aideo_filter_dampening;
-    let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
+let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
 
     // RAM BUFFER CURSOR
     let mut ram_cursor = (start_pos * file_rate as f64) as usize;
 
     // Crossfade State Variables
+    let next_child_process = Arc::new(Mutex::new(None::<std::process::Child>));
     let mut next_track_path: Option<String> = None;
     let mut next_decoder_rx: Option<std::sync::mpsc::Receiver<Result<DecoderInfo, String>>> = None;
     let mut next_decoder_info: Option<DecoderInfo> = None;
@@ -4390,12 +4400,24 @@ fn play_file(
     while running {
         loop {
             match rx.try_recv() {
-                Ok(PlayerCommand::Stop) => { abort_background_downloads(); running = false; break; }
+                Ok(PlayerCommand::Stop) => {
+                    abort_background_downloads();
+                    kill_current_process(&next_child_process);
+                    running = false;
+                    break;
+                }
                 Ok(PlayerCommand::Pause) => { status.store(2, Ordering::Relaxed); }
                 Ok(PlayerCommand::Resume) => { status.store(1, Ordering::Relaxed); }
-                Ok(PlayerCommand::Play(p, pos)) => { abort_background_downloads(); running = false; next_track_info = Some((p, pos)); break; }
+                Ok(PlayerCommand::Play(p, pos)) => {
+                    abort_background_downloads();
+                    kill_current_process(&next_child_process);
+                    running = false;
+                    next_track_info = Some((p, pos));
+                    break;
+                }
                 Ok(PlayerCommand::Seek(secs)) => {
                     // Reset crossfade transition states to prevent stale next-track bleed
+                    kill_current_process(&next_child_process);
                     crossfade_frame_counter = 0;
                     crossfade_triggered = false;
                     next_track_path = None;
@@ -4418,6 +4440,7 @@ fn play_file(
                             let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
                             let _ = format.seek(SeekMode::Accurate, SeekTo::TimeStamp { ts: seek_ts, track_id });
                         }
+                        ram_cursor = (secs * file_rate as f64) as usize;
                         position_secs.store(secs.to_bits(), Ordering::Relaxed);
                         flush_signal.store(true, Ordering::SeqCst);
                         pending.iter_mut().for_each(|ch| ch.clear());
@@ -4426,6 +4449,7 @@ fn play_file(
                         abort_background_downloads();
                         decode_shutdown.store(true, Ordering::SeqCst);
                         kill_current_process(&current_process);
+                        kill_current_process(&next_child_process);
                         running = false;
                         next_track_info = Some((path.to_string(), secs));
                         position_secs.store(secs.to_bits(), Ordering::Relaxed);
@@ -4495,7 +4519,7 @@ fn play_file(
                     println!("[player-crossfade] Triggering crossfade to next track: {}", next_path);
                     let app_h = app_handle.clone();
                     let ffmpeg_p = ffmpeg_path.to_string();
-                    let process_c = Arc::clone(&current_process);
+                    let process_c = Arc::clone(&next_child_process);
                     let quality = last_ffmpeg_quality.clone();
                     let dsp_c = dsp_now.clone();
                     let next_path_c = next_path.clone();
@@ -4733,7 +4757,7 @@ fn play_file(
                     });
 
                     if changed {
-                        let _ = resampler.set_resample_ratio_relative(rel_ratio, true);
+                        let _ = resampler.set_resample_ratio_relative(rel_ratio, false);
                     }
 
                     let refs: Vec<&[f32]> = chunk_planar.iter().map(|v| v.as_slice()).collect();
@@ -4855,8 +4879,11 @@ fn play_file(
 
             while out_idx < n_out {
                 for ch in 0..dev_ch {
-                    let src_ch = if ch < use_ch { ch } else { 0 };
-                    let mut sample = out_planar[src_ch][out_idx];
+                    let mut sample = if ch < use_ch && ch < out_planar.len() {
+                        out_planar[ch][out_idx]
+                    } else {
+                        0.0
+                    };
                     
                     // Final Gain & Dither
                     if let Some(rng) = &mut dither_rng {
@@ -5042,7 +5069,12 @@ fn play_file(
     
     // Give drivers a moment to fully release the hardware before the next stream starts
     if next_track_info.is_some() {
+        if let Some(next_proc) = safe_lock(&next_child_process).take() {
+            *safe_lock(&current_process) = Some(next_proc);
+        }
         std::thread::sleep(std::time::Duration::from_millis(100));
+    } else {
+        kill_current_process(&next_child_process);
     }
     
     next_track_info

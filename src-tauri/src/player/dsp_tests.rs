@@ -76,6 +76,74 @@ mod dsp_tests {
         let expected = 10.0f32.powf(-6.0 / 20.0);
         assert!((samples[0][0] - expected).abs() < 1e-4, "Expected ~0.5012, got {}", samples[0][0]);
     }
+
+    #[test]
+    fn test_biquad_filter_safe_under_zero_or_low_sample_rate() {
+        let mut filter = BiquadFilter::new();
+        // Zero and sub-20Hz sample rates must not panic or divide by zero
+        filter.set_peaking(0.0, 1000.0, 3.0, 1.0);
+        assert!(filter.process(0.5).is_finite());
+
+        filter.set_lowshelf(10.0, 50.0, 6.0, 0.707);
+        assert!(filter.process(0.5).is_finite());
+
+        filter.set_highshelf(20.0, 10000.0, -3.0, 0.707);
+        assert!(filter.process(0.5).is_finite());
+
+        filter.set_highpass(5.0, 200.0, 1.0);
+        assert!(filter.process(0.5).is_finite());
+
+        filter.set_lowpass(15.0, 500.0, 1.0);
+        assert!(filter.process(0.5).is_finite());
+    }
+
+    #[test]
+    fn test_spatializer_node_preserves_stereo_separation_at_zero_wet() {
+        use crate::player::{AudioNode, DSPState, SpatializerNode};
+        let mut spatializer = SpatializerNode::new();
+        let dsp = DSPState {
+            enabled: true,
+            spatial_enabled: true,
+            spatial_wet: 0.0,
+            ..DSPState::default()
+        };
+
+        spatializer.update_params(&dsp, 44100.0);
+        // Feed pure hard-panned stereo: Left = 1.0, Right = 0.0
+        let mut samples = vec![vec![1.0f32; 128], vec![0.0f32; 128]];
+        spatializer.process(&mut samples, 44100.0);
+
+        // At wet = 0.0, Right channel must remain 0.0 (no collapse to mono)
+        assert_eq!(samples[0][0], 1.0, "Left channel should remain 1.0 at wet 0.0");
+        assert_eq!(samples[1][0], 0.0, "Right channel should remain 0.0 at wet 0.0");
+    }
+
+    #[test]
+    fn test_normalizer_node_noise_gate_preserves_unity_gain_during_silence() {
+        use crate::player::{AudioNode, DSPState, NormalizerNode};
+        let mut normalizer = NormalizerNode::new();
+        let dsp = DSPState {
+            enabled: true,
+            r128_enabled: true,
+            ..DSPState::default()
+        };
+
+        normalizer.update_params(&dsp, 44100.0);
+        // Feed 1 second of pure silence
+        let mut silent_samples = vec![vec![0.0f32; 44100], vec![0.0f32; 44100]];
+        normalizer.process(&mut silent_samples, 44100.0);
+
+        // Feed first transient after silence
+        let mut transient = vec![vec![0.5f32; 1], vec![0.5f32; 1]];
+        normalizer.process(&mut transient, 44100.0);
+
+        // Transient must not be boosted by +6dB (2.0x) due to noise gate
+        assert!(
+            transient[0][0] <= 0.55,
+            "Transient after silence should not be amplified excessively (expected <= 0.55, got {})",
+            transient[0][0]
+        );
+    }
 }
 
 

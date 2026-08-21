@@ -30,10 +30,12 @@ impl BiquadFilter {
     }
 
     pub fn set_peaking(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
+        let safe_fs = fs.max(1000.0);
+        let max_f0 = (safe_fs * 0.49).max(10.0);
+        let f0 = f0.clamp(10.0, max_f0);
+        let q = q.clamp(0.01, 100.0);
         let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
+        let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
 
@@ -52,10 +54,12 @@ impl BiquadFilter {
     }
 
     pub fn set_lowshelf(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
+        let safe_fs = fs.max(1000.0);
+        let max_f0 = (safe_fs * 0.49).max(10.0);
+        let f0 = f0.clamp(10.0, max_f0);
+        let q = q.clamp(0.01, 100.0);
         let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
+        let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
         let sqrt_a = a.sqrt();
@@ -75,10 +79,12 @@ impl BiquadFilter {
     }
 
     pub fn set_highshelf(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
+        let safe_fs = fs.max(1000.0);
+        let max_f0 = (safe_fs * 0.49).max(10.0);
+        let f0 = f0.clamp(10.0, max_f0);
+        let q = q.clamp(0.01, 100.0);
         let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
+        let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
         let sqrt_a = a.sqrt();
@@ -98,9 +104,11 @@ impl BiquadFilter {
     }
 
     pub fn set_highpass(&mut self, fs: f32, f0: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
+        let safe_fs = fs.max(1000.0);
+        let max_f0 = (safe_fs * 0.49).max(10.0);
+        let f0 = f0.clamp(10.0, max_f0);
+        let q = q.clamp(0.01, 100.0);
+        let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
 
@@ -119,9 +127,11 @@ impl BiquadFilter {
     }
 
     pub fn set_lowpass(&mut self, fs: f32, f0: f32, q: f32) {
-        let f0 = f0.clamp(10.0, fs * 0.49);
-        let q = q.max(0.01);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / fs;
+        let safe_fs = fs.max(1000.0);
+        let max_f0 = (safe_fs * 0.49).max(10.0);
+        let f0 = f0.clamp(10.0, max_f0);
+        let q = q.clamp(0.01, 100.0);
+        let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
 

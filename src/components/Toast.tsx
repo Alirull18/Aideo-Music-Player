@@ -69,6 +69,15 @@ export function ToastContainer() {
       addToast(event.payload, 'error');
       setBufferingState(null);
     });
+    const unlistenUiToast = listen<{ message?: string; type?: string } | string>('ui-toast', (event) => {
+      if (typeof event.payload === 'string') {
+        addToast(event.payload, 'info');
+      } else if (event.payload && typeof event.payload === 'object') {
+        const msg = event.payload.message || '';
+        const t = (event.payload.type as any) || 'info';
+        if (msg) addToast(msg, t);
+      }
+    });
     const unlistenInfo = listen<string>('ui-toast-info', (event) => {
       addToast(event.payload, 'info');
     });
@@ -131,6 +140,7 @@ export function ToastContainer() {
 
     return () => {
       unlisten.then(f => f());
+      unlistenUiToast.then(f => f());
       unlistenInfo.then(f => f());
       unlistenSuccess.then(f => f());
       unlistenPlaybackSuccess.then(f => f());

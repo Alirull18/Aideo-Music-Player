@@ -1,5 +1,6 @@
 import { useState, useEffect, memo } from 'react';
 import { useStore } from '../store';
+import { chainQueueOperation } from '../store/playbackSlice';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -1554,9 +1555,10 @@ export function LibraryView() {
                   const restTracks = shuffled.slice(1);
                   persistQueueState(restTracks, { shuffle: true });
 
-                  invoke('clear_queue').then(() => {
+                  chainQueueOperation(async () => {
+                    await invoke('clear_queue');
                     if (restTracks.length > 0) {
-                      invoke('add_to_queue_bulk', { paths: restTracks.map(t => t.path) });
+                      await invoke('add_to_queue_bulk', { paths: restTracks.map(t => t.path) });
                     }
                   });
 
@@ -1584,9 +1586,10 @@ export function LibraryView() {
                   const restTracks = sourceTracks.slice(1);
                   useStore.setState({ shuffle: false, queue: restTracks });
 
-                  invoke('clear_queue').then(() => {
+                  chainQueueOperation(async () => {
+                    await invoke('clear_queue');
                     if (restTracks.length > 0) {
-                      invoke('add_to_queue_bulk', { paths: restTracks.map(t => t.path) });
+                      await invoke('add_to_queue_bulk', { paths: restTracks.map(t => t.path) });
                     }
                   });
 

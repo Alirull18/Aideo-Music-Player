@@ -72,8 +72,6 @@ export function LiquidBackground() {
     canvas.width = 250;
     canvas.height = 250;
 
-    let animId: number;
-
     const render = () => {
       const w = canvas.width;
       const h = canvas.height;
@@ -175,21 +173,34 @@ export function LiquidBackground() {
         ctx.arc(cx, cy, rad, 0, Math.PI * 2);
         ctx.fill();
       }
-
-      animId = requestAnimationFrame(render);
     };
 
-    render();
+    let animId: number | null = null;
+    let isRunning = true;
 
-    const handleVisibility = () => {
+    const loop = () => {
+      if (!isRunning) return;
       if (document.visibilityState === 'visible') {
         render();
+      }
+      animId = requestAnimationFrame(loop);
+    };
+
+    animId = requestAnimationFrame(loop);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && isRunning && animId === null) {
+        animId = requestAnimationFrame(loop);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
-      cancelAnimationFrame(animId);
+      isRunning = false;
+      if (animId !== null) {
+        cancelAnimationFrame(animId);
+        animId = null;
+      }
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [accentColor, playbackStatus, lowSpecMode, liquidBackgroundEnabled]);
