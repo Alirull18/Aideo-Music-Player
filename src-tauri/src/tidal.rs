@@ -50,6 +50,17 @@ pub struct TidalCredentials {
 pub struct TidalState {
     pub session: Mutex<Option<TidalSession>>,
     pub logged_in: Mutex<bool>,
+    pub refresh_lock: tokio::sync::Mutex<()>,
+}
+
+impl Default for TidalState {
+    fn default() -> Self {
+        Self {
+            session: Mutex::new(None),
+            logged_in: Mutex::new(false),
+            refresh_lock: tokio::sync::Mutex::new(()),
+        }
+    }
 }
 
 impl TidalState {
@@ -247,7 +258,10 @@ fn get_client() -> reqwest::Client {
 }
 
 async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: bool) -> Result<String, String> {
-    let current_sess = state.session.lock().unwrap().clone();
+    // Acquire async deduplication lock to serialize concurrent token refresh calls
+    let _guard = state.refresh_lock.lock().await;
+
+    let current_sess = crate::safe_lock(&state.session).clone();
     
     if let Some(mut sess) = current_sess {
         let now = std::time::SystemTime::now()
@@ -274,7 +288,8 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
                 .await 
             {
                 Ok(res) => {
-                    if res.status().is_success() {
+                    let status = res.status();
+                    if status.is_success() {
                         if let Ok(token_info) = res.json::<serde_json::Value>().await {
                             let access_token = token_info["access_token"].as_str().ok_or_else(|| "No access token returned".to_string())?.to_string();
                             let refresh_token = token_info["refresh_token"].as_str().unwrap_or(&sess.refresh_token).to_string();
@@ -285,17 +300,18 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
                             sess.expires_at = now + expires_in;
 
                             TidalState::save_session(app_handle, &sess);
-                            *state.session.lock().unwrap() = Some(sess);
+                            *crate::safe_lock(&state.session) = Some(sess);
+                            *crate::safe_lock(&state.logged_in) = true;
                             println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] Token refreshed successfully!{RESET}");
                             return Ok(access_token);
                         }
                     } else {
-                        let status = res.status();
-                        println!("{BOLD}{RED}✘ [TIDAL ENGINE] Refresh rejected ({}).{RESET}", status);
-                        if is_permanent_auth_failure(status) {
+                        let err_text = res.text().await.unwrap_or_default();
+                        println!("{BOLD}{RED}✘ [TIDAL ENGINE] Refresh rejected ({}) — body: {}{RESET}", status, err_text);
+                        if is_permanent_auth_failure(status, Some(&err_text)) {
                             TidalState::clear_session(app_handle);
-                            *state.logged_in.lock().unwrap() = false;
-                            *state.session.lock().unwrap() = None;
+                            *crate::safe_lock(&state.logged_in) = false;
+                            *crate::safe_lock(&state.session) = None;
                             return Err("Tidal session has expired. Please logout and connect again under Settings/Search panel.".to_string());
                         }
                         return Err(format!("Tidal token refresh temporary failure ({}). Session preserved.", status));
@@ -411,8 +427,8 @@ pub async fn tidal_login_start(
                         };
 
                         TidalState::save_session(&app_handle_clone, &session);
-                        *state_clone.session.lock().unwrap() = Some(session);
-                        *state_clone.logged_in.lock().unwrap() = true;
+                        *crate::safe_lock(&state_clone.session) = Some(session);
+                        *crate::safe_lock(&state_clone.logged_in) = true;
 
                         println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] User logged in successfully!{RESET}");
                         let _ = app_handle_clone.emit("tidal-login-success", ());
@@ -444,14 +460,14 @@ pub async fn tidal_login_poll_status(
     app_handle: AppHandle,
 ) -> Result<bool, String> {
     // Check if memory state says logged in
-    if *state.logged_in.lock().unwrap() {
+    if *crate::safe_lock(&state.logged_in) {
         return Ok(true);
     }
 
     // Try loading from session cache
     if let Some(sess) = TidalState::load_cached_session(&app_handle) {
-        *state.session.lock().unwrap() = Some(sess);
-        *state.logged_in.lock().unwrap() = true;
+        *crate::safe_lock(&state.session) = Some(sess);
+        *crate::safe_lock(&state.logged_in) = true;
         return Ok(true);
     }
 
@@ -471,7 +487,7 @@ pub async fn tidal_search(
     let mut country = region.filter(|r| !r.trim().is_empty());
 
     if country.is_none() {
-        let guard = state.session.lock().unwrap();
+        let guard = crate::safe_lock(&state.session);
         if let Some(ref s) = *guard {
             country = s.country_code.clone();
         }
@@ -489,7 +505,7 @@ pub async fn tidal_search(
                 if let Ok(sess_info) = res.json::<serde_json::Value>().await {
                     if let Some(code) = sess_info["countryCode"].as_str() {
                         let country_str = code.to_string();
-                        let mut guard = state.session.lock().unwrap();
+                        let mut guard = crate::safe_lock(&state.session);
                         if let Some(ref mut sess) = *guard {
                             sess.country_code = Some(country_str.clone());
                             TidalState::save_session(&app_handle, sess);
@@ -998,8 +1014,8 @@ pub async fn tidal_logout(
     app_handle: AppHandle,
 ) -> Result<bool, String> {
     TidalState::clear_session(&app_handle);
-    *state.session.lock().unwrap() = None;
-    *state.logged_in.lock().unwrap() = false;
+    *crate::safe_lock(&state.session) = None;
+    *crate::safe_lock(&state.logged_in) = false;
     println!("{BOLD}{YELLOW}[TIDAL ENGINE] Logged out of Tidal successfully.{RESET}");
     Ok(true)
 }
@@ -1181,8 +1197,20 @@ pub fn compute_poll_params(raw_interval: u64) -> (u64, u64) {
 
 /// Determines whether a token refresh HTTP status code indicates permanent authentication failure
 /// (requiring session purge) vs transient errors (rate limit 429, server errors 5xx).
-pub fn is_permanent_auth_failure(status: reqwest::StatusCode) -> bool {
-    status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::BAD_REQUEST
+pub fn is_permanent_auth_failure(status: reqwest::StatusCode, error_body: Option<&str>) -> bool {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return true;
+    }
+    if status == reqwest::StatusCode::BAD_REQUEST {
+        if let Some(body) = error_body {
+            let body_lower = body.to_lowercase();
+            return body_lower.contains("invalid_grant")
+                || body_lower.contains("invalid_client")
+                || body_lower.contains("unauthorized_client");
+        }
+        return false;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1212,17 +1240,27 @@ mod tests {
 
     #[test]
     fn test_tidal_refresh_status_code_classification() {
-        // Permanent auth failures -> clear session
-        assert!(is_permanent_auth_failure(reqwest::StatusCode::UNAUTHORIZED));
-        assert!(is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST));
+        // Permanent 401 Unauthorized -> clears session regardless of body
+        assert!(is_permanent_auth_failure(reqwest::StatusCode::UNAUTHORIZED, None));
+        assert!(is_permanent_auth_failure(reqwest::StatusCode::UNAUTHORIZED, Some("invalid token")));
 
-        // Transient errors / rate limits -> preserve session
-        assert!(!is_permanent_auth_failure(reqwest::StatusCode::TOO_MANY_REQUESTS));
-        assert!(!is_permanent_auth_failure(reqwest::StatusCode::INTERNAL_SERVER_ERROR));
-        assert!(!is_permanent_auth_failure(reqwest::StatusCode::BAD_GATEWAY));
-        assert!(!is_permanent_auth_failure(reqwest::StatusCode::SERVICE_UNAVAILABLE));
-        assert!(!is_permanent_auth_failure(reqwest::StatusCode::GATEWAY_TIMEOUT));
-        assert!(!is_permanent_auth_failure(reqwest::StatusCode::FORBIDDEN));
+        // 400 Bad Request -> only permanent if body indicates revoked/invalid grant or client
+        assert!(is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST, Some("{\"error\":\"invalid_grant\"}")));
+        assert!(is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST, Some("{\"error\":\"invalid_client\"}")));
+        assert!(is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST, Some("{\"error\":\"unauthorized_client\"}")));
+
+        // 400 Bad Request with non-fatal or missing error body -> preserve session
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST, None));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST, Some("{\"error\":\"temporary_error\"}")));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::BAD_REQUEST, Some("Bad Request syntax")));
+
+        // Transient errors and rate limits -> preserve session
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::TOO_MANY_REQUESTS, Some("rate limit")));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::INTERNAL_SERVER_ERROR, None));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::BAD_GATEWAY, None));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::SERVICE_UNAVAILABLE, None));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::GATEWAY_TIMEOUT, None));
+        assert!(!is_permanent_auth_failure(reqwest::StatusCode::FORBIDDEN, None));
     }
 }
 

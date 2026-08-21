@@ -12,28 +12,59 @@ use crate::db::Track;
 
 use tauri::{AppHandle, Emitter};
 
-pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
+pub const SCAN_CHUNK_SIZE: usize = 500;
+
+pub fn scan_directory_chunked<F>(
+    dir: &str,
+    app_handle: &AppHandle,
+    mut on_chunk: F,
+) -> usize
+where
+    F: FnMut(Vec<Track>),
+{
     if !std::path::Path::new(dir).exists() {
-        return Vec::new();
+        return 0;
     }
 
-    let files: Vec<PathBuf> = WalkDir::new(dir)
+    let mut total_scanned = 0;
+    let mut current_chunk: Vec<PathBuf> = Vec::with_capacity(SCAN_CHUNK_SIZE);
+
+    for entry in WalkDir::new(dir)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_file())
-        .filter_map(|e| {
-            let path = e.path();
-            if let Some(ext) = path.extension() {
-                let ext_str = ext.to_string_lossy().to_lowercase();
-                if matches!(ext_str.as_str(), "flac" | "wav" | "m4a" | "mp3" | "ogg" | "opus" | "aac" | "aiff" | "ape" | "wma" | "dsf" | "dff") {
-                    return Some(path.to_path_buf());
+    {
+        let path = entry.path();
+        if let Some(ext) = path.extension() {
+            let ext_str = ext.to_string_lossy().to_lowercase();
+            if matches!(
+                ext_str.as_str(),
+                "flac" | "wav" | "m4a" | "mp3" | "ogg" | "opus" | "aac" | "aiff" | "ape" | "wma" | "dsf" | "dff"
+            ) {
+                current_chunk.push(path.to_path_buf());
+                if current_chunk.len() >= SCAN_CHUNK_SIZE {
+                    let tracks = process_chunk(&current_chunk, app_handle);
+                    total_scanned += tracks.len();
+                    on_chunk(tracks);
+                    current_chunk.clear();
                 }
             }
-            None
-        })
-        .collect();
+        }
+    }
 
-    files.par_iter()
+    if !current_chunk.is_empty() {
+        let tracks = process_chunk(&current_chunk, app_handle);
+        total_scanned += tracks.len();
+        on_chunk(tracks);
+        current_chunk.clear();
+    }
+
+    total_scanned
+}
+
+fn process_chunk(chunk: &[PathBuf], app_handle: &AppHandle) -> Vec<Track> {
+    chunk
+        .par_iter()
         .filter_map(|path_owned| {
             let path_clone = path_owned.clone();
             let result = std::panic::catch_unwind(move || extract_metadata(&path_clone));
@@ -49,6 +80,14 @@ pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
             }
         })
         .collect()
+}
+
+pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
+    let mut all_tracks = Vec::new();
+    scan_directory_chunked(dir, app_handle, |chunk| {
+        all_tracks.extend(chunk);
+    });
+    all_tracks
 }
 
 fn parse_number_value(value: &symphonia::core::meta::Value) -> Option<i32> {

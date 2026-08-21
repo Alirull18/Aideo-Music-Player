@@ -1,6 +1,3 @@
-pub mod ytdlp;
-
-
 use serde::{Deserialize, Serialize};
 use tauri::{State, Manager};
 use crate::AppState;

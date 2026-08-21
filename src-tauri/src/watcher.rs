@@ -147,6 +147,10 @@ fn rescan_and_notify(app_handle: &AppHandle, watched_dirs: &[String]) {
 
 #[tauri::command]
 pub fn sync_watch_folders(dirs: Vec<String>, app_handle: AppHandle) -> Result<(), String> {
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        let conn = crate::safe_lock(&state.db);
+        let _ = crate::db::save_library_directories(&conn, &dirs);
+    }
     update_watch_folders(dirs, &app_handle)
 }
 

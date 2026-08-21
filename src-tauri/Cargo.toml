@@ -34,7 +34,6 @@ cpal = "0.17.3"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 walkdir = "2.5.0"
 notify = "6.0"
-libloading = "0.8.0"
 base64 = "0.22"
 rubato = "0.16"
 reqwest = { version = "0.12", features = ["json", "blocking", "stream", "native-tls"] }
@@ -79,6 +78,7 @@ tokio-tungstenite = "0.29.0"
 sha2 = "0.10"
 hex = "0.4"
 rayon = "1.10"
+dunce = "1.0"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 

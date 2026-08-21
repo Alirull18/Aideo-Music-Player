@@ -55,4 +55,89 @@ mod tests {
         assert_eq!(matched_tracks.len(), 2);
         assert_eq!(matched_tracks[0].artist.as_deref(), Some("Miles Davis"));
     }
+
+    #[test]
+    fn test_library_directories_table_and_crud() {
+        use crate::db::{get_library_directories, init_db, save_library_directories};
+
+        let conn = init_db(":memory:").unwrap();
+        let dirs = vec![
+            "C:\\Music\\Jazz".to_string(),
+            "D:\\Audio\\FLAC".to_string(),
+        ];
+
+        save_library_directories(&conn, &dirs).expect("save_library_directories should succeed");
+
+        let loaded = get_library_directories(&conn).expect("get_library_directories should succeed");
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded.contains(&"C:\\Music\\Jazz".to_string()));
+        assert!(loaded.contains(&"D:\\Audio\\FLAC".to_string()));
+
+        // Overwrite / sync with new list
+        let new_dirs = vec!["E:\\NewLibrary".to_string()];
+        save_library_directories(&conn, &new_dirs).expect("save_library_directories overwrite should succeed");
+        let updated = get_library_directories(&conn).unwrap();
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0], "E:\\NewLibrary");
+    }
+
+    #[test]
+    fn test_history_index_and_scrobble_bounding() {
+        let mut conn = init_db(":memory:").unwrap();
+
+        // Verify index exists
+        let index_exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_history_path'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        assert!(index_exists, "idx_history_path index must be created in init_db");
+
+        // Insert 1050 unsynced history rows in a transaction
+        let tx = conn.transaction().unwrap();
+        for i in 1..=1050 {
+            tx.execute(
+                "INSERT INTO playback_history (track_path, title, artist, timestamp, synced)
+                 VALUES (?1, ?2, 'Artist', ?3, 0)",
+                rusqlite::params![format!("C:/track_{}.mp3", i), format!("Track {}", i), i as i64],
+            ).unwrap();
+        }
+
+        // Apply 1000 limit deletion
+        tx.execute(
+            "DELETE FROM playback_history 
+             WHERE synced = 0 AND id NOT IN (
+                 SELECT id FROM playback_history WHERE synced = 0 ORDER BY timestamp DESC LIMIT 1000
+             )",
+            [],
+        ).unwrap();
+        tx.commit().unwrap();
+
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM playback_history WHERE synced = 0", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1000, "Unsynced history must be bounded to 1,000 max entries");
+    }
+
+    #[test]
+    fn test_transactional_operations_commit_and_rollback() {
+        use crate::db::{add_to_playlist, create_playlist, delete_track, get_playlist_tracks, init_db};
+
+        let mut conn = init_db(":memory:").unwrap();
+        conn.execute(
+            "INSERT INTO tracks (path, title, artist) VALUES ('C:/song.mp3', 'Song A', 'Artist A')",
+            [],
+        ).unwrap();
+
+        let pl_id = create_playlist(&conn, "Test Playlist").unwrap();
+        add_to_playlist(&mut conn, pl_id, "C:/song.mp3").unwrap();
+
+        let tracks = get_playlist_tracks(&conn, pl_id).unwrap();
+        assert_eq!(tracks.len(), 1);
+
+        // Delete track wraps both tracks and playlist_tracks in transaction
+        delete_track(&mut conn, "C:/song.mp3").unwrap();
+        let remaining_pl_tracks = get_playlist_tracks(&conn, pl_id).unwrap();
+        assert_eq!(remaining_pl_tracks.len(), 0);
+    }
 }

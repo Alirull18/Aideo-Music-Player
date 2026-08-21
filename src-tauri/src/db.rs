@@ -180,6 +180,14 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         println!("[Database] Migration completed successfully!");
     }
 
+    // Create library directories registry table (SEC-01)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS library_directories (
+            path TEXT PRIMARY KEY
+        )",
+        [],
+    )?;
+
     // Create playback history table for future Spotify Wrapped
     conn.execute(
         "CREATE TABLE IF NOT EXISTS playback_history (
@@ -335,9 +343,33 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_loved ON tracks(loved)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_path_hash ON tracks(path_hash)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON playback_history(timestamp)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_path ON playback_history(track_path)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position)", []);
 
     Ok(conn)
+}
+
+pub fn save_library_directories(conn: &Connection, dirs: &[String]) -> Result<()> {
+    let _ = conn.execute("DELETE FROM library_directories", []);
+    for dir in dirs {
+        conn.execute(
+            "INSERT OR IGNORE INTO library_directories (path) VALUES (?1)",
+            rusqlite::params![dir],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn get_library_directories(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT path FROM library_directories")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    let mut dirs = Vec::new();
+    for r in rows {
+        if let Ok(d) = r {
+            dirs.push(d);
+        }
+    }
+    Ok(dirs)
 }
 
 pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
@@ -466,16 +498,18 @@ pub fn get_playlists(conn: &Connection) -> Result<Vec<Playlist>> {
     Ok(playlists)
 }
 
-pub fn add_to_playlist(conn: &Connection, playlist_id: i32, track_path: &str) -> Result<()> {
-    let pos: i32 = conn.query_row(
+pub fn add_to_playlist(conn: &mut Connection, playlist_id: i32, track_path: &str) -> Result<()> {
+    let tx = conn.transaction()?;
+    let pos: i32 = tx.query_row(
         "SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_tracks WHERE playlist_id = ?1",
         params![playlist_id],
         |row| row.get(0),
     )?;
-    conn.execute(
+    tx.execute(
         "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_path, position) VALUES (?1, ?2, ?3)",
         params![playlist_id, track_path, pos],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -542,14 +576,16 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
     Ok(tracks)
 }
 
-pub fn delete_track(conn: &Connection, path: &str) -> Result<()> {
-    conn.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path])?;
-    conn.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path])?;
+pub fn delete_track(conn: &mut Connection, path: &str) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path])?;
+    tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path])?;
+    tx.commit()?;
     Ok(())
 }
 
 pub fn toggle_love_track(
-    conn: &Connection,
+    conn: &mut Connection,
     path: &str,
     loved: bool,
     title: Option<&str>,
@@ -559,9 +595,10 @@ pub fn toggle_love_track(
     format: Option<&str>,
     cover_url: Option<&str>,
 ) -> Result<()> {
+    let tx = conn.transaction()?;
     let loved_int = if loved { 1 } else { 0 };
 
-    conn.execute(
+    tx.execute(
         "INSERT INTO tracks (path, title, artist, album, duration, format, loved, disliked, cover_url)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
          ON CONFLICT(path) DO UPDATE SET
@@ -579,7 +616,7 @@ pub fn toggle_love_track(
     let playlist_name = "Favorite Songs";
     
     // Check if "Favorite Songs" playlist exists
-    let playlist_id: i32 = match conn.query_row(
+    let playlist_id: i32 = match tx.query_row(
         "SELECT id FROM playlists WHERE name = ?1",
         rusqlite::params![playlist_name],
         |row| row.get(0),
@@ -587,35 +624,36 @@ pub fn toggle_love_track(
         Ok(id) => id,
         Err(_) => {
             // Create the playlist
-            conn.execute("INSERT INTO playlists (name) VALUES (?1)", rusqlite::params![playlist_name])?;
-            conn.last_insert_rowid() as i32
+            tx.execute("INSERT INTO playlists (name) VALUES (?1)", rusqlite::params![playlist_name])?;
+            tx.last_insert_rowid() as i32
         }
     };
 
     if loved {
         // Insert into playlist_tracks with new position
-        let pos: i32 = conn.query_row(
+        let pos: i32 = tx.query_row(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_tracks WHERE playlist_id = ?1",
             rusqlite::params![playlist_id],
             |row| row.get(0),
         ).unwrap_or(1);
-        conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_path, position) VALUES (?1, ?2, ?3)",
             rusqlite::params![playlist_id, path, pos],
         )?;
     } else {
         // Remove from playlist_tracks
-        conn.execute(
+        tx.execute(
             "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
             rusqlite::params![playlist_id, path],
         )?;
     }
 
+    tx.commit()?;
     Ok(())
 }
 
 pub fn toggle_dislike_track(
-    conn: &Connection,
+    conn: &mut Connection,
     path: &str,
     disliked: bool,
     title: Option<&str>,
@@ -625,9 +663,10 @@ pub fn toggle_dislike_track(
     format: Option<&str>,
     cover_url: Option<&str>,
 ) -> Result<()> {
+    let tx = conn.transaction()?;
     let disliked_int = if disliked { 1 } else { 0 };
 
-    conn.execute(
+    tx.execute(
         "INSERT INTO tracks (path, title, artist, album, duration, format, disliked, loved, cover_url)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
          ON CONFLICT(path) DO UPDATE SET
@@ -644,18 +683,19 @@ pub fn toggle_dislike_track(
 
     if disliked {
         // Delete from Favorite Songs playlist if it was there
-        if let Ok(playlist_id) = conn.query_row(
+        if let Ok(playlist_id) = tx.query_row(
             "SELECT id FROM playlists WHERE name = 'Favorite Songs'",
             [],
             |row| row.get::<_, i32>(0),
         ) {
-            let _ = conn.execute(
+            let _ = tx.execute(
                 "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
                 rusqlite::params![playlist_id, path],
             );
         }
     }
 
+    tx.commit()?;
     Ok(())
 }
 

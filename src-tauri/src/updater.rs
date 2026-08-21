@@ -156,32 +156,43 @@ pub async fn download_and_install(
         return Err(e);
     }
     
-    let temp_str = temp_file_path.to_string_lossy().into_owned();
-    
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        let cmd_str = if is_msi {
-            format!("ping 127.0.0.1 -n 6 > nul && msiexec.exe /i \"{}\" /qb && timeout /t 10 > nul && del /f /q \"{}\"", temp_str, temp_str)
+        const DETACHED_PROCESS: u32 = 0x00000008;
+
+        if is_msi {
+            Command::new("msiexec.exe")
+                .arg("/i")
+                .arg(&temp_file_path)
+                .arg("/qb")
+                .creation_flags(DETACHED_PROCESS)
+                .spawn()
+                .map_err(|e| format!("Failed to execute MSI installer: {}", e))?;
         } else {
-            format!("ping 127.0.0.1 -n 6 > nul && start \"\" \"{}\" && timeout /t 15 > nul && del /f /q \"{}\"", temp_str, temp_str)
-        };
-        
-        Command::new("cmd.exe")
-            .raw_arg(format!("/C {}", cmd_str))
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .spawn()
-            .map_err(|e| e.to_string())?;
+            Command::new(&temp_file_path)
+                .creation_flags(DETACHED_PROCESS)
+                .spawn()
+                .map_err(|e| format!("Failed to execute installer binary: {}", e))?;
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        let cmd_str = format!("sleep 5 && open \"{}\" && sleep 15 && rm -f \"{}\"", temp_str, temp_str);
-        Command::new("sh")
-            .arg("-c")
-            .arg(&cmd_str)
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open")
+                .arg(&temp_file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open installer: {}", e))?;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Command::new("xdg-open")
+                .arg(&temp_file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open installer: {}", e))?;
+        }
     }
 
     app_handle.exit(0);

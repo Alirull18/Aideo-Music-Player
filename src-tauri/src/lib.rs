@@ -115,16 +115,61 @@ async fn translate_lyric_line(text: String) -> Result<(String, String), String> 
     Ok((translation, transliteration))
 }
 
+pub fn is_trusted_oauth_host(host: &str) -> bool {
+    let host = host.to_lowercase();
+    let exact_hosts = [
+        "accounts.google.com",
+        "github.com",
+        "last.fm",
+        "www.last.fm",
+        "auth.tidal.com",
+        "login.tidal.com",
+        "listenbrainz.org",
+        "www.listenbrainz.org",
+        "localhost",
+        "127.0.0.1",
+    ];
+    if exact_hosts.contains(&host.as_str()) {
+        return true;
+    }
+    let suffix_hosts = [
+        ".supabase.co",
+        ".tidal.com",
+        ".last.fm",
+        ".listenbrainz.org",
+        ".google.com",
+        ".github.com",
+    ];
+    for suffix in suffix_hosts {
+        if host.ends_with(suffix) {
+            return true;
+        }
+    }
+    false
+}
+
 #[tauri::command]
 async fn open_oauth_window(app_handle: tauri::AppHandle, url: String, provider: String) -> Result<(), String> {
+    let parsed_url = url.parse::<tauri::Url>().map_err(|e| format!("Invalid OAuth URL: {}", e))?;
+    
+    // Validate scheme
+    let scheme = parsed_url.scheme();
+    if scheme != "https" && scheme != "http" {
+        return Err("Security violation: OAuth URL must use HTTPS".to_string());
+    }
+
+    // Validate host allowlist
+    let host = parsed_url.host_str().ok_or_else(|| "Missing host in OAuth URL".to_string())?;
+    if !is_trusted_oauth_host(host) {
+        return Err(format!("Security violation: Target domain '{}' is not permitted for authentication", host));
+    }
+
     let title = format!("Sign in with {}", if provider == "google" { "Google" } else { "GitHub" });
     
     if let Some(existing_win) = app_handle.get_webview_window("supabase-login") {
         let _ = existing_win.close();
     }
 
-    let parsed_url = url.parse::<tauri::Url>().map_err(|e| e.to_string())?;
-    
     let app_handle_clone = app_handle.clone();
     let _login_win = tauri::WebviewWindowBuilder::new(
         &app_handle,
@@ -554,74 +599,54 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
     let app_handle_clone = app_handle.clone();
     
     tokio::task::spawn_blocking(move || {
-        let mut all_scanned_tracks = Vec::new();
-        for dir in &dirs {
-            let tracks = scanner::scan_directory(dir, &app_handle_clone);
-            all_scanned_tracks.extend(tracks);
-        }
-
-        let db_tracks = {
+        // Save registered library directories (SEC-01)
+        {
             let conn = safe_lock(&db_conn_arc);
-            let mut stmt = conn.prepare("SELECT id, path FROM tracks").map_err(|e| e.to_string())?;
-            let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
-            let mut list = Vec::new();
-            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-                let id: i32 = row.get(0).map_err(|e| e.to_string())?;
-                let path: String = row.get(1).map_err(|e| e.to_string())?;
-                list.push((id, path));
-            }
-            list
-        };
-
-        let mut conn = safe_lock(&db_conn_arc);
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        
-        let db_paths: std::collections::HashSet<String> = db_tracks.into_iter().map(|(_, p)| p).collect();
-        
-        for track in all_scanned_tracks {
-            if !db_paths.contains(&track.path) {
-                tx.execute(
-                    "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, track_number, disc_number)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                    rusqlite::params![
-                        track.path,
-                        track.title,
-                        track.artist,
-                        track.album,
-                        track.duration,
-                        track.format,
-                        track.lyric_offset,
-                        track.track_number,
-                        track.disc_number,
-                    ],
-                ).map_err(|e| e.to_string())?;
-            } else {
-                tx.execute(
-                    "UPDATE tracks SET 
-                        title = COALESCE(NULLIF(?1, ''), title),
-                        artist = COALESCE(NULLIF(?2, ''), artist),
-                        album = COALESCE(NULLIF(?3, ''), album),
-                        duration = COALESCE(?4, duration),
-                        format = COALESCE(?5, format),
-                        track_number = COALESCE(?6, track_number),
-                        disc_number = COALESCE(?7, disc_number)
-                     WHERE path = ?8",
-                    rusqlite::params![
-                        track.title,
-                        track.artist,
-                        track.album,
-                        track.duration,
-                        track.format,
-                        track.track_number,
-                        track.disc_number,
-                        track.path,
-                    ],
-                ).map_err(|e| e.to_string())?;
-            }
+            let _ = db::save_library_directories(&conn, &dirs);
         }
-        
-        tx.commit().map_err(|e| e.to_string())?;
-        
+
+        let mut total_saved = 0;
+
+        for dir in &dirs {
+            scanner::scan_directory_chunked(dir, &app_handle_clone, |chunk| {
+                if chunk.is_empty() {
+                    return;
+                }
+                let mut conn = safe_lock(&db_conn_arc);
+                if let Ok(tx) = conn.transaction() {
+                    for track in &chunk {
+                        let _ = tx.execute(
+                            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, track_number, disc_number)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                             ON CONFLICT(path) DO UPDATE SET 
+                                 title = COALESCE(NULLIF(excluded.title, ''), tracks.title),
+                                 artist = COALESCE(NULLIF(excluded.artist, ''), tracks.artist),
+                                 album = COALESCE(NULLIF(excluded.album, ''), tracks.album),
+                                 duration = COALESCE(excluded.duration, tracks.duration),
+                                 format = COALESCE(excluded.format, tracks.format),
+                                 track_number = COALESCE(excluded.track_number, tracks.track_number),
+                                 disc_number = COALESCE(excluded.disc_number, tracks.disc_number)",
+                            rusqlite::params![
+                                track.path,
+                                track.title,
+                                track.artist,
+                                track.album,
+                                track.duration,
+                                track.format,
+                                track.lyric_offset,
+                                track.track_number,
+                                track.disc_number,
+                            ],
+                        );
+                    }
+                    if tx.commit().is_ok() {
+                        total_saved += chunk.len();
+                    }
+                };
+            });
+        }
+
+        let conn = safe_lock(&db_conn_arc);
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(0);
         Ok(count as usize)
     }).await.map_err(|e| format!("Scanning task panicked: {}", e))?
@@ -750,14 +775,14 @@ fn delete_cached_track(stream_url: String, state: State<'_, AppState>) -> Result
     }
 
     // Only delete from DB if loved is 0 and disliked is 0
-    let conn = safe_lock(&state.db);
+    let mut conn = safe_lock(&state.db);
     let (loved, disliked): (i32, i32) = conn.query_row(
         "SELECT COALESCE(loved, 0), COALESCE(disliked, 0) FROM tracks WHERE path = ?1",
         rusqlite::params![stream_url],
         |row| Ok((row.get(0)?, row.get(1)?)),
     ).unwrap_or((0, 0));
     if loved == 0 && disliked == 0 {
-        let _ = db::delete_track(&conn, &stream_url);
+        let _ = db::delete_track(&mut conn, &stream_url);
     }
     Ok(())
 }
@@ -782,8 +807,8 @@ fn delete_playlist(id: i32, state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn add_to_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = safe_lock(&state.db);
-    db::add_to_playlist(&conn, playlist_id, &path).map_err(|e| e.to_string())
+    let mut conn = safe_lock(&state.db);
+    db::add_to_playlist(&mut conn, playlist_id, &path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -812,38 +837,99 @@ fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
 
 #[tauri::command]
 fn delete_track(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let conn = safe_lock(&state.db);
-    db::delete_track(&conn, &path).map_err(|e| e.to_string())?;
-    
-    // 1. Delete the main audio file (if local)
-    if !path.starts_with("http://") && !path.starts_with("https://") {
-        let audio_path = std::path::Path::new(&path);
-        let _ = std::fs::remove_file(audio_path);
+    let mut conn = safe_lock(&state.db);
 
-        // 2. Delete sidecar files (.jpg, .png next to the file)
-        if let (Some(parent), Some(stem)) = (audio_path.parent(), audio_path.file_stem()) {
-            if let Some(stem_str) = stem.to_str() {
-                let jpg_path = parent.join(format!("{}.jpg", stem_str));
-                let png_path = parent.join(format!("{}.png", stem_str));
-                let _ = std::fs::remove_file(jpg_path);
-                let _ = std::fs::remove_file(png_path);
-            }
-        }
-    } else {
-        // Delete Cloud Cache files if it's an online track
+    // 1. Online / Cloud tracks handling
+    if path.starts_with("http://") || path.starts_with("https://") {
+        db::delete_track(&mut conn, &path).map_err(|e| e.to_string())?;
+        
         let hash = format!("{:x}", md5::compute(path.as_bytes()));
         if let Some(data_dir) = dirs::data_dir() {
             let cache_dir = data_dir.join("Aideo").join("CloudCache");
-            let cache_path = cache_dir.join(format!("{}.cache", hash));
-            let temp_path = cache_dir.join(format!("{}.tmp", hash));
-            let _ = std::fs::remove_file(cache_path);
-            let _ = std::fs::remove_file(temp_path);
+            let _ = std::fs::remove_file(cache_dir.join(format!("{}.cache", hash)));
+            let _ = std::fs::remove_file(cache_dir.join(format!("{}.tmp", hash)));
         }
+        let _ = std::fs::remove_file(lyrics::get_lrc_path(&path));
+        return Ok(());
     }
 
-    // 3. Delete the lyric file (covers both local and remote)
-    let lrc_path = lyrics::get_lrc_path(&path);
-    let _ = std::fs::remove_file(lrc_path);
+    // 2. Verify track metadata exists in SQLite database
+    let track_exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM tracks WHERE path = ?1 LIMIT 1",
+            rusqlite::params![&path],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if !track_exists {
+        return Err("Track not found in library database".to_string());
+    }
+
+    // 3. Canonicalize path and verify containment within library directories
+    let audio_path = std::path::Path::new(&path);
+    if audio_path.exists() {
+        let canonical_target = dunce::canonicalize(audio_path)
+            .map_err(|e| format!("Invalid track path: {}", e))?;
+
+        let registered_dirs = db::get_library_directories(&conn).unwrap_or_default();
+        let mut is_contained = false;
+
+        for dir in &registered_dirs {
+            if let Ok(canon_dir) = dunce::canonicalize(dir) {
+                if canonical_target.starts_with(&canon_dir) {
+                    is_contained = true;
+                    break;
+                }
+            }
+        }
+
+        // Also permit default system audio directory if registered_dirs is empty
+        if !is_contained && registered_dirs.is_empty() {
+            if let Some(audio_dir) = dirs::audio_dir() {
+                if let Ok(canon_audio) = dunce::canonicalize(&audio_dir) {
+                    if canonical_target.starts_with(&canon_audio) {
+                        is_contained = true;
+                    }
+                }
+            }
+        }
+
+        // If registered dirs exist and target is outside, deny access
+        if !registered_dirs.is_empty() && !is_contained {
+            return Err("Security violation: Track path is outside authorized music library directories".to_string());
+        }
+
+        // 4. Atomic database transaction with filesystem deletion rollback
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![&path])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![&path])
+            .map_err(|e| e.to_string())?;
+
+        // Delete primary audio file
+        if let Err(e) = std::fs::remove_file(&canonical_target) {
+            // Drop tx without committing -> automatically rolls back DB changes!
+            return Err(format!("Failed to delete audio file: {}", e));
+        }
+
+        // Delete sidecar images (.jpg, .png)
+        if let (Some(parent), Some(stem)) = (canonical_target.parent(), canonical_target.file_stem()) {
+            if let Some(stem_str) = stem.to_str() {
+                let _ = std::fs::remove_file(parent.join(format!("{}.jpg", stem_str)));
+                let _ = std::fs::remove_file(parent.join(format!("{}.png", stem_str)));
+            }
+        }
+
+        // Delete lyrics
+        let _ = std::fs::remove_file(lyrics::get_lrc_path(&path));
+
+        // Commit transaction after successful filesystem operations
+        tx.commit().map_err(|e| e.to_string())?;
+    } else {
+        // File already missing from disk -> clean up database record
+        db::delete_track(&mut conn, &path).map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
@@ -901,8 +987,22 @@ fn save_lyrics_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(lrc_path, content).map_err(|e| e.to_string())
 }
 
+pub fn is_valid_text_file_extension(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    p.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            let lower = ext.to_ascii_lowercase();
+            lower == "m3u" || lower == "m3u8" || lower == "txt" || lower == "json"
+        })
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
+    if !is_valid_text_file_extension(&path) {
+        return Err("Invalid file extension: only .m3u, .m3u8, .txt, and .json files are permitted".to_string());
+    }
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
@@ -1062,19 +1162,31 @@ fn log_playback_start(
     playback_source: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<i64, String> {
-    let conn = safe_lock(&state.db);
+    let mut conn = safe_lock(&state.db);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     
-    conn.execute(
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
         "INSERT INTO playback_history (track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, synced, genre, playback_source)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0.0, 0, 0, ?8, ?9)",
         rusqlite::params![path, title, artist, album, duration, format, now, genre, playback_source],
     ).map_err(|e| e.to_string())?;
     
-    let id = conn.last_insert_rowid();
+    let id = tx.last_insert_rowid();
+
+    // Bound unsynced offline scrobble entries to 1,000 max (MIN-08)
+    let _ = tx.execute(
+        "DELETE FROM playback_history 
+         WHERE synced = 0 AND id NOT IN (
+             SELECT id FROM playback_history WHERE synced = 0 ORDER BY timestamp DESC LIMIT 1000
+         )",
+        [],
+    );
+
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(id)
 }
 
@@ -1120,7 +1232,9 @@ fn get_unsynced_history(state: State<'_, AppState>) -> Result<Vec<PlaybackHistor
     let mut stmt = conn.prepare(
         "SELECT id, track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, genre, playback_source 
          FROM playback_history 
-         WHERE synced = 0"
+         WHERE synced = 0
+         ORDER BY timestamp ASC
+         LIMIT 1000"
     ).map_err(|e| e.to_string())?;
     
     let rows = stmt.query_map([], |row| {
@@ -1620,9 +1734,9 @@ fn toggle_love_track(
     cover_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let conn = safe_lock(&state.db);
+    let mut conn = safe_lock(&state.db);
     db::toggle_love_track(
-        &conn,
+        &mut conn,
         &path,
         loved,
         title.as_deref(),
@@ -1647,9 +1761,9 @@ fn toggle_dislike_track(
     cover_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let conn = safe_lock(&state.db);
+    let mut conn = safe_lock(&state.db);
     db::toggle_dislike_track(
-        &conn,
+        &mut conn,
         &path,
         disliked,
         title.as_deref(),
@@ -2343,6 +2457,7 @@ pub fn run() {
             let tidal_state = std::sync::Arc::new(tidal::TidalState {
                 session: std::sync::Mutex::new(None),
                 logged_in: std::sync::Mutex::new(false),
+                refresh_lock: tokio::sync::Mutex::new(()),
             });
             if let Some(sess) = tidal::TidalState::load_cached_session(app.handle()) {
                 *safe_lock(&tidal_state.session) = Some(sess);
@@ -2558,4 +2673,54 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod write_text_file_tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_text_file_extensions() {
+        assert!(is_valid_text_file_extension("playlist.m3u"));
+        assert!(is_valid_text_file_extension("playlist.m3u8"));
+        assert!(is_valid_text_file_extension("PLAYLIST.M3U8"));
+        assert!(is_valid_text_file_extension("notes.txt"));
+        assert!(is_valid_text_file_extension("data.json"));
+        assert!(is_valid_text_file_extension("C:\\Users\\Music\\aideo-queue.m3u8"));
+        assert!(is_valid_text_file_extension("/home/user/playlist.m3u"));
+    }
+
+    #[test]
+    fn test_invalid_text_file_extensions() {
+        assert!(!is_valid_text_file_extension("malicious.exe"));
+        assert!(!is_valid_text_file_extension("script.bat"));
+        assert!(!is_valid_text_file_extension("script.sh"));
+        assert!(!is_valid_text_file_extension("no_extension"));
+        assert!(!is_valid_text_file_extension(""));
+        assert!(!is_valid_text_file_extension("playlist.m3u8.exe"));
+        assert!(!is_valid_text_file_extension("image.png"));
+    }
+
+    #[test]
+    fn test_trusted_oauth_hosts() {
+        assert!(is_trusted_oauth_host("accounts.google.com"));
+        assert!(is_trusted_oauth_host("github.com"));
+        assert!(is_trusted_oauth_host("api.github.com"));
+        assert!(is_trusted_oauth_host("auth.tidal.com"));
+        assert!(is_trusted_oauth_host("login.tidal.com"));
+        assert!(is_trusted_oauth_host("last.fm"));
+        assert!(is_trusted_oauth_host("www.last.fm"));
+        assert!(is_trusted_oauth_host("listenbrainz.org"));
+        assert!(is_trusted_oauth_host("my-project.supabase.co"));
+        assert!(is_trusted_oauth_host("localhost"));
+        assert!(is_trusted_oauth_host("127.0.0.1"));
+    }
+
+    #[test]
+    fn test_untrusted_oauth_hosts() {
+        assert!(!is_trusted_oauth_host("evil.com"));
+        assert!(!is_trusted_oauth_host("supabase.co.evil.com"));
+        assert!(!is_trusted_oauth_host("phishing-google.com"));
+        assert!(!is_trusted_oauth_host(""));
+    }
 }

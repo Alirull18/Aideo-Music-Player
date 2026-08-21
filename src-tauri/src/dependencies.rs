@@ -3,6 +3,7 @@ use futures::StreamExt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use serde::Serialize;
+use sha2::{Sha256, Digest};
 
 #[derive(Serialize, Debug, Clone)]
 pub struct DependencyStatus {
@@ -34,10 +35,36 @@ pub fn get_dependencies_status() -> Result<DependencyStatus, String> {
     })
 }
 
-async fn download_with_progress(
+pub fn parse_sha256sums_for_binary(text: &str, target_binary: &str) -> Option<String> {
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 && parts[1].trim_start_matches('*') == target_binary {
+            return Some(parts[0].trim().to_lowercase());
+        }
+    }
+    None
+}
+
+pub async fn fetch_ytdlp_expected_sha256() -> Option<String> {
+    let client = crate::get_http_client();
+    let res = client
+        .get("https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS")
+        .header("User-Agent", "AideoMusicPlayer/0.9.5")
+        .send()
+        .await
+        .ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let text = res.text().await.ok()?;
+    parse_sha256sums_for_binary(&text, "yt-dlp.exe")
+}
+
+pub async fn download_with_progress_and_sha256(
     url: &str,
     dest_path: &Path,
     dep_id: &str,
+    expected_sha256: Option<&str>,
     app_handle: &tauri::AppHandle,
 ) -> Result<(), String> {
     if let Ok(parsed) = url::Url::parse(url) {
@@ -77,12 +104,14 @@ async fn download_with_progress(
     let mut file = std::fs::File::create(&temp_dest)
         .map_err(|e| format!("Failed to create temporary destination file: {}", e))?;
 
+    let mut hasher = Sha256::new();
     let mut downloaded = 0;
     let mut stream = res.bytes_stream();
     let mut last_emit = std::time::Instant::now();
 
     while let Some(item) = stream.next().await {
         let chunk = item.map_err(|e| format!("Error during streaming download: {}", e))?;
+        hasher.update(&chunk);
         file.write_all(&chunk)
             .map_err(|e| format!("Failed to write chunk to disk: {}", e))?;
         downloaded += chunk.len() as u64;
@@ -103,6 +132,18 @@ async fn download_with_progress(
         }
     }
     drop(file);
+
+    let actual_sha256 = hex::encode(hasher.finalize());
+    if let Some(expected) = expected_sha256 {
+        let expected_clean = expected.trim().to_lowercase();
+        if !expected_clean.is_empty() && actual_sha256.to_lowercase() != expected_clean {
+            let _ = std::fs::remove_file(&temp_dest);
+            return Err(format!(
+                "SHA-256 checksum verification failed for {}: expected {}, got {}",
+                dep_id, expected_clean, actual_sha256
+            ));
+        }
+    }
 
     std::fs::rename(&temp_dest, dest_path)
         .map_err(|e| format!("Failed to finalize dependency installation: {}", e))?;
@@ -125,7 +166,8 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                 "message": "Downloading high-performance YouTube audio decoder in background...",
                 "type": "info"
             }));
-            download_with_progress(url, &dest, "ytdlp", &app_handle).await?;
+            let expected_hash = fetch_ytdlp_expected_sha256().await;
+            download_with_progress_and_sha256(url, &dest, "ytdlp", expected_hash.as_deref(), &app_handle).await?;
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "YouTube audio decoder successfully installed!",
                 "type": "success"
@@ -138,7 +180,7 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                 "message": "Downloading FFmpeg Transcoder in background...",
                 "type": "info"
             }));
-            download_with_progress(url, &zip_dest, "ffmpeg", &app_handle).await?;
+            download_with_progress_and_sha256(url, &zip_dest, "ffmpeg", None, &app_handle).await?;
             
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "Extracting FFmpeg engine...",
@@ -273,7 +315,8 @@ pub async fn check_update_ytdlp(app_handle: tauri::AppHandle) -> Result<bool, St
     // Method 2 fallback: Re-download latest binary if -U failed
     let dest = aideo_dir.join("yt-dlp.exe");
     let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
-    download_with_progress(url, &dest, "ytdlp", &app_handle).await?;
+    let expected_hash = fetch_ytdlp_expected_sha256().await;
+    download_with_progress_and_sha256(url, &dest, "ytdlp", expected_hash.as_deref(), &app_handle).await?;
     
     let _ = app_handle.emit("ui-toast", serde_json::json!({
         "message": "yt-dlp binary successfully updated to latest release!",
@@ -302,6 +345,28 @@ pub fn spawn_background_ytdlp_updater(_app_handle: tauri::AppHandle) {
             println!("[ytdlp-auto-update] Background update check completed.");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sha256sums_for_binary_exact() {
+        let sums = "\
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  yt-dlp
+a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0  yt-dlp.exe
+fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210  yt-dlp_macos
+";
+        let parsed = parse_sha256sums_for_binary(sums, "yt-dlp.exe");
+        assert_eq!(parsed, Some("a1b2c3d4e5f60718293a4b5c6d7e8f90123456789abcdef0123456789abcdef0".to_string()));
+    }
+
+    #[test]
+    fn test_parse_sha256sums_for_binary_missing() {
+        let sums = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  yt-dlp\n";
+        assert_eq!(parse_sha256sums_for_binary(sums, "yt-dlp.exe"), None);
+    }
 }
 
 

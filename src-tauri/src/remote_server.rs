@@ -15,20 +15,42 @@ pub fn get_or_init_pin() -> &'static str {
     })
 }
 
-fn constant_time_eq(a: &str, b: &str) -> bool {
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
     a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn extract_pin_from_query(query: &str) -> Option<&str> {
+pub fn extract_pin_from_query(query: &str) -> Option<&str> {
     for pair in query.split('&') {
         let mut parts = pair.splitn(2, '=');
         if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
             if k == "pin" {
                 return Some(v);
             }
+        }
+    }
+    None
+}
+
+pub fn extract_pin_from_auth_header(header_val: &str) -> Option<&str> {
+    let trimmed = header_val.trim();
+    if let Some(token) = trimmed.strip_prefix("Bearer ") {
+        return Some(token.trim());
+    }
+    if let Some(token) = trimmed.strip_prefix("bearer ") {
+        return Some(token.trim());
+    }
+    None
+}
+
+pub fn extract_auth_header_from_raw_http(request_str: &str) -> Option<&str> {
+    for line in request_str.lines() {
+        let trimmed = line.trim();
+        if let Some(val) = trimmed.strip_prefix("Authorization:")
+            .or_else(|| trimmed.strip_prefix("authorization:")) {
+            return Some(val.trim());
         }
     }
     None
@@ -89,16 +111,32 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, app_handle: AppH
         let mut pin_valid = false;
         #[allow(clippy::result_large_err)]
         let callback = |req: &tokio_tungstenite::tungstenite::handshake::server::Request, response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+            let expected_pin = get_or_init_pin();
+
+            // 1. Check Authorization: Bearer <PIN> header
+            let auth_header = req.headers().get("authorization")
+                .or_else(|| req.headers().get("Authorization"))
+                .and_then(|v| v.to_str().ok());
+
+            if let Some(auth) = auth_header {
+                if let Some(pin) = extract_pin_from_auth_header(auth) {
+                    if constant_time_eq(pin, expected_pin) {
+                        pin_valid = true;
+                        return Ok(response);
+                    }
+                }
+            }
+
+            // 2. Fallback to query parameter ?pin=<PIN>
             let uri = req.uri();
             let query = uri.query().unwrap_or("");
-            let expected_pin = get_or_init_pin();
-            
             if let Some(pin) = extract_pin_from_query(query) {
                 if constant_time_eq(pin, expected_pin) {
                     pin_valid = true;
                     return Ok(response);
                 }
             }
+
             let err_response = tokio_tungstenite::tungstenite::http::Response::builder()
                 .status(tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN)
                 .body(Some("Forbidden - Invalid or missing PIN".to_string()))
@@ -123,15 +161,23 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, app_handle: AppH
 }
 
 async fn handle_http(mut stream: TcpStream, request_str: std::borrow::Cow<'_, str>) {
-    // Validate the PIN from the request line
     let expected_pin = get_or_init_pin();
+
+    // 1. Check Authorization header
+    let pin_from_header = extract_auth_header_from_raw_http(&request_str)
+        .and_then(extract_pin_from_auth_header);
+
+    // 2. Check query parameter ?pin=...
     let first_line = request_str.lines().next().unwrap_or("");
     let path_and_query = first_line.split_whitespace().nth(1).unwrap_or("");
     let query_str = path_and_query.splitn(2, '?').nth(1).unwrap_or("");
+    let pin_from_query = extract_pin_from_query(query_str);
 
-    let has_valid_pin = extract_pin_from_query(query_str)
-        .map(|pin| constant_time_eq(pin, expected_pin))
-        .unwrap_or(false);
+    let has_valid_pin = match (pin_from_header, pin_from_query) {
+        (Some(pin), _) => constant_time_eq(pin, expected_pin),
+        (None, Some(pin)) => constant_time_eq(pin, expected_pin),
+        (None, None) => false,
+    };
 
     let (status_line, content) = if !has_valid_pin {
         ("HTTP/1.1 403 FORBIDDEN\r\nContent-Type: text/html; charset=utf-8\r\n",
@@ -1062,4 +1108,44 @@ fn get_remote_html() -> String {
 </html>
 "#
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_pin_from_auth_header_valid_bearer() {
+        assert_eq!(extract_pin_from_auth_header("Bearer test_pin_123"), Some("test_pin_123"));
+        assert_eq!(extract_pin_from_auth_header("bearer abcdef456"), Some("abcdef456"));
+        assert_eq!(extract_pin_from_auth_header("  Bearer   padded_pin  "), Some("padded_pin"));
+    }
+
+    #[test]
+    fn test_extract_pin_from_auth_header_invalid() {
+        assert_eq!(extract_pin_from_auth_header("Basic dXNlcjpwYXNz"), None);
+        assert_eq!(extract_pin_from_auth_header("test_pin_only"), None);
+        assert_eq!(extract_pin_from_auth_header(""), None);
+    }
+
+    #[test]
+    fn test_extract_pin_from_query() {
+        assert_eq!(extract_pin_from_query("pin=my_secret_pin"), Some("my_secret_pin"));
+        assert_eq!(extract_pin_from_query("other=123&pin=my_secret_pin&foo=bar"), Some("my_secret_pin"));
+        assert_eq!(extract_pin_from_query("other=123&foo=bar"), None);
+        assert_eq!(extract_pin_from_query(""), None);
+    }
+
+    #[test]
+    fn test_constant_time_eq() {
+        assert!(constant_time_eq("secret123", "secret123"));
+        assert!(!constant_time_eq("secret123", "secret124"));
+        assert!(!constant_time_eq("secret", "secret123"));
+    }
+
+    #[test]
+    fn test_extract_auth_header_from_raw_http() {
+        let req = "GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer my_token\r\n\r\n";
+        assert_eq!(extract_auth_header_from_raw_http(req), Some("Bearer my_token"));
+    }
 }
