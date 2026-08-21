@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.9.5
+# 💎 Aideo Music Player v0.9.6
 
 **A High-Performance, Audiophile-Grade Desktop Music Engine with Smart Hardware Auto-Matching, Automatic Storage Management, Real-Time Lyric Translation, and Dynamic Aesthetics.**
 
@@ -61,21 +61,21 @@ Aideo is a high-performance desktop music player engineered with **Tauri**, **Ru
 
 ---
 
-## ✨ What's New in v0.9.5
+## ✨ What's New in v0.9.6
 
-Version **0.9.5** delivers a major upgrade to music discovery, battery & CPU efficiency, full artist discography browsing, and seamless desktop multitasking:
+Version **0.9.6** is a major audiophile precision, security, and UI stability update designed to deliver flawless sound playback, zero-glitch streaming, and snappy desktop responsiveness:
 
-* 🧠 **Smarter AI Discovery Hub**: Enjoy 40–75+ accurate music recommendations tailored to your taste, with smart anti-collision verification that prevents unrelated songs with the same title from appearing.
-* 🚫 **Zero-Tolerance Slop Filter**: Search results and recommendations automatically filter out reaction videos, dance covers, and fancams—keeping your feed 100% focused on authentic music.
-* 🎵 **Complete Artist Discographies**: Explore an artist's full catalog with instant tabs for **🔥 Popular Hits**, **🎵 All Releases & Singles**, and **📁 In Library**, complete with a live in-profile search filter.
-* ⚡ **Whisper-Quiet 0% Idle Engine**: Visualizers, background timers, and lyric sweeps automatically sleep when audio is paused or minimized, saving laptop battery and eliminating idle CPU usage.
-* 📌 **Pinned Mini Player & Multi-Screen HUD**: Keep the Mini Player floating above games and work with the new **Always-on-Top Pin**, or enjoy borderless fullscreen on multi-monitor setups without cursor capture.
-* 🎨 **Adaptive Artwork & Ambient Blur**: Non-square album covers render in their authentic aspect ratio with dynamic, color-matched ambient blur backdrops.
-* 🎯 **Multi-Select & Bulk Actions**: Select multiple songs at once (`Ctrl + Click`, `Shift + Click`) to play, queue, favorite, or add them to playlists with a single click.
-* 🔄 **Resilient Reconnection & Auto-Updates**: Network dropouts automatically resume right where you left off, while background streaming helpers update seamlessly.
-* 🪟 **System Tray & Session Memory**: Keep audio playing when minimized to the Windows system tray. Aideo automatically restores your volume, tabs, and window layout on startup.
+* 🎧 **Studio Stereo & Spatial Imaging**: Fixed the spatializer dry/wet engine so your stereo tracks maintain 100% of their rich separation, punch, and soundstage at default settings without collapsing to mono.
+* 🔊 **True 5.1 & 7.1 Surround Sound**: Multi-speaker setups now route real silence to unassigned surround channels instead of leaking left-ear audio to center and subwoofer channels.
+* 🔄 **Zero-Glitch Crossfading**: Crossfading between songs now uses independent stream pipelines, preventing upcoming track buffering from cutting off or stuttering your active music.
+* 🛡️ **Silence Gate on Volume Normalizer**: Loudness normalization automatically holds unity gain during song intros and pauses, eliminating loud volume blasts when quiet tracks start.
+* ⚡ **Rapid Skip Protection**: Skipping songs quickly now instantly synchronizes lyrics, cover art, and ambient lighting without showing old lyrics or delayed artwork.
+* 🔒 **Hardened File & Library Security**: Track deletions are strictly verified and locked within your registered music library folders to protect personal system files.
+* 🔐 **Cryptographic Binary Verification**: All streaming helper tools (`yt-dlp`, `ffmpeg`) are checked against official SHA-256 cryptographic signatures before execution.
+* 🔋 **Zero GPU Leak & Battery Saver**: Ambient liquid background animations use a synchronized render loop that automatically sleeps when minimized or in background tabs.
+* 🚀 **Lighter & Faster Footprint**: Cleaned up legacy unmounted components and pruned unused dependencies, making Aideo faster to start and lighter on system RAM (~75MB).
 
-> 📖 *For the complete developer notes and deep technical details, see the [**v0.9.5 Release Notes**](docs/RELEASE_NOTES_v0.9.5.md).*
+> 📖 *For the complete release breakdown, see the [**v0.9.6 Release Notes**](docs/RELEASE_NOTES_v0.9.6.md).*
 
 ---
 
@@ -115,7 +115,7 @@ Control your music effortlessly from anywhere in the player with built-in hotkey
 
 ## 🚀 Getting Started
 
-1. **Download**: Grab the latest release installer (`Aideo_0.9.5_x64_en-US.msi` or `.exe`) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
+1. **Download**: Grab the latest release installer (`Aideo_0.9.6_x64_en-US.msi` or `.exe`) from the [**Releases Page**](https://github.com/Alirul/Aideo-Music-Player/releases/latest).
 2. **Install**: Run the Windows installer and launch Aideo.
 3. **Enjoy**: Add your music folder or connect Subsonic/Jellyfin cloud streaming to start listening!
 

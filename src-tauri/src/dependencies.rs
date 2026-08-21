@@ -49,7 +49,7 @@ pub async fn fetch_ytdlp_expected_sha256() -> Option<String> {
     let client = crate::get_http_client();
     let res = client
         .get("https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS")
-        .header("User-Agent", "AideoMusicPlayer/0.9.5")
+        .header("User-Agent", "AideoMusicPlayer/0.9.6")
         .send()
         .await
         .ok()?;
@@ -83,7 +83,7 @@ pub async fn download_with_progress_and_sha256(
     let client = crate::get_http_client();
     let res = client
         .get(url)
-        .header("User-Agent", "AideoMusicPlayer/0.9.5")
+        .header("User-Agent", "AideoMusicPlayer/0.9.6")
         .send()
         .await
         .map_err(|e| format!("Network request failed: {}", e))?;
