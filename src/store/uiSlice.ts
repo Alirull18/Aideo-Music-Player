@@ -75,6 +75,8 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   sleepTimer: { duration: 0, remaining: 0, active: false },
   colorScheme: (safeGetStorage('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
   albumArtFit: (safeGetStorage('aideo-album-art-fit') as 'cover' | 'contain') || 'contain',
+  playerBarDesign: (safeGetStorage('aideo-playerbar-design') as any) || 'classic',
+  playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
 
   setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }
@@ -82,6 +84,34 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   coverArtModalTrack: null,
   setCoverArtModalTrack: (track: any) => set({ coverArtModalTrack: track }),
+
+  tagEditorTrack: null,
+  tagEditorBatchTracks: [],
+  setTagEditorTrack: (track: any) => set({ tagEditorTrack: track }),
+  setTagEditorBatchTracks: (tracks: any[]) => set({ tagEditorBatchTracks: tracks }),
+
+  desktopLyricsOpen: false,
+  desktopLyricsLocked: false,
+
+  toggleDesktopLyrics: async () => {
+    const next = !get().desktopLyricsOpen;
+    try {
+      await invoke('toggle_desktop_lyrics', { show: next });
+      set({ desktopLyricsOpen: next });
+    } catch (e) {
+      console.error('Failed to toggle desktop lyrics:', e);
+    }
+  },
+
+  toggleDesktopLyricsLocked: async () => {
+    const next = !get().desktopLyricsLocked;
+    try {
+      await invoke('set_desktop_lyrics_ignore_cursor', { ignore: next });
+      set({ desktopLyricsLocked: next });
+    } catch (e) {
+      console.error('Failed to set desktop lyrics click-through:', e);
+    }
+  },
 
   setPlaybackError: (err: string | null) => {
     set({ playbackError: err });
@@ -272,6 +302,22 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setAlbumArtFit: (fit: 'cover' | 'contain') => {
     localStorage.setItem('aideo-album-art-fit', fit);
     set({ albumArtFit: fit });
+  },
+
+  setPlayerBarDesign: (design: any) => {
+    safeSetStorage('aideo-playerbar-design', design);
+    set({ playerBarDesign: design });
+  },
+
+  setPlayerBarTransparent: (transparent: boolean) => {
+    safeSetStorage('aideo-playerbar-transparent', String(transparent));
+    set({ playerBarTransparent: transparent });
+  },
+
+  togglePlayerBarTransparent: () => {
+    const next = !get().playerBarTransparent;
+    safeSetStorage('aideo-playerbar-transparent', String(next));
+    set({ playerBarTransparent: next });
   },
 
   setGlobalHotkey: (action: string, binding: string | null) => {

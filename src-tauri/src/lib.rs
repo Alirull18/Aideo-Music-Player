@@ -41,6 +41,8 @@ pub mod remote_server;
 mod hotkeys;
 mod m3u;
 pub mod watcher;
+pub mod tag_editor;
+pub mod upnp;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -85,34 +87,165 @@ pub struct SearchResult {
     pub duration: Option<f64>,
 }
 
+fn clean_translated_text(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .trim()
+        .to_string()
+}
+
 // ── Translation command ─────────────────────────────────────────────────────
 #[tauri::command]
 async fn translate_lyric_line(text: String) -> Result<(String, String), String> {
-    let url = format!(
+    if text.trim().is_empty() {
+        return Ok((String::new(), String::new()));
+    }
+    let client = get_http_client();
+
+    // 1. Try Google Translate API (JSON with transliteration dt=rm)
+    let api_url = format!(
         "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&dt=rm&q={}",
         urlencoding::encode(&text)
     );
-    let client = get_http_client();
-    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    let data = res
-        .json::<serde_json::Value>()
+
+    if let Ok(res) = client
+        .get(&api_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .send()
         .await
-        .map_err(|e| e.to_string())?;
+    {
+        if res.status().is_success() {
+            if let Ok(data) = res.json::<serde_json::Value>().await {
+                let translation = data.get(0)
+                    .and_then(|v| v.get(0))
+                    .and_then(|v| v.get(0))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                
+                let transliteration = data.get(0)
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.iter().rev().find_map(|item| {
+                        item.get(3).and_then(|t| t.as_str())
+                    }))
+                    .unwrap_or("")
+                    .to_string();
 
-    let translation = data.get(0)
-        .and_then(|v| v.get(0))
-        .and_then(|v| v.get(0))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let transliteration = data.get(0)
-        .and_then(|v| v.get(1))
-        .and_then(|v| v.get(3))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+                if !translation.is_empty() || !transliteration.is_empty() {
+                    return Ok((clean_translated_text(&translation), transliteration));
+                }
+            }
+        }
+    }
 
-    Ok((translation, transliteration))
+    // 2. Fallback: Google Mobile Translate Web Scraper
+    let mobile_url = format!(
+        "https://translate.google.com/m?sl=auto&tl=en&q={}",
+        urlencoding::encode(&text)
+    );
+
+    if let Ok(res) = client
+        .get(&mobile_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .send()
+        .await
+    {
+        if let Ok(html) = res.text().await {
+            if let Some(start) = html.find("<div class=\"result-container\">") {
+                let rest = &html[start + 30..];
+                if let Some(end) = rest.find("</div>") {
+                    let trans = clean_translated_text(&rest[..end]);
+                    return Ok((trans, String::new()));
+                }
+            }
+        }
+    }
+
+    // 3. Fallback: MyMemory API
+    let mymemory_url = format!(
+        "https://api.mymemory.translated.net/get?q={}&langpair=auto|en",
+        urlencoding::encode(&text)
+    );
+
+    if let Ok(res) = client.get(&mymemory_url).send().await {
+        if let Ok(data) = res.json::<serde_json::Value>().await {
+            if let Some(trans) = data["responseData"]["translatedText"].as_str() {
+                let trans = clean_translated_text(trans);
+                if !trans.starts_with("MYMEMORY WARNING:") {
+                    return Ok((trans, String::new()));
+                }
+            }
+        }
+    }
+
+    Ok((String::new(), String::new()))
+}
+
+#[tauri::command]
+async fn translate_lyrics_batch(lines: Vec<String>) -> Result<Vec<(String, String)>, String> {
+    if lines.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results: Vec<(String, String)> = vec![(String::new(), String::new()); lines.len()];
+    let client = get_http_client();
+
+    const CHUNK_SIZE: usize = 25;
+    for (chunk_idx, chunk) in lines.chunks(CHUNK_SIZE).enumerate() {
+        let chunk_start = chunk_idx * CHUNK_SIZE;
+        let joined_text = chunk.join("\n");
+
+        let mut chunk_translated = false;
+
+        // Try 1: Google Mobile Web Batch (fast, reliable, handles multi-line text)
+        let mobile_url = format!(
+            "https://translate.google.com/m?sl=auto&tl=en&q={}",
+            urlencoding::encode(&joined_text)
+        );
+
+        if let Ok(res) = client
+            .get(&mobile_url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .send()
+            .await
+        {
+            if let Ok(html) = res.text().await {
+                if let Some(start) = html.find("<div class=\"result-container\">") {
+                    let rest = &html[start + 30..];
+                    if let Some(end) = rest.find("</div>") {
+                        let trans_raw = clean_translated_text(&rest[..end]);
+                        let trans_lines: Vec<&str> = trans_raw.split('\n').map(|s| s.trim()).collect();
+                        for (i, &trans_line) in trans_lines.iter().enumerate() {
+                            if chunk_start + i < results.len() {
+                                results[chunk_start + i].0 = trans_line.to_string();
+                            }
+                        }
+                        chunk_translated = true;
+                    }
+                }
+            }
+        }
+
+        // Try 2: If batch failed or for romaji, run translate_lyric_line
+        if !chunk_translated {
+            for (i, line) in chunk.iter().enumerate() {
+                if !line.trim().is_empty() {
+                    if let Ok((trans, rom)) = translate_lyric_line(line.clone()).await {
+                        if chunk_start + i < results.len() {
+                            results[chunk_start + i] = (trans, rom);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 pub fn is_trusted_oauth_host(host: &str) -> bool {
@@ -205,30 +338,240 @@ async fn open_oauth_window(app_handle: tauri::AppHandle, url: String, provider: 
 
 // ── Online Search commands ──────────────────────────────────────────────────
 #[tauri::command]
-async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String> {
+async fn get_unison_ttml(
+    song: String,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: Option<f64>,
+) -> Result<String, String> {
     let client = get_http_client();
-    let encoded_query = urlencoding::encode(&query);
+    let timeout_dur = std::time::Duration::from_millis(3500);
 
-    let lrc_fut = async {
+    let art_param = artist.as_deref().unwrap_or("").trim();
+    let song_param = song.trim();
+    let query_str = format!("{} {}", art_param, song_param).trim().to_string();
+
+    let req_fut = async {
+        // 1. First attempt: BiniLyrics (Apple Music Word-Level TTML CDN)
+        let bini_url = format!(
+            "https://lyrics-api.binimum.org/getLyrics?q={}",
+            urlencoding::encode(&query_str)
+        );
+        if let Ok(resp) = client
+            .get(&bini_url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.6")
+            .send()
+            .await
+        {
+            if let Ok(data) = resp.json::<serde_json::Value>().await {
+                if let Some(list) = data["results"].as_array() {
+                    let mut sorted = list.clone();
+                    sorted.sort_by_key(|item| {
+                        if item["timing_type"].as_str() == Some("word") { 0 } else { 1 }
+                    });
+                    if let Some(first) = sorted.first() {
+                        if let Some(url) = first["lyricsUrl"].as_str() {
+                            if let Ok(ttml_res) = client.get(url).send().await {
+                                if let Ok(body) = ttml_res.text().await {
+                                    let trimmed = body.trim();
+                                    if trimmed.starts_with('<') {
+                                        return Ok(trimmed.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Second attempt: Better Lyrics / Unison (Crowdsourced TTML)
+        let mut urls = vec![
+            format!(
+                "https://lyrics-api.boidu.dev/getLyrics?s={}&a={}",
+                urlencoding::encode(song_param),
+                urlencoding::encode(art_param)
+            ),
+            format!(
+                "https://lyrics.boidu.dev/getLyrics?s={}&a={}",
+                urlencoding::encode(song_param),
+                urlencoding::encode(art_param)
+            ),
+        ];
+        if let Some(ref alb) = album {
+            if !alb.trim().is_empty() {
+                urls[0].push_str(&format!("&album={}", urlencoding::encode(alb)));
+            }
+        }
+        if let Some(dur) = duration {
+            if dur > 0.0 {
+                urls[0].push_str(&format!("&duration={:.1}", dur));
+            }
+        }
+
+        for url in urls {
+            if let Ok(resp) = client
+                .get(&url)
+                .header("Accept", "application/json, text/xml, */*")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.6")
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(body) = resp.text().await {
+                        let trimmed = body.trim();
+                        if trimmed.starts_with('<') {
+                            return Ok(trimmed.to_string());
+                        }
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            if let Some(ttml) = json["ttml"].as_str()
+                                .or_else(|| json["lyrics"].as_str())
+                                .or_else(|| json["data"]["ttml"].as_str())
+                                .or_else(|| json["data"]["lyrics"].as_str())
+                            {
+                                if !ttml.trim().is_empty() {
+                                    return Ok(ttml.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Err("No TTML lyrics found in BiniLyrics or Better Lyrics".to_string())
+    };
+
+    match tokio::time::timeout(timeout_dur, req_fut).await {
+        Ok(res) => res,
+        Err(_) => Err("TTML lyrics request timed out after 3.5s".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn get_kugou_krc(id: String, accesskey: String) -> Result<String, String> {
+    let client = get_http_client();
+    let timeout_dur = std::time::Duration::from_millis(3500);
+    let url = format!(
+        "http://lyrics.kugou.com/download?ver=1&client=pc&id={}&accesskey={}&fmt=krc&charset=utf8",
+        urlencoding::encode(&id),
+        urlencoding::encode(&accesskey)
+    );
+
+    let fetch_fut = async {
+        let resp = client
+            .get(&url)
+            .header("User-Agent", "KuGou/10000")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        if let Some(content_b64) = data["content"].as_str() {
+            if let Some(decoded) = lyrics::decode_krc(content_b64) {
+                return Ok(decoded);
+            }
+        }
+        Err("Failed to decode Kugou KRC lyrics".to_string())
+    };
+
+    match tokio::time::timeout(timeout_dur, fetch_fut).await {
+        Ok(res) => res,
+        Err(_) => Err("Kugou download request timed out after 3.5s".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn search_lyrics_online(
+    query: String,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: Option<f64>,
+) -> Result<Vec<SearchResult>, String> {
+    let client = get_http_client();
+    let timeout_dur = std::time::Duration::from_millis(3500);
+
+    let explicit_title = title.as_deref().unwrap_or("").trim();
+    let explicit_artist = artist.as_deref().unwrap_or("").trim();
+
+    let (song, artist_opt) = if !explicit_title.is_empty() {
+        (
+            explicit_title.to_string(),
+            if explicit_artist.is_empty() {
+                None
+            } else {
+                Some(explicit_artist.to_string())
+            },
+        )
+    } else if let Some(pos) = query.find(" - ") {
+        let art = query[..pos].trim();
+        let sng = query[pos + 3..].trim();
+        (sng.to_string(), Some(art.to_string()))
+    } else {
+        (query.trim().to_string(), None)
+    };
+
+    let full_search_str = if let Some(ref art) = artist_opt {
+        format!("{} {}", art, song)
+    } else {
+        query.clone()
+    };
+    let encoded_query = urlencoding::encode(&full_search_str);
+
+    // 1. BiniLyrics (Apple Music Official Word-Sync TTML)
+    let bini_query = full_search_str.clone();
+    let bini_song_fallback = song.clone();
+    let bini_fut = async {
         let mut results = Vec::new();
-        let lrc_url = format!("https://lrclib.net/api/search?q={}", encoded_query);
-        if let Ok(res) = client.get(&lrc_url).send().await {
+        let bini_url = format!(
+            "https://lyrics-api.binimum.org/getLyrics?q={}",
+            urlencoding::encode(&bini_query)
+        );
+        if let Ok(res) = client
+            .get(&bini_url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.6")
+            .send()
+            .await
+        {
             if let Ok(data) = res.json::<serde_json::Value>().await {
-                if let Some(list) = data.as_array() {
-                    for item in list.iter().take(5) {
-                        results.push(SearchResult {
-                            id: item["id"].to_string(),
-                            title: item["trackName"].as_str().unwrap_or("").to_string(),
-                            artist: item["artistName"].as_str().unwrap_or("").to_string(),
-                            source: "LRCLIB".to_string(),
-                            synced: !item["syncedLyrics"].is_null(),
-                            content_id: None,
-                            raw_lrc: item["syncedLyrics"]
-                                .as_str()
-                                .or(item["plainLyrics"].as_str())
-                                .map(|s| s.to_string()),
-                            duration: item["duration"].as_f64(),
-                        });
+                if let Some(list) = data["results"].as_array() {
+                    let mut sorted = list.clone();
+                    sorted.sort_by_key(|item| {
+                        if item["timing_type"].as_str() == Some("word") { 0 } else { 1 }
+                    });
+
+                    for item in sorted.iter().take(2) {
+                        let track_name = item["track_name"].as_str().unwrap_or("").to_string();
+                        let artist_name = item["artist_name"].as_str().unwrap_or("").to_string();
+                        let dur = item["duration"].as_f64();
+                        let timing = item["timing_type"].as_str().unwrap_or("").to_string();
+                        let lyrics_url = item["lyricsUrl"].as_str().unwrap_or("").to_string();
+
+                        if !lyrics_url.is_empty() {
+                            let mut raw_ttml = None;
+                            if let Ok(lyr_res) = client.get(&lyrics_url).send().await {
+                                if let Ok(lyr_text) = lyr_res.text().await {
+                                    if lyr_text.trim().starts_with('<') {
+                                        raw_ttml = Some(lyr_text);
+                                    }
+                                }
+                            }
+
+                            results.push(SearchResult {
+                                id: format!("binilyrics-{}", item["id"].as_str().unwrap_or("item")),
+                                title: if track_name.is_empty() { bini_song_fallback.clone() } else { track_name },
+                                artist: artist_name,
+                                source: "BiniLyrics".to_string(),
+                                synced: true,
+                                content_id: Some(lyrics_url),
+                                raw_lrc: raw_ttml,
+                                duration: dur,
+                            });
+                            if timing == "word" {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -236,22 +579,120 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
         results
     };
 
+    // 2. Better Lyrics / Unison API (Syllable-level TTML)
+    let boidu_song = song.clone();
+    let boidu_art = artist_opt.clone();
+    let boidu_dur = duration;
+    let boidu_alb = album.clone();
+    let boidu_fut = async {
+        let mut results = Vec::new();
+        let art_str = boidu_art.as_deref().unwrap_or("");
+        let mut urls = vec![
+            format!(
+                "https://lyrics-api.boidu.dev/getLyrics?s={}&a={}",
+                urlencoding::encode(&boidu_song),
+                urlencoding::encode(art_str)
+            ),
+            format!(
+                "https://lyrics.boidu.dev/getLyrics?s={}&a={}",
+                urlencoding::encode(&boidu_song),
+                urlencoding::encode(art_str)
+            ),
+        ];
+        if let Some(ref alb) = boidu_alb {
+            if !alb.trim().is_empty() {
+                urls[0].push_str(&format!("&album={}", urlencoding::encode(alb)));
+            }
+        }
+        if let Some(dur) = boidu_dur {
+            if dur > 0.0 {
+                urls[0].push_str(&format!("&duration={:.1}", dur));
+            }
+        }
+
+        for u in urls {
+            if let Ok(res) = client.get(&u)
+                .header("Accept", "application/json, text/xml, */*")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.6")
+                .send()
+                .await
+            {
+                if res.status().is_success() {
+                    if let Ok(body) = res.text().await {
+                        let trimmed = body.trim();
+                        let mut ttml_str = None;
+                        if trimmed.starts_with('<') {
+                            ttml_str = Some(trimmed.to_string());
+                        } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            if let Some(s) = json["ttml"].as_str()
+                                .or_else(|| json["lyrics"].as_str())
+                                .or_else(|| json["data"]["ttml"].as_str())
+                                .or_else(|| json["data"]["lyrics"].as_str())
+                            {
+                                if !s.trim().is_empty() {
+                                    ttml_str = Some(s.to_string());
+                                }
+                            }
+                        }
+
+                        if let Some(ttml) = ttml_str {
+                            let title_str = boidu_song.clone();
+                            let art_name = art_str.to_string();
+                            results.push(SearchResult {
+                                id: format!("betterlyrics-{:x}", md5::compute(format!("{}-{}", title_str, art_name).as_bytes())),
+                                title: title_str,
+                                artist: art_name,
+                                source: "Better Lyrics".to_string(),
+                                synced: true,
+                                content_id: Some(boidu_song.clone()),
+                                raw_lrc: Some(ttml),
+                                duration: boidu_dur,
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        results
+    };
+
+    // 3. NetEase Cloud Music (YRC Word-Sync & KLyric Karaoke)
     let ne_fut = async {
         let mut results = Vec::new();
         let ne_url = format!(
-            "https://music.163.com/api/search/get?s={}&type=1&limit=5",
+            "https://music.163.com/api/search/get?s={}&type=1&limit=3",
             encoded_query
         );
         if let Ok(res) = client.get(&ne_url)
             .header("Referer", "https://music.163.com")
-            .send().await {
+            .send().await
+        {
             if let Ok(data) = res.json::<serde_json::Value>().await {
                 if let Some(songs) = data["result"]["songs"].as_array() {
-                    for item in songs {
+                    for item in songs.iter().take(2) {
                         let ne_id = item["id"].as_i64().map(|i| i.to_string())
                             .or_else(|| item["id"].as_str().map(|s| s.to_string()))
                             .unwrap_or_else(|| item["id"].to_string());
-                            
+
+                        let mut raw_yrc = None;
+                        let lyr_url = format!(
+                            "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1&os=pc&yv=1",
+                            ne_id
+                        );
+                        if let Ok(lyr_res) = client.get(&lyr_url).header("Referer", "https://music.163.com").send().await {
+                            if let Ok(lyr_data) = lyr_res.json::<serde_json::Value>().await {
+                                if let Some(yrc_text) = lyr_data["yrc"]["lyric"].as_str()
+                                    .or_else(|| lyr_data["klyric"]["lyric"].as_str())
+                                    .or_else(|| lyr_data["lrc"]["lyric"].as_str())
+                                {
+                                    if !yrc_text.trim().is_empty() {
+                                        raw_yrc = Some(yrc_text.to_string());
+                                    }
+                                }
+                            }
+                        }
+
                         results.push(SearchResult {
                             id: ne_id.clone(),
                             title: item["name"].as_str().unwrap_or("").to_string(),
@@ -264,7 +705,7 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
                             source: "NetEase".to_string(),
                             synced: true,
                             content_id: Some(ne_id),
-                            raw_lrc: None,
+                            raw_lrc: raw_yrc,
                             duration: item["duration"].as_f64().map(|ms| ms / 1000.0)
                                 .or_else(|| item["dt"].as_f64().map(|ms| ms / 1000.0)),
                         });
@@ -275,16 +716,73 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
         results
     };
 
+    // 4. Kugou (KRC Word-by-Word Sync)
+    let kugou_search_query = full_search_str.clone();
+    let kugou_song_fallback = song.clone();
+    let kugou_fut = async {
+        let mut results = Vec::new();
+        let kugou_url = format!(
+            "http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword={}&duration=&hash=",
+            urlencoding::encode(&kugou_search_query)
+        );
+        if let Ok(res) = client.get(&kugou_url)
+            .header("User-Agent", "KuGou/10000")
+            .send()
+            .await
+        {
+            if let Ok(data) = res.json::<serde_json::Value>().await {
+                if let Some(candidates) = data["candidates"].as_array() {
+                    for cand in candidates.iter().take(2) {
+                        let id = cand["id"].to_string();
+                        let accesskey = cand["accesskey"].as_str().unwrap_or("").to_string();
+                        let song_title = cand["song"].as_str().unwrap_or("").to_string();
+                        let singer = cand["singer"].as_str().unwrap_or("").to_string();
+                        let dur = cand["duration"].as_f64().map(|ms| ms / 1000.0);
+
+                        if !accesskey.is_empty() {
+                            let d_url = format!(
+                                "http://lyrics.kugou.com/download?ver=1&client=pc&id={}&accesskey={}&fmt=krc&charset=utf8",
+                                urlencoding::encode(&id),
+                                urlencoding::encode(&accesskey)
+                            );
+                            if let Ok(d_res) = client.get(&d_url).header("User-Agent", "KuGou/10000").send().await {
+                                if let Ok(d_data) = d_res.json::<serde_json::Value>().await {
+                                    if let Some(content_b64) = d_data["content"].as_str() {
+                                        if let Some(decoded_krc) = lyrics::decode_krc(content_b64) {
+                                            results.push(SearchResult {
+                                                id: format!("kugou-{}", id),
+                                                title: if song_title.is_empty() { kugou_song_fallback.clone() } else { song_title },
+                                                artist: singer,
+                                                source: "Kugou".to_string(),
+                                                synced: true,
+                                                content_id: Some(id),
+                                                raw_lrc: Some(decoded_krc),
+                                                duration: dur,
+                                            });
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        results
+    };
+
+    // 5. QQ Music (qrc word sync & lrc)
     let qq_fut = async {
         let mut results = Vec::new();
         let qq_url = format!(
-            "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w={}&format=json",
+            "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=3&w={}&format=json",
             encoded_query
         );
         if let Ok(res) = client.get(&qq_url).send().await {
             if let Ok(data) = res.json::<serde_json::Value>().await {
                 if let Some(songs) = data["data"]["song"]["list"].as_array() {
-                    for item in songs {
+                    for item in songs.iter().take(2) {
                         results.push(SearchResult {
                             id: item["songmid"].as_str().unwrap_or("").to_string(),
                             title: item["songname"].as_str().unwrap_or("").to_string(),
@@ -308,76 +806,167 @@ async fn search_lyrics_online(query: String) -> Result<Vec<SearchResult>, String
         results
     };
 
-    let (lrc_res, ne_res, qq_res) = tokio::join!(lrc_fut, ne_fut, qq_fut);
-    
+    // 6. LRCLIB (Exact Match & Search)
+    let lrc_song = song.clone();
+    let lrc_art = artist_opt.clone();
+    let lrc_fut = async {
+        let mut results = Vec::new();
+
+        // Exact match attempt if artist is known
+        if let Some(ref art) = lrc_art {
+            let get_url = format!(
+                "https://lrclib.net/api/get?track_name={}&artist_name={}",
+                urlencoding::encode(&lrc_song),
+                urlencoding::encode(art)
+            );
+            if let Ok(res) = client.get(&get_url).send().await {
+                if let Ok(item) = res.json::<serde_json::Value>().await {
+                    if let Some(synced) = item["syncedLyrics"].as_str().or_else(|| item["plainLyrics"].as_str()) {
+                        results.push(SearchResult {
+                            id: item["id"].to_string(),
+                            title: item["trackName"].as_str().unwrap_or(&lrc_song).to_string(),
+                            artist: item["artistName"].as_str().unwrap_or(art).to_string(),
+                            source: "LRCLIB".to_string(),
+                            synced: !item["syncedLyrics"].is_null(),
+                            content_id: None,
+                            raw_lrc: Some(synced.to_string()),
+                            duration: item["duration"].as_f64(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Search attempt
+        let search_url = format!("https://lrclib.net/api/search?q={}", encoded_query);
+        if let Ok(res) = client.get(&search_url).send().await {
+            if let Ok(data) = res.json::<serde_json::Value>().await {
+                if let Some(list) = data.as_array() {
+                    for item in list.iter().take(3) {
+                        let id_str = item["id"].to_string();
+                        if !results.iter().any(|r| r.id == id_str) {
+                            results.push(SearchResult {
+                                id: id_str,
+                                title: item["trackName"].as_str().unwrap_or("").to_string(),
+                                artist: item["artistName"].as_str().unwrap_or("").to_string(),
+                                source: "LRCLIB".to_string(),
+                                synced: !item["syncedLyrics"].is_null(),
+                                content_id: None,
+                                raw_lrc: item["syncedLyrics"]
+                                    .as_str()
+                                    .or(item["plainLyrics"].as_str())
+                                    .map(|s| s.to_string()),
+                                duration: item["duration"].as_f64(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        results
+    };
+
+    // Join all 6 providers concurrently with timeout
+    let (bini_res, boidu_res, ne_res, kugou_res, qq_res, lrc_res) = tokio::join!(
+        tokio::time::timeout(timeout_dur, bini_fut),
+        tokio::time::timeout(timeout_dur, boidu_fut),
+        tokio::time::timeout(timeout_dur, ne_fut),
+        tokio::time::timeout(timeout_dur, kugou_fut),
+        tokio::time::timeout(timeout_dur, qq_fut),
+        tokio::time::timeout(timeout_dur, lrc_fut)
+    );
+
     let mut results = Vec::new();
-    results.extend(lrc_res);
-    results.extend(ne_res);
-    results.extend(qq_res);
+    if let Ok(r) = bini_res { results.extend(r); }
+    if let Ok(r) = boidu_res { results.extend(r); }
+    if let Ok(r) = ne_res { results.extend(r); }
+    if let Ok(r) = kugou_res { results.extend(r); }
+    if let Ok(r) = qq_res { results.extend(r); }
+    if let Ok(r) = lrc_res { results.extend(r); }
 
     Ok(results)
 }
 
-
 #[tauri::command]
 async fn get_netease_lrc(id: String) -> Result<String, String> {
     let client = get_http_client();
+    let timeout_dur = std::time::Duration::from_millis(3500);
     let url = format!(
-        "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1&os=pc",
+        "https://music.163.com/api/song/lyric?id={}&lv=1&kv=1&tv=-1&os=pc&yv=1",
         id
     );
-    let res = client.get(&url)
-        .header("Referer", "https://music.163.com")
-        .send().await.map_err(|e| e.to_string())?;
-    let data = res
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| e.to_string())?;
-    let lrc = data["klyric"]["lyric"]
-        .as_str()
-        .or_else(|| data["lrc"]["lyric"].as_str())
-        .ok_or("No lyric found")?
-        .to_string();
-    Ok(lrc)
+
+    let fetch_fut = async {
+        let res = client.get(&url)
+            .header("Referer", "https://music.163.com")
+            .send().await.map_err(|e| e.to_string())?;
+        let data = res
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| e.to_string())?;
+        let lrc = data["yrc"]["lyric"]
+            .as_str()
+            .or_else(|| data["klyric"]["lyric"].as_str())
+            .or_else(|| data["lrc"]["lyric"].as_str())
+            .ok_or("No lyric found")?
+            .to_string();
+        Ok(lrc)
+    };
+
+    match tokio::time::timeout(timeout_dur, fetch_fut).await {
+        Ok(res) => res,
+        Err(_) => Err("NetEase lyric request timed out after 3.5s".to_string()),
+    }
 }
 
 #[tauri::command]
 async fn get_qqmusic_lrc(mid: String) -> Result<String, String> {
     let client = get_http_client();
+    let timeout_dur = std::time::Duration::from_millis(3500);
     let url = format!("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid={}&format=json&nobase64=1", mid);
-    let res = client
-        .get(&url)
-        .header("Referer", "https://y.qq.com/portal/player.html")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
 
-    let text = res.text().await.map_err(|e| e.to_string())?;
-    let mut clean_json = text;
-    if clean_json.contains("MusicJsonCallback(") {
-        clean_json = clean_json.replace("MusicJsonCallback(", "");
-        if clean_json.ends_with(')') {
-            clean_json.pop();
-        } else if clean_json.ends_with(");") {
-            clean_json.truncate(clean_json.len() - 2);
-        } else {
-            clean_json = clean_json.trim_end_matches(')').trim_end_matches(';').trim_end_matches(' ').to_string();
-        }
-    }
+    let fetch_fut = async {
+        let res = client
+            .get(&url)
+            .header("Referer", "https://y.qq.com/portal/player.html")
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
 
-    let data: serde_json::Value = serde_json::from_str(&clean_json).map_err(|e| e.to_string())?;
-    let lrc = data["lyric"].as_str().ok_or("No lyric found")?.to_string();
-
-    if !lrc.contains("[") && lrc.len() > 10 {
-        use base64::{engine::general_purpose, Engine as _};
-        if let Ok(decoded) = general_purpose::STANDARD.decode(lrc.trim()) {
-            if let Ok(s) = String::from_utf8(decoded) {
-                return Ok(s);
+        let text = res.text().await.map_err(|e| e.to_string())?;
+        let mut clean_json = text;
+        if clean_json.contains("MusicJsonCallback(") {
+            clean_json = clean_json.replace("MusicJsonCallback(", "");
+            if clean_json.ends_with(')') {
+                clean_json.pop();
+            } else if clean_json.ends_with(");") {
+                clean_json.truncate(clean_json.len() - 2);
+            } else {
+                clean_json = clean_json.trim_end_matches(')').trim_end_matches(';').trim_end_matches(' ').to_string();
             }
         }
-    }
 
-    Ok(lrc)
+        let data: serde_json::Value = serde_json::from_str(&clean_json).map_err(|e| e.to_string())?;
+        let lrc = data["lyric"].as_str()
+            .or_else(|| data["qrc"].as_str())
+            .ok_or("No lyric found")?.to_string();
+
+        if !lrc.contains('[') && lrc.len() > 10 {
+            use base64::{engine::general_purpose, Engine as _};
+            if let Ok(decoded) = general_purpose::STANDARD.decode(lrc.trim()) {
+                if let Ok(s) = String::from_utf8(decoded) {
+                    return Ok(s);
+                }
+            }
+        }
+
+        Ok(lrc)
+    };
+
+    match tokio::time::timeout(timeout_dur, fetch_fut).await {
+        Ok(res) => res,
+        Err(_) => Err("QQ Music lyric request timed out after 3.5s".to_string()),
+    }
 }
 
 // ── Last.fm Commands ───────────────────────────────────────────────────────
@@ -849,7 +1438,8 @@ fn delete_track(path: String, state: State<'_, AppState>) -> Result<(), String> 
             let _ = std::fs::remove_file(cache_dir.join(format!("{}.cache", hash)));
             let _ = std::fs::remove_file(cache_dir.join(format!("{}.tmp", hash)));
         }
-        let _ = std::fs::remove_file(lyrics::get_lrc_path(&path));
+        let _ = std::fs::remove_file(lyrics::get_lyrics_cache_path(&path, "ttml"));
+        let _ = std::fs::remove_file(lyrics::get_lyrics_cache_path(&path, "lrc"));
         return Ok(());
     }
 
@@ -922,7 +1512,10 @@ fn delete_track(path: String, state: State<'_, AppState>) -> Result<(), String> 
         }
 
         // Delete lyrics
-        let _ = std::fs::remove_file(lyrics::get_lrc_path(&path));
+        let _ = std::fs::remove_file(lyrics::get_lyrics_file_path(&path, "ttml"));
+        let _ = std::fs::remove_file(lyrics::get_lyrics_file_path(&path, "lrc"));
+        let _ = std::fs::remove_file(lyrics::get_lyrics_cache_path(&path, "ttml"));
+        let _ = std::fs::remove_file(lyrics::get_lyrics_cache_path(&path, "lrc"));
 
         // Commit transaction after successful filesystem operations
         tx.commit().map_err(|e| e.to_string())?;
@@ -983,8 +1576,8 @@ async fn get_cover_art(path: String) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn save_lyrics_file(path: String, content: String) -> Result<(), String> {
-    let lrc_path = lyrics::get_lrc_path(&path);
-    std::fs::write(lrc_path, content).map_err(|e| e.to_string())
+    let save_path = lyrics::get_lyrics_save_path(&path, &content);
+    std::fs::write(save_path, content).map_err(|e| e.to_string())
 }
 
 pub fn is_valid_text_file_extension(path: &str) -> bool {
@@ -2197,6 +2790,197 @@ fn toggle_keep_awake(enable: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_track_by_path(path: String, state: State<'_, AppState>) -> Result<db::Track, String> {
+    let conn = safe_lock(&state.db);
+    db::get_track_by_path(&conn, &path).map_err(|e| e.to_string())
+}
+
+// ── Tag Editor Commands ───────────────────────────────────────────────────
+#[tauri::command]
+async fn read_audio_tags(path: String) -> Result<tag_editor::AudioTagData, String> {
+    tokio::task::spawn_blocking(move || {
+        tag_editor::read_tags(&path)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn write_audio_tags(
+    path: String,
+    update: tag_editor::AudioTagUpdate,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<db::Track, String> {
+    let path_clone = path.clone();
+    let update_clone = update.clone();
+
+    tokio::task::spawn_blocking(move || {
+        tag_editor::write_tags(&path_clone, &update_clone)
+    }).await.map_err(|e| e.to_string())??;
+
+    artwork::invalidate_cover_cache(&path);
+
+    let conn = safe_lock(&state.db);
+    let updated_track = db::update_track_tags(
+        &conn,
+        &path,
+        update.title.as_deref(),
+        update.artist.as_deref(),
+        update.album.as_deref(),
+        update.track_number.map(|n| n as i32),
+        update.disc_number.map(|n| n as i32),
+    ).map_err(|e| e.to_string())?;
+
+    let _ = app_handle.emit("track-metadata-updated", serde_json::json!({
+        "path": path,
+        "track": updated_track,
+    }));
+
+    Ok(updated_track)
+}
+
+#[tauri::command]
+async fn batch_update_tags(
+    paths: Vec<String>,
+    update: tag_editor::AudioTagBatchUpdate,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let paths_clone = paths.clone();
+    let update_clone = update.clone();
+
+    let updated_count = tokio::task::spawn_blocking(move || {
+        tag_editor::batch_write_tags(&paths_clone, &update_clone)
+    }).await.map_err(|e| e.to_string())??;
+
+    let mut conn = safe_lock(&state.db);
+    if let Ok(tx) = conn.transaction() {
+        for p in &paths {
+            artwork::invalidate_cover_cache(p);
+            let _ = tx.execute(
+                "UPDATE tracks SET 
+                    artist = COALESCE(?1, artist),
+                    album = COALESCE(?2, album)
+                 WHERE path = ?3",
+                rusqlite::params![update.artist.as_deref(), update.album.as_deref(), p],
+            );
+        }
+        let _ = tx.commit();
+    }
+
+    let _ = app_handle.emit("library-updated", ());
+    Ok(updated_count)
+}
+
+// ── Desktop Lyrics Window Commands ─────────────────────────────────────────
+#[tauri::command]
+async fn toggle_desktop_lyrics(show: bool, app_handle: AppHandle) -> Result<bool, String> {
+    if show {
+        if let Some(win) = app_handle.get_webview_window("desktop-lyrics") {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+        } else {
+            let win_builder = tauri::WebviewWindowBuilder::new(
+                &app_handle,
+                "desktop-lyrics",
+                tauri::WebviewUrl::App("index.html?window=desktop-lyrics".into()),
+            )
+            .title("Aideo Desktop Lyrics")
+            .inner_size(880.0, 140.0)
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(false)
+            .resizable(true);
+
+            let win = win_builder.build().map_err(|e| e.to_string())?;
+            let _ = win.show();
+        }
+        Ok(true)
+    } else {
+        if let Some(win) = app_handle.get_webview_window("desktop-lyrics") {
+            let _ = win.hide();
+        }
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn set_desktop_lyrics_ignore_cursor(ignore: bool, app_handle: AppHandle) -> Result<(), String> {
+    if let Some(win) = app_handle.get_webview_window("desktop-lyrics") {
+        win.set_ignore_cursor_events(ignore).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_desktop_lyrics_status(app_handle: AppHandle) -> Result<bool, String> {
+    if let Some(win) = app_handle.get_webview_window("desktop-lyrics") {
+        Ok(win.is_visible().unwrap_or(false))
+    } else {
+        Ok(false)
+    }
+}
+
+// ── UPnP / DLNA Commands ──────────────────────────────────────────────────
+#[tauri::command]
+async fn upnp_discover() -> Result<Vec<upnp::UpnpDevice>, String> {
+    upnp::discover_upnp_devices().await
+}
+
+#[tauri::command]
+fn upnp_connect(device_id: String) -> Result<(), String> {
+    upnp::connect_upnp_device(&device_id)
+}
+
+#[tauri::command]
+async fn upnp_disconnect() -> Result<(), String> {
+    upnp::disconnect_upnp_device().await
+}
+
+#[tauri::command]
+async fn upnp_play(
+    path: String,
+    title: String,
+    artist: String,
+    album: String,
+    cover_url: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("flac")
+        .to_lowercase();
+
+    let mime = match ext.as_str() {
+        "flac" => "audio/flac",
+        "wav" => "audio/wav",
+        "mp3" => "audio/mpeg",
+        "m4a" | "aac" => "audio/mp4",
+        "ogg" | "opus" => "audio/ogg",
+        _ => "audio/flac",
+    };
+
+    let local_port = chromecast::ensure_local_stream_server(&state).await.unwrap_or(8080);
+    let local_ip = chromecast::get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    let stream_url = format!("http://{}:{}/stream?path={}", local_ip, local_port, urlencoding::encode(&path));
+
+    upnp::upnp_play_stream(&stream_url, &title, &artist, &album, cover_url.as_deref(), mime).await
+}
+
+#[tauri::command]
+async fn upnp_control(action: String, value: Option<f64>) -> Result<(), String> {
+    upnp::upnp_control_action(&action, value).await
+}
+
+#[tauri::command]
+async fn upnp_get_status() -> Result<upnp::UpnpStatus, String> {
+    upnp::upnp_query_status().await
+}
+
 pub fn run() {
     dotenvy::dotenv().ok();
     tauri::Builder::default()
@@ -2301,8 +3085,11 @@ pub fn run() {
             get_bit_perfect_mode,
             get_network_telemetry,
             search_lyrics_online,
+            get_unison_ttml,
+            get_kugou_krc,
             get_netease_lrc,
             translate_lyric_line,
+            translate_lyrics_batch,
             get_qqmusic_lrc,
             set_dsp_state,
             get_dsp_state,
@@ -2408,6 +3195,19 @@ pub fn run() {
             chromecast::chromecast_play,
             chromecast::chromecast_control,
             chromecast::chromecast_get_status,
+            get_track_by_path,
+            read_audio_tags,
+            write_audio_tags,
+            batch_update_tags,
+            toggle_desktop_lyrics,
+            set_desktop_lyrics_ignore_cursor,
+            get_desktop_lyrics_status,
+            upnp_discover,
+            upnp_connect,
+            upnp_disconnect,
+            upnp_play,
+            upnp_control,
+            upnp_get_status,
         ])
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {

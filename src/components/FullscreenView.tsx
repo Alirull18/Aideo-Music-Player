@@ -18,13 +18,17 @@ import {
   Music,
   Activity,
   Languages,
-  Type
+  Type,
+  Mic,
+  AlignLeft,
+  FileText
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
 import { Visualizer } from './Visualizer';
 import { generateWaveformPeaks } from '../utils/waveform';
 import { baseName, getStreamName } from '../utils';
+import { LyricsDisplayMode } from '../store/types';
 
 export function FullscreenView() {
   const {
@@ -36,6 +40,8 @@ export function FullscreenView() {
     lyrics,
     lyricOffset,
     lyricStatus,
+    lyricsDisplayMode,
+    setLyricsDisplayMode,
     accentColor,
     dsp,
     currentDevice,
@@ -56,8 +62,9 @@ export function FullscreenView() {
     albumArtFit
   } = useStore();
 
-  // Syllable word-by-word sync detection: only run 60fps rAF timer if track has word-level karaoke data
+  // Syllable word-by-word sync detection: only run 60fps rAF timer if track has word-level karaoke data and karaoke mode is active
   const hasWordSync = useMemo(() => lyrics.some(l => l.words && l.words.length > 0), [lyrics]);
+  const isKaraokeActive = hasWordSync && lyricsDisplayMode === 'karaoke';
   const [smoothedTime, setSmoothedTime] = useState(playback.position_secs);
   const lastPositionRef = useRef(playback.position_secs);
   const lastTimeRef = useRef(performance.now());
@@ -65,28 +72,28 @@ export function FullscreenView() {
   useEffect(() => {
     lastPositionRef.current = playback.position_secs;
     lastTimeRef.current = performance.now();
-    if (hasWordSync) {
+    if (isKaraokeActive) {
       setSmoothedTime(playback.position_secs);
     }
-  }, [playback.position_secs, hasWordSync]);
+  }, [playback.position_secs, isKaraokeActive]);
 
   useEffect(() => {
-    if (!hasWordSync || playback.status !== 'Playing') return;
+    if (!isKaraokeActive || playback.status !== 'Playing') return;
 
     let frameId: number;
     const update = () => {
       const now = performance.now();
       const delta = (now - lastTimeRef.current) / 1000;
-      const interpolated = lastPositionRef.current + Math.min(0.25, delta);
+      const interpolated = lastPositionRef.current + Math.max(0, delta);
       setSmoothedTime(interpolated);
       frameId = requestAnimationFrame(update);
     };
 
     frameId = requestAnimationFrame(update);
     return () => cancelAnimationFrame(frameId);
-  }, [playback.status, hasWordSync]);
+  }, [playback.status, isKaraokeActive]);
 
-  const currentTime = (hasWordSync ? smoothedTime : playback.position_secs) + lyricOffset / 1000;
+  const currentTime = (isKaraokeActive ? smoothedTime : playback.position_secs) + lyricOffset / 1000;
   const trackDuration = currentTrack?.duration || 0;
 
   const [layout, setLayout] = useState<'stage' | 'zen'>(() => {
@@ -298,14 +305,14 @@ export function FullscreenView() {
   }, [lyrics, playback.position_secs, lyricOffset]);
 
   useEffect(() => {
-    if (!scrollRef.current || activeIdx === -1) return;
+    if (lyricsDisplayMode === 'static' || !scrollRef.current || activeIdx === -1) return;
     const el = scrollRef.current.querySelector(`[data-idx="${activeIdx}"]`) as HTMLElement | null;
     if (el) {
       const container = scrollRef.current;
       const targetTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
       container.scrollTo({ top: targetTop, behavior: 'smooth' });
     }
-  }, [activeIdx, layout]);
+  }, [activeIdx, layout, lyricsDisplayMode]);
 
   // Play/Pause handler
   const handlePlayPause = () => {
@@ -451,7 +458,7 @@ export function FullscreenView() {
 
             {/* Right Column: Synced scrolling lyrics */}
             <div className="fullscreen-lyrics-column">
-              <div className="fullscreen-lyrics-fade-wrap">
+              <div className={`fullscreen-lyrics-fade-wrap ${lyricsDisplayMode === 'static' ? 'plain-mode' : ''}`}>
                 <div className="fullscreen-lyrics-scroll" ref={scrollRef}>
                   <div className="fullscreen-lyric-spacer" />
                   {lyrics.length === 0 ? (
@@ -473,22 +480,31 @@ export function FullscreenView() {
                       <div
                         key={i}
                         data-idx={i}
-                        className={`fullscreen-lyric-line ${i === activeIdx ? 'active' : ''}`}
-                        onClick={() => seek(l.time_secs - lyricOffset / 1000)}
+                        className={`fullscreen-lyric-line ${lyricsDisplayMode !== 'static' && i === activeIdx ? 'active' : ''}`}
+                        style={{ cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default' }}
+                        onClick={() => {
+                          if (lyricsDisplayMode !== 'static') {
+                            seek(l.time_secs - lyricOffset / 1000);
+                          }
+                        }}
                       >
                         <div>
-                          {i === activeIdx && l.words && l.words.length > 0 ? (
+                          {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
                             l.words.map((word, wordIdx) => {
                               const nextWord = l.words![wordIdx + 1];
-                              const duration = nextWord ? (nextWord.time_secs - word.time_secs) : 0.8;
+                              const duration = word.duration_secs && word.duration_secs > 0
+                                ? word.duration_secs
+                                : (nextWord && nextWord.time_secs > word.time_secs ? (nextWord.time_secs - word.time_secs) : 0.8);
                               const isStarted = currentTime >= word.time_secs;
-                              const isFinished = nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration);
+                              const isFinished = (word.duration_secs && word.duration_secs > 0)
+                                ? currentTime >= (word.time_secs + word.duration_secs)
+                                : (nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration));
                               
                               let progress = 0;
                               if (isFinished) {
                                 progress = 100;
                               } else if (isStarted) {
-                                progress = Math.min(100, ((currentTime - word.time_secs) / duration) * 100);
+                                progress = Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
                               }
 
                               return (
@@ -554,7 +570,7 @@ export function FullscreenView() {
 
             {/* Immersive Centered Lyrics */}
             <div className="fullscreen-lyrics-column">
-              <div className="fullscreen-lyrics-fade-wrap">
+              <div className={`fullscreen-lyrics-fade-wrap ${lyricsDisplayMode === 'static' ? 'plain-mode' : ''}`}>
                 <div className="fullscreen-zen-lyrics-scroll" ref={scrollRef}>
                   <div className="fullscreen-lyric-spacer" />
                   {lyrics.length === 0 ? (
@@ -576,22 +592,31 @@ export function FullscreenView() {
                       <div
                         key={i}
                         data-idx={i}
-                        className={`fullscreen-zen-lyric-line ${i === activeIdx ? 'active' : ''}`}
-                        onClick={() => seek(l.time_secs - lyricOffset / 1000)}
+                        className={`fullscreen-zen-lyric-line ${lyricsDisplayMode !== 'static' && i === activeIdx ? 'active' : ''}`}
+                        style={{ cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default' }}
+                        onClick={() => {
+                          if (lyricsDisplayMode !== 'static') {
+                            seek(l.time_secs - lyricOffset / 1000);
+                          }
+                        }}
                       >
                         <div>
-                          {i === activeIdx && l.words && l.words.length > 0 ? (
+                          {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
                             l.words.map((word, wordIdx) => {
                               const nextWord = l.words![wordIdx + 1];
-                              const duration = nextWord ? (nextWord.time_secs - word.time_secs) : 0.8;
+                              const duration = word.duration_secs && word.duration_secs > 0
+                                ? word.duration_secs
+                                : (nextWord && nextWord.time_secs > word.time_secs ? (nextWord.time_secs - word.time_secs) : 0.8);
                               const isStarted = currentTime >= word.time_secs;
-                              const isFinished = nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration);
+                              const isFinished = (word.duration_secs && word.duration_secs > 0)
+                                ? currentTime >= (word.time_secs + word.duration_secs)
+                                : (nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration));
                               
                               let progress = 0;
                               if (isFinished) {
                                 progress = 100;
                               } else if (isStarted) {
-                                progress = Math.min(100, ((currentTime - word.time_secs) / duration) * 100);
+                                progress = Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
                               }
 
                               return (
@@ -708,6 +733,22 @@ export function FullscreenView() {
 
           {/* Right utility buttons */}
           <div className="fullscreen-hud-right">
+            {/* Display Mode Toggle */}
+            <button
+              className={`fullscreen-hud-btn ${lyricsDisplayMode === 'karaoke' ? 'active' : ''}`}
+              onClick={() => {
+                const nextMode: LyricsDisplayMode =
+                  lyricsDisplayMode === 'karaoke' ? 'line_sync' :
+                  lyricsDisplayMode === 'line_sync' ? 'static' : 'karaoke';
+                setLyricsDisplayMode(nextMode);
+              }}
+              title={`Display Mode: ${lyricsDisplayMode === 'karaoke' ? '🎤 Karaoke (Word-by-word wipe)' : lyricsDisplayMode === 'line_sync' ? '⏱️ Line Sync (Smooth highlight)' : '📄 Static Text (Plain reading)'} (Click to switch)`}
+            >
+              {lyricsDisplayMode === 'karaoke' && <Mic size={18} />}
+              {lyricsDisplayMode === 'line_sync' && <AlignLeft size={18} />}
+              {lyricsDisplayMode === 'static' && <FileText size={18} />}
+            </button>
+
             {/* Romaji Characters Toggle */}
             <button
               className={`fullscreen-hud-btn ${showRomaji ? 'active' : ''}`}

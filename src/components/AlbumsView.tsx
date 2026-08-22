@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { 
-  Disc, Play, Shuffle, MoreVertical, Plus, Trash2, Activity, ListPlus, Edit3, Image, X, Heart
+  Disc, Play, Shuffle, MoreVertical, Plus, Trash2, Activity, ListPlus, Edit3, Image, X, Heart, Tag
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { extractDominantColor } from '../utils/colorExtractor';
@@ -710,6 +710,20 @@ export function AlbumsView({
                           >
                             <Activity size={14} style={{ color: '#10b981' }} />
                             Sonic Mix
+                          </div>
+
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenFor(null);
+                              useStore.getState().setTagEditorBatchTracks(album.tracks);
+                            }}
+                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(139, 92, 246, 0.15)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <Tag size={14} />
+                            Batch Edit Audio Tags
                           </div>
 
                           <div

@@ -8,6 +8,8 @@ pub enum HotkeyAction {
     PlayPause,
     Next,
     Prev,
+    ToggleDesktopLyrics,
+    ToggleDesktopLyricsLock,
 }
 
 impl HotkeyAction {
@@ -16,6 +18,8 @@ impl HotkeyAction {
             "playPause" => Some(HotkeyAction::PlayPause),
             "next" => Some(HotkeyAction::Next),
             "prev" => Some(HotkeyAction::Prev),
+            "toggleDesktopLyrics" => Some(HotkeyAction::ToggleDesktopLyrics),
+            "toggleDesktopLyricsLock" => Some(HotkeyAction::ToggleDesktopLyricsLock),
             _ => None,
         }
     }
@@ -27,6 +31,8 @@ impl HotkeyAction {
             HotkeyAction::PlayPause => "media-toggle",
             HotkeyAction::Next => "media-next",
             HotkeyAction::Prev => "media-prev",
+            HotkeyAction::ToggleDesktopLyrics => "toggle-desktop-lyrics",
+            HotkeyAction::ToggleDesktopLyricsLock => "toggle-desktop-lyrics-lock",
         }
     }
 }
@@ -65,6 +71,8 @@ mod tests {
         assert_eq!(HotkeyAction::from_id("playPause"), Some(HotkeyAction::PlayPause));
         assert_eq!(HotkeyAction::from_id("next"), Some(HotkeyAction::Next));
         assert_eq!(HotkeyAction::from_id("prev"), Some(HotkeyAction::Prev));
+        assert_eq!(HotkeyAction::from_id("toggleDesktopLyrics"), Some(HotkeyAction::ToggleDesktopLyrics));
+        assert_eq!(HotkeyAction::from_id("toggleDesktopLyricsLock"), Some(HotkeyAction::ToggleDesktopLyricsLock));
         assert_eq!(HotkeyAction::from_id("volumeUp"), None);
     }
 
@@ -73,5 +81,7 @@ mod tests {
         assert_eq!(HotkeyAction::PlayPause.event_name(), "media-toggle");
         assert_eq!(HotkeyAction::Next.event_name(), "media-next");
         assert_eq!(HotkeyAction::Prev.event_name(), "media-prev");
+        assert_eq!(HotkeyAction::ToggleDesktopLyrics.event_name(), "toggle-desktop-lyrics");
+        assert_eq!(HotkeyAction::ToggleDesktopLyricsLock.event_name(), "toggle-desktop-lyrics-lock");
     }
 }

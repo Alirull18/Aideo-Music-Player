@@ -277,19 +277,24 @@ export function cleanSearchQuery(artist: string | null | undefined, title: strin
 
 export function isStreamTrack(path?: string | null, format?: string | null): boolean {
   if (!path) return false;
+  const fmt = (format || '').toUpperCase();
   return (
     path.startsWith('http://') ||
     path.startsWith('https://') ||
     path.startsWith('mms://') ||
     path.startsWith('rtsp://') ||
-    format?.toUpperCase() === 'YOUTUBE DIRECT' ||
-    format?.toUpperCase() === 'TIDAL' ||
-    format?.toUpperCase() === 'SUBSONIC' ||
-    format?.toUpperCase() === 'JELLYFIN' ||
-    format?.toUpperCase() === 'STREAM' ||
-    format?.toUpperCase() === 'RADIO'
+    path.startsWith('aideo://') ||
+    fmt === 'YOUTUBE DIRECT' ||
+    fmt.includes('YOUTUBE') ||
+    fmt.includes('TIDAL') ||
+    fmt === 'SUBSONIC' ||
+    fmt === 'JELLYFIN' ||
+    fmt === 'STREAM' ||
+    fmt === 'RADIO' ||
+    (/^[a-zA-Z0-9_-]{11}$/.test(path) && fmt !== 'FLAC' && fmt !== 'MP3' && fmt !== 'WAV' && fmt !== 'OGG' && fmt !== 'M4A' && fmt !== 'AAC' && fmt !== 'OPUS' && fmt !== 'DSF' && fmt !== 'DFF')
   );
 }
+
 
 
 

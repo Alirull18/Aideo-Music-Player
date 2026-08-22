@@ -35,6 +35,13 @@ pub fn get_cover_art(audio_path: &str) -> Option<String> {
     res
 }
 
+/// Invalidates cached artwork for a given audio path so updated tags reflect immediately.
+pub fn invalidate_cover_cache(audio_path: &str) {
+    if let Ok(mut cache) = COVER_CACHE.lock() {
+        cache.remove(audio_path);
+    }
+}
+
 fn extract_art(audio_path: &str) -> Option<String> {
     let file = std::fs::File::open(audio_path).ok()?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());

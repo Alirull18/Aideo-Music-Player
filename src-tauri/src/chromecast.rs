@@ -21,10 +21,32 @@ lazy_static! {
 }
 
 // Helper to determine the local machine's IP address by querying OS routing paths
-fn get_local_ip() -> Option<String> {
+pub fn get_local_ip() -> Option<String> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     socket.local_addr().ok().map(|addr| addr.ip().to_string())
+}
+
+pub async fn ensure_local_stream_server(app_state: &crate::AppState) -> Option<u16> {
+    let mut port_lock = LOCAL_SERVER_PORT.lock().await;
+    if let Some(port) = *port_lock {
+        return Some(port);
+    }
+    let app_state_inner = crate::AppState {
+        player: app_state.player.clone(),
+        db: app_state.db.clone(),
+        media_controls: app_state.media_controls.clone(),
+        cached_devices: app_state.cached_devices.clone(),
+    };
+    if let Some((port, shutdown_tx)) = start_local_server(app_state_inner).await {
+        *port_lock = Some(port);
+        let mut shutdown_lock = LOCAL_SERVER_SHUTDOWN.lock().await;
+        *shutdown_lock = Some(shutdown_tx);
+        println!("[streaming] Local HTTP stream server started on port {}", port);
+        Some(port)
+    } else {
+        None
+    }
 }
 
 // Canonical-path allowlist cache so each HTTP request is a set lookup instead of

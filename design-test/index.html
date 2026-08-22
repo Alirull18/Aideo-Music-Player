@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aideo Music Player — The bit-perfect player for Windows</title>
+  <meta name="description" content="Aideo locks your DAC in WASAPI Exclusive mode and plays your files untouched: 4,000+ AutoEQ headphone calibrations, a 10-band parametric EQ, synced Romaji lyrics, and local plus streaming audio in one library.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders:opsz,wght@10..72,400..800&family=Archivo:wght@400;500;600&family=Chivo+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <a class="brand" href="#top">
+      <span class="brand-mark" aria-hidden="true"></span>
+      AIDEO
+      <span class="brand-ver">v0.9.6</span>
+    </a>
+    <nav class="topnav" aria-label="Page sections">
+      <a href="#signal">Signal path</a>
+      <a href="#modules">Modules</a>
+      <a href="#screens">Screens</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="topbar-cta" href="https://github.com/Alirull18/Aideo-Music-Player" target="_blank" rel="noopener noreferrer">View source on GitHub</a>
+  </header>
+
+  <main id="top">
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="hero-status"><span class="led" aria-hidden="true"></span>Signal locked &middot; Windows 10 / 11 &middot; Free and open source</p>
+        <h1>Your DAC,<br>unlocked.</h1>
+        <p class="hero-sub">
+          Every other player routes your music through the Windows mixer, which resamples it,
+          dithers it, and squeezes the dynamics out of it. Aideo takes exclusive control of your
+          sound card and hands it the exact bits that were mastered. Nothing added, nothing shaved off.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-solid" href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" target="_blank" rel="noopener noreferrer">Download for Windows</a>
+          <a class="btn btn-line" href="#signal">See the signal path</a>
+        </div>
+      </div>
+
+      <div class="hero-meter" aria-hidden="true">
+        <svg viewBox="0 0 340 220" role="presentation" focusable="false">
+          <rect x="4" y="4" width="332" height="212" rx="10" class="meter-face"/>
+          <g class="meter-ticks">
+            <line x1="70" y1="168" x2="78" y2="160"/>
+            <line x1="94" y1="146" x2="101" y2="139"/>
+            <line x1="118" y1="128" x2="124" y2="122"/>
+            <line x1="142" y1="113" x2="147" y2="108"/>
+            <line x1="166" y1="102" x2="170" y2="97"/>
+            <line x1="196" y1="96" x2="198" y2="91"/>
+            <line x1="222" y1="95" x2="223" y2="90"/>
+            <line x1="248" y1="99" x2="248" y2="94"/>
+            <line x1="272" y1="107" x2="271" y2="102"/>
+          </g>
+          <text x="66" y="186" class="meter-num">-20</text>
+          <text x="112" y="144" class="meter-num">-10</text>
+          <text x="152" y="118" class="meter-num">-5</text>
+          <text x="190" y="106" class="meter-num hot">0</text>
+          <text x="236" y="110" class="meter-num hot">+3</text>
+          <text x="170" y="60" class="meter-label">VU</text>
+          <g class="needle">
+            <line x1="170" y1="180" x2="170" y2="52"/>
+            <circle cx="170" cy="180" r="7"/>
+          </g>
+          <text x="24" y="200" class="meter-plate">AIDEO &#183; CH-A &#183; 600&#937;</text>
+        </svg>
+        <p class="meter-caption">Analog-style output meter, driven by the same samples your DAC receives.</p>
+      </div>
+    </section>
+
+    <!-- SPEC PLATE -->
+    <section class="plate" aria-label="Specifications at a glance">
+      <dl class="plate-grid">
+        <div><dt>Output</dt><dd>WASAPI Exclusive, bit-perfect</dd></div>
+        <div><dt>Formats</dt><dd>FLAC &middot; ALAC &middot; WAV &middot; DSD256</dd></div>
+        <div><dt>Sample rates</dt><dd>44.1 to 384 kHz, hardware clocked</dd></div>
+        <div><dt>Equalizer</dt><dd>5 or 10-band parametric biquad</dd></div>
+        <div><dt>Headphone EQ</dt><dd>4,000+ AutoEQ calibrations built in</dd></div>
+        <div><dt>Idle cost</dt><dd>0% CPU and GPU, visualizer sleeps</dd></div>
+      </dl>
+    </section>
+
+    <!-- SIGNAL PATH -->
+    <section class="signal" id="signal">
+      <h2>Where the bits go</h2>
+      <p class="section-sub">
+        The same FLAC file, two ways. On the left, the default Windows route. On the right, what
+        Aideo does instead. The difference is not subtle on revealing headphones.
+      </p>
+
+      <div class="signal-routes">
+        <article class="route route-shared">
+          <header>
+            <h3>Shared mixer route</h3>
+            <span class="route-tag tag-warn">Resampled</span>
+          </header>
+          <ol>
+            <li><span>Master file</span><small>96 kHz / 24-bit FLAC</small></li>
+            <li><span>Windows resampler</span><small>forced to 48 kHz</small></li>
+            <li><span>Software mixer</span><small>dithering noise added</small></li>
+            <li><span>Loudness limiter</span><small>transients compressed</small></li>
+            <li><span>Your headphones</span><small>a different recording</small></li>
+          </ol>
+          <footer>You hear the mixer's version of your music.</footer>
+        </article>
+
+        <article class="route route-aideo">
+          <header>
+            <h3>Aideo exclusive route</h3>
+            <span class="route-tag tag-ok">Bit-perfect</span>
+          </header>
+          <ol>
+            <li><span>Master file</span><small>96 kHz / 24-bit FLAC</small></li>
+            <li><span>Decoder core</span><small>32-bit float, lossless</small></li>
+            <li><span>DSP chain</span><small>64-bit biquad math, optional</small></li>
+            <li><span>Hardware clock lock</span><small>native rate, no resample</small></li>
+            <li><span>Your DAC</span><small>the master, exactly</small></li>
+          </ol>
+          <footer>You hear the mastering engineer's version.</footer>
+        </article>
+      </div>
+    </section>
+
+    <!-- MODULES -->
+    <section class="modules" id="modules">
+      <h2>The rack</h2>
+      <p class="section-sub">
+        Each feature ships as its own module. Turn on what you need; everything runs locally on
+        your machine.
+      </p>
+
+      <div class="rack">
+        <article class="module">
+          <div class="module-head">
+            <span class="module-no">EQ-01</span>
+            <h3>AutoEQ calibration</h3>
+            <span class="module-led" aria-hidden="true"></span>
+          </div>
+          <p>Search your exact headphone or IEM model, pick a target curve, and Aideo writes the
+          corrective parametric filters for you. Four thousand models covered, gain headroom
+          protected automatically.</p>
+        </article>
+
+        <article class="module">
+          <div class="module-head">
+            <span class="module-no">DSP-02</span>
+            <h3>Parametric equalizer</h3>
+            <span class="module-led" aria-hidden="true"></span>
+          </div>
+          <p>A 5-band quick board or a full 10-band parametric, computed in real time with 64-bit
+          biquad precision. Export your curve as an Equalizer APO preset when you want it elsewhere.</p>
+        </article>
+
+        <article class="module">
+          <div class="module-head">
+            <span class="module-no">LYR-03</span>
+            <h3>Synced lyrics with Romaji</h3>
+            <span class="module-led" aria-hidden="true"></span>
+          </div>
+          <p>Timed lyrics scroll line by line while the track plays. One click transliterates Japanese
+          to Romaji, pulled from LRCLIB, NetEase, and QQ Music.</p>
+        </article>
+
+        <article class="module">
+          <div class="module-head">
+            <span class="module-no">LIB-04</span>
+            <h3>Hybrid library</h3>
+            <span class="module-led" aria-hidden="true"></span>
+          </div>
+          <p>Local FLAC and DSD sit in the same playlists as YouTube Music streams, Tidal Hi-Fi
+          tracks, and Subsonic or Jellyfin servers. One queue, every source.</p>
+        </article>
+
+        <article class="module">
+          <div class="module-head">
+            <span class="module-no">CON-05</span>
+            <h3>Aideo Connect remote</h3>
+            <span class="module-led" aria-hidden="true"></span>
+          </div>
+          <p>Scan a QR code and control playback from any phone browser on your Wi-Fi. No companion
+          app, no account, no traffic leaving your network.</p>
+        </article>
+
+        <article class="module">
+          <div class="module-head">
+            <span class="module-no">WRP-06</span>
+            <h3>Private listening stats</h3>
+            <span class="module-led" aria-hidden="true"></span>
+          </div>
+          <p>A Wrapped-style year in review, generated on your disk from your own play history. The
+          data never leaves the machine because it never exists anywhere else.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- SCREENS -->
+    <section class="screens" id="screens">
+      <h2>Built, not rendered</h2>
+      <p class="section-sub">Real captures from the current build.</p>
+      <figure class="screen-frame">
+        <img src="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461"
+             alt="Aideo fullscreen player showing large album art, scrolling timed lyrics, and playback controls"
+             loading="lazy">
+        <figcaption>Fullscreen view: timed lyrics, ambient backdrop, transport controls.</figcaption>
+      </figure>
+      <figure class="screen-frame">
+        <img src="https://github.com/user-attachments/assets/b1035ae9-7ae2-4d26-9fdd-810c5d82d02f"
+             alt="Aideo DSP panel showing a 10-band parametric equalizer curve and AutoEQ headphone search"
+             loading="lazy">
+        <figcaption>DSP lab: parametric EQ curve with AutoEQ model search.</figcaption>
+      </figure>
+    </section>
+
+    <!-- FAQ -->
+    <section class="faq" id="faq">
+      <h2>Questions from the bench</h2>
+
+      <details>
+        <summary>Does bit-perfect output actually matter if I can't hear it?</summary>
+        <p>Maybe not, and that's fine. But resampling and limiter compression are measurable on any
+        DAC, and once you've paid for good transducers it costs nothing to stop mangling the signal
+        before it reaches them.</p>
+      </details>
+
+      <details>
+        <summary>Which headphones work with AutoEQ?</summary>
+        <p>Over four thousand models are in the database: Sennheiser, Beyerdynamic, Sony, Audio-Technica,
+        most popular IEMs, and AirPods. Search by name, apply the curve, tweak it if you disagree with Harman.</p>
+      </details>
+
+      <details>
+        <summary>Is streaming quality worse than local files?</summary>
+        <p>Tidal Hi-Fi tracks are lossless and play back bit-perfect like local files. YouTube Music
+        streams are lossy, so they're transcoded once on arrival and then handled by the same engine;
+        Aideo marks them honestly in the library instead of pretending otherwise.</p>
+      </details>
+
+      <details>
+        <summary>What does it cost?</summary>
+        <p>Nothing. Aideo is free and open source under its repository license, and there is no
+        account, telemetry, or subscription anywhere in the app.</p>
+      </details>
+
+      <details>
+        <summary>How is this different from foobar2000 or MusicBee?</summary>
+        <p>Those are excellent local players. Aideo starts from the same bit-perfect principle and adds
+        what they treat as plugins or don't attempt: built-in AutoEQ without configuration, Romaji lyric
+        transliteration, hybrid streaming sources, and a phone remote over LAN.</p>
+      </details>
+    </section>
+
+    <!-- DOWNLOAD -->
+    <section class="download">
+      <h2>Put it on your desk.</h2>
+      <p>Windows 10 and 11, installer under 30 MB, uninstaller included.</p>
+      <div class="hero-actions">
+        <a class="btn btn-solid" href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" target="_blank" rel="noopener noreferrer">Download version 0.9.6</a>
+        <a class="btn btn-line" href="https://github.com/Alirull18/Aideo-Music-Player" target="_blank" rel="noopener noreferrer">Read the source</a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="colophon">
+    <p>Aideo Music Player, built by Alirul with Tauri, Rust, and React. This page is a design study.</p>
+  </footer>
+
+</body>
+</html>

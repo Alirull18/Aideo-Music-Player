@@ -1,17 +1,39 @@
 import { StateCreator } from 'zustand';
-import { PlayerState, extractDominantColor } from './types';
+import { PlayerState, extractDominantColor, LyricsDisplayMode } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { emit } from '@tauri-apps/api/event';
 import { cleanSearchQuery, pathsEqual } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
+import { romanizeText } from '../utils/romanizer';
 
 export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   lyrics: [],
   lyricOffset: 0,
   lyricStatus: 'idle',
+  lyricsDisplayMode: (safeGetStorage('aideo-lyrics-display-mode', 'karaoke') as LyricsDisplayMode) || 'karaoke',
   coverArt: null,
   isTranslating: false,
   showRomaji: safeGetStorage('aideo-show-romaji') === 'true',
   showTranslation: safeGetStorage('aideo-show-translation') === 'true',
+  showLyricsHeader: safeGetStorage('aideo-show-lyrics-header') !== 'false',
+
+  setLyricsDisplayMode: (mode: LyricsDisplayMode) => {
+    safeSetStorage('aideo-lyrics-display-mode', mode);
+    set({ lyricsDisplayMode: mode });
+    if (get().desktopLyricsOpen) {
+      emit('desktop-lyrics-sync', {
+        currentTrack: get().currentTrack,
+        playback: get().playback,
+        lyrics: get().lyrics,
+        lyricOffset: get().lyricOffset,
+        showRomaji: get().showRomaji,
+        showTranslation: get().showTranslation,
+        accentColor: get().accentColor,
+        desktopLyricsLocked: get().desktopLyricsLocked,
+        lyricsDisplayMode: mode,
+      }).catch(() => {});
+    }
+  },
 
   setShowRomaji: (val: boolean) => {
     safeSetStorage('aideo-show-romaji', String(val));
@@ -20,6 +42,15 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
   setShowTranslation: (val: boolean) => {
     safeSetStorage('aideo-show-translation', String(val));
     set({ showTranslation: val });
+  },
+  setShowLyricsHeader: (val: boolean) => {
+    safeSetStorage('aideo-show-lyrics-header', String(val));
+    set({ showLyricsHeader: val });
+  },
+  toggleLyricsHeader: () => {
+    const next = !get().showLyricsHeader;
+    safeSetStorage('aideo-show-lyrics-header', String(next));
+    set({ showLyricsHeader: next });
   },
 
   adjustLyricOffset: (ms: number) => {
@@ -65,13 +96,19 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ lyricStatus: 'loading' });
     try {
       const query = `${cleanArtist} ${cleanTitle}`.trim();
-      const results: any[] = await invoke('search_lyrics_online', { query });
+      const results: any[] = await invoke('search_lyrics_online', {
+        query,
+        title: cleanTitle,
+        artist: cleanArtist,
+        album: track.album || undefined,
+        duration: track.duration || undefined,
+      });
 
       if (results && results.length > 0) {
         // Exclude iTunes results since they do not contain lyrics
         const lyricResults = results.filter(r => r.source !== 'iTunes');
 
-        // Score and rank results based on title, artist and duration matching (identical to LyricsPanel.tsx)
+        // Score and rank results based on title, artist, duration matching, sync quality and provider cascade priority
         const targetTitle = cleanTitle || track.title || '';
         const targetArtist = cleanArtist || track.artist || '';
         const targetDuration = track.duration;
@@ -98,6 +135,8 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             if (pArtist === rArtist || rArtist.includes(pArtist) || pArtist.includes(rArtist)) {
               artistScore = 1.0;
             }
+          } else if (!targetArtist || targetArtist.trim() === '') {
+            artistScore = 0.5;
           }
 
           let durationBonus = 0;
@@ -112,9 +151,24 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             }
           }
 
-          const syncBonus = r.raw_lrc || r.source !== 'iTunes' ? 0.2 : 0.0;
+          // Word-sync bonus (BiniLyrics Apple TTML, Better Lyrics TTML, NetEase YRC, Kugou KRC, QQ QRC) vs line sync vs plain text
+          let syncBonus = 0.0;
+          const raw = r.raw_lrc || '';
+          const hasWordTiming = raw.includes('<span') || raw.includes('<tt') || raw.includes('(') || raw.includes('<');
+          if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison' || r.source === 'NetEase' || r.source === 'Kugou' || hasWordTiming) {
+            syncBonus = 0.40;
+          } else if (r.synced || raw.includes('[')) {
+            syncBonus = 0.15;
+          }
+
+          // Provider cascade priority bonus: BiniLyrics / Better Lyrics (1) > NetEase / Kugou (2) > QQMusic (3) > LRCLIB (4)
+          let sourceBonus = 0.0;
+          if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison') sourceBonus = 0.25;
+          else if (r.source === 'NetEase' || r.source === 'Kugou') sourceBonus = 0.15;
+          else if (r.source === 'QQMusic') sourceBonus = 0.05;
+
           const rankBonus = Math.max(0, 0.15 - (index * 0.03));
-          const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + rankBonus;
+          const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + sourceBonus + rankBonus;
 
           return { result: r, score, titleScore };
         });
@@ -130,6 +184,17 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
 
         if (bestMatch) {
           let lrc = bestMatch.raw_lrc ?? '';
+          if (!lrc && (bestMatch.source === 'BiniLyrics' || bestMatch.source === 'Better Lyrics' || bestMatch.source === 'Unison')) {
+            lrc = await invoke<string>('get_unison_ttml', {
+              song: bestMatch.title,
+              artist: bestMatch.artist || cleanArtist || undefined,
+              album: track.album || undefined,
+              duration: bestMatch.duration || track.duration || undefined,
+            }).catch(() => '');
+          }
+          if (!lrc && bestMatch.source === 'Kugou' && bestMatch.content_id) {
+            lrc = await invoke<string>('get_kugou_krc', { id: bestMatch.content_id, accesskey: bestMatch.id }).catch(() => '');
+          }
           if (!lrc && bestMatch.source === 'NetEase' && bestMatch.content_id) {
             lrc = await invoke<string>('get_netease_lrc', { id: bestMatch.content_id }).catch(() => '');
           }
@@ -181,15 +246,26 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ isTranslating: true });
     try {
       const trackPath = playback.current_track;
-      const translated = await Promise.all(
-        lyrics.map(async (l) => {
-          if (!l.text) return l;
-          try {
-            const [translation, romaji]: [string, string] = await invoke('translate_lyric_line', { text: l.text });
-            return { ...l, translation: translation || undefined, romaji: romaji || undefined };
-          } catch { return l; }
-        })
-      );
+      const texts = lyrics.map(l => l.text || '');
+      let batchResults: [string, string][] = [];
+      try {
+        batchResults = await invoke<[string, string][]>('translate_lyrics_batch', { lines: texts });
+      } catch (err) {
+        console.error('Batch translation invoke failed:', err);
+      }
+
+      const translated = lyrics.map((l, idx) => {
+        if (!l.text) return l;
+        const [trans, rom] = batchResults[idx] || ['', ''];
+        const localRom = romanizeText(l.text);
+        const resolvedRomaji = l.romaji || rom || (localRom !== l.text ? localRom : undefined);
+        return {
+          ...l,
+          translation: trans || l.translation || undefined,
+          romaji: resolvedRomaji,
+        };
+      });
+
       if (pathsEqual(get().playback.current_track, trackPath)) {
         safeSetStorage('aideo-show-translation', 'true');
         set({ lyrics: translated, showTranslation: true });
@@ -203,15 +279,26 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ isTranslating: true });
     try {
       const trackPath = playback.current_track;
-      const withRomaji = await Promise.all(
-        lyrics.map(async (l) => {
-          if (!l.text || l.romaji) return l;
-          try {
-            const [, romaji]: [string, string] = await invoke('translate_lyric_line', { text: l.text });
-            return { ...l, romaji: romaji || undefined };
-          } catch { return l; }
-        })
-      );
+      const texts = lyrics.map(l => (l.romaji ? '' : (l.text || '')));
+      let batchResults: [string, string][] = [];
+      try {
+        batchResults = await invoke<[string, string][]>('translate_lyrics_batch', { lines: texts });
+      } catch (err) {
+        console.error('Batch romaji invoke failed:', err);
+      }
+
+      const withRomaji = lyrics.map((l, idx) => {
+        if (!l.text) return l;
+        if (l.romaji) return l;
+        const [, rom] = batchResults[idx] || ['', ''];
+        const localRom = romanizeText(l.text);
+        const resolvedRomaji = rom || (localRom !== l.text ? localRom : undefined);
+        return {
+          ...l,
+          romaji: resolvedRomaji,
+        };
+      });
+
       if (pathsEqual(get().playback.current_track, trackPath)) {
         safeSetStorage('aideo-show-romaji', 'true');
         set({ lyrics: withRomaji, showRomaji: true });

@@ -29,6 +29,8 @@ import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { CoverArtModal } from './components/CoverArtModal';
+import { TagEditorModal } from './components/TagEditorModal';
+import { DesktopLyricBar } from './components/DesktopLyricBar';
 import { BrowserCallbackLanding } from './components/BrowserCallbackLanding';
 import { OauthChildCallback } from './components/OauthChildCallback';
 import { MiniPlayer } from './components/MiniPlayer';
@@ -71,7 +73,12 @@ function AideoApp() {
     sidebarCollapsed,
     miniPlayerMode,
     colorScheme,
-    coverArtModalTrack
+    coverArtModalTrack,
+    tagEditorTrack,
+    tagEditorBatchTracks,
+    playerBarDesign,
+    playerBarTransparent,
+    accentColor
   } = useStore(useShallow(s => ({
     view: s.view,
     pollStatus: s.pollStatus,
@@ -91,6 +98,11 @@ function AideoApp() {
     miniPlayerMode: s.miniPlayerMode,
     colorScheme: s.colorScheme,
     coverArtModalTrack: s.coverArtModalTrack,
+    tagEditorTrack: s.tagEditorTrack,
+    tagEditorBatchTracks: s.tagEditorBatchTracks,
+    playerBarDesign: s.playerBarDesign,
+    playerBarTransparent: s.playerBarTransparent,
+    accentColor: s.accentColor,
   })));
   const [systemIsLight, setSystemIsLight] = useState(window.matchMedia('(prefers-color-scheme: light)').matches);
 
@@ -312,6 +324,34 @@ function AideoApp() {
       if (isCancelled) { uPrev(); return; }
       cleanups.push(uPrev);
 
+      const uDesktopToggle = await listen('toggle-desktop-lyrics', () => {
+        if (isCancelled) return;
+        useStore.getState().toggleDesktopLyrics();
+      });
+      if (isCancelled) { uDesktopToggle(); return; }
+      cleanups.push(uDesktopToggle);
+
+      const uDesktopLock = await listen('toggle-desktop-lyrics-lock', () => {
+        if (isCancelled) return;
+        useStore.getState().toggleDesktopLyricsLocked();
+      });
+      if (isCancelled) { uDesktopLock(); return; }
+      cleanups.push(uDesktopLock);
+
+      const uDesktopClosed = await listen('desktop-lyrics-closed', () => {
+        if (isCancelled) return;
+        useStore.setState({ desktopLyricsOpen: false });
+      });
+      if (isCancelled) { uDesktopClosed(); return; }
+      cleanups.push(uDesktopClosed);
+
+      const uDesktopLockStatus = await listen('desktop-lyrics-lock-status', (event: any) => {
+        if (isCancelled) return;
+        useStore.setState({ desktopLyricsLocked: Boolean(event.payload) });
+      });
+      if (isCancelled) { uDesktopLockStatus(); return; }
+      cleanups.push(uDesktopLockStatus);
+
       // Window Size, Position & State Restoration and Tracking
       if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
         try {
@@ -326,10 +366,15 @@ function AideoApp() {
                 if (savedState.maximized) {
                   await win.maximize();
                 } else {
-                  if (savedState.width && savedState.height) {
+                  if (savedState.width && savedState.height && savedState.width >= 300 && savedState.height >= 200) {
                     await win.setSize(new PhysicalSize(savedState.width, savedState.height));
                   }
-                  if (typeof savedState.x === 'number' && typeof savedState.y === 'number') {
+                  if (
+                    typeof savedState.x === 'number' &&
+                    typeof savedState.y === 'number' &&
+                    savedState.x > -10000 &&
+                    savedState.y > -10000
+                  ) {
                     await win.setPosition(new PhysicalPosition(savedState.x, savedState.y));
                   }
                 }
@@ -339,6 +384,9 @@ function AideoApp() {
             let saveTimeout: any = null;
             const persistWindowState = async () => {
               try {
+                const isMin = await win.isMinimized();
+                if (isMin) return;
+
                 const isMax = await win.isMaximized();
                 if (isMax) {
                   localStorage.setItem('aideo-window-state', JSON.stringify({ maximized: true }));
@@ -346,13 +394,20 @@ function AideoApp() {
                 }
                 const size = await win.innerSize();
                 const pos = await win.outerPosition();
-                localStorage.setItem('aideo-window-state', JSON.stringify({
-                  maximized: false,
-                  width: size.width,
-                  height: size.height,
-                  x: pos.x,
-                  y: pos.y
-                }));
+                if (
+                  size.width >= 300 &&
+                  size.height >= 200 &&
+                  pos.x > -10000 &&
+                  pos.y > -10000
+                ) {
+                  localStorage.setItem('aideo-window-state', JSON.stringify({
+                    maximized: false,
+                    width: size.width,
+                    height: size.height,
+                    x: pos.x,
+                    y: pos.y
+                  }));
+                }
               } catch (_) {}
             };
 
@@ -455,6 +510,49 @@ function AideoApp() {
     };
   }, [setPlaybackSuccess, setPlaybackError]);
 
+  useEffect(() => {
+    const themeMode = localStorage.getItem('aideo-theme-mode');
+    if (themeMode === 'preset') {
+      const pc = localStorage.getItem('aideo-preset-color') || '#8b5cf6';
+      const pr = localStorage.getItem('aideo-preset-rgb') || '139, 92, 246';
+      document.documentElement.style.setProperty('--dynamic-accent', pc);
+      document.documentElement.style.setProperty('--accent-rgb', pr);
+      return;
+    } else if (themeMode === 'windows') {
+      invoke('get_windows_accent_color')
+        .then((color: any) => {
+          document.documentElement.style.setProperty('--dynamic-accent', color);
+          let r = 139, g = 92, b = 246;
+          if (color.startsWith('#')) {
+            const hex = color.replace('#', '');
+            r = parseInt(hex.substring(0, 2), 16);
+            g = parseInt(hex.substring(2, 4), 16);
+            b = parseInt(hex.substring(4, 6), 16);
+          }
+          document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`);
+        })
+        .catch((err: any) => console.error("Failed to fetch Windows accent color:", err));
+      return;
+    }
+
+    document.documentElement.style.setProperty('--dynamic-accent', accentColor);
+    
+    let r = 139, g = 92, b = 246;
+    if (accentColor.startsWith('rgb')) {
+      const m = accentColor.match(/\d+/g);
+      if (m && m.length >= 3) {
+        r = parseInt(m[0]); g = parseInt(m[1]); b = parseInt(m[2]);
+      }
+    } else if (accentColor.startsWith('#')) {
+      const hex = accentColor.replace('#', '');
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    }
+    
+    document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`);
+  }, [accentColor]);
+
   if (miniPlayerMode) {
     return (
       <MotionConfig reducedMotion={lowSpecMode ? "always" : "user"}>
@@ -468,7 +566,7 @@ function AideoApp() {
 
   return (
     <MotionConfig reducedMotion={lowSpecMode ? "always" : "user"}>
-      <div className={`${lowSpecMode ? "app low-spec" : "app"} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${isLightTheme ? "light-theme" : ""}`}>
+      <div className={`${lowSpecMode ? "app low-spec" : "app"} ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${isLightTheme ? "light-theme" : ""} playerbar-${playerBarDesign} ${playerBarTransparent ? "playerbar-transparent" : ""}`}>
         <Sidebar />
       <main className="app-main">
         {/* Keep the core heavy AideoView and LibraryView mounted to ensure buttery-smooth instant transitions */}
@@ -769,6 +867,10 @@ function AideoApp() {
         <AnimatePresence>
           {coverArtModalTrack && <CoverArtModal />}
         </AnimatePresence>
+
+        <AnimatePresence>
+          {(tagEditorTrack || (tagEditorBatchTracks && tagEditorBatchTracks.length > 0)) && <TagEditorModal />}
+        </AnimatePresence>
       </AnimatePresence>
 
       <AnimatePresence>
@@ -791,13 +893,20 @@ function AideoApp() {
 }
 
 export default function App() {
+  const isDesktopLyricsInitial = typeof window !== 'undefined' && (
+    window.location.search.includes('window=desktop-lyrics') || 
+    window.location.hash.includes('desktop-lyrics')
+  );
   const [isOauthChild, setIsOauthChild] = useState(false);
+  const [isDesktopLyricsWindow, setIsDesktopLyricsWindow] = useState(isDesktopLyricsInitial);
 
   useEffect(() => {
     import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
       const win = getCurrentWindow();
       if (win.label === 'supabase-login') {
         setIsOauthChild(true);
+      } else if (win.label === 'desktop-lyrics') {
+        setIsDesktopLyricsWindow(true);
       }
     }).catch(() => {});
   }, []);
@@ -811,6 +920,10 @@ export default function App() {
 
   if (isOauthChild) {
     return <OauthChildCallback />;
+  }
+
+  if (isDesktopLyricsWindow || isDesktopLyricsInitial) {
+    return <DesktopLyricBar />;
   }
 
   return <AideoApp />;

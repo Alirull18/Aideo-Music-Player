@@ -1084,12 +1084,23 @@ pub async fn get_tidal_autoplay_recommendations(
 ) -> Result<Vec<TidalTrackResult>, String> {
     println!("[tidal] Aideo Autoplay Engine v2: Resolving Tidal Radio for '{}' by '{}'", title, artist);
     
-    let query = format!("{} Radio", artist);
-    let search_results = tidal_search(state, app_handle, query, None).await;
+    let query = if !artist.is_empty() && artist != "Unknown Artist" {
+        format!("{} Radio", artist)
+    } else if !title.is_empty() && title != "Unknown Title" {
+        title.clone()
+    } else {
+        "Top Tracks".to_string()
+    };
+
+    let mut search_results = tidal_search(state.clone(), app_handle.clone(), query, None).await;
+    if search_results.as_ref().map(|t| t.is_empty()).unwrap_or(true) && !artist.is_empty() && artist != "Unknown Artist" {
+        search_results = tidal_search(state, app_handle, artist.clone(), None).await;
+    }
 
     match search_results {
         Ok(tracks) => {
             let artist_lower = artist.to_lowercase();
+            let clean_seed_title = clean_title(&title);
 
             let mut filtered_tracks = Vec::new();
             let mut seen_titles = std::collections::HashSet::new();
@@ -1107,9 +1118,13 @@ pub async fn get_tidal_autoplay_recommendations(
                     continue;
                 }
 
-                // 2. Fuzzy Title De-duplication (Similarity >70% against seed title)
+                // 2. Precise Deduplication against Seed
+                let is_same_artist = crate::youtube::artist_matches(&track.artist, &artist);
+                let clean_cand = clean_title(&track.title);
+                let is_same_title = clean_seed_title == clean_cand && !clean_cand.is_empty();
                 let sim = fuzzy_title_similarity(&track.title, &title);
-                if sim > 0.70 {
+
+                if (is_same_artist && (sim > 0.65 || is_same_title)) || (is_same_title && is_same_artist) {
                     println!("[autoplay-filter] Drop duplicate song: '{}' (Similarity: {:.2}%)", track.title, sim * 100.0);
                     continue;
                 }
@@ -1121,11 +1136,10 @@ pub async fn get_tidal_autoplay_recommendations(
                 }
 
                 // 4. De-duplicate clean titles inside the recommended list itself
-                let clean = clean_title(&track.title);
-                if seen_titles.contains(&clean) {
+                if seen_titles.contains(&clean_cand) {
                     continue;
                 }
-                seen_titles.insert(clean);
+                seen_titles.insert(clean_cand);
 
                 filtered_tracks.push(track);
             }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
-import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, VolumeX, Heart, ThumbsDown, Music, Lock, Unlock, Pin, PinOff } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, VolumeX, Heart, ThumbsDown, Music, Lock, Unlock, Pin, PinOff, Tv2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -37,7 +37,11 @@ export function MiniPlayer() {
     toggleDislikeTrack,
     translateLyrics,
     getRomaji,
-    isTranslating
+    isTranslating,
+    desktopLyricsOpen,
+    toggleDesktopLyrics,
+    desktopLyricsLocked,
+    toggleDesktopLyricsLocked
   } = useStore();
 
   const current = currentTrack;
@@ -293,6 +297,31 @@ export function MiniPlayer() {
                   <Lock size={11} color="var(--accent)" />
                 ) : (
                   <Unlock size={11} color="var(--text-dim)" />
+                )}
+              </button>
+              <button 
+                className={`mini-fb-btn ${desktopLyricsOpen ? 'active' : ''}`}
+                onClick={toggleDesktopLyrics}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  toggleDesktopLyricsLocked();
+                }}
+                title={desktopLyricsOpen ? (desktopLyricsLocked ? "Desktop Lyrics: Locked (Right-click to Unlock)" : "Desktop Lyrics: Open (Right-click to Lock)") : "Open Floating Desktop Lyric Bar"}
+                style={{ position: 'relative' }}
+              >
+                <Tv2 size={11} color={desktopLyricsOpen ? "var(--accent)" : "var(--text-dim)"} />
+                {desktopLyricsOpen && desktopLyricsLocked && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 1,
+                      right: 1,
+                      width: 4,
+                      height: 4,
+                      borderRadius: '50%',
+                      backgroundColor: '#10b981',
+                    }}
+                  />
                 )}
               </button>
             </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
+import { PlayerBarDesign } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -9,7 +10,8 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { 
   Settings, Library, Radio, FolderSearch, RefreshCw, DownloadCloud, 
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
-  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard
+  Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
+  Disc, Layers, Activity, Minus
 } from 'lucide-react';
 
 interface PresetTheme {
@@ -109,7 +111,9 @@ export function SettingsView() {
     resetDislikedTracks,
     colorScheme, setColorScheme, shortcuts, setShortcut,
     albumArtFit, setAlbumArtFit,
-    globalHotkeys, setGlobalHotkey
+    globalHotkeys, setGlobalHotkey,
+    playerBarDesign, setPlayerBarDesign,
+    playerBarTransparent, togglePlayerBarTransparent, setPlayerBarTransparent
   } = useStore(useShallow(s => ({
     scanDirs: s.scanDirs,
     addScanDir: s.addScanDir,
@@ -185,6 +189,11 @@ export function SettingsView() {
     setAlbumArtFit: s.setAlbumArtFit,
     globalHotkeys: s.globalHotkeys,
     setGlobalHotkey: s.setGlobalHotkey,
+    playerBarDesign: s.playerBarDesign,
+    setPlayerBarDesign: s.setPlayerBarDesign,
+    playerBarTransparent: s.playerBarTransparent,
+    togglePlayerBarTransparent: s.togglePlayerBarTransparent,
+    setPlayerBarTransparent: s.setPlayerBarTransparent,
   })));
 
   // Tab navigation State
@@ -362,6 +371,8 @@ export function SettingsView() {
     setThemeMode('dynamic');
     setSelectedFont('Outfit');
     setFontScale(100);
+    setPlayerBarDesign('classic');
+    setPlayerBarTransparent(false);
     if (!liquidBackgroundEnabled) toggleLiquidBackground();
     if (!sidebarLastfmVisible) toggleSidebarLastfmVisible();
     if (!sidebarListenbrainzVisible) toggleSidebarListenbrainzVisible();
@@ -1009,6 +1020,229 @@ export function SettingsView() {
                 Aspect Fill (Cover)
               </button>
             </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'playerbar-design',
+      title: 'Player Bar Style & Layout',
+      description: 'Choose your preferred bottom playback bar layout from popular modern music players, floating capsules, and audiophile deck styles.',
+      keywords: 'player bar playbar layout style design floating island waveform minimal vinyl deck classic spotify apple music tidal roon modern appearance',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div className="settings-ctrl-title">Player Bar Theme & Layout Engine</div>
+          <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
+            Select a custom playback console tailored for your workflow — from modern floating capsules to full-deck waveform audiophile scrubbers.
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {[
+              {
+                id: 'classic' as PlayerBarDesign,
+                name: 'Classic Studio',
+                badge: 'Desktop Default',
+                badgeColor: '#3b82f6',
+                icon: <Layers size={18} color="#60a5fa" />,
+                desc: 'Balanced 3-column docked layout with interactive waveform seekbar, synchronized lyric peek, and full audio utility drawer.',
+                visual: (
+                  <div className="pbar-preview-box preview-classic">
+                    <div className="pbar-prev-thumb" />
+                    <div className="pbar-prev-meta">
+                      <div className="pbar-prev-line short" />
+                      <div className="pbar-prev-line mini" />
+                    </div>
+                    <div className="pbar-prev-controls">
+                      <div className="pbar-prev-btn-group" />
+                      <div className="pbar-prev-wave" />
+                    </div>
+                    <div className="pbar-prev-actions" />
+                  </div>
+                )
+              },
+              {
+                id: 'floating' as PlayerBarDesign,
+                name: 'Floating Dynamic Island',
+                badge: 'Apple Music / macOS',
+                badgeColor: '#a855f7',
+                icon: <Radio size={18} color="#c084fc" />,
+                desc: 'Elevated glassmorphic pill capsule suspended cleanly above the canvas with centered fluid controls and ambient glow.',
+                visual: (
+                  <div className="pbar-preview-box preview-floating">
+                    <div className="pbar-prev-floating-pill">
+                      <div className="pbar-prev-thumb circle" />
+                      <div className="pbar-prev-meta">
+                        <div className="pbar-prev-line short" />
+                      </div>
+                      <div className="pbar-prev-center-btn" />
+                      <div className="pbar-prev-actions compact" />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'waveform' as PlayerBarDesign,
+                name: 'Audiophile Waveform Deck',
+                badge: 'Pro Audio & DAW',
+                badgeColor: '#06b6d4',
+                icon: <Activity size={18} color="#22d3ee" />,
+                desc: 'Prominent full-width high-definition audio waveform scrubbing deck paired with real-time audio telemetry engine HUD.',
+                visual: (
+                  <div className="pbar-preview-box preview-waveform">
+                    <div className="pbar-prev-full-wave">
+                      {[40, 70, 90, 60, 30, 80, 100, 75, 45, 65, 85, 50, 70, 90, 40].map((h, i) => (
+                        <div key={i} style={{ height: `${h}%`, flex: 1, background: i < 7 ? 'var(--accent, #8b5cf6)' : 'rgba(255,255,255,0.2)', borderRadius: 1 }} />
+                      ))}
+                    </div>
+                    <div className="pbar-prev-subdeck">
+                      <div className="pbar-prev-thumb mini" />
+                      <div className="pbar-prev-center-btn" />
+                      <div className="pbar-prev-hud-chip" />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'minimal' as PlayerBarDesign,
+                name: 'Minimalist Compact',
+                badge: 'Zen / Low-Profile',
+                badgeColor: '#10b981',
+                icon: <Minus size={18} color="#34d399" />,
+                desc: 'Ultra-slim 48px distraction-free bar with top hairline scrubbing line, maximizing screen real estate for your library.',
+                visual: (
+                  <div className="pbar-preview-box preview-minimal">
+                    <div className="pbar-prev-hairline" />
+                    <div className="pbar-prev-single-row">
+                      <div className="pbar-prev-thumb tiny" />
+                      <div className="pbar-prev-line inline" />
+                      <div className="pbar-prev-center-btn" />
+                      <div className="pbar-prev-time-chip" />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'vinyl' as PlayerBarDesign,
+                name: 'Retro Vinyl Deck',
+                badge: 'Analog Turntable',
+                badgeColor: '#f59e0b',
+                icon: <Disc size={18} color="#fbbf24" />,
+                desc: 'Nostalgic turntable aesthetic featuring spinning vinyl disc album art, vintage warm amber accents, and glowing status LEDs.',
+                visual: (
+                  <div className="pbar-preview-box preview-vinyl">
+                    <div className="pbar-prev-vinyl-disc">
+                      <div className="pbar-prev-vinyl-grooves" />
+                      <div className="pbar-prev-vinyl-label" />
+                    </div>
+                    <div className="pbar-prev-meta">
+                      <div className="pbar-prev-line short amber" />
+                    </div>
+                    <div className="pbar-prev-center-btn amber" />
+                    <div className="pbar-prev-led-chip" />
+                  </div>
+                )
+              }
+            ].map((d) => {
+              const isSelected = playerBarDesign === d.id;
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => {
+                    setPlayerBarDesign(d.id);
+                    window.dispatchEvent(new CustomEvent('ui-toast', {
+                      detail: { message: `Switched player bar layout to ${d.name}!`, type: 'success' }
+                    }));
+                  }}
+                  className={`settings-design-card ${isSelected ? 'active' : ''}`}
+                  style={{
+                    padding: 16,
+                    borderRadius: 14,
+                    background: isSelected ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                    border: isSelected ? '1.5px solid var(--accent, #8b5cf6)' : '1px solid rgba(255, 255, 255, 0.07)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    position: 'relative',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: isSelected ? '0 8px 24px rgba(var(--accent-rgb), 0.2)' : 'none'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ 
+                          width: 32, 
+                          height: 32, 
+                          borderRadius: 8, 
+                          background: isSelected ? 'rgba(var(--accent-rgb), 0.2)' : 'rgba(255, 255, 255, 0.05)', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center' 
+                        }}>
+                          {d.icon}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{d.name}</div>
+                          <span style={{ 
+                            fontSize: 9, 
+                            fontWeight: 700, 
+                            color: d.badgeColor, 
+                            background: `${d.badgeColor}18`, 
+                            padding: '2px 6px', 
+                            borderRadius: 6,
+                            marginTop: 2,
+                            display: 'inline-block'
+                          }}>
+                            {d.badge}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: '50%',
+                        border: isSelected ? '5px solid var(--accent, #8b5cf6)' : '2px solid rgba(255, 255, 255, 0.2)',
+                        background: isSelected ? '#ffffff' : 'transparent',
+                        transition: 'all 0.2s ease',
+                        flexShrink: 0
+                      }} />
+                    </div>
+
+                    {d.visual}
+
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.45, marginTop: 10 }}>
+                      {d.desc}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'playerbar-transparency',
+      title: 'Player Bar Glassmorphic Transparency',
+      description: 'Make the bottom player bar translucent with a frosted glass backdrop-blur effect.',
+      keywords: 'player bar playbar transparent transparency glass glassmorphism frosted acrylic blur backdrop appearance UI',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1, paddingRight: 24 }}>
+              <div className="settings-ctrl-title">Transparent Glass Playbar</div>
+              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
+                Render the bottom playback bar with a glassmorphic translucent background and backdrop blur, allowing dynamic liquid art, full artwork backdrops, and ambient light to shine through.
+              </div>
+            </div>
+            <SlidingSwitch 
+              checked={playerBarTransparent} 
+              onChange={togglePlayerBarTransparent} 
+            />
           </div>
         </div>
       )

@@ -1242,110 +1242,132 @@ pub async fn get_youtube_autoplay_recommendations(
 
     let client = crate::get_http_client();
 
+    // If video_id is not a clean 11-char ID and we have artist/title, resolve the seed video_id via YouTube search
+    let mut resolved_video_id = video_id.trim().to_string();
+    if (resolved_video_id.len() != 11 || resolved_video_id.contains('/') || resolved_video_id.contains('&') || resolved_video_id.contains('?')) 
+        && (!artist.is_empty() || !title.is_empty()) 
+    {
+        let query = if !artist.is_empty() && !title.is_empty() && artist != "Unknown Artist" {
+            format!("{} {}", artist, title)
+        } else if !title.is_empty() && title != "Unknown Title" {
+            title.clone()
+        } else {
+            artist.clone()
+        };
+        if let Ok(search_results) = search_youtube_internal(&client, &api_key, &query, false).await {
+            if let Some(first) = search_results.into_iter().next() {
+                resolved_video_id = first.id;
+                println!("[youtube] Resolved seed video_id for autoplay: '{}'", resolved_video_id);
+            }
+        }
+    }
+
     // --- CANDIDATE GENERATION SOURCE 1: YouTube Music Watch Next ---
     let mut tracks = Vec::new();
-    let search_url = format!("https://music.youtube.com/youtubei/v1/next?key={}&prettyPrint=false", api_key);
-    let payload = serde_json::json!({
-        "context": {
-            "client": {
-                "clientName": "WEB_REMIX",
-                "clientVersion": "1.20240101.01.00",
-                "hl": "en",
-                "gl": "US"
-            }
-        },
-        "videoId": video_id
-    });
-
-    if let Ok(res) = client.post(&search_url)
-        .header("Content-Type", "application/json")
-        .header("Referer", "https://music.youtube.com/")
-        .json(&payload)
-        .send()
-        .await
-    {
-        if let Ok(json_res) = res.json::<serde_json::Value>().await {
-            let mut items = Vec::new();
-            find_playlist_panel_videos(&json_res, &mut items);
-
-            let mut seen_ids = std::collections::HashSet::new();
-            seen_ids.insert(video_id.clone());
-
-            for item in items {
-                let id = match item.get("videoId").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => continue,
-                };
-
-                if seen_ids.contains(&id) {
-                    continue;
+    if resolved_video_id.len() == 11 {
+        let search_url = format!("https://music.youtube.com/youtubei/v1/next?key={}&prettyPrint=false", api_key);
+        let payload = serde_json::json!({
+            "context": {
+                "client": {
+                    "clientName": "WEB_REMIX",
+                    "clientVersion": "1.20240101.01.00",
+                    "hl": "en",
+                    "gl": "US"
                 }
+            },
+            "videoId": resolved_video_id
+        });
 
-                let track_title = item.get("title")
-                    .and_then(|t| t.get("runs"))
-                    .and_then(|r| r.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|first| first.get("text"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("Unknown Title")
-                    .to_string();
+        if let Ok(res) = client.post(&search_url)
+            .header("Content-Type", "application/json")
+            .header("Referer", "https://music.youtube.com/")
+            .json(&payload)
+            .send()
+            .await
+        {
+            if let Ok(json_res) = res.json::<serde_json::Value>().await {
+                let mut items = Vec::new();
+                find_playlist_panel_videos(&json_res, &mut items);
 
-                let track_artist = item.get("longBylineText")
-                    .and_then(|b| b.get("runs"))
-                    .and_then(|r| r.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|first| first.get("text"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("Unknown Artist")
-                    .to_string();
+                let mut seen_ids = std::collections::HashSet::new();
+                seen_ids.insert(resolved_video_id.clone());
 
-                let thumbnail_url = item.get("thumbnail")
-                    .and_then(|t| t.get("thumbnails"))
-                    .and_then(|arr| arr.as_array())
-                    .and_then(|arr| arr.last())
-                    .and_then(|t| t.get("url"))
-                    .and_then(|u| u.as_str());
+                for item in items {
+                    let id = match item.get("videoId").and_then(|v| v.as_str()) {
+                        Some(s) => s.to_string(),
+                        None => continue,
+                    };
 
-                let cover_url = thumbnail_url.map(|url| {
-                    if let Some(pos) = url.find("=w") {
-                        url.get(..pos).map(|prefix| format!("{}=w500-h500-l90-rj", prefix)).unwrap_or_else(|| url.to_string())
-                    } else if let Some(pos) = url.find("=s") {
-                        url.get(..pos).map(|prefix| format!("{}=w500-h500-l90-rj", prefix)).unwrap_or_else(|| url.to_string())
-                    } else {
-                        url.to_string()
+                    if seen_ids.contains(&id) {
+                        continue;
                     }
-                }).or_else(|| {
-                    Some(format!("https://i.ytimg.com/vi/{}/mqdefault.jpg", id))
-                });
 
-                let duration_raw = item.get("lengthText")
-                    .and_then(|l| l.get("runs"))
-                    .and_then(|r| r.as_array())
-                    .and_then(|arr| arr.first())
-                    .and_then(|first| first.get("text"))
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("0:00")
-                    .to_string();
+                    let track_title = item.get("title")
+                        .and_then(|t| t.get("runs"))
+                        .and_then(|r| r.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|first| first.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("Unknown Title")
+                        .to_string();
 
-                let url = format!("https://www.youtube.com/watch?v={}", id);
-                seen_ids.insert(id.clone());
+                    let track_artist = item.get("longBylineText")
+                        .and_then(|b| b.get("runs"))
+                        .and_then(|r| r.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|first| first.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("Unknown Artist")
+                        .to_string();
 
-                tracks.push(YoutubeTrack {
-                    id,
-                    title: track_title,
-                    artist: track_artist,
-                    cover_url,
-                    duration_raw,
-                    url,
-                    recommendation_source: None,
-                });
+                    let thumbnail_url = item.get("thumbnail")
+                        .and_then(|t| t.get("thumbnails"))
+                        .and_then(|arr| arr.as_array())
+                        .and_then(|arr| arr.last())
+                        .and_then(|t| t.get("url"))
+                        .and_then(|u| u.as_str());
+
+                    let cover_url = thumbnail_url.map(|url| {
+                        if let Some(pos) = url.find("=w") {
+                            url.get(..pos).map(|prefix| format!("{}=w500-h500-l90-rj", prefix)).unwrap_or_else(|| url.to_string())
+                        } else if let Some(pos) = url.find("=s") {
+                            url.get(..pos).map(|prefix| format!("{}=w500-h500-l90-rj", prefix)).unwrap_or_else(|| url.to_string())
+                        } else {
+                            url.to_string()
+                        }
+                    }).or_else(|| {
+                        Some(format!("https://i.ytimg.com/vi/{}/mqdefault.jpg", id))
+                    });
+
+                    let duration_raw = item.get("lengthText")
+                        .and_then(|l| l.get("runs"))
+                        .and_then(|r| r.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|first| first.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("0:00")
+                        .to_string();
+
+                    let url = format!("https://www.youtube.com/watch?v={}", id);
+                    seen_ids.insert(id.clone());
+
+                    tracks.push(YoutubeTrack {
+                        id,
+                        title: track_title,
+                        artist: track_artist,
+                        cover_url,
+                        duration_raw,
+                        url,
+                        recommendation_source: None,
+                    });
+                }
             }
         }
     }
 
     // --- CANDIDATE GENERATION SOURCE 2: Hybrid Collaborative Loved Seeds & Current Track (Last.fm) ---
     // Only query loved streams that share some context (same artist or matching text tokens) with the current song
-    // to prevent unrelated genres/languages (e.g. K-pop) from hijacking the radio of a different style (e.g. Malay rock).
+    // to prevent unrelated genres/languages from hijacking the radio.
     let extra_seeds: Vec<(String, String)> = {
         let mut seeds = Vec::new();
         let conn = crate::safe_lock(&state.db);
@@ -1439,7 +1461,7 @@ pub async fn get_youtube_autoplay_recommendations(
         }
     }
 
-    if lastfm_candidates.is_empty() {
+    if lastfm_candidates.is_empty() && !artist.is_empty() && artist != "Unknown Artist" {
         if let Ok(sim_artists) = crate::lastfm_api::get_similar_artists(&artist).await {
             for sim_art in sim_artists.iter().take(3) {
                 if let Ok(top_tracks) = crate::lastfm_api::get_artist_top_tracks(sim_art).await {
@@ -1486,15 +1508,20 @@ pub async fn get_youtube_autoplay_recommendations(
         }
     }
 
-    if tracks.is_empty() {
-        println!("[youtube] Autoplay endpoint returned no recommendations. Executing fallback search recommendations for artist: {}", artist);
-        let search_query = format!("{} similar songs recommendations", artist);
-        if let Ok(fallback_tracks) = search_youtube_internal(client, &api_key, &search_query, false).await {
-            tracks = fallback_tracks;
+    // Fallback if candidate generation returned very few tracks
+    if tracks.len() < 5 && !artist.is_empty() && artist != "Unknown Artist" {
+        println!("[youtube] Autoplay candidates under threshold. Executing targeted fallback search for artist: {}", artist);
+        let search_query = format!("{} official audio", artist);
+        if let Ok(fallback_tracks) = search_youtube_internal(&client, &api_key, &search_query, false).await {
+            for fb_track in fallback_tracks {
+                if !tracks.iter().any(|t| t.id == fb_track.id) {
+                    tracks.push(fb_track);
+                }
+            }
         }
     }
 
-    // Query recently played track titles/artists from db to exclude them
+    // Query recently played track titles/artists from db for taste weighting (not hard dropping)
     let recently_played: std::collections::HashSet<String> = {
         let mut plays = std::collections::HashSet::new();
         let conn = crate::safe_lock(&state.db);
@@ -1518,51 +1545,52 @@ pub async fn get_youtube_autoplay_recommendations(
 
     // ── AIDEO AUTOPLAY ENGINE V2 FILTER PIPELINE ──
     let _artist_lower = artist.to_lowercase();
+    let clean_seed_title = clean_title(&title);
     let mut filtered_tracks = Vec::new();
     let mut seen_titles = std::collections::HashSet::new();
 
     for track in tracks {
-        // 0. Drop recently played tracks
-        let clean_t = clean_title(&track.title);
-        let clean_a = track.artist.to_lowercase().trim().to_string();
-        let track_key = format!("{} - {}", clean_a, clean_t);
-        if recently_played.contains(&track_key) {
-            println!("[autoplay-filter] Drop recently played track (from DB match): '{}' by '{}'", track.title, track.artist);
+        // 0. Skip exact seed video ID
+        if track.id == resolved_video_id {
             continue;
         }
-        // 0. Instrumental/Third-Party Filter
+
+        // 1. Instrumental/Third-Party Filter
         if is_third_party_or_instrumental(&track.title, &track.artist) {
             println!("[autoplay-filter] Drop instrumental/third-party track: '{}' by '{}'", track.title, track.artist);
             continue;
         }
 
-        // 1. Semantic Noise Filter
+        // 2. Semantic Noise Filter
         if is_semantic_noise(&track.title, &title) {
             println!("[autoplay-filter] Drop semantic noise: '{}' by '{}'", track.title, track.artist);
             continue;
         }
 
-        // 2. Fuzzy Title De-duplication (Similarity >70% against seed title)
+        // 3. Precise Deduplication against Seed:
+        // Only drop if candidate is the exact same song by matching artist, or identical clean title with matching artist
+        let is_same_artist = artist_matches(&track.artist, &artist);
+        let clean_cand = clean_title(&track.title);
+        let is_same_title = clean_seed_title == clean_cand && !clean_cand.is_empty();
         let sim = fuzzy_title_similarity(&track.title, &title);
-        if sim > 0.70 {
-            println!("[autoplay-filter] Drop duplicate song: '{}' (Similarity: {:.2}%)", track.title, sim * 100.0);
+
+        if (is_same_artist && (sim > 0.65 || is_same_title)) || (is_same_title && is_same_artist) {
+            println!("[autoplay-filter] Drop duplicate seed song: '{}' by '{}' (Similarity: {:.2}%)", track.title, track.artist, sim * 100.0);
             continue;
         }
 
-        // 3. Track Duration Filter (Drop >15 mins / 900s)
+        // 4. Track Duration Filter (Drop >15 mins / 900s)
         let is_too_long = is_duration_too_long(&track.duration_raw);
-
         if is_too_long {
             println!("[autoplay-filter] Drop long-duration track: '{}' ({})", track.title, track.duration_raw);
             continue;
         }
 
-        // 4. De-duplicate clean titles inside the recommended list itself
-        let clean = clean_title(&track.title);
-        if seen_titles.contains(&clean) {
+        // 5. De-duplicate clean titles inside the recommended list itself
+        if seen_titles.contains(&clean_cand) {
             continue;
         }
-        seen_titles.insert(clean);
+        seen_titles.insert(clean_cand);
 
         filtered_tracks.push(track);
     }
@@ -1652,6 +1680,14 @@ pub async fn get_youtube_autoplay_recommendations(
             }
         }
 
+        // Soft penalty for recently played tracks (instead of hard dropping)
+        let clean_t = clean_title(&track.title);
+        let clean_a = track.artist.to_lowercase().trim().to_string();
+        let track_key = format!("{} - {}", clean_a, clean_t);
+        if recently_played.contains(&track_key) {
+            score -= 0.35;
+        }
+
         // Apply Multi-Armed Bandit (MAB) skip penalties/boosts based on database history
         if let Some(&(total, skipped)) = artist_skip_stats.get(&candidate_artist_lower) {
             if total >= 3 {
@@ -1684,26 +1720,42 @@ pub async fn get_youtube_autoplay_recommendations(
     // Curate queue with artist diversity constraints
     let mut final_queue = Vec::new();
     let mut artist_counts = std::collections::HashMap::new();
+    let same_artist_limit = match discovery_level.as_str() {
+        "familiarity" => 4,
+        "discovery" => 2,
+        _ => 3,
+    };
 
-    for (track, score) in scored_tracks {
+    for (track, score) in &scored_tracks {
         if final_queue.len() >= 8 {
             break;
         }
 
         let cand_artist = track.artist.clone();
         let current_count = *artist_counts.get(&cand_artist).unwrap_or(&0);
-        let same_artist_limit = if discovery_level == "familiarity" { 4 } else { 2 };
 
         if current_count < same_artist_limit {
             artist_counts.insert(cand_artist, current_count + 1);
             println!("[autoplay-scorer] Accepted '{}' by '{}' (Score: {:.2})", track.title, track.artist, score);
-            final_queue.push(track);
+            final_queue.push(track.clone());
         } else {
             println!("[autoplay-scorer] Capped artist repetitions for '{}' by '{}'", track.title, track.artist);
         }
     }
 
-    // Resolve durations for final curated 8 tracks concurrently!
+    // If final queue has fewer than 5 tracks, relax artist limit to backfill
+    if final_queue.len() < 5 {
+        for (track, _score) in &scored_tracks {
+            if final_queue.len() >= 8 {
+                break;
+            }
+            if !final_queue.iter().any(|t| t.id == track.id) {
+                final_queue.push(track.clone());
+            }
+        }
+    }
+
+    // Resolve durations for final curated tracks concurrently
     let mut duration_tasks = Vec::new();
     for (i, track) in final_queue.iter().enumerate() {
         if track.duration_raw == "0:00" {
@@ -3768,5 +3820,32 @@ mod tests {
         assert!(!is_duration_too_long(""));
         assert!(!is_duration_too_long("invalid:time:format"));
     }
+
+    #[test]
+    fn test_clean_title_and_similarity() {
+        assert_eq!(clean_title("Blinding Lights (Official Video)"), "blinding lights");
+        assert_eq!(clean_title("Stay feat. Justin Bieber"), "stay");
+        assert_eq!(clean_title("Save Your Tears [Live]"), "save your tears");
+
+        // High similarity for same song title variants
+        let sim1 = fuzzy_title_similarity("Blinding Lights", "Blinding Lights (Official Audio)");
+        assert!(sim1 > 0.80);
+
+        // Different songs with same title should not be dropped without artist match
+        assert_eq!(clean_title("Hello"), "hello");
+        assert!(!artist_matches("Adele", "Lionel Richie"));
+    }
+
+    #[test]
+    fn test_semantic_noise_and_third_party_filtering() {
+        assert!(is_semantic_noise("Song (Karaoke Version)", "Song"));
+        assert!(is_semantic_noise("Song - Instrumental", "Song"));
+        assert!(!is_semantic_noise("Song (Official Audio)", "Song"));
+
+        assert!(is_third_party_or_instrumental("Top 50 Hits Compilation 2024", "Unknown"));
+        assert!(is_third_party_or_instrumental("Best Chill Songs 2023", "Chill Nation"));
+        assert!(!is_third_party_or_instrumental("Blinding Lights", "The Weeknd"));
+    }
 }
+
 

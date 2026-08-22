@@ -1,7 +1,8 @@
 import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl } from '../utils';
+import { emit } from '@tauri-apps/api/event';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isStreamTrack } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 
 let isPolling = false;
@@ -131,19 +132,104 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   chromecast_scanning: false,
   chromecast_connected: false,
 
+  upnp_devices: [],
+  upnp_active_device: null,
+  upnp_scanning: false,
+  upnp_connected: false,
+
   updateDiscordPresence: () => {
-    const { playback, tracks, discordEnabled } = get();
+    const state = get();
+    const { playback, discordEnabled } = state;
     if (!discordEnabled) {
       invoke('clear_discord_presence').catch(console.error);
       return;
     }
-    if (!playback.current_track) {
+    if (!playback.current_track || playback.status === 'Stopped') {
       invoke('update_discord_presence', { details: "Idle", stateStr: "Browsing Library", isPlaying: false });
       return;
     }
-    const track = tracks.find(t => pathsEqual(t.path, playback.current_track));
-    const details = track?.title || 'Unknown Track';
-    const stateStr = `by ${track?.artist || 'Unknown Artist'}`;
+
+    const currentPath = playback.current_track;
+
+    // 1. Resolve track metadata with hierarchical priority:
+    // a. currentTrack in store (active playing track, virtual track, cloud track)
+    let track = state.currentTrack && pathsEqual(state.currentTrack.path, currentPath) ? state.currentTrack : null;
+
+    // b. tracks in library
+    if (!track) {
+      track = state.tracks.find(t => pathsEqual(t.path, currentPath)) || null;
+    }
+
+    // c. queue
+    if (!track) {
+      track = state.queue.find(t => pathsEqual(t.path, currentPath)) || null;
+    }
+
+    // d. play history
+    if (!track) {
+      track = state.playHistory.slice().reverse().find(t => t && pathsEqual(t.path, currentPath) && t.title && t.title !== 'Web Audio Stream') || null;
+    }
+
+    // e. onlineTrackCache by direct key or resolved hash/path equality
+    if (!track) {
+      if (onlineTrackCache.has(currentPath)) {
+        const cached = onlineTrackCache.get(currentPath);
+        if (cached && cached.title && cached.title !== 'Web Audio Stream') {
+          track = cached;
+        }
+      }
+      if (!track) {
+        for (const [key, cached] of onlineTrackCache.entries()) {
+          if (pathsEqual(key, currentPath) && cached && cached.title && cached.title !== 'Web Audio Stream') {
+            track = cached;
+            break;
+          }
+        }
+      }
+    }
+
+    let title = track?.title?.trim() || '';
+    let artist = track?.artist?.trim() || '';
+
+    const isOnline = currentPath.startsWith('http://') || currentPath.startsWith('https://');
+
+    // Handle generic / missing track titles
+    if (!title || title === 'Unknown Track' || title === 'Web Audio Stream' || title === 'Unknown Stream') {
+      if (isOnline) {
+        const meta = parseStreamMetadata(currentPath);
+        if (meta.title && meta.title !== 'Web Audio Stream' && meta.title !== 'Unknown Stream') {
+          title = meta.title;
+          if (!artist || artist === 'Unknown Artist' || artist === '—' || artist === 'Web Stream') {
+            artist = meta.artist;
+          }
+        } else {
+          title = getStreamName(currentPath);
+        }
+      } else {
+        const rawBase = baseName(currentPath);
+        title = rawBase.replace(/\.(mp3|flac|m4a|wav|ogg|aac|wma|opus|alac|aiff|ape|dsf|dff)$/i, '');
+      }
+    }
+
+    // Handle generic / missing artist
+    if (!artist || artist === 'Unknown Artist' || artist === '—' || artist === 'Web Stream' || artist === 'YouTube Audio') {
+      if (title && (title.includes(' - ') || title.includes(' — ') || title.includes(' : '))) {
+        const cleaned = cleanSearchQuery(artist, title);
+        if (cleaned.artist) {
+          artist = cleaned.artist;
+          if (cleaned.title) {
+            title = cleaned.title;
+          }
+        }
+      }
+      if (!artist || artist === 'Unknown Artist' || artist === '—' || artist === 'Web Stream' || artist === 'YouTube Audio') {
+        artist = isOnline ? 'Online Stream' : 'Unknown Artist';
+      }
+    }
+
+    const details = title || 'Unknown Track';
+    const stateStr = `by ${artist || 'Unknown Artist'}`;
+
     invoke('update_discord_presence', {
       details,
       stateStr,
@@ -161,6 +247,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
       if (get().chromecast_connected) {
         await invoke('chromecast_control', { action: 'pause' });
+      } else if (get().upnp_connected) {
+        await invoke('upnp_control', { action: 'pause' });
       } else {
         await invoke('pause_track');
         await invoke('update_media_playback', { playing: false });
@@ -195,6 +283,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
       if (state.chromecast_connected) {
         await invoke('chromecast_control', { action: 'resume' });
+      } else if (state.upnp_connected) {
+        await invoke('upnp_control', { action: 'play' });
       } else {
         await invoke('resume_track');
         await invoke('update_media_playback', { playing: true });
@@ -210,6 +300,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const current = get().playback.current_track;
       if (get().chromecast_connected) {
         await invoke('chromecast_control', { action: 'stop' });
+      } else if (get().upnp_connected) {
+        await invoke('upnp_control', { action: 'stop' });
       } else {
         await invoke('stop_track');
       }
@@ -237,6 +329,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       if (clampedVol > 0) {
         safeSetStorage('aideo_volume', String(clampedVol));
+      }
+      if (get().upnp_connected) {
+        await invoke('upnp_control', { action: 'volume', value: clampedVol * 100 });
       }
       await invoke('set_volume', { volume: clampedVol });
       set(s => ({
@@ -266,6 +361,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       if (get().chromecast_connected) {
         await invoke('chromecast_control', { action: 'seek', value: secs });
+      } else if (get().upnp_connected) {
+        await invoke('upnp_control', { action: 'seek', value: secs });
       } else {
         await invoke('seek_track', { secs });
       }
@@ -389,12 +486,16 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
 
       const currentPlayback = get().playback;
+      const statusChanged = currentPlayback.status !== status.status;
       if (
-        currentPlayback.status !== status.status ||
+        statusChanged ||
         Math.abs((currentPlayback.position_secs || 0) - (status.position_secs || 0)) >= 0.1 ||
         currentPlayback.volume !== status.volume
       ) {
         set(s => ({ playback: { ...s.playback, ...status } }));
+        if (statusChanged) {
+          get().updateDiscordPresence();
+        }
       }
 
       // Periodically sync media progress with OS Media Control Center (once every 1 second, or 5 ticks of 200ms)
@@ -411,6 +512,20 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         set({ networkTelemetry: status.network_telemetry });
       } else if (get().networkTelemetry !== null) {
         set({ networkTelemetry: null });
+      }
+
+      if (get().desktopLyricsOpen) {
+        emit('desktop-lyrics-sync', {
+          currentTrack: get().currentTrack,
+          playback: get().playback,
+          lyrics: get().lyrics,
+          lyricOffset: get().lyricOffset,
+          showRomaji: get().showRomaji,
+          showTranslation: get().showTranslation,
+          accentColor: get().accentColor,
+          desktopLyricsLocked: get().desktopLyricsLocked,
+          lyricsDisplayMode: get().lyricsDisplayMode,
+        }).catch(() => {});
       }
 
       if (!status.current_track && get().coverArt) {
@@ -780,7 +895,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         cover_url: metadata?.cover_url || null
       };
       await get().recordPlaybackTransition(virtualTrack);
-      onlineTrackCache.set(url, virtualTrack);
+      setOnlineTrackCache(url, virtualTrack);
       set({
         coverArt: metadata?.cover_url || null,
         accentColor: '#8b5cf6',
@@ -789,6 +904,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         currentTrack: virtualTrack,
         playback: { ...get().playback, current_track: url, status: 'Playing', position_secs: 0, last_skip_time: Date.now() },
       });
+      get().updateDiscordPresence();
 
       if (metadata?.cover_url) {
         if (metadata.cover_url.startsWith('http://') || metadata.cover_url.startsWith('https://')) {
@@ -854,6 +970,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         if (!pathsEqual(get().playback.current_track, url)) return;
         if (Array.isArray(lrc) && lrc.length > 0) {
           set({ lyrics: lrc, lyricStatus: 'found' });
+          const hasWordSync = lrc.some((l: any) => l.words && l.words.length > 0);
+          if (!hasWordSync && pathsEqual(get().playback.current_track, url)) {
+            get().autoFetchLyricsOnline(virtualTrack);
+          }
         } else {
           get().autoFetchLyricsOnline(virtualTrack);
         }
@@ -996,11 +1116,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   clearQueue: async () => {
     try {
       const currentTrack = get().currentTrack;
-      const isOnline = currentTrack && (
-        currentTrack.path.startsWith('http://') || 
-        currentTrack.path.startsWith('https://') || 
-        currentTrack.format === 'Tidal FLAC'
-      );
+      const isOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
       const isAutoplayEnabled = get().autoplayEnabled;
       
       const currentQueue = get().queue;
@@ -1219,6 +1335,78 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
     } catch (e) {
       console.error('Failed to disconnect from Chromecast:', e);
+    }
+  },
+
+  discoverUpnpDevices: async () => {
+    set({ upnp_scanning: true });
+    try {
+      const devices = await invoke<any[]>('upnp_discover');
+      set({ upnp_devices: devices, upnp_scanning: false });
+    } catch (e) {
+      console.error('Failed to discover UPnP devices:', e);
+      set({ upnp_scanning: false });
+    }
+  },
+
+  connectUpnpDevice: async (device: any) => {
+    try {
+      if (get().upnp_connected) {
+        await get().disconnectUpnpDevice();
+      }
+      if (get().chromecast_connected) {
+        await get().disconnectCastDevice();
+      }
+      
+      const activeTrack = get().currentTrack;
+      const startPos = get().playback.position_secs;
+
+      await invoke('upnp_connect', { deviceId: device.id });
+      await invoke('stop_track').catch(() => {});
+
+      set({
+        upnp_active_device: device.id,
+        upnp_connected: true,
+      });
+
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Connected to ${device.name} [Hi-Res Lossless DLNA]`, type: 'success' } 
+      }));
+
+      if (activeTrack) {
+        await get().playTrack(activeTrack, true, false, undefined, startPos);
+      }
+    } catch (e) {
+      console.error('Failed to connect to UPnP device:', e);
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: `Failed to connect to ${device.name}: ${e}`, type: 'error' } 
+      }));
+    }
+  },
+
+  disconnectUpnpDevice: async () => {
+    try {
+      const activeTrack = get().currentTrack;
+      const currentPos = get().playback.position_secs;
+      const wasPlaying = get().playback.status === 'Playing';
+
+      await invoke('upnp_disconnect');
+      set({
+        upnp_active_device: null,
+        upnp_connected: false,
+      });
+      window.dispatchEvent(new CustomEvent('ui-toast', { 
+        detail: { message: 'Disconnected from UPnP MediaRenderer', type: 'info' } 
+      }));
+
+      if (activeTrack) {
+        await get().playTrack(activeTrack, true, false, undefined, currentPos);
+        if (!wasPlaying) {
+          await get().pauseTrack();
+        }
+      }
+    } catch (e) {
+      console.error('Failed to disconnect UPnP device:', e);
     }
   },
 });

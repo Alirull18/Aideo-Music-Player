@@ -420,6 +420,61 @@ pub fn update_track_metadata(conn: &Connection, path: &str, title: &str, artist:
     Ok(())
 }
 
+pub fn update_track_tags(
+    conn: &Connection,
+    path: &str,
+    title: Option<&str>,
+    artist: Option<&str>,
+    album: Option<&str>,
+    track_number: Option<i32>,
+    disc_number: Option<i32>,
+) -> Result<Track> {
+    conn.execute(
+        "UPDATE tracks SET 
+            title = COALESCE(?1, title),
+            artist = COALESCE(?2, artist),
+            album = COALESCE(?3, album),
+            track_number = COALESCE(?4, track_number),
+            disc_number = COALESCE(?5, disc_number)
+         WHERE path = ?6",
+        rusqlite::params![title, artist, album, track_number, disc_number, path],
+    )?;
+    get_track_by_path(conn, path)
+}
+
+pub fn get_track_by_path(conn: &Connection, path: &str) -> Result<Track> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number 
+         FROM tracks WHERE path = ?1"
+    )?;
+    stmt.query_row(rusqlite::params![path], |row| {
+        let p: String = row.get(1)?;
+        let db_hash: Option<String> = row.get(16).ok();
+        let path_hash = db_hash.or_else(|| Some(format!("{:x}", md5::compute(p.as_bytes()))));
+        Ok(Track {
+            id: row.get(0)?,
+            path: p,
+            title: row.get(2)?,
+            artist: row.get(3)?,
+            album: row.get(4)?,
+            duration: row.get(5)?,
+            format: row.get(6)?,
+            lyric_offset: row.get(7).unwrap_or(0),
+            loved: Some(row.get(8).unwrap_or(0)),
+            disliked: Some(row.get(9).unwrap_or(0)),
+            cover_url: row.get(10).ok(),
+            path_hash,
+            bpm: row.get(11).ok(),
+            energy: row.get(12).ok(),
+            bass_ratio: row.get(13).ok(),
+            treble_ratio: row.get(14).ok(),
+            replaygain_gain: row.get(15).ok(),
+            track_number: row.get(17).ok(),
+            disc_number: row.get(18).ok(),
+        })
+    })
+}
+
 pub fn update_track_offset(conn: &Connection, path: &str, offset: i32) -> Result<()> {
     conn.execute(
         "UPDATE tracks SET lyric_offset = ?1 WHERE path = ?2",

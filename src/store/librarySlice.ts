@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl } from '../utils';
+import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
@@ -10,10 +10,7 @@ import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
 let isTransitioning = false;
 let lastPlayedPathFromUI: string | null = null;
 let isSkipping = false;
-
-const isStreamTrack = (path: string, format?: string | null): boolean => {
-  return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
-};
+let autoplayReqSeq = 0;
 
 let metadataFetchSeq = 0;
 
@@ -87,6 +84,10 @@ const fetchTrackMetadataAndLyrics = async (
     duration: track.duration || 0,
   }).catch(() => { });
 
+  if (isCurrent()) {
+    get().updateDiscordPresence();
+  }
+
   if (!isOnline && !track.cover_url) {
     invoke('get_cover_art', { path }).then(async (art: any) => {
       if (!isCurrent()) return;
@@ -116,6 +117,10 @@ const fetchTrackMetadataAndLyrics = async (
     if (!isCurrent()) return;
     if (Array.isArray(lrc) && lrc.length > 0) {
       set({ lyrics: lrc, lyricStatus: 'found' });
+      const hasWordSync = lrc.some((l: any) => l.words && l.words.length > 0);
+      if (!hasWordSync && isCurrent()) {
+        get().autoFetchLyricsOnline(track);
+      }
     } else {
       if (isCurrent()) get().autoFetchLyricsOnline(track);
     }
@@ -338,7 +343,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       });
     }
     
-    const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
+    const isOnline = isStreamTrack(track.path, track.format);
     let isCached = false;
     if (isOnline) {
       try {
@@ -400,7 +405,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       const isHttpUrl = track.path.startsWith('http://') || track.path.startsWith('https://');
       if (isHttpUrl) {
-        onlineTrackCache.set(track.path, track);
+        setOnlineTrackCache(track.path, track);
       }
 
       localStorage.setItem('aideo_current_track', JSON.stringify(track));
@@ -489,7 +494,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       get().triggerAutoplayRadio(track, forceResetAutoplay);
 
       // Filter out autoplay recommendations from the queue if autoplay is disabled or if playing a local track
-      const isTrackOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
+      const isTrackOnline = isStreamTrack(track.path, track.format);
       if (!get().autoplayEnabled || !isTrackOnline) {
         const currentQueue = get().queue;
         const filtered = currentQueue.filter(t => !t.is_autoplay);
@@ -743,7 +748,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
 
       // Prevent cloud/online streams from falling back to local files, and trigger Autoplay Loop if enabled
-      const isCurrentTrackOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC';
+      const isCurrentTrackOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
       if (isCurrentTrackOnline) {
         if (get().autoplayEnabled && currentTrack) {
           window.dispatchEvent(new CustomEvent('ui-toast', { 
@@ -751,171 +756,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           }));
 
           try {
-            let recommendedTracks: Track[] = [];
-            const seedTrack = get().autoplaySeedTrack || currentTrack;
-            const isTidal = seedTrack.format === 'Tidal FLAC' || seedTrack.path.includes('api.tidal.com');
-
-            if (isTidal) {
-              let trackId = seedTrack.path;
-              if (trackId.startsWith('http')) {
-                const parts = trackId.split('/');
-                trackId = parts[parts.length - 1] || trackId;
-              }
-              const tracks = await invoke<any[]>('get_tidal_autoplay_recommendations', {
-                artist: seedTrack.artist || 'Unknown Artist',
-                title: seedTrack.title || 'Unknown Title'
-              });
-              recommendedTracks = tracks.map(t => ({
-                id: -20000 - Number(t.id),
-                path: t.id,
-                title: t.title,
-                artist: t.artist,
-                duration: t.duration,
-                format: 'Tidal FLAC',
-                lyric_offset: 0,
-                cover_url: t.cover_url,
-                is_autoplay: true
-              }));
-            } else {
-              let videoId = '';
-              const match = seedTrack.path.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/);
-              if (match && match[1]) {
-                videoId = match[1];
-              } else if (seedTrack.path.startsWith('http')) {
-                const urlParts = seedTrack.path.split(/[=]/);
-                if (urlParts.length > 1) videoId = urlParts.pop() || '';
-              }
-
-              const tracksState = get().tracks;
-              const playCountsState = get().playCounts;
-              const artistPlayCounts: Record<string, number> = {};
-              tracksState.forEach(t => {
-                if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio' && t.artist !== 'Web Audio Stream') {
-                  const count = playCountsState[t.path] || 0;
-                  if (count > 0) {
-                    artistPlayCounts[t.artist] = (artistPlayCounts[t.artist] || 0) + count;
-                  }
-                }
-              });
-
-              const topArtists = Object.entries(artistPlayCounts)
-                .sort((a, b) => b[1] - a[1])
-                .map(entry => entry[0])
-                .slice(0, 5);
-
-              if (topArtists.length === 0) {
-                const artistFrequencies: Record<string, number> = {};
-                tracksState.forEach(t => {
-                  if (t.artist && t.artist !== 'Unknown Artist' && t.artist !== 'YouTube Audio' && t.artist !== 'Web Audio Stream') {
-                    artistFrequencies[t.artist] = (artistFrequencies[t.artist] || 0) + 1;
-                  }
-                });
-                const mostFrequent = Object.entries(artistFrequencies)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(entry => entry[0])
-                  .slice(0, 5);
-                topArtists.push(...mostFrequent);
-              }
-
-              const libraryArtists = Array.from(new Set(
-                tracksState
-                  .map(t => t.artist)
-                  .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio' && a !== 'Web Audio Stream')
-              ));
-
-              const discoveryLevel = get().autoplayDiscoveryLevel;
-
-              const tracks = await invoke<any[]>('get_youtube_autoplay_recommendations', {
-                videoId,
-                artist: seedTrack.artist || 'Unknown Artist',
-                title: seedTrack.title || 'Unknown Title',
-                topArtists,
-                libraryArtists,
-                discoveryLevel,
-                autoplayAlgorithm: get().autoplayAlgorithm || 'v2'
-              });
-
-              const parseDuration = (raw: string): number => {
-                if (!raw) return 180;
-                const parts = raw.split(':').map(Number);
-                if (parts.some(isNaN)) return 180;
-                let secs = 0;
-                if (parts.length === 3) {
-                  secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
-                } else if (parts.length === 2) {
-                  secs = parts[0] * 60 + parts[1];
-                } else {
-                  secs = parts[0] || 0;
-                }
-                return secs > 0 ? secs : 180;
-              };
-
-              recommendedTracks = tracks.map((t, idx) => ({
-                id: -30000 - Math.floor(Math.random() * 1000000) - idx,
-                path: t.url,
-                title: t.title,
-                artist: t.artist,
-                duration: parseDuration(t.duration_raw),
-                format: 'YouTube Direct',
-                lyric_offset: 0,
-                cover_url: t.cover_url,
-                is_autoplay: true
-              }));
-            }
-
-            // Filter out previously played tracks in current autoplay session, currently playing track, already queued tracks, and disliked tracks
-            const playedSet = new Set(get().autoplaySessionHistory.map(t => t.path));
-            const queuedSet = new Set(get().queue.map(t => t.path));
-            const dislikedSet = new Set(get().tracks.filter(t => t.disliked === 1).map(t => t.path));
-            const currentTrackPath = currentTrack?.path;
-
-            const cleanText = (str: string | null) => {
-              if (!str) return '';
-              let val = str.toLowerCase();
-              val = val.replace(/[\(\[][^\)\]]+[\)\]]/g, '');
-              val = val.replace(/\s+(feat|ft|featuring|official\s+audio|official\s+video).*$/i, '');
-              return val.trim();
-            };
-
-            const playedTitleArtistSet = new Set(
-              get().autoplaySessionHistory.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
-            );
-
-            const queuedTitleArtistSet = new Set(
-              get().queue.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
-            );
-
-            let finalRecommended = recommendedTracks.filter(t => 
-              !playedSet.has(t.path) && 
-              !queuedSet.has(t.path) && 
-              !dislikedSet.has(t.path) &&
-              t.path !== currentTrackPath &&
-              !playedTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
-              !queuedTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`)
-            );
-
-            if (finalRecommended.length === 0) {
-              finalRecommended = recommendedTracks.filter(t => 
-                !queuedSet.has(t.path) && 
-                !dislikedSet.has(t.path) &&
-                t.path !== currentTrackPath
-              );
-            }
-
-            if (finalRecommended.length === 0) {
-              finalRecommended = recommendedTracks.filter(t => !dislikedSet.has(t.path));
-            }
-
-            if (finalRecommended.length === 0) {
-              finalRecommended = recommendedTracks;
-            }
-
-            if (finalRecommended.length > 0) {
-              // Append top 10 recommended tracks to the queue
-              for (const rt of finalRecommended.slice(0, 10)) {
-                await get().addToQueue(rt);
-              }
-              // Play the first one immediately!
+            await get().triggerAutoplayRadio(currentTrack, true);
+            const newQueue = get().queue;
+            if (newQueue.length > 0) {
               await get().playFromQueue(0);
               return;
             }
@@ -932,7 +775,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         }
       }
 
-      const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC';
+      const isCurrentOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
       const activeTracks = isCurrentOnline
         ? tracks.filter(t => isStreamTrack(t.path, t.format))
         : tracks.filter(t => !isStreamTrack(t.path, t.format));
@@ -976,7 +819,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       return queue[0];
     }
 
-    const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC' || currentTrack?.format === 'YouTube Direct';
+    const isCurrentOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
     const activeTracks = isCurrentOnline
       ? tracks.filter(t => isStreamTrack(t.path, t.format))
       : tracks.filter(t => !isStreamTrack(t.path, t.format));
@@ -1015,7 +858,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           result.push(currentTrack);
         }
       } else {
-        const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://') || currentTrack?.format === 'Tidal FLAC' || currentTrack?.format === 'YouTube Direct';
+        const isCurrentOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
         const activeTracks = isCurrentOnline
           ? tracks.filter(t => isStreamTrack(t.path, t.format))
           : tracks.filter(t => !isStreamTrack(t.path, t.format));
@@ -1048,7 +891,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     for (const track of nextTracks) {
       if (!track) continue;
       
-      const isOnline = track.path.startsWith('http://') || track.path.startsWith('https://') || track.format === 'Tidal FLAC' || track.format === 'YouTube Direct';
+      const isOnline = isStreamTrack(track.path, track.format);
       if (!isOnline) continue;
 
       if (track.path.includes("youtube.com") || track.path.includes("youtu.be") || track.format === 'YouTube Direct') {
@@ -1101,7 +944,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
       
       // Fallback: sequential previous from active library
-      const isCurrentOnline = currentTrack?.path.startsWith('http://') || currentTrack?.path.startsWith('https://');
+      const isCurrentOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
       const activeTracks = isCurrentOnline
         ? tracks.filter(t => isStreamTrack(t.path, t.format))
         : tracks.filter(t => !isStreamTrack(t.path, t.format));
@@ -1127,11 +970,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   triggerAutoplayRadio: async (track: Track, forceReset = false) => {
-    // Lock to the original user-clicked seed track to keep the radio centered on the same vibe!
-    const seedTrack = get().autoplaySeedTrack || track;
+    // Dynamic seed: use the clicked track if forceReset, otherwise evolve using the current playing track
+    const seedTrack = forceReset ? track : (track || get().currentTrack || get().autoplaySeedTrack);
     if (!seedTrack) return;
-    const isCurrentTrackOnline = seedTrack.path.startsWith('http://') || seedTrack.path.startsWith('https://') || seedTrack.format === 'Tidal FLAC';
+    const isCurrentTrackOnline = isStreamTrack(seedTrack.path, seedTrack.format);
     if (!isCurrentTrackOnline || !get().autoplayEnabled) return;
+
+    const currentReqSeq = ++autoplayReqSeq;
 
     try {
       console.log(`[autoplay] Generating upcoming radio queue using seed: '${seedTrack.title}' by '${seedTrack.artist}'...`);
@@ -1143,25 +988,28 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           artist: seedTrack.artist || 'Unknown Artist',
           title: seedTrack.title || 'Unknown Title'
         });
-        recommendedTracks = tracks.map(t => ({
-          id: -20000 - Number(t.id),
-          path: t.id,
-          title: t.title,
-          artist: t.artist,
-          duration: t.duration,
-          format: 'Tidal FLAC',
-          lyric_offset: 0,
-          cover_url: t.cover_url,
-          is_autoplay: true
-        }));
+        if (Array.isArray(tracks)) {
+          recommendedTracks = tracks.map(t => ({
+            id: -20000 - Number(t.id || 0),
+            path: t.id,
+            title: t.title || 'Unknown Title',
+            artist: t.artist || 'Unknown Artist',
+            duration: t.duration || 180,
+            format: 'Tidal FLAC',
+            lyric_offset: 0,
+            cover_url: t.cover_url || null,
+            is_autoplay: true
+          }));
+        }
       } else {
         let videoId = '';
-        const match = seedTrack.path.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/);
-        if (match && match[1]) {
-          videoId = match[1];
-        } else if (seedTrack.path.startsWith('http')) {
-          const urlParts = seedTrack.path.split(/[=]/);
-          if (urlParts.length > 1) videoId = urlParts.pop() || '';
+        if (/^[a-zA-Z0-9_-]{11}$/.test(seedTrack.path)) {
+          videoId = seedTrack.path;
+        } else {
+          const match = seedTrack.path.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/);
+          if (match && match[1]) {
+            videoId = match[1];
+          }
         }
 
         const tracksState = get().tracks;
@@ -1229,17 +1077,25 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           return secs > 0 ? secs : 180;
         };
 
-        recommendedTracks = tracks.map((t, idx) => ({
-          id: -30000 - Math.floor(Math.random() * 1000000) - idx,
-          path: t.url,
-          title: t.title,
-          artist: t.artist,
-          duration: parseDuration(t.duration_raw),
-          format: 'YouTube Direct',
-          lyric_offset: 0,
-          cover_url: t.cover_url,
-          is_autoplay: true
-        }));
+        if (Array.isArray(tracks)) {
+          recommendedTracks = tracks.map((t, idx) => ({
+            id: -30000 - Math.floor(Math.random() * 1000000) - idx,
+            path: t.url,
+            title: t.title || 'Unknown Title',
+            artist: t.artist || 'Unknown Artist',
+            duration: parseDuration(t.duration_raw),
+            format: 'YouTube Direct',
+            lyric_offset: 0,
+            cover_url: t.cover_url || null,
+            is_autoplay: true
+          }));
+        }
+      }
+
+      // If a newer autoplay request has already been issued, discard this stale result
+      if (currentReqSeq !== autoplayReqSeq) {
+        console.log('[autoplay] Stale recommendation request superseded, skipping queue update.');
+        return;
       }
 
       const currentQueue = get().queue;
@@ -1291,17 +1147,21 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
       if (finalRecommended.length === 0) {
         finalRecommended = recommendedTracks.filter(t => 
-          !existingPaths.has(t.path) &&
+          !existingPaths.has(t.path) && 
           !existingTitleArtistSet.has(`${cleanText(t.artist)} - ${cleanText(t.title)}`) &&
           !dislikedSet.has(t.path)
         );
       }
       if (finalRecommended.length === 0) {
-        finalRecommended = recommendedTracks.filter(t => !dislikedSet.has(t.path));
+        finalRecommended = recommendedTracks.filter(t => !dislikedSet.has(t.path) && t.path !== currentTrackPath);
       }
 
       const needed = Math.max(0, 10 - existingAutoplay.length);
       const toAppend = finalRecommended.slice(0, needed);
+
+      if (toAppend.length === 0 && !forceReset) {
+        return;
+      }
 
       const newQueue = [...manualQueue, ...existingAutoplay, ...toAppend];
       set({ queue: newQueue });

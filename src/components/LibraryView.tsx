@@ -4,7 +4,7 @@ import { chainQueueOperation } from '../store/playbackSlice';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe, GripVertical, ArrowUp, ArrowDown, Play } from 'lucide-react';
+import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe, GripVertical, ArrowUp, ArrowDown, Play, Tag } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { Track, Playlist } from '../store/types';
 import { useVirtualList } from '../utils/useVirtualList';
@@ -568,6 +568,19 @@ const TrackRow = memo(({
                   </div>
 
                   <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
+                  <div
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setMenuOpenFor(null); 
+                      useStore.getState().setTagEditorTrack(t);
+                    }}
+                    style={{ padding: '10px 14px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(139, 92, 246, 0.15)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <Tag size={14} />
+                    Edit Audio Tags (ID3 / FLAC)
+                  </div>
                   <div
                     onClick={(e) => { 
                       e.stopPropagation(); 
@@ -2340,6 +2353,20 @@ export function LibraryView() {
             >
               <Heart size={13} color="#ef4444" />
               Favorite All
+            </button>
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+                if (selected.length > 0) {
+                  useStore.getState().setTagEditorBatchTracks(selected);
+                }
+              }}
+              style={{ padding: '6px 14px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, borderRadius: 10, cursor: 'pointer' }}
+            >
+              <Tag size={13} />
+              Edit Tags
             </button>
 
             <button

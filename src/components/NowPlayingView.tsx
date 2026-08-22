@@ -1,8 +1,7 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { invoke } from '@tauri-apps/api/core';
-import { MessageSquare, Activity, Maximize2, Heart, ThumbsDown, CheckCircle2 } from 'lucide-react';
+import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
@@ -22,10 +21,12 @@ const isRadioStream = (track: any): boolean => {
 
 export function NowPlayingView() {
   const { 
-    playback, currentDevice, coverArt, accentColor, dsp, 
+    playback, currentDevice, coverArt, dsp, 
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
     setView, toggleLoveTrack, toggleDislikeTrack, toggleControlCenter,
-    albumArtFit, cachedCloudHashes, setLibrarySearchQuery
+    albumArtFit, cachedCloudHashes, setLibrarySearchQuery,
+    desktopLyricsOpen, toggleDesktopLyrics, desktopLyricsLocked, toggleDesktopLyricsLocked,
+    setMiniPlayerMode
   } = useStore();
   const current = currentTrack;
 
@@ -36,49 +37,6 @@ export function NowPlayingView() {
   }, [current, cachedCloudHashes]);
 
   const [showLyrics, setShowLyrics] = useState(true);
-
-  useEffect(() => {
-    const themeMode = localStorage.getItem('aideo-theme-mode');
-    if (themeMode === 'preset') {
-      const pc = localStorage.getItem('aideo-preset-color') || '#8b5cf6';
-      const pr = localStorage.getItem('aideo-preset-rgb') || '139, 92, 246';
-      document.documentElement.style.setProperty('--dynamic-accent', pc);
-      document.documentElement.style.setProperty('--accent-rgb', pr);
-      return;
-    } else if (themeMode === 'windows') {
-      invoke('get_windows_accent_color')
-        .then((color: any) => {
-          document.documentElement.style.setProperty('--dynamic-accent', color);
-          let r = 139, g = 92, b = 246;
-          if (color.startsWith('#')) {
-            const hex = color.replace('#', '');
-            r = parseInt(hex.substring(0, 2), 16);
-            g = parseInt(hex.substring(2, 4), 16);
-            b = parseInt(hex.substring(4, 6), 16);
-          }
-          document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`);
-        })
-        .catch((err: any) => console.error("Failed to fetch Windows accent color:", err));
-      return;
-    }
-
-    document.documentElement.style.setProperty('--dynamic-accent', accentColor);
-    
-    let r = 139, g = 92, b = 246;
-    if (accentColor.startsWith('rgb')) {
-      const m = accentColor.match(/\d+/g);
-      if (m && m.length >= 3) {
-        r = parseInt(m[0]); g = parseInt(m[1]); b = parseInt(m[2]);
-      }
-    } else if (accentColor.startsWith('#')) {
-      const hex = accentColor.replace('#', '');
-      r = parseInt(hex.substring(0, 2), 16);
-      g = parseInt(hex.substring(2, 4), 16);
-      b = parseInt(hex.substring(4, 6), 16);
-    }
-    
-    document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`);
-  }, [accentColor]);
 
   if (!playback.current_track) {
     return (
@@ -181,6 +139,92 @@ export function NowPlayingView() {
             }}
           >
             <Activity size={16} />
+          </button>
+
+          {/* Floating Transparent Desktop Lyric Bar Toggle Button */}
+          <button
+            onClick={() => toggleDesktopLyrics()}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              toggleDesktopLyricsLocked();
+            }}
+            title={desktopLyricsOpen ? (desktopLyricsLocked ? "Desktop Lyrics: Locked (Right-click to Unlock)" : "Desktop Lyrics: Open (Right-click to Lock)") : "Open Floating Desktop Lyric Bar"}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: desktopLyricsOpen ? '1px solid rgba(var(--accent-rgb), 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+              background: desktopLyricsOpen ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255, 255, 255, 0.03)',
+              color: desktopLyricsOpen ? 'var(--accent)' : 'var(--text-dim)',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+              boxShadow: desktopLyricsOpen ? '0 0 10px rgba(var(--accent-rgb), 0.25)' : 'none',
+              position: 'relative'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.08)';
+              if (!desktopLyricsOpen) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)';
+                e.currentTarget.style.color = 'white';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              if (!desktopLyricsOpen) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                e.currentTarget.style.color = 'var(--text-dim)';
+              }
+            }}
+          >
+            <Tv2 size={16} />
+            {desktopLyricsOpen && desktopLyricsLocked && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: '#10b981',
+                  boxShadow: '0 0 6px #10b981',
+                }}
+              />
+            )}
+          </button>
+
+          {/* Mini Player Toggle Button */}
+          <button
+            onClick={() => setMiniPlayerMode(true)}
+            title="Switch to Mini Player Mode"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(255, 255, 255, 0.03)',
+              color: 'var(--text-dim)',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.08)';
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)';
+              e.currentTarget.style.color = 'white';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+              e.currentTarget.style.color = 'var(--text-dim)';
+            }}
+          >
+            <Minimize2 size={16} />
           </button>
 
           {/* Theater Fullscreen Toggle Button */}

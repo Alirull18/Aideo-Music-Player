@@ -62,10 +62,75 @@ export interface Playlist {
   name: string;
 }
 
+export interface AudioTagData {
+  path: string;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  album_artist?: string | null;
+  year?: string | null;
+  genre?: string | null;
+  track_number?: number | null;
+  track_total?: number | null;
+  disc_number?: number | null;
+  disc_total?: number | null;
+  comment?: string | null;
+  lyrics?: string | null;
+  cover_data_url?: string | null;
+  format?: string | null;
+  duration_secs?: number | null;
+  bitrate?: number | null;
+  sample_rate?: number | null;
+  channels?: number | null;
+}
+
+export interface AudioTagUpdate {
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  album_artist?: string | null;
+  year?: string | null;
+  genre?: string | null;
+  track_number?: number | null;
+  track_total?: number | null;
+  disc_number?: number | null;
+  disc_total?: number | null;
+  comment?: string | null;
+  lyrics?: string | null;
+  cover_base64?: string | null;
+  remove_cover?: boolean | null;
+}
+
+export interface AudioTagBatchUpdate {
+  artist?: string | null;
+  album?: string | null;
+  album_artist?: string | null;
+  year?: string | null;
+  genre?: string | null;
+  comment?: string | null;
+  cover_base64?: string | null;
+  remove_cover?: boolean | null;
+}
+
+export interface UpnpDevice {
+  id: string;
+  name: string;
+  manufacturer: string;
+  model_name: string;
+  location: string;
+  ip: string;
+  av_transport_url?: string | null;
+  rendering_control_url?: string | null;
+  is_connected: boolean;
+}
+
 export interface LyricWord {
   time_secs: number;
+  duration_secs?: number;
   text: string;
 }
+
+export type LyricsDisplayMode = 'karaoke' | 'line_sync' | 'static';
 
 export interface LyricLine {
   time_secs: number;
@@ -191,6 +256,7 @@ export interface PlayerState {
   lyrics: LyricLine[];
   lyricOffset: number;
   lyricStatus: 'idle' | 'loading' | 'found' | 'not_found';
+  lyricsDisplayMode: LyricsDisplayMode;
   coverArt: string | null;
   accentColor: string;
   showProMode: boolean;
@@ -207,6 +273,7 @@ export interface PlayerState {
   isTranslating: boolean;
   showRomaji: boolean;
   showTranslation: boolean;
+  showLyricsHeader: boolean;
   scrobbleEnabled: boolean;
   lastfmSessionKey: string | null;
   lastfmToken: string | null;
@@ -236,9 +303,30 @@ export interface PlayerState {
   chromecast_scanning: boolean;
   chromecast_connected: boolean;
 
+  // Lossless UPnP / DLNA State
+  upnp_devices: UpnpDevice[];
+  upnp_active_device: string | null;
+  upnp_scanning: boolean;
+  upnp_connected: boolean;
+
+  // Tag Editor State
+  tagEditorTrack: Track | null;
+  tagEditorBatchTracks: Track[];
+
+  // Desktop Lyrics State
+  desktopLyricsOpen: boolean;
+  desktopLyricsLocked: boolean;
+
   // actions
   setCustomPrompt: (prompt: Partial<CustomPromptState>) => void;
   setCoverArtModalTrack: (track: Track | null) => void;
+  setTagEditorTrack: (track: Track | null) => void;
+  setTagEditorBatchTracks: (tracks: Track[]) => void;
+  toggleDesktopLyrics: () => Promise<void>;
+  toggleDesktopLyricsLocked: () => Promise<void>;
+  discoverUpnpDevices: () => Promise<void>;
+  connectUpnpDevice: (device: UpnpDevice) => Promise<void>;
+  disconnectUpnpDevice: () => Promise<void>;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
   setView: (view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts') => void;
@@ -271,6 +359,8 @@ export interface PlayerState {
   setLastFmSession: (key: string | null) => void;
   setShowRomaji: (val: boolean) => void;
   setShowTranslation: (val: boolean) => void;
+  setShowLyricsHeader: (val: boolean) => void;
+  toggleLyricsHeader: () => void;
   scanLibrary: () => Promise<void>;
   loadLibrary: () => Promise<void>;
   deleteTrack: (path: string) => Promise<void>;
@@ -320,6 +410,7 @@ export interface PlayerState {
   setPlaybackRate: (rate: number) => Promise<void>;
   adjustLyricOffset: (ms: number) => void;
   setLyricOffset: (ms: number) => void;
+  setLyricsDisplayMode: (mode: LyricsDisplayMode) => void;
   saveLyrics: (path: string, lrc: string) => Promise<void>;
   autoFetchLyricsOnline: (track: Track) => Promise<void>;
   translateLyrics: () => Promise<void>;
@@ -448,7 +539,18 @@ export interface PlayerState {
   // Album Art Fit Mode
   albumArtFit: 'cover' | 'contain';
   setAlbumArtFit: (fit: 'cover' | 'contain') => void;
+
+  // Player Bar Design Layout
+  playerBarDesign: PlayerBarDesign;
+  setPlayerBarDesign: (design: PlayerBarDesign) => void;
+
+  // Player Bar Transparency (Glassmorphism)
+  playerBarTransparent: boolean;
+  setPlayerBarTransparent: (transparent: boolean) => void;
+  togglePlayerBarTransparent: () => void;
 }
+
+export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 'vinyl';
 
 function rgbToHsl(r: number, g: number, b: number) {
   r /= 255; g /= 255; b /= 255;
@@ -499,10 +601,13 @@ function hslToRgb(h: number, s: number, l: number) {
   };
 }
 
-export function extractDominantColor(dataUrl: string): Promise<string> {
+export function extractDominantColor(dataUrl: string | null | undefined): Promise<string> {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.trim()) {
+    return Promise.resolve('#8b5cf6');
+  }
   return new Promise((resolve) => {
     const img = new Image();
-    if (dataUrl && !dataUrl.startsWith('data:')) {
+    if (!dataUrl.startsWith('data:')) {
       img.crossOrigin = 'anonymous';
     }
     img.onload = () => {
