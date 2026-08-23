@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
-import { PlayerBarDesign } from '../store/types';
+import { PlayerBarDesign, AideoPageDesign } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -11,7 +11,7 @@ import {
   Settings, Library, Radio, FolderSearch, RefreshCw, DownloadCloud, 
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
-  Disc, Layers, Activity, Minus
+  Disc, Layers, Activity, Minus, LayoutGrid
 } from 'lucide-react';
 
 interface PresetTheme {
@@ -57,8 +57,8 @@ function SlidingSwitch({ checked, onChange }: SlidingSwitchProps) {
         width: 44,
         height: 24,
         borderRadius: 12,
-        background: checked ? 'var(--dynamic-accent, #8b5cf6)' : 'rgba(255, 255, 255, 0.08)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        background: checked ? 'var(--dynamic-accent, #8b5cf6)' : 'var(--glass-h)',
+        border: '1px solid var(--glass-border)',
         padding: 2,
         cursor: 'pointer',
         display: 'flex',
@@ -113,7 +113,9 @@ export function SettingsView() {
     albumArtFit, setAlbumArtFit,
     globalHotkeys, setGlobalHotkey,
     playerBarDesign, setPlayerBarDesign,
-    playerBarTransparent, togglePlayerBarTransparent, setPlayerBarTransparent
+    aideoPageDesign, setAideoPageDesign,
+    playerBarTransparent, togglePlayerBarTransparent, setPlayerBarTransparent,
+    discoveryLayout, setDiscoveryLayout
   } = useStore(useShallow(s => ({
     scanDirs: s.scanDirs,
     addScanDir: s.addScanDir,
@@ -191,8 +193,12 @@ export function SettingsView() {
     setGlobalHotkey: s.setGlobalHotkey,
     playerBarDesign: s.playerBarDesign,
     setPlayerBarDesign: s.setPlayerBarDesign,
+    aideoPageDesign: s.aideoPageDesign,
+    setAideoPageDesign: s.setAideoPageDesign,
     playerBarTransparent: s.playerBarTransparent,
     togglePlayerBarTransparent: s.togglePlayerBarTransparent,
+    discoveryLayout: s.discoveryLayout,
+    setDiscoveryLayout: s.setDiscoveryLayout,
     setPlayerBarTransparent: s.setPlayerBarTransparent,
   })));
 
@@ -289,6 +295,7 @@ export function SettingsView() {
     setShortcut('volumeDown', 'ArrowDown');
     setShortcut('dspBypass', 'b');
     setShortcut('mute', 'm');
+    setShortcut('fullscreenToggle', 'F11');
     window.dispatchEvent(new CustomEvent('ui-toast', { 
       detail: { message: 'Keyboard shortcuts restored to defaults', type: 'info' } 
     }));
@@ -627,7 +634,7 @@ export function SettingsView() {
                 style={{ position: 'relative' }}
               >
                 <label style={{ display: 'flex', width: '100%', height: '100%', cursor: 'pointer', alignItems: 'center', gap: 10 }}>
-                  <div className="settings-chip-color" style={{ backgroundColor: customColor, border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div className="settings-chip-color" style={{ backgroundColor: customColor, border: '1px solid var(--glass-border)' }}>
                     <Plus size={10} color="white" />
                   </div>
                   <div className="settings-chip-info">
@@ -771,7 +778,8 @@ export function SettingsView() {
             { id: 'volumeUp', label: 'Volume Up' },
             { id: 'volumeDown', label: 'Volume Down' },
             { id: 'mute', label: 'Mute / Unmute' },
-            { id: 'dspBypass', label: 'DSP A/B Bypass Toggle' }
+            { id: 'dspBypass', label: 'DSP A/B Bypass Toggle' },
+            { id: 'fullscreenToggle', label: 'Toggle Fullscreen Window' }
           ].map(action => {
             const isRecording = recordingAction === action.id;
             return (
@@ -837,7 +845,7 @@ export function SettingsView() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Core Locked Features Info (Excluded) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, background: 'rgba(255,255,255,0.02)', padding: '12px 16px', borderRadius: 10, border: '1px solid var(--glass-border)', marginBottom: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, background: 'var(--glass)', padding: '12px 16px', borderRadius: 10, border: '1px solid var(--glass-border)', marginBottom: 6 }}>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
                 <strong style={{ color: 'var(--text)', display: 'block', marginBottom: 4 }}>Locked Core Views:</strong>
                 Library, Aideo, Aideo Search, Now Playing
@@ -860,7 +868,7 @@ export function SettingsView() {
             </div>
 
             {/* ListenBrainz Visibility Switch */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid var(--glass-border)' }}>
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>ListenBrainz Tab</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show/hide your ListenBrainz scrobbling feed and recommendations.</div>
@@ -874,7 +882,7 @@ export function SettingsView() {
             </div>
 
             {/* Smart Mix Builder Visibility Switch */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid var(--glass-border)' }}>
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Smart Mix Builder</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show or hide the smart playlist builder card in the Aideo tab.</div>
@@ -925,7 +933,7 @@ export function SettingsView() {
                 justifyContent: 'space-between', 
                 alignItems: 'center', 
                 padding: '8px 4px', 
-                borderTop: '1px solid rgba(255,255,255,0.04)',
+                borderTop: '1px solid var(--glass-border)',
                 opacity: notificationsEnabled ? 1 : 0.5,
                 transition: 'opacity 0.2s',
                 pointerEvents: notificationsEnabled ? 'auto' : 'none'
@@ -986,7 +994,7 @@ export function SettingsView() {
                 <strong>Aspect Fit (Contain with Ambient Blur)</strong> displays non-square covers completely without cropping and renders a smooth blurred ambient backdrop. <strong>Aspect Fill (Cover)</strong> crops the artwork to fill the entire square container.
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 6, background: 'rgba(255, 255, 255, 0.05)', padding: 4, borderRadius: 10 }}>
+            <div style={{ display: 'flex', gap: 6, background: 'var(--glass-h)', padding: 4, borderRadius: 10 }}>
               <button
                 onClick={() => setAlbumArtFit('contain')}
                 style={{
@@ -1020,6 +1028,244 @@ export function SettingsView() {
                 Aspect Fill (Cover)
               </button>
             </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'discovery-layout',
+      title: 'Discovery Hub Layout',
+      description: 'Choose how the Discovery Hub organizes and presents your recommendations, recaps, and dynamic smart mixes.',
+      keywords: 'discovery hub layout shelves unified multi-shelf feed mix playlists recommendations appearance UI',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div className="settings-ctrl-header-row">
+            <div>
+              <div className="settings-ctrl-title">Discovery Hub Architecture</div>
+              <div className="settings-ctrl-desc">
+                Organize your personalized music discovery into multi-category shelves or a single unified feed.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                className={`btn ${discoveryLayout === 'shelves' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+                onClick={() => setDiscoveryLayout('shelves')}
+              >
+                <Layers size={13} />
+                Multi-Shelf
+              </button>
+              <button 
+                className={`btn ${discoveryLayout === 'unified' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+                onClick={() => setDiscoveryLayout('unified')}
+              >
+                <LayoutGrid size={13} />
+                Unified Feed
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'aideo-page-design',
+      title: 'Aideo Home Page Layout & Experience',
+      description: 'Select your preferred visual architecture for the main Aideo home portal — from classic studio and editorial bento to audiophile deck and cinematic flow.',
+      keywords: 'aideo page layout design theme bento audiophile cinematic classic studio home portal appearance UI',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div className="settings-ctrl-title">Aideo Home Page Design Engine</div>
+          <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
+            Customize your primary music portal layout with 4 bespoke visual architectures designed for discovery, deep listening, and effortless curation.
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+            {[
+              {
+                id: 'classic' as AideoPageDesign,
+                name: 'Classic Studio',
+                badge: 'Balanced Hub',
+                badgeColor: '#3b82f6',
+                icon: <Layers size={18} color="#60a5fa" />,
+                desc: 'Comprehensive multi-shelf discovery layout with live library stats, quick recap grid, and dynamic smart mix builder.',
+                visual: (
+                  <div className="aideo-prev-box prev-classic">
+                    <div className="aideo-prev-greeting">
+                      <div className="aideo-prev-line title" />
+                      <div className="aideo-prev-stats-group">
+                        <div className="aideo-prev-stat-pill" />
+                        <div className="aideo-prev-stat-pill" />
+                      </div>
+                    </div>
+                    <div className="aideo-prev-shelf">
+                      <div className="aideo-prev-thumb sm" />
+                      <div className="aideo-prev-thumb sm" />
+                      <div className="aideo-prev-thumb sm" />
+                      <div className="aideo-prev-thumb sm" />
+                    </div>
+                    <div className="aideo-prev-recap-grid">
+                      <div className="aideo-prev-recap-card" />
+                      <div className="aideo-prev-recap-card" />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'bento' as AideoPageDesign,
+                name: 'Editorial Bento',
+                badge: 'Apple / Editorial',
+                badgeColor: '#a855f7',
+                icon: <LayoutGrid size={18} color="#c084fc" />,
+                desc: 'Modern asymmetric bento grid featuring a dynamic Hero Spotlight, interactive Mood Soundscape tiles, and real-time Library Pulse stats.',
+                visual: (
+                  <div className="aideo-prev-box prev-bento">
+                    <div className="aideo-prev-bento-grid">
+                      <div className="aideo-prev-bento-hero">
+                        <div className="aideo-prev-bento-glow" />
+                        <div className="aideo-prev-line xs" />
+                      </div>
+                      <div className="aideo-prev-bento-side">
+                        <div className="aideo-prev-bento-tile purple" />
+                        <div className="aideo-prev-bento-tile cyan" />
+                      </div>
+                    </div>
+                    <div className="aideo-prev-bento-footer">
+                      <div className="aideo-prev-bento-strip" />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'audiophile' as AideoPageDesign,
+                name: 'Audiophile Minimalist Deck',
+                badge: 'Hi-Res / Precision',
+                badgeColor: '#06b6d4',
+                icon: <Activity size={18} color="#22d3ee" />,
+                desc: 'Typography-first high-density console featuring sample rate badges (FLAC / 96kHz / 24-bit), compact recap columns, and streamlined feeds.',
+                visual: (
+                  <div className="aideo-prev-box prev-audiophile">
+                    <div className="aideo-prev-audio-header">
+                      <div className="aideo-prev-mono-line" />
+                      <div className="aideo-prev-badge-flac">FLAC</div>
+                    </div>
+                    <div className="aideo-prev-audio-rows">
+                      <div className="aideo-prev-audio-row">
+                        <div className="aideo-prev-mono-idx">01</div>
+                        <div className="aideo-prev-line flex1" />
+                        <div className="aideo-prev-badge-rate">24/96</div>
+                      </div>
+                      <div className="aideo-prev-audio-row">
+                        <div className="aideo-prev-mono-idx">02</div>
+                        <div className="aideo-prev-line flex1" />
+                        <div className="aideo-prev-badge-rate">16/44</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'cinematic' as AideoPageDesign,
+                name: 'Immersive Cinematic Flow',
+                badge: 'Ambient / Visual',
+                badgeColor: '#f59e0b',
+                icon: <Sparkles size={18} color="#fbbf24" />,
+                desc: 'Vivid ambient glow backdrops, expansive visual hero artwork carousels, bold mood soundscapes, and floating discovery reels.',
+                visual: (
+                  <div className="aideo-prev-box prev-cinematic">
+                    <div className="aideo-prev-cine-hero">
+                      <div className="aideo-prev-cine-overlay">
+                        <div className="aideo-prev-line white" />
+                        <div className="aideo-prev-cine-play" />
+                      </div>
+                    </div>
+                    <div className="aideo-prev-cine-reel">
+                      <div className="aideo-prev-cine-card glow" />
+                      <div className="aideo-prev-cine-card" />
+                      <div className="aideo-prev-cine-card" />
+                    </div>
+                  </div>
+                )
+              }
+            ].map((d) => {
+              const isSelected = aideoPageDesign === d.id;
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => {
+                    setAideoPageDesign(d.id);
+                    window.dispatchEvent(new CustomEvent('ui-toast', {
+                      detail: { message: `Switched Aideo home page layout to ${d.name}!`, type: 'success' }
+                    }));
+                  }}
+                  className={`settings-design-card ${isSelected ? 'active' : ''}`}
+                  style={{
+                    padding: 16,
+                    borderRadius: 14,
+                    background: isSelected ? 'rgba(var(--accent-rgb), 0.08)' : 'var(--glass)',
+                    border: isSelected ? '1.5px solid var(--accent, #8b5cf6)' : '1px solid var(--glass-border)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    position: 'relative',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: isSelected ? '0 8px 24px rgba(var(--accent-rgb), 0.2)' : 'none'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ 
+                          width: 32, 
+                          height: 32, 
+                          borderRadius: 8, 
+                          background: isSelected ? 'rgba(var(--accent-rgb), 0.2)' : 'var(--glass-h)', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center' 
+                        }}>
+                          {d.icon}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{d.name}</div>
+                          <span style={{ 
+                            fontSize: 9, 
+                            fontWeight: 700, 
+                            color: d.badgeColor, 
+                            background: `${d.badgeColor}18`, 
+                            padding: '2px 6px', 
+                            borderRadius: 4, 
+                            textTransform: 'uppercase', 
+                            letterSpacing: 0.5 
+                          }}>
+                            {d.badge}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: '50%',
+                        border: isSelected ? '5px solid var(--accent, #8b5cf6)' : '2px solid var(--glass-border)',
+                        background: isSelected ? '#fff' : 'transparent',
+                        transition: 'all 0.2s ease',
+                        flexShrink: 0
+                      }} />
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4, marginTop: 6, minHeight: 32 }}>
+                      {d.desc}
+                    </div>
+                  </div>
+
+                  {d.visual}
+                </div>
+              );
+            })}
           </div>
         </div>
       )
@@ -1092,7 +1338,7 @@ export function SettingsView() {
                   <div className="pbar-preview-box preview-waveform">
                     <div className="pbar-prev-full-wave">
                       {[40, 70, 90, 60, 30, 80, 100, 75, 45, 65, 85, 50, 70, 90, 40].map((h, i) => (
-                        <div key={i} style={{ height: `${h}%`, flex: 1, background: i < 7 ? 'var(--accent, #8b5cf6)' : 'rgba(255,255,255,0.2)', borderRadius: 1 }} />
+                        <div key={i} style={{ height: `${h}%`, flex: 1, background: i < 7 ? 'var(--accent, #8b5cf6)' : 'var(--glass-h)', borderRadius: 1 }} />
                       ))}
                     </div>
                     <div className="pbar-prev-subdeck">
@@ -1158,8 +1404,8 @@ export function SettingsView() {
                   style={{
                     padding: 16,
                     borderRadius: 14,
-                    background: isSelected ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(255, 255, 255, 0.02)',
-                    border: isSelected ? '1.5px solid var(--accent, #8b5cf6)' : '1px solid rgba(255, 255, 255, 0.07)',
+                    background: isSelected ? 'rgba(var(--accent-rgb), 0.08)' : 'var(--glass)',
+                    border: isSelected ? '1.5px solid var(--accent, #8b5cf6)' : '1px solid var(--glass-border)',
                     cursor: 'pointer',
                     display: 'flex',
                     flexDirection: 'column',
@@ -1177,7 +1423,7 @@ export function SettingsView() {
                           width: 32, 
                           height: 32, 
                           borderRadius: 8, 
-                          background: isSelected ? 'rgba(var(--accent-rgb), 0.2)' : 'rgba(255, 255, 255, 0.05)', 
+                          background: isSelected ? 'rgba(var(--accent-rgb), 0.2)' : 'var(--glass-h)', 
                           display: 'flex', 
                           alignItems: 'center', 
                           justifyContent: 'center' 
@@ -1204,7 +1450,7 @@ export function SettingsView() {
                         width: 18,
                         height: 18,
                         borderRadius: '50%',
-                        border: isSelected ? '5px solid var(--accent, #8b5cf6)' : '2px solid rgba(255, 255, 255, 0.2)',
+                        border: isSelected ? '5px solid var(--accent, #8b5cf6)' : '2px solid var(--glass-border)',
                         background: isSelected ? '#ffffff' : 'transparent',
                         transition: 'all 0.2s ease',
                         flexShrink: 0
@@ -1321,7 +1567,7 @@ export function SettingsView() {
               </div>
             ))}
             {scanDirs.length === 0 && (
-              <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '24px', textAlign: 'center', background: 'rgba(0,0,0,0.15)', borderRadius: 12, border: '1px dashed rgba(255,255,255,0.05)' }}>
+              <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '24px', textAlign: 'center', background: 'var(--glass)', borderRadius: 12, border: '1px dashed var(--glass-border)' }}>
                 No storage folders tracked. Click below to add your directories.
               </div>
             )}
@@ -1397,7 +1643,7 @@ export function SettingsView() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
             {/* Subsonic / Navidrome Console */}
             <div style={{ 
-              background: 'rgba(255, 255, 255, 0.02)', 
+              background: 'var(--glass)', 
               border: '1px solid var(--glass-border)', 
               borderRadius: 12, 
               padding: 16,
@@ -1516,7 +1762,7 @@ export function SettingsView() {
 
             {/* Jellyfin Console */}
             <div style={{ 
-              background: 'rgba(255, 255, 255, 0.02)', 
+              background: 'var(--glass)', 
               border: '1px solid var(--glass-border)', 
               borderRadius: 12, 
               padding: 16,
@@ -1704,7 +1950,7 @@ export function SettingsView() {
                     {lfmLoading ? 'Contacting Last.fm API...' : 'Authorize Aideo on Last.fm'}
                   </button>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8, padding: 14, background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8, padding: 14, background: 'var(--glass)', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
                     <span style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'center' }}>Waiting for browser authorization. Verify in the opened window.</span>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
@@ -1785,7 +2031,7 @@ export function SettingsView() {
                   </button>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, padding: '12px 16px', borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Automatic Scrobbling</div>
                     <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>Send playback listens to ListenBrainz servers in real-time.</div>
@@ -1954,7 +2200,7 @@ export function SettingsView() {
                     padding: 16,
                     borderRadius: 12,
                     border: active ? '1.5px solid var(--accent)' : '1px solid var(--glass-border)',
-                    background: active ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(255,255,255,0.015)',
+                    background: active ? 'rgba(var(--accent-rgb), 0.08)' : 'var(--glass)',
                     cursor: 'pointer',
                     transition: 'border 0.2s, background 0.2s',
                     boxShadow: active ? '0 8px 30px rgba(var(--accent-rgb), 0.15)' : 'none',
@@ -1968,7 +2214,7 @@ export function SettingsView() {
                       <div style={{
                         padding: 6,
                         borderRadius: 6,
-                        background: active ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                        background: active ? 'var(--accent)' : 'var(--glass-h)',
                         color: active ? 'white' : 'var(--text)',
                         display: 'flex',
                         alignItems: 'center',
@@ -2011,7 +2257,7 @@ export function SettingsView() {
                       textTransform: 'uppercase',
                       padding: '3px 8px',
                       borderRadius: 20,
-                      background: active ? 'var(--accent)' : 'rgba(255,255,255,0.04)',
+                      background: active ? 'var(--accent)' : 'var(--glass-h)',
                       color: active ? 'white' : 'var(--text-dim)',
                       transition: 'all 0.2s'
                     }}>
@@ -2067,7 +2313,7 @@ export function SettingsView() {
                               style={{
                                 flex: 1, fontSize: 9, padding: '8px 4px', borderRadius: 4, cursor: 'pointer',
                                 border: '1px solid var(--glass-border)',
-                                background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                                background: active ? 'var(--accent)' : 'var(--glass)',
                                 color: active ? 'white' : 'var(--text)',
                                 fontWeight: active ? 700 : 500,
                                 transition: 'all 0.15s'
@@ -2102,7 +2348,7 @@ export function SettingsView() {
                               style={{
                                 flex: 1, fontSize: 9, padding: '8px 4px', borderRadius: 4, cursor: 'pointer',
                                 border: '1px solid var(--glass-border)',
-                                background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                                background: active ? 'var(--accent)' : 'var(--glass)',
                                 color: active ? 'white' : 'var(--text)',
                                 fontWeight: active ? 700 : 500,
                                 transition: 'all 0.15s'
@@ -2137,7 +2383,7 @@ export function SettingsView() {
                               style={{
                                 flex: 1, fontSize: 9, padding: '8px 4px', borderRadius: 4, cursor: 'pointer',
                                 border: '1px solid var(--glass-border)',
-                                background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                                background: active ? 'var(--accent)' : 'var(--glass)',
                                 color: active ? 'white' : 'var(--text)',
                                 fontWeight: active ? 700 : 500,
                                 transition: 'all 0.15s'
@@ -2172,7 +2418,7 @@ export function SettingsView() {
                               style={{
                                 flex: 1, fontSize: 9, padding: '8px 4px', borderRadius: 4, cursor: 'pointer',
                                 border: '1px solid var(--glass-border)',
-                                background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                                background: active ? 'var(--accent)' : 'var(--glass)',
                                 color: active ? 'white' : 'var(--text)',
                                 fontWeight: active ? 700 : 500,
                                 transition: 'all 0.15s'
@@ -2300,7 +2546,7 @@ export function SettingsView() {
                   style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playbackBitPerfect ? 'rgba(6, 182, 212, 0.08)' : 'rgba(0,0,0,0.2)', borderColor: playbackBitPerfect ? '#06b6d4' : '', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>Bit-Perfect Bypass</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackBitPerfect ? '#06b6d4' : 'rgba(255,255,255,0.05)', color: playbackBitPerfect ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackBitPerfect ? '#06b6d4' : 'var(--glass-h)', color: playbackBitPerfect ? '#fff' : 'var(--text-dim)' }}>
                       {playbackBitPerfect ? 'ACTIVE' : 'OFF'}
                     </span>
                   </div>
@@ -2317,7 +2563,7 @@ export function SettingsView() {
                   style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playbackExclusive ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(0,0,0,0.2)', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>Exclusive Access</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackExclusive ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: playbackExclusive ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackExclusive ? 'var(--accent)' : 'var(--glass-h)', color: playbackExclusive ? '#fff' : 'var(--text-dim)' }}>
                       {playbackExclusive ? 'ON' : 'OFF'}
                     </span>
                   </div>
@@ -2387,7 +2633,7 @@ export function SettingsView() {
                   style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: dsp.dither ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(0,0,0,0.2)', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>TPDF Noise Dither</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: dsp.dither ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: dsp.dither ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: dsp.dither ? 'var(--accent)' : 'var(--glass-h)', color: dsp.dither ? '#fff' : 'var(--text-dim)' }}>
                       {dsp.dither ? 'ON' : 'OFF'}
                     </span>
                   </div>
@@ -2404,7 +2650,7 @@ export function SettingsView() {
                   style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: dsp.r128_enabled ? 'rgba(59, 130, 246, 0.12)' : 'rgba(0,0,0,0.2)', borderColor: dsp.r128_enabled ? '#3b82f6' : '', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>Loudness Normalization</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: dsp.r128_enabled ? '#3b82f6' : 'rgba(255,255,255,0.05)', color: dsp.r128_enabled ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: dsp.r128_enabled ? '#3b82f6' : 'var(--glass-h)', color: dsp.r128_enabled ? '#fff' : 'var(--text-dim)' }}>
                       {dsp.r128_enabled ? 'ACTIVE' : 'OFF'}
                     </span>
                   </div>
@@ -2432,7 +2678,7 @@ export function SettingsView() {
                     padding: '8px 16px',
                     borderRadius: 6,
                     border: '1px solid var(--glass-border)',
-                    background: dsp.upsample_rate === rate ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                    background: dsp.upsample_rate === rate ? 'var(--accent)' : 'var(--glass)',
                     color: dsp.upsample_rate === rate ? 'white' : 'var(--text)',
                     cursor: 'pointer',
                     fontWeight: dsp.upsample_rate === rate ? 700 : 500,
@@ -2523,7 +2769,7 @@ export function SettingsView() {
                     padding: '8px 4px',
                     borderRadius: 6,
                     border: '1px solid var(--glass-border)',
-                    background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                    background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'var(--glass)',
                     color: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'white' : 'var(--text)',
                     cursor: 'pointer',
                     fontWeight: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 700 : 500,
@@ -2600,7 +2846,7 @@ export function SettingsView() {
                   </div>
                 </div>
               </div>
-              <div style={{ display: 'flex', background: 'rgba(255, 255, 255, 0.02)', padding: 3, borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.04)', gap: 4 }}>
+              <div style={{ display: 'flex', background: 'var(--glass)', padding: 3, borderRadius: 8, border: '1px solid var(--glass-border)', gap: 4 }}>
                 {[
                   { id: 'yt-dlp', label: 'Web Downloader (yt-dlp)', desc: 'Fast, unthrottled downloads' },
                   { id: 'reqwest', label: 'Direct HTTP (reqwest)', desc: 'Lightweight direct audio streaming' }
@@ -2611,7 +2857,7 @@ export function SettingsView() {
                     title={opt.desc}
                     style={{
                       flex: 1,
-                      background: dsp.stream_engine === opt.id ? 'rgba(255, 255, 255, 0.07)' : 'transparent',
+                      background: dsp.stream_engine === opt.id ? 'var(--glass-h)' : 'transparent',
                       border: 'none',
                       color: dsp.stream_engine === opt.id ? 'white' : 'var(--text-dim)',
                       padding: '8px 10px',
@@ -2697,7 +2943,7 @@ export function SettingsView() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                border: '1px solid rgba(255,255,255,0.1)'
+                border: '1px solid var(--glass-border)'
               }}>
                 <img 
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(remoteUrl)}`} 
@@ -3022,7 +3268,7 @@ export function SettingsView() {
               </div>
 
               {/* Cache Size Limit Slider */}
-              <div style={{ marginTop: 20, background: 'rgba(255,255,255,0.02)', padding: '14px 18px', borderRadius: 10, border: '1px solid var(--glass-border)' }}>
+              <div style={{ marginTop: 20, background: 'var(--glass)', padding: '14px 18px', borderRadius: 10, border: '1px solid var(--glass-border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <div>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', display: 'block' }}>Smart Cache Limit Slider</span>
@@ -3146,7 +3392,7 @@ export function SettingsView() {
               </button>
             </div>
             {updateStatus && (
-              <div className="settings-update-status-msg" style={{ background: 'rgba(255,255,255,0.02)', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)', marginTop: 16 }}>
+              <div className="settings-update-status-msg" style={{ background: 'var(--glass)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--glass-border)', marginTop: 16 }}>
                 {updateStatus}
               </div>
             )}
@@ -3308,8 +3554,8 @@ export function SettingsView() {
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              background: 'rgba(255, 255, 255, 0.01)',
-              border: '1px solid rgba(255, 255, 255, 0.04)',
+              background: 'var(--glass)',
+              border: '1px solid var(--glass-border)',
               padding: '14px 20px',
               borderRadius: 12,
               marginBottom: 10
@@ -3463,7 +3709,7 @@ function DependencyManagerPanel() {
         const isDownloading = download?.active;
 
         return (
-          <div key={dep.id} className="settings-ctrl-card" style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.01)' }}>
+          <div key={dep.id} className="settings-ctrl-card" style={{ padding: '16px 20px', background: 'var(--glass)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ flex: 1, paddingRight: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -3531,7 +3777,7 @@ function DependencyManagerPanel() {
                   <span>Downloading data chunks...</span>
                   <span>{Math.round(download.percent)}%</span>
                 </div>
-                <div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ width: '100%', height: 4, background: 'var(--glass-h)', borderRadius: 2, overflow: 'hidden' }}>
                   <motion.div 
                     style={{ height: '100%', background: 'var(--accent)' }}
                     initial={{ width: 0 }}
@@ -3620,7 +3866,7 @@ function AccountAuthPanel() {
                 style={{
                   background: 'rgba(12, 12, 20, 0.85)',
                   backdropFilter: 'blur(30px)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  border: '1px solid var(--glass-border)',
                   borderRadius: 20,
                   padding: 28,
                   width: '100%',
@@ -3683,7 +3929,7 @@ function AccountAuthPanel() {
                 style={{
                   background: 'rgba(12, 12, 20, 0.85)',
                   backdropFilter: 'blur(30px)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  border: '1px solid var(--glass-border)',
                   borderRadius: 20,
                   padding: 28,
                   width: '100%',
@@ -3821,8 +4067,8 @@ function AccountAuthPanel() {
               justifyContent: 'center', 
               gap: 8, 
               padding: '10px 0',
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--glass)',
+              border: '1px solid var(--glass-border)',
               color: 'white',
               fontSize: 11,
               fontWeight: 600,
@@ -3853,8 +4099,8 @@ function AccountAuthPanel() {
               justifyContent: 'center', 
               gap: 8, 
               padding: '10px 0',
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--glass)',
+              border: '1px solid var(--glass-border)',
               color: 'white',
               fontSize: 11,
               fontWeight: 600,
@@ -3873,11 +4119,11 @@ function AccountAuthPanel() {
 
       {/* Separator Line */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
-        <div style={{ flex: 1, height: 1, background: 'rgba(255, 255, 255, 0.06)' }} />
+        <div style={{ flex: 1, height: 1, background: 'var(--glass-border)' }} />
         <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
           or email sign-in
         </span>
-        <div style={{ flex: 1, height: 1, background: 'rgba(255, 255, 255, 0.06)' }} />
+        <div style={{ flex: 1, height: 1, background: 'var(--glass-border)' }} />
       </div>
 
       {/* Email Login Form (Secondary Option) */}

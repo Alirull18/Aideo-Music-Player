@@ -111,7 +111,7 @@ export function AudioControlCenter() {
                   }}
                 >
                   <span>{dsp.enabled ? 'Mode B: DSP' : 'Mode A: Raw'}</span>
-                  <span style={{ fontSize: 9, opacity: 0.7, background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: 3 }}>B</span>
+                  <span style={{ fontSize: 9, opacity: 0.7, background: 'var(--glass-h)', padding: '1px 4px', borderRadius: 3 }}>B</span>
                 </button>
               </div>
             </div>
@@ -141,7 +141,7 @@ export function AudioControlCenter() {
                 </div>
               </div>
 
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '12px 16px', borderRadius: 8, width: '100%', maxWidth: 500, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+              <div style={{ background: 'var(--glass)', padding: '12px 16px', borderRadius: 8, width: '100%', maxWidth: 500, fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
                 <p style={{ margin: 0 }}>
                   {dsp.width < 1.0
                     ? "Crossfeed blends stereo channels to reduce ear fatigue when using headphones, simulating the natural sound of speakers."
@@ -154,7 +154,7 @@ export function AudioControlCenter() {
           </div>
 
           {/* Column 2: Hardware & Output */}
-          <div style={{ flex: 1.2, padding: 32, borderRight: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.01)', overflowY: 'auto' }}>
+          <div style={{ flex: 1.2, padding: 32, borderRight: '1px solid var(--glass-border)', background: 'var(--glass)', overflowY: 'auto' }}>
             <h3 style={{ margin: 0, marginBottom: 24, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Settings2 size={18} /> Output Hardware
             </h3>
@@ -209,7 +209,7 @@ export function AudioControlCenter() {
                 <div className={`exclusive-toggle ${playback.exclusive ? 'active' : ''}`} onClick={toggleExclusive} style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.exclusive ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 14, fontWeight: 600 }}>Exclusive Mode</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.exclusive ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: playback.exclusive ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.exclusive ? 'var(--accent)' : 'var(--glass-h)', color: playback.exclusive ? '#fff' : 'var(--text-dim)' }}>
                       {playback.exclusive ? 'ON' : 'OFF'}
                     </span>
                   </div>
@@ -226,7 +226,7 @@ export function AudioControlCenter() {
                   style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playback.bit_perfect ? 'rgba(6, 182, 212, 0.1)' : 'rgba(0,0,0,0.2)', borderColor: playback.bit_perfect ? '#06b6d4' : '' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 14, fontWeight: 600 }}>Bit-Perfect Bypass</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.bit_perfect ? '#06b6d4' : 'rgba(255,255,255,0.1)', color: playback.bit_perfect ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: playback.bit_perfect ? '#06b6d4' : 'var(--glass-h)', color: playback.bit_perfect ? '#fff' : 'var(--text-dim)' }}>
                       {playback.bit_perfect ? 'ACTIVE' : 'OFF'}
                     </span>
                   </div>
@@ -249,7 +249,7 @@ export function AudioControlCenter() {
                           padding: '3px 6px',
                           borderRadius: 4,
                           border: '1px solid var(--glass-border)',
-                          background: dsp.upsample_rate === rate ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                          background: dsp.upsample_rate === rate ? 'var(--accent)' : 'var(--glass-h)',
                           color: dsp.upsample_rate === rate ? 'white' : 'var(--text-dim)',
                           cursor: 'pointer',
                           fontWeight: dsp.upsample_rate === rate ? 700 : 400,
@@ -279,7 +279,7 @@ export function AudioControlCenter() {
                   style={{ padding: '16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: dsp.dither ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0,0,0,0.2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 14, fontWeight: 600 }}>TPDF Dithering</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: dsp.dither ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: dsp.dither ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: dsp.dither ? 'var(--accent)' : 'var(--glass-h)', color: dsp.dither ? '#fff' : 'var(--text-dim)' }}>
                       {dsp.dither ? 'ON' : 'OFF'}
                     </span>
                   </div>
@@ -304,7 +304,7 @@ export function AudioControlCenter() {
                         padding: '4px 8px',
                         borderRadius: 12,
                         border: 'none',
-                        background: dsp.crossfade_transition_enabled ? 'var(--accent)' : 'rgba(255,255,255,0.1)',
+                        background: dsp.crossfade_transition_enabled ? 'var(--accent)' : 'var(--glass-h)',
                         color: dsp.crossfade_transition_enabled ? '#fff' : 'var(--text-dim)',
                         cursor: 'pointer'
                       }}
@@ -345,7 +345,7 @@ export function AudioControlCenter() {
                             padding: '3px 6px',
                             borderRadius: 4,
                             border: '1px solid var(--glass-border)',
-                            background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                            background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'var(--glass-h)',
                             color: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'white' : 'var(--text-dim)',
                             cursor: 'pointer',
                             flex: 1,
@@ -384,7 +384,7 @@ export function AudioControlCenter() {
                           borderRadius: 6,
                           border: '1px solid var(--glass-border)',
                           cursor: 'pointer',
-                          background: playbackRate === rate ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                          background: playbackRate === rate ? 'var(--accent)' : 'var(--glass-h)',
                           color: playbackRate === rate ? 'white' : 'var(--text-dim)',
                           textAlign: 'center',
                           transition: 'all 0.2s'
@@ -414,7 +414,7 @@ export function AudioControlCenter() {
                     <span style={{ fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Clock size={14} /> Timer Control
                     </span>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: sleepTimer.active ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: sleepTimer.active ? '#fff' : 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 12, background: sleepTimer.active ? 'var(--accent)' : 'var(--glass-h)', color: sleepTimer.active ? '#fff' : 'var(--text-dim)' }}>
                       {sleepTimer.active ? `ACTIVE · ${Math.floor(sleepTimer.remaining / 60)}m ${sleepTimer.remaining % 60}s` : 'OFF'}
                     </span>
                   </div>
@@ -428,7 +428,7 @@ export function AudioControlCenter() {
                           padding: '4px 8px',
                           borderRadius: 4,
                           border: '1px solid var(--glass-border)',
-                          background: sleepTimer.active && sleepTimer.duration === mins ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                          background: sleepTimer.active && sleepTimer.duration === mins ? 'var(--accent)' : 'var(--glass-h)',
                           color: sleepTimer.active && sleepTimer.duration === mins ? 'white' : 'var(--text-dim)',
                           cursor: 'pointer',
                           transition: 'all 0.2s',
@@ -473,7 +473,7 @@ export function AudioControlCenter() {
                     
                     {/* Latency & Speed Row */}
                     <div style={{ display: 'flex', gap: 12 }}>
-                      <div style={{ flex: 1, padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1, padding: '10px 12px', borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Globe size={14} style={{ color: networkTelemetry.latency_ms < 60 ? '#10b981' : networkTelemetry.latency_ms < 150 ? '#f59e0b' : '#ef4444' }} />
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 8, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Latency</div>
@@ -482,7 +482,7 @@ export function AudioControlCenter() {
                           </div>
                         </div>
                       </div>
-                      <div style={{ flex: 1, padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1, padding: '10px 12px', borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Gauge size={14} style={{ color: networkTelemetry.current_download_rate_bps > 0 ? 'var(--accent)' : '#6b7280' }} />
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 8, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Speed</div>
@@ -500,7 +500,7 @@ export function AudioControlCenter() {
 
                     {/* Buffer Progress */}
                     {networkTelemetry.active_stream_total_bytes > 0 && (
-                      <div style={{ padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)' }}>
+                      <div style={{ padding: '10px 12px', borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6 }}>
                           <span>Stream Buffer</span>
                           <span>
@@ -510,7 +510,7 @@ export function AudioControlCenter() {
                             })()}
                           </span>
                         </div>
-                        <div style={{ width: '100%', height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2, overflow: 'hidden', marginBottom: 6 }}>
+                        <div style={{ width: '100%', height: 4, background: 'var(--glass-h)', borderRadius: 2, overflow: 'hidden', marginBottom: 6 }}>
                           <div style={{ 
                             height: '100%', 
                             background: 'var(--accent)', 
@@ -538,7 +538,7 @@ export function AudioControlCenter() {
                     )}
 
                     {/* Data Usage Section */}
-                    <div style={{ padding: '10px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ padding: '10px 12px', borderRadius: 6, background: 'var(--glass)', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Database size={14} style={{ color: 'var(--text-dim)' }} />
                         <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-dim)' }}>Session Data Used</span>
@@ -568,14 +568,14 @@ export function AudioControlCenter() {
           </div>
 
           {/* Column 3: Detailed Vertical Signal Path */}
-          <div style={{ flex: 1.5, padding: 32, background: 'rgba(255,255,255,0.02)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+          <div style={{ flex: 1.5, padding: 32, background: 'var(--glass)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
             <h3 style={{ margin: 0, marginBottom: 24, fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
               <AudioLines size={18} color="var(--accent)" /> Detailed Signal Path
             </h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'relative', flex: 1 }}>
               {/* Node 1: Source */}
-              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>
                 <div style={{ padding: 8, borderRadius: 6, background: 'rgba(168, 85, 247, 0.1)', color: '#a855f7' }}>
                   <AudioLines size={16} />
                 </div>
@@ -594,8 +594,8 @@ export function AudioControlCenter() {
               <div style={{ width: 2, height: 16, background: 'var(--accent)', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />
 
               {/* Node 2: DSP */}
-              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderColor: dspActive ? 'var(--accent)' : '' }}>
-                <div style={{ padding: 8, borderRadius: 6, background: dspActive ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.02)', color: dspActive ? '#6366f1' : '#6b7280' }}>
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--glass-border)', borderColor: dspActive ? 'var(--accent)' : '' }}>
+                <div style={{ padding: 8, borderRadius: 6, background: dspActive ? 'rgba(99, 102, 241, 0.1)' : 'var(--glass)', color: dspActive ? '#6366f1' : '#6b7280' }}>
                   <Settings size={16} />
                 </div>
                 <div>
@@ -634,8 +634,8 @@ export function AudioControlCenter() {
               <div style={{ width: 2, height: 16, background: dsp.upsample_rate > 0 ? '#06b6d4' : 'var(--accent)', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />
 
               {/* Node 3: Resampler */}
-              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--glass-border)', borderColor: dsp.upsample_rate > 0 ? '#06b6d4' : '' }}>
-                <div style={{ padding: 8, borderRadius: 6, background: dsp.upsample_rate > 0 ? 'rgba(6, 182, 212, 0.1)' : 'rgba(255,255,255,0.02)', color: dsp.upsample_rate > 0 ? '#06b6d4' : '#6b7280' }}>
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--glass-border)', borderColor: dsp.upsample_rate > 0 ? '#06b6d4' : '' }}>
+                <div style={{ padding: 8, borderRadius: 6, background: dsp.upsample_rate > 0 ? 'rgba(6, 182, 212, 0.1)' : 'var(--glass)', color: dsp.upsample_rate > 0 ? '#06b6d4' : '#6b7280' }}>
                   <Sparkles size={16} />
                 </div>
                 <div>
@@ -659,7 +659,7 @@ export function AudioControlCenter() {
               <div style={{ width: 2, height: 16, background: '#22c55e', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />
 
               {/* Node 4: Output Driver */}
-              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'var(--glass)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
                 <div style={{ padding: 8, borderRadius: 6, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e' }}>
                   <Volume2 size={16} />
                 </div>

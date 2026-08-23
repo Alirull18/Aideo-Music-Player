@@ -414,6 +414,11 @@ pub fn xor_cipher(data: &[u8]) -> Vec<u8> {
 
 #[tauri::command]
 pub async fn cache_cloud_track(app_handle: tauri::AppHandle, stream_url: String) -> Result<bool, String> {
+    let parsed_url = url::Url::parse(&stream_url).map_err(|e| format!("Invalid stream URL: {}", e))?;
+    if parsed_url.scheme() != "http" && parsed_url.scheme() != "https" {
+        return Err("Invalid stream URL scheme: only http and https are permitted".to_string());
+    }
+
     let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
     let Some(data_dir) = dirs::data_dir() else {
         return Err("Failed to resolve data directory".to_string());

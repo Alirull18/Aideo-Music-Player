@@ -395,8 +395,8 @@ export function AlbumsView({
             fontWeight: 600,
             borderRadius: 16,
             border: 'none',
-            background: !filterLovedOnly ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-            color: !filterLovedOnly ? 'white' : 'var(--text-dim)',
+            background: !filterLovedOnly ? 'rgba(var(--accent-rgb), 0.15)' : 'transparent',
+            color: !filterLovedOnly ? 'var(--accent)' : 'var(--text-dim)',
             cursor: 'pointer',
             transition: 'all 0.2s',
           }}
@@ -453,8 +453,8 @@ export function AlbumsView({
                 transition={{ duration: 0.2 }}
                 onClick={() => setSelectedAlbum(album)}
                 style={{
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  background: 'var(--glass)',
+                  border: '1px solid var(--glass-border)',
                   borderRadius: 16,
                   padding: 14,
                   cursor: 'pointer',
@@ -467,11 +467,11 @@ export function AlbumsView({
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.3)';
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                  e.currentTarget.style.background = 'var(--glass-h)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.06)';
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                  e.currentTarget.style.borderColor = 'var(--glass-border)';
+                  e.currentTarget.style.background = 'var(--glass)';
                 }}
               >
                 {/* Cover Image Container */}
@@ -500,14 +500,14 @@ export function AlbumsView({
                       left: 10,
                       background: 'rgba(0, 0, 0, 0.65)',
                       backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      border: '1px solid var(--glass-border)',
                       borderRadius: '50%',
                       width: 28,
                       height: 28,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: isLoved ? '#ef4444' : 'rgba(255, 255, 255, 0.6)',
+                      color: isLoved ? '#ef4444' : 'var(--text-dim)',
                       cursor: 'pointer',
                       transition: 'transform 0.2s',
                     }}
@@ -524,7 +524,7 @@ export function AlbumsView({
                       right: 10,
                       background: 'rgba(0, 0, 0, 0.65)',
                       backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      border: '1px solid var(--glass-border)',
                       borderRadius: 12,
                       padding: '3px 8px',
                       fontSize: 11,
@@ -579,7 +579,7 @@ export function AlbumsView({
                     style={{
                       fontWeight: 700,
                       fontSize: 14,
-                      color: 'white',
+                      color: 'var(--text)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -611,7 +611,7 @@ export function AlbumsView({
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.color = '#fff';
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                        e.currentTarget.style.background = 'var(--glass-h)';
                       }}
                       onMouseLeave={(e) => {
                         if (menuOpenFor !== album.id) {
@@ -636,13 +636,13 @@ export function AlbumsView({
                             right: 0,
                             top: '100%',
                             zIndex: 1001,
-                            background: 'rgba(20, 20, 32, 0.95)',
+                            background: 'var(--toast-bg)',
                             backdropFilter: 'blur(20px)',
-                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            border: '1px solid var(--glass-border)',
                             borderRadius: 12,
                             padding: 6,
                             minWidth: 200,
-                            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.6)',
+                            boxShadow: 'var(--shadow-lg)',
                             display: 'flex',
                             flexDirection: 'column',
                             gap: 2,
@@ -652,18 +652,18 @@ export function AlbumsView({
                         >
                           <div
                             onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handlePlayAlbum(album, false); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
-                            <Play size={14} fill="white" />
+                            <Play size={14} />
                             Play Album
                           </div>
 
                           <div
                             onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handlePlayAlbumNext(album); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
                             <ListPlus size={14} />
@@ -672,8 +672,8 @@ export function AlbumsView({
 
                           <div
                             onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleAddAlbumToQueue(album); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
                             <Plus size={14} />
@@ -682,20 +682,20 @@ export function AlbumsView({
 
                           <div
                             onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setPlaylistModalTracks(album.tracks); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
                             <Plus size={14} />
                             Add to Playlist...
                           </div>
 
-                          <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 4px' }} />
+                          <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 4px' }} />
 
                           <div
                             onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setCoverArtModalTrack(album.sampleTrack); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
                             <Image size={14} />
@@ -734,15 +734,15 @@ export function AlbumsView({
                               setEditTitle(album.title);
                               setEditArtist(album.artist);
                             }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
                             <Edit3 size={14} />
                             Edit Album Data
                           </div>
 
-                          <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 4px' }} />
+                          <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 4px' }} />
 
                           <div
                             onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleDeleteAlbum(album); }}
@@ -815,22 +815,22 @@ export function AlbumsView({
                 width: '100%',
                 maxWidth: 620,
                 height: '100%',
-                background: '#12121a',
-                borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
+                background: 'var(--drawer-bg)',
+                borderLeft: '1px solid var(--glass-border)',
                 display: 'flex',
                 flexDirection: 'column',
-                boxShadow: '-12px 0 40px rgba(0, 0, 0, 0.8)',
+                boxShadow: 'var(--shadow-drawer)',
               }}
             >
               {/* Drawer Header with Dynamic Ambient Tint */}
               <div 
                 style={{ 
                   padding: 24, 
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.08)', 
+                  borderBottom: '1px solid var(--glass-border)', 
                   display: 'flex', 
                   gap: 20, 
                   position: 'relative',
-                  background: `linear-gradient(180deg, ${ambientColor} 0%, rgba(18, 18, 26, 0.95) 100%)`,
+                  background: `linear-gradient(180deg, ${ambientColor} 0%, var(--drawer-header-fade) 100%)`,
                   transition: 'background 0.5s ease',
                 }}
               >
@@ -840,12 +840,12 @@ export function AlbumsView({
                     position: 'absolute',
                     top: 20,
                     right: 20,
-                    background: 'rgba(255, 255, 255, 0.1)',
+                    background: 'var(--glass-h)',
                     border: 'none',
                     borderRadius: '50%',
                     width: 32,
                     height: 32,
-                    color: 'white',
+                    color: 'var(--text)',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -867,11 +867,11 @@ export function AlbumsView({
                       style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, padding: 0 }}
                       title="Love Album"
                     >
-                      <Heart size={14} fill={lovedAlbumKeys.includes(selectedAlbum.id) ? '#ef4444' : 'none'} color={lovedAlbumKeys.includes(selectedAlbum.id) ? '#ef4444' : 'rgba(255, 255, 255, 0.6)'} />
+                      <Heart size={14} fill={lovedAlbumKeys.includes(selectedAlbum.id) ? '#ef4444' : 'none'} color={lovedAlbumKeys.includes(selectedAlbum.id) ? '#ef4444' : 'var(--text-dim)'} />
                     </button>
                   </div>
 
-                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'white', lineHeight: 1.2 }}>{selectedAlbum.title}</h2>
+                  <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}>{selectedAlbum.title}</h2>
                   
                   {/* Clickable Artist Name */}
                   <div 
@@ -884,7 +884,7 @@ export function AlbumsView({
                     {selectedAlbum.artist}
                   </div>
 
-                  <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.4)', marginTop: 4 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>
                     {selectedAlbum.tracks.length} tracks • {fmt(selectedAlbum.totalDuration)} total duration
                   </div>
 
@@ -924,7 +924,7 @@ export function AlbumsView({
                           gap: 8, 
                           padding: '6px 12px', 
                           marginBottom: 8, 
-                          background: 'rgba(255, 255, 255, 0.05)', 
+                          background: 'var(--glass)', 
                           borderRadius: 8,
                           fontSize: 12,
                           fontWeight: 600,
@@ -953,7 +953,7 @@ export function AlbumsView({
                                   {getTrackNumber(t) || idx + 1}
                                 </td>
                                 <td>
-                                  <div style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>{t.title || '—'}</div>
+                                  <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 14 }}>{t.title || '—'}</div>
                                   <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.artist || '—'}</div>
                                 </td>
                                 <td style={{ textAlign: 'right', color: 'var(--text-dim)', fontSize: 13 }}>
@@ -987,7 +987,7 @@ export function AlbumsView({
                               {getTrackNumber(t) || idx + 1}
                             </td>
                             <td>
-                              <div style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>{t.title || '—'}</div>
+                              <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 14 }}>{t.title || '—'}</div>
                               <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.artist || '—'}</div>
                             </td>
                             <td style={{ textAlign: 'right', color: 'var(--text-dim)', fontSize: 13 }}>
@@ -1059,9 +1059,9 @@ export function AlbumsView({
                       style={{
                         padding: 12,
                         borderRadius: 10,
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
-                        color: 'white',
+                        background: 'var(--glass)',
+                        border: '1px solid var(--glass-border)',
+                        color: 'var(--text)',
                         textAlign: 'left',
                         cursor: 'pointer',
                         fontWeight: 600,
@@ -1069,7 +1069,7 @@ export function AlbumsView({
                         transition: 'background 0.2s',
                       }}
                       onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.2)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                     >
                       {pl.name}
                     </button>
@@ -1115,9 +1115,9 @@ export function AlbumsView({
                     width: '100%',
                     padding: 10,
                     borderRadius: 8,
-                    background: 'rgba(255, 255, 255, 0.06)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    color: 'white',
+                    background: 'var(--glass)',
+                    border: '1px solid var(--glass-border)',
+                    color: 'var(--text)',
                     outline: 'none',
                     fontSize: 14,
                   }}
@@ -1134,9 +1134,9 @@ export function AlbumsView({
                     width: '100%',
                     padding: 10,
                     borderRadius: 8,
-                    background: 'rgba(255, 255, 255, 0.06)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    color: 'white',
+                    background: 'var(--glass)',
+                    border: '1px solid var(--glass-border)',
+                    color: 'var(--text)',
                     outline: 'none',
                     fontSize: 14,
                   }}

@@ -22,7 +22,8 @@ export function OnboardingWizard() {
     scrobbleEnabled, toggleScrobble,
     listenbrainzEnabled, toggleListenbrainzScrobble,
     scanDirs, addScanDir, removeScanDir, scanLibrary,
-    accentColor
+    accentColor,
+    setView
   } = useStore();
 
   const [step, setStep] = useState(1);
@@ -192,9 +193,10 @@ export function OnboardingWizard() {
       scanLibrary().catch(e => console.error("Library sync failed:", e));
     }
 
-    // 4. Complete onboarding
+    // 4. Complete onboarding and direct to Aideo Hub
     setOnboardingCompleted(true);
     setShowOnboarding(false);
+    setView('aideo');
 
     window.dispatchEvent(new CustomEvent('ui-toast', { 
       detail: { message: `Welcome to Aideo Console! Calibrated in ${selectedMode.toUpperCase()} mode.`, type: 'success' } 
@@ -254,10 +256,10 @@ export function OnboardingWizard() {
               maxWidth: 720,
               background: 'rgba(15, 15, 23, 0.72)',
               backdropFilter: 'blur(32px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--glass-border)',
               borderRadius: 24,
               padding: 40,
-              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(255,255,255,0.1) inset',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(16,24,40,0.08) inset',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -283,7 +285,7 @@ export function OnboardingWizard() {
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.5, marginBottom: 8 }}>
               Calibrate Your <span style={{ color: `rgb(${rgbAccent})` }}>Aideo Experience</span>
             </h1>
-            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.5, maxWidth: 520, marginBottom: 36 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.5, maxWidth: 520, marginBottom: 36 }}>
               Welcome to the reference desktop audio workspace. Choose how you would like to interact with your music environment.
             </p>
 
@@ -294,8 +296,8 @@ export function OnboardingWizard() {
                 whileTap={{ scale: 0.98 }}
                 onClick={() => handleModeSelect('local')}
                 style={{
-                  background: selectedMode === 'local' ? `rgba(${rgbAccent}, 0.08)` : 'rgba(255, 255, 255, 0.015)',
-                  border: selectedMode === 'local' ? `2px solid rgb(${rgbAccent})` : '1.5px solid rgba(255, 255, 255, 0.04)',
+                  background: selectedMode === 'local' ? `rgba(${rgbAccent}, 0.08)` : 'var(--glass)',
+                  border: selectedMode === 'local' ? `2px solid rgb(${rgbAccent})` : '1.5px solid var(--glass-border)',
                   borderRadius: 18,
                   padding: 24,
                   cursor: 'pointer',
@@ -311,19 +313,19 @@ export function OnboardingWizard() {
                 <div>
                   <div style={{
                     width: 38, height: 38, borderRadius: 10,
-                    background: selectedMode === 'local' ? `rgb(${rgbAccent})` : 'rgba(255, 255, 255, 0.04)',
-                    color: selectedMode === 'local' ? '#ffffff' : 'rgba(255,255,255,0.8)',
+                    background: selectedMode === 'local' ? `rgb(${rgbAccent})` : 'var(--glass)',
+                    color: selectedMode === 'local' ? '#ffffff' : 'var(--text)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     marginBottom: 16, transition: 'all 0.2s'
                   }}>
                     <HardDrive size={18} />
                   </div>
                   <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: '#ffffff' }}>Local File Only Mode</h3>
-                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.4 }}>
-                    Minimalist, offline local music catalog. Disables all background network queries, analytics, and third-party widgets for absolute low latency and CPU headroom.
+                  <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                    Offline local music catalog with personalized Aideo Discovery Hub, local algorithmic smart mixes, time capsule, and bit-perfect audio playback.
                   </p>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: selectedMode === 'local' ? `rgb(${rgbAccent})` : 'rgba(255,255,255,0.4)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: selectedMode === 'local' ? `rgb(${rgbAccent})` : 'var(--text-dim)' }}>
                   {selectedMode === 'local' ? <Check size={14} /> : null}
                   {selectedMode === 'local' ? 'Selected Path' : 'Select Local Path'}
                 </div>
@@ -335,8 +337,8 @@ export function OnboardingWizard() {
                 whileTap={{ scale: 0.98 }}
                 onClick={() => handleModeSelect('hybrid')}
                 style={{
-                  background: selectedMode === 'hybrid' ? `rgba(${rgbAccent}, 0.08)` : 'rgba(255, 255, 255, 0.015)',
-                  border: selectedMode === 'hybrid' ? `2px solid rgb(${rgbAccent})` : '1.5px solid rgba(255, 255, 255, 0.04)',
+                  background: selectedMode === 'hybrid' ? `rgba(${rgbAccent}, 0.08)` : 'var(--glass)',
+                  border: selectedMode === 'hybrid' ? `2px solid rgb(${rgbAccent})` : '1.5px solid var(--glass-border)',
                   borderRadius: 18,
                   padding: 24,
                   cursor: 'pointer',
@@ -352,19 +354,19 @@ export function OnboardingWizard() {
                 <div>
                   <div style={{
                     width: 38, height: 38, borderRadius: 10,
-                    background: selectedMode === 'hybrid' ? `rgb(${rgbAccent})` : 'rgba(255, 255, 255, 0.04)',
-                    color: selectedMode === 'hybrid' ? '#ffffff' : 'rgba(255,255,255,0.8)',
+                    background: selectedMode === 'hybrid' ? `rgb(${rgbAccent})` : 'var(--glass)',
+                    color: selectedMode === 'hybrid' ? '#ffffff' : 'var(--text)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     marginBottom: 16, transition: 'all 0.2s'
                   }}>
                     <Headphones size={18} />
                   </div>
                   <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: '#ffffff' }}>Hybrid Music Explorer Mode</h3>
-                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', lineHeight: 1.4 }}>
+                  <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
                     Pristine offline engine coupled with high-fidelity Lossless Cloud streams, Web Stream search discovery, scrobblers, and remote Subsonic/Jellyfin cloud indexing.
                   </p>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: selectedMode === 'hybrid' ? `rgb(${rgbAccent})` : 'rgba(255,255,255,0.4)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: selectedMode === 'hybrid' ? `rgb(${rgbAccent})` : 'var(--text-dim)' }}>
                   {selectedMode === 'hybrid' ? <Check size={14} /> : null}
                   {selectedMode === 'hybrid' ? 'Selected Path' : 'Select Hybrid Path'}
                 </div>
@@ -405,10 +407,10 @@ export function OnboardingWizard() {
               maxWidth: 720,
               background: 'rgba(15, 15, 23, 0.72)',
               backdropFilter: 'blur(32px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--glass-border)',
               borderRadius: 24,
               padding: 40,
-              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(255,255,255,0.1) inset',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(16,24,40,0.08) inset',
               display: 'flex',
               flexDirection: 'column',
               zIndex: 10
@@ -432,7 +434,7 @@ export function OnboardingWizard() {
             <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, textAlign: 'center' }}>
               Required Engines Calibration
             </h2>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', textAlign: 'center', lineHeight: 1.5, maxWidth: 540, marginBottom: 28, alignSelf: 'center' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.5, maxWidth: 540, marginBottom: 28, alignSelf: 'center' }}>
               Hybrid Mode blends local files with scrobblers and web searches. To stream high-fidelity audio from the cloud, Aideo uses local decoders. Let's download and set them up now.
             </p>
 
@@ -440,8 +442,8 @@ export function OnboardingWizard() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 32, width: '100%' }}>
               {/* Card 1: yt-dlp */}
               <div style={{
-                background: 'rgba(255, 255, 255, 0.015)',
-                border: '1px solid rgba(255, 255, 255, 0.04)',
+                background: 'var(--glass)',
+                border: '1px solid var(--glass-border)',
                 borderRadius: 16,
                 padding: '20px 24px',
                 display: 'flex',
@@ -460,7 +462,7 @@ export function OnboardingWizard() {
                   </div>
                   <div>
                     <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>Web Stream Resolver</h3>
-                    <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
+                    <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                       Handles direct lossless stream extraction. Size: {depStatus?.ytdlp_size ? `${(depStatus.ytdlp_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
                     </p>
                   </div>
@@ -476,7 +478,7 @@ export function OnboardingWizard() {
                       <span style={{ fontSize: 11, color: `rgb(${rgbAccent})`, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Loader2 size={12} className="animate-spin" /> Downloading {depDownloads['ytdlp'].percent.toFixed(0)}%
                       </span>
-                      <div style={{ width: 100, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ width: 100, height: 4, background: 'var(--glass-h)', borderRadius: 2, overflow: 'hidden' }}>
                         <div style={{ width: `${depDownloads['ytdlp'].percent}%`, height: '100%', background: `rgb(${rgbAccent})` }} />
                       </div>
                     </div>
@@ -494,8 +496,8 @@ export function OnboardingWizard() {
 
               {/* Card 2: ffmpeg */}
               <div style={{
-                background: 'rgba(255, 255, 255, 0.015)',
-                border: '1px solid rgba(255, 255, 255, 0.04)',
+                background: 'var(--glass)',
+                border: '1px solid var(--glass-border)',
                 borderRadius: 16,
                 padding: '20px 24px',
                 display: 'flex',
@@ -514,7 +516,7 @@ export function OnboardingWizard() {
                   </div>
                   <div>
                     <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>FFmpeg Transcoder</h3>
-                    <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
+                    <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                       Decodes and converts audio streams to premium lossless M4A format. Size: {depStatus?.ffmpeg_size ? `${(depStatus.ffmpeg_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
                     </p>
                   </div>
@@ -530,7 +532,7 @@ export function OnboardingWizard() {
                       <span style={{ fontSize: 11, color: `rgb(${rgbAccent})`, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Loader2 size={12} className="animate-spin" /> Downloading {depDownloads['ffmpeg'].percent.toFixed(0)}%
                       </span>
-                      <div style={{ width: 100, height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ width: 100, height: 4, background: 'var(--glass-h)', borderRadius: 2, overflow: 'hidden' }}>
                         <div style={{ width: `${depDownloads['ffmpeg'].percent}%`, height: '100%', background: `rgb(${rgbAccent})` }} />
                       </div>
                     </div>
@@ -616,9 +618,9 @@ export function OnboardingWizard() {
                     : 'none',
                   background: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed
                     ? `linear-gradient(135deg, rgb(${rgbAccent}), rgba(${rgbAccent}, 0.75))`
-                    : 'rgba(255, 255, 255, 0.05)',
+                    : 'var(--glass)',
                   cursor: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed ? 'pointer' : 'not-allowed',
-                  color: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed ? 'white' : 'rgba(255, 255, 255, 0.3)'
+                  color: depStatus?.ytdlp_installed && depStatus?.ffmpeg_installed ? 'white' : 'var(--text-dim)'
                 }}
               >
                 Continue <ArrowRight size={16} />
@@ -640,10 +642,10 @@ export function OnboardingWizard() {
               maxWidth: 780,
               background: 'rgba(15, 15, 23, 0.72)',
               backdropFilter: 'blur(32px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--glass-border)',
               borderRadius: 24,
               padding: '36px 40px',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(255,255,255,0.1) inset',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(16,24,40,0.08) inset',
               display: 'flex',
               flexDirection: 'column',
               zIndex: 10
@@ -652,7 +654,7 @@ export function OnboardingWizard() {
             <h2 style={{ fontSize: 20, fontWeight: 800, textAlign: 'center', marginBottom: 4 }}>
               Setup & Connection Parameters
             </h2>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 28 }}>
+            <p style={{ fontSize: 12, color: 'var(--text-dim)', textAlign: 'center', marginBottom: 28 }}>
               Configure your optional connected stream and stats API integrations.
             </p>
 
@@ -678,17 +680,17 @@ export function OnboardingWizard() {
                       className={`settings-ctrl-card ${options.youtubeMusic ? 'active' : ''}`}
                       onClick={() => handleToggleOption('youtubeMusic')}
                       style={{
-                        padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'rgba(255,255,255,0.015)',
-                        border: '1px solid rgba(255,255,255,0.04)', display: 'flex', gap: 10, alignItems: 'flex-start',
-                        transition: 'all 0.2s', borderColor: options.youtubeMusic ? `rgba(${rgbAccent}, 0.4)` : 'rgba(255,255,255,0.04)'
+                        padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'var(--glass)',
+                        border: '1px solid var(--glass-border)', display: 'flex', gap: 10, alignItems: 'flex-start',
+                        transition: 'all 0.2s', borderColor: options.youtubeMusic ? `rgba(${rgbAccent}, 0.4)` : 'var(--glass)'
                       }}
                     >
-                      <div style={{ color: options.youtubeMusic ? `rgb(${rgbAccent})` : 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+                      <div style={{ color: options.youtubeMusic ? `rgb(${rgbAccent})` : 'var(--text-dim)', marginTop: 2 }}>
                         {options.youtubeMusic ? <CheckSquare size={16} /> : <Square size={16} />}
                       </div>
                       <div>
                         <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Web Streams & Lossless Cloud Search</div>
-                        <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.5)', lineHeight: 1.3, marginTop: 2 }}>Enables direct web stream extraction and lossless cloud FLAC downloads. Spawns yt-dlp.</div>
+                        <div style={{ fontSize: 9.5, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 2 }}>Enables direct web stream extraction and lossless cloud FLAC downloads. Spawns yt-dlp.</div>
                       </div>
                     </div>
                   )}
@@ -697,17 +699,17 @@ export function OnboardingWizard() {
                     className={`settings-ctrl-card ${options.discordRpc ? 'active' : ''}`}
                     onClick={() => handleToggleOption('discordRpc')}
                     style={{
-                      padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'rgba(255,255,255,0.015)',
-                      border: '1px solid rgba(255,255,255,0.04)', display: 'flex', gap: 10, alignItems: 'flex-start',
-                      transition: 'all 0.2s', borderColor: options.discordRpc ? `rgba(${rgbAccent}, 0.4)` : 'rgba(255,255,255,0.04)'
+                      padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'var(--glass)',
+                      border: '1px solid var(--glass-border)', display: 'flex', gap: 10, alignItems: 'flex-start',
+                      transition: 'all 0.2s', borderColor: options.discordRpc ? `rgba(${rgbAccent}, 0.4)` : 'var(--glass)'
                     }}
                   >
-                    <div style={{ color: options.discordRpc ? `rgb(${rgbAccent})` : 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+                    <div style={{ color: options.discordRpc ? `rgb(${rgbAccent})` : 'var(--text-dim)', marginTop: 2 }}>
                       {options.discordRpc ? <CheckSquare size={16} /> : <Square size={16} />}
                     </div>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Discord Rich Presence (RPC)</div>
-                      <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.5)', lineHeight: 1.3, marginTop: 2 }}>Broadcasts cover artwork, active playback progress, and song titles onto profile badges.</div>
+                      <div style={{ fontSize: 9.5, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 2 }}>Broadcasts cover artwork, active playback progress, and song titles onto profile badges.</div>
                     </div>
                   </div>
 
@@ -715,17 +717,17 @@ export function OnboardingWizard() {
                     className={`settings-ctrl-card ${options.lastfmScrobble ? 'active' : ''}`}
                     onClick={() => handleToggleOption('lastfmScrobble')}
                     style={{
-                      padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'rgba(255,255,255,0.015)',
-                      border: '1px solid rgba(255,255,255,0.04)', display: 'flex', gap: 10, alignItems: 'flex-start',
-                      transition: 'all 0.2s', borderColor: options.lastfmScrobble ? `rgba(${rgbAccent}, 0.4)` : 'rgba(255,255,255,0.04)'
+                      padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'var(--glass)',
+                      border: '1px solid var(--glass-border)', display: 'flex', gap: 10, alignItems: 'flex-start',
+                      transition: 'all 0.2s', borderColor: options.lastfmScrobble ? `rgba(${rgbAccent}, 0.4)` : 'var(--glass)'
                     }}
                   >
-                    <div style={{ color: options.lastfmScrobble ? `rgb(${rgbAccent})` : 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+                    <div style={{ color: options.lastfmScrobble ? `rgb(${rgbAccent})` : 'var(--text-dim)', marginTop: 2 }}>
                       {options.lastfmScrobble ? <CheckSquare size={16} /> : <Square size={16} />}
                     </div>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Last.fm Stats Scrobbling</div>
-                      <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.5)', lineHeight: 1.3, marginTop: 2 }}>Syncs tracks scrobble transitions and displays history dashboard.</div>
+                      <div style={{ fontSize: 9.5, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 2 }}>Syncs tracks scrobble transitions and displays history dashboard.</div>
                     </div>
                   </div>
 
@@ -733,17 +735,17 @@ export function OnboardingWizard() {
                     className={`settings-ctrl-card ${options.listenbrainzScrobble ? 'active' : ''}`}
                     onClick={() => handleToggleOption('listenbrainzScrobble')}
                     style={{
-                      padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'rgba(255,255,255,0.015)',
-                      border: '1px solid rgba(255,255,255,0.04)', display: 'flex', gap: 10, alignItems: 'flex-start',
-                      transition: 'all 0.2s', borderColor: options.listenbrainzScrobble ? `rgba(${rgbAccent}, 0.4)` : 'rgba(255,255,255,0.04)'
+                      padding: '12px 14px', borderRadius: 12, cursor: 'pointer', background: 'var(--glass)',
+                      border: '1px solid var(--glass-border)', display: 'flex', gap: 10, alignItems: 'flex-start',
+                      transition: 'all 0.2s', borderColor: options.listenbrainzScrobble ? `rgba(${rgbAccent}, 0.4)` : 'var(--glass)'
                     }}
                   >
-                    <div style={{ color: options.listenbrainzScrobble ? `rgb(${rgbAccent})` : 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+                    <div style={{ color: options.listenbrainzScrobble ? `rgb(${rgbAccent})` : 'var(--text-dim)', marginTop: 2 }}>
                       {options.listenbrainzScrobble ? <CheckSquare size={16} /> : <Square size={16} />}
                     </div>
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>ListenBrainz Scrobbling & Recs</div>
-                      <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.5)', lineHeight: 1.3, marginTop: 2 }}>Connects opensource listening feeds to MusicBrainz dataset.</div>
+                      <div style={{ fontSize: 9.5, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 2 }}>Connects opensource listening feeds to MusicBrainz dataset.</div>
                     </div>
                   </div>
                 </div>
@@ -804,10 +806,10 @@ export function OnboardingWizard() {
               maxWidth: 720,
               background: 'rgba(15, 15, 23, 0.72)',
               backdropFilter: 'blur(32px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--glass-border)',
               borderRadius: 24,
               padding: 40,
-              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(255,255,255,0.1) inset',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.8), 0 0 2px rgba(16,24,40,0.08) inset',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -831,7 +833,7 @@ export function OnboardingWizard() {
             <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>
               Define Offline Audio Directories
             </h2>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', textAlign: 'center', lineHeight: 1.5, maxWidth: 500, marginBottom: 28 }}>
+            <p style={{ fontSize: 12, color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.5, maxWidth: 500, marginBottom: 28 }}>
               Select folders on your local disk containing MP3, FLAC, M4A, or WAV files. Aideo indices metadata recursively.
             </p>
 
@@ -842,11 +844,11 @@ export function OnboardingWizard() {
                   key={dir} 
                   style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    padding: '10px 16px', background: 'rgba(255, 255, 255, 0.015)', 
-                    border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 10
+                    padding: '10px 16px', background: 'var(--glass)', 
+                    border: '1px solid var(--glass-border)', borderRadius: 10
                   }}
                 >
-                  <span style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%', color: 'rgba(255,255,255,0.8)' }}>
+                  <span style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%', color: 'var(--text)' }}>
                     {dir}
                   </span>
                   <button 
@@ -863,8 +865,8 @@ export function OnboardingWizard() {
 
               {scanDirs.length === 0 && (
                 <div style={{
-                  fontSize: 12, color: 'rgba(255,255,255,0.4)', padding: '24px', textAlign: 'center',
-                  background: 'rgba(0,0,0,0.15)', borderRadius: 12, border: '1px dashed rgba(255,255,255,0.06)'
+                  fontSize: 12, color: 'var(--text-dim)', padding: '24px', textAlign: 'center',
+                  background: 'var(--glass)', borderRadius: 12, border: '1px dashed var(--glass-border)'
                 }}>
                   No local paths linked yet. Link folders to index your music!
                 </div>
@@ -884,7 +886,7 @@ export function OnboardingWizard() {
                 justifyContent: 'center',
                 gap: 8,
                 borderRadius: 10,
-                border: '1.5px dashed rgba(255,255,255,0.15)',
+                border: '1.5px dashed var(--glass-border)',
                 background: 'transparent',
                 marginBottom: 36
               }}

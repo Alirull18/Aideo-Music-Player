@@ -178,12 +178,12 @@ export function ChartsView() {
   const top1 = leaderboard[0];
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', padding: 32, background: 'var(--bg)', boxSizing: 'border-box' }}>
+    <div style={{ height: '100%', overflowY: 'auto', padding: '32px 32px calc(var(--player-h) + 40px) 32px', background: 'var(--bg)', boxSizing: 'border-box' }}>
       
       {/* 🔮 Dynamic Spotify-Style Hero Header */}
       <div style={{
-        background: `linear-gradient(180deg, ${heroColor} 0%, rgba(15, 15, 25, 0.95) 100%)`,
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        background: `linear-gradient(180deg, ${heroColor} 0%, var(--hero-fade) 100%)`,
+        border: '1px solid var(--glass-border)',
         borderRadius: 24,
         padding: 32,
         marginBottom: 32,
@@ -196,7 +196,7 @@ export function ChartsView() {
         overflow: 'hidden'
       }}>
         {/* Top 1 Hero Thumbnail */}
-        <div style={{ width: 180, height: 180, borderRadius: 16, overflow: 'hidden', boxShadow: '0 12px 36px rgba(0,0,0,0.6)', flexShrink: 0, background: '#111' }}>
+        <div style={{ width: 180, height: 180, borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-cover)', flexShrink: 0, background: '#111' }}>
           <img 
             src={top1?.cover_url || defaultCover} 
             alt={top1?.title || 'Top Track'} 
@@ -215,7 +215,7 @@ export function ChartsView() {
             <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Updated Live</span>
           </div>
 
-          <h1 style={{ fontSize: 36, fontWeight: 900, color: 'white', margin: 0, letterSpacing: -0.5 }}>
+          <h1 style={{ fontSize: 36, fontWeight: 900, color: 'var(--hero-ink)', margin: 0, letterSpacing: -0.5 }}>
             Top Songs — {selectedCountry !== 'global' ? continents.find(c => c.id === selectedCountry)?.label : 'Global'}
           </h1>
 
@@ -257,9 +257,9 @@ export function ChartsView() {
                 borderRadius: 28,
                 fontSize: 13,
                 fontWeight: 700,
-                background: 'rgba(255, 255, 255, 0.08)',
-                color: 'white',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
+                background: 'var(--glass-h)',
+                color: 'var(--text)',
+                border: '1px solid var(--glass-border)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -290,9 +290,9 @@ export function ChartsView() {
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
-                  background: isSel ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-                  color: isSel ? '#ffffff' : 'var(--text-dim)',
-                  border: isSel ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgba(255, 255, 255, 0.06)',
+                  background: isSel ? 'rgba(var(--accent-rgb), 0.15)' : 'var(--glass)',
+                  color: isSel ? 'var(--accent)' : 'var(--text-dim)',
+                  border: isSel ? '1px solid rgba(var(--accent-rgb), 0.45)' : '1px solid var(--glass-border)',
                   transition: 'all 0.2s ease',
                 }}
               >
@@ -320,9 +320,9 @@ export function ChartsView() {
                       fontWeight: 700,
                       cursor: 'pointer',
                       whiteSpace: 'nowrap',
-                      background: isSel ? 'var(--accent)' : 'rgba(255, 255, 255, 0.05)',
+                      background: isSel ? 'var(--accent)' : 'var(--glass)',
                       color: isSel ? '#ffffff' : 'var(--text-dim)',
-                      border: isSel ? '1px solid var(--accent)' : '1px solid rgba(255, 255, 255, 0.08)',
+                      border: isSel ? '1px solid var(--accent)' : '1px solid var(--glass-border)',
                       transition: 'all 0.2s ease',
                       boxShadow: isSel ? '0 4px 14px rgba(139, 92, 246, 0.35)' : 'none',
                     }}
@@ -340,9 +340,9 @@ export function ChartsView() {
                 value={selectedCountry}
                 onChange={(e) => setSelectedCountry(e.target.value)}
                 style={{
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: 'white',
+                  background: 'var(--glass)',
+                  border: '1px solid var(--glass-border)',
+                  color: 'var(--text)',
                   fontSize: 13,
                   fontWeight: 600,
                   padding: '8px 12px',
@@ -352,7 +352,7 @@ export function ChartsView() {
                 }}
               >
                 {continents.map(c => (
-                  <option key={c.id} value={c.id} style={{ background: '#141420', color: 'white' }}>
+                  <option key={c.id} value={c.id} style={{ background: 'var(--surface, #141420)', color: 'var(--text, white)' }}>
                     {c.label}
                   </option>
                 ))}
@@ -389,15 +389,15 @@ export function ChartsView() {
             return (
               <motion.div
                 key={t.id || idx}
-                whileHover={{ background: 'rgba(255, 255, 255, 0.05)' }}
+                whileHover={{ background: 'var(--glass-h)' }}
                 onClick={() => handlePlayTrack(t)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   padding: '12px 16px',
                   borderRadius: 12,
-                  background: isGold ? 'rgba(255, 215, 0, 0.08)' : isSilver ? 'rgba(192, 192, 192, 0.05)' : isBronze ? 'rgba(205, 127, 50, 0.05)' : 'rgba(255, 255, 255, 0.02)',
-                  border: isGold ? '1px solid rgba(255, 215, 0, 0.25)' : '1px solid rgba(255, 255, 255, 0.06)',
+                  background: isGold ? 'rgba(255, 215, 0, 0.08)' : isSilver ? 'rgba(192, 192, 192, 0.05)' : isBronze ? 'rgba(205, 127, 50, 0.05)' : 'var(--glass)',
+                  border: isGold ? '1px solid rgba(255, 215, 0, 0.25)' : '1px solid var(--glass-border)',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
                   gap: 16
@@ -429,7 +429,7 @@ export function ChartsView() {
 
                 {/* Title & Artist */}
                 <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {t.title}
                   </span>
                   <span style={{ fontSize: 12, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -438,7 +438,7 @@ export function ChartsView() {
                 </div>
 
                 {/* Source Badge */}
-                <div style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 12, background: 'rgba(255, 255, 255, 0.06)', color: 'var(--text-dim)' }}>
+                <div style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 12, background: 'var(--glass-h)', color: 'var(--text-dim)' }}>
                   {t.recommendation_source || 'Trending'}
                 </div>
 
@@ -485,9 +485,9 @@ export function ChartsView() {
                   borderRadius: 24,
                   fontSize: 13,
                   fontWeight: 700,
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: 'white',
+                  background: 'var(--glass)',
+                  border: '1px solid var(--glass-border)',
+                  color: 'var(--text)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -495,8 +495,8 @@ export function ChartsView() {
                   transition: 'all 0.2s',
                   opacity: loadingMore ? 0.7 : 1
                 }}
-                onMouseEnter={(e) => { if (!loadingMore) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; }}
-                onMouseLeave={(e) => { if (!loadingMore) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'; }}
+                onMouseEnter={(e) => { if (!loadingMore) e.currentTarget.style.background = 'var(--glass-h)'; }}
+                onMouseLeave={(e) => { if (!loadingMore) e.currentTarget.style.background = 'var(--glass)'; }}
               >
                 {loadingMore ? (
                   <>

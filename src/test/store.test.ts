@@ -34,4 +34,22 @@ describe('Store Actions & Slices', () => {
     expect(useStore.getState().scanDirs).not.toContain(testDir);
     expect(useStore.getState().scanDirs.length).toBe(initialDirs.length);
   });
+
+  it('should prioritize manual queue ahead of repeat-one mode in getNextTrackToPlay', () => {
+    const track1 = { id: 1, path: 'C:/music/1.mp3', title: 'Song 1', artist: 'A', album: '', duration: 100, format: 'mp3', lyric_offset: 0 };
+    const queuedTrack = { id: 2, path: 'C:/music/2.mp3', title: 'Queued Song', artist: 'B', album: '', duration: 120, format: 'mp3', lyric_offset: 0 };
+    
+    useStore.setState({
+      currentTrack: track1,
+      repeat: 'one',
+      queue: [queuedTrack],
+      tracks: [track1]
+    });
+
+    const nextTrack = useStore.getState().getNextTrackToPlay();
+    expect(nextTrack?.path).toBe(queuedTrack.path);
+
+    const lookahead = useStore.getState().getNextTracksToPlay(2);
+    expect(lookahead[0].path).toBe(queuedTrack.path);
+  });
 });

@@ -25,7 +25,7 @@ export function pickShuffleIndex(paths: string[], currentIndex: number, excludeI
   }
 
   // Prefer candidates never played this session; otherwise least-recently played.
-  let bestIndex = -1;
+  let bestCandidates: number[] = [];
   let bestScore = Infinity;
   const now = ++pickCounter;
   for (let i = 0; i < length; i++) {
@@ -34,10 +34,19 @@ export function pickShuffleIndex(paths: string[], currentIndex: number, excludeI
     const score = last === undefined ? -1 : last;
     if (score < bestScore) {
       bestScore = score;
-      bestIndex = i;
+      bestCandidates = [i];
+    } else if (score === bestScore) {
+      bestCandidates.push(i);
     }
   }
-  if (bestIndex === -1) bestIndex = (currentIndex + 1) % length;
+
+  let bestIndex = -1;
+  if (bestCandidates.length > 0) {
+    const randomChoice = Math.floor(Math.random() * bestCandidates.length);
+    bestIndex = bestCandidates[randomChoice];
+  } else {
+    bestIndex = (currentIndex + 1) % length;
+  }
 
   lastPickedAt.set(paths[bestIndex], now);
   return bestIndex;

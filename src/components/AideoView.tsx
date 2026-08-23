@@ -5,8 +5,7 @@ import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, ChevronDown, Flame, Disc, RotateCcw } from 'lucide-react';
-import defaultCover from '../assets/default_cover.png';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Activity, Plus, Sliders } from 'lucide-react';
 import { YoutubeMix } from '../store/types';
 
 // Format track duration
@@ -128,7 +127,7 @@ const PopularTrackRow = memo(({
         display: 'flex',
         alignItems: 'center',
         padding: '12px 20px',
-        borderBottom: idx === totalTracks - 1 ? 'none' : '1px solid rgba(255,255,255,0.04)',
+        borderBottom: idx === totalTracks - 1 ? 'none' : '1px solid var(--glass-border)',
         transition: 'background 0.2s',
         gap: 16
       }}
@@ -173,8 +172,8 @@ const PopularTrackRow = memo(({
         <button
           onClick={() => handlePlayPopularTrack(track.name)}
           style={{
-            background: isResolving ? 'rgba(6, 182, 212, 0.1)' : 'rgba(255,255,255,0.04)',
-            border: '1px solid ' + (isResolving ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255,255,255,0.08)'),
+            background: isResolving ? 'rgba(6, 182, 212, 0.1)' : 'var(--glass)',
+            border: '1px solid ' + (isResolving ? 'rgba(6, 182, 212, 0.2)' : 'var(--glass-border)'),
             borderRadius: 8,
             width: 32,
             height: 32,
@@ -186,10 +185,10 @@ const PopularTrackRow = memo(({
             transition: 'all 0.2s'
           }}
           onMouseEnter={e => {
-            if (!isResolving) e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+            if (!isResolving) e.currentTarget.style.background = 'var(--glass-h)';
           }}
           onMouseLeave={e => {
-            if (!isResolving) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+            if (!isResolving) e.currentTarget.style.background = 'var(--glass)';
           }}
           title="Play song"
         >
@@ -204,8 +203,8 @@ const PopularTrackRow = memo(({
         <button
           onClick={() => handleOpenWebBypassForPopular(track.name, 'lucida')}
           style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'var(--glass)',
+            border: '1px solid var(--glass-border)',
             borderRadius: 8,
             padding: '0 8px',
             height: 32,
@@ -226,8 +225,8 @@ const PopularTrackRow = memo(({
         <button
           onClick={() => handleOpenWebBypassForPopular(track.name, 'squid')}
           style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'var(--glass)',
+            border: '1px solid var(--glass-border)',
             borderRadius: 8,
             padding: '0 8px',
             height: 32,
@@ -282,8 +281,8 @@ const PopularTrackRow = memo(({
           <button
             onClick={() => handleDownloadPopularTrack(track.name)}
             style={{
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'var(--glass)',
+              border: '1px solid var(--glass-border)',
               borderRadius: 8,
               width: 32,
               height: 32,
@@ -307,6 +306,7 @@ const PopularTrackRow = memo(({
 });
 
 import { SimpleLRU } from '../utils/lruCache';
+import { buildUnifiedTabs, getUnifiedTabTracks, UnifiedTabId } from '../utils/discoveryFeed';
 
 // Artwork caching
 const coverArtCache = new SimpleLRU<string, string | null>(300);
@@ -324,51 +324,90 @@ function getBadgeClass(source: string) {
   return 'badge-default';
 }
 
-const TrackCardThumbnail = memo(({ path, coverUrl }: { path: string, coverUrl?: string | null }) => {
-  const targetPath = coverUrl || path;
-  const [art, setArt] = useState<string | null>(coverArtCache.get(targetPath) || null);
+const TrackCardThumbnail = memo(({ 
+  path, 
+  coverUrl, 
+  className, 
+  fallbackIconSize = 22 
+}: { 
+  path?: string | null, 
+  coverUrl?: string | null, 
+  className?: string, 
+  fallbackIconSize?: number 
+}) => {
+  const isDirectWebUrl = Boolean(coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://') || coverUrl.startsWith('data:')));
+  const targetPath = isDirectWebUrl ? coverUrl! : (coverUrl || path || '');
+  const isOnlinePath = targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:');
+
+  const [art, setArt] = useState<string | null>(() => {
+    if (!targetPath) return null;
+    if (isOnlinePath) return targetPath;
+    return coverArtCache.get(targetPath) || null;
+  });
 
   useEffect(() => {
-    let active = true;
-    const cached = coverArtCache.get(targetPath) || null;
-    setArt(cached);
+    if (!targetPath) {
+      setArt(null);
+      return;
+    }
 
-    if (!targetPath) return;
-
-    if (targetPath.startsWith('data:')) {
+    if (isOnlinePath) {
       setArt(targetPath);
       return;
     }
 
-    if (!cached && !coverArtCache.has(targetPath)) {
-      if (!pendingArtRequests.has(targetPath)) {
-        const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
-          const artUrl = (res && typeof res === 'string') ? res : null;
-          coverArtCache.set(targetPath, artUrl);
-          return artUrl;
-        }).catch(() => {
-          coverArtCache.set(targetPath, null);
-          return null;
-        }).finally(() => {
-          pendingArtRequests.delete(targetPath);
-        });
-        pendingArtRequests.set(targetPath, req);
-      }
-      
-      pendingArtRequests.get(targetPath)?.then(resolvedArt => {
-        if (active) {
-          setArt(resolvedArt || null);
-        }
-      });
+    let active = true;
+    const cached = coverArtCache.get(targetPath);
+    if (cached !== undefined) {
+      setArt(cached);
+      return;
     }
+
+    if (!pendingArtRequests.has(targetPath)) {
+      const req = invoke('get_cover_art', { path: targetPath }).then((res: any) => {
+        const artUrl = (res && typeof res === 'string') ? res : null;
+        coverArtCache.set(targetPath, artUrl);
+        return artUrl;
+      }).catch(() => {
+        coverArtCache.set(targetPath, null);
+        return null;
+      }).finally(() => {
+        pendingArtRequests.delete(targetPath);
+      });
+      pendingArtRequests.set(targetPath, req);
+    }
+    
+    pendingArtRequests.get(targetPath)?.then(resolvedArt => {
+      if (active) {
+        setArt(resolvedArt || null);
+      }
+    });
 
     return () => {
       active = false;
     };
-  }, [targetPath]);
+  }, [targetPath, isOnlinePath]);
+
+  if (!art) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0d1117' }}>
+        <Music size={fallbackIconSize} color="var(--text-dim)" />
+      </div>
+    );
+  }
 
   return (
-    <img src={art || defaultCover} alt="" loading="lazy" className="aideo-track-img" />
+    <img 
+      src={art} 
+      alt="" 
+      referrerPolicy="no-referrer" 
+      loading="lazy" 
+      className={className || "aideo-track-img"}
+      onError={() => {
+        if (targetPath) coverArtCache.set(targetPath, null);
+        setArt(null);
+      }} 
+    />
   );
 });
 
@@ -398,7 +437,10 @@ export function AideoView() {
     appMode,
     resumePosition,
     resumeLastSession,
-    dismissResumePrompt
+    dismissResumePrompt,
+    discoveryLayout,
+    setDiscoveryLayout,
+    aideoPageDesign
   } = useStore(useShallow(s => ({
     tracks: s.tracks,
     playHistory: s.playHistory,
@@ -425,9 +467,13 @@ export function AideoView() {
     resumePosition: s.resumePosition,
     resumeLastSession: s.resumeLastSession,
     dismissResumePrompt: s.dismissResumePrompt,
+    discoveryLayout: s.discoveryLayout,
+    setDiscoveryLayout: s.setDiscoveryLayout,
+    aideoPageDesign: s.aideoPageDesign,
   })));
   const [greeting, setGreeting] = useState('Good morning');
   const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
+  const [audiophileFilter, setAudiophileFilter] = useState<'all' | 'lossless' | 'rotation' | 'recs' | 'charts'>('all');
   const isFetchingRef = useRef(false);
   const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
@@ -439,7 +485,7 @@ export function AideoView() {
   const [activeSource, setActiveSource] = useState('Library History');
   const [generatingMix, setGeneratingMix] = useState(false);
   const [visibleRecsCount, setVisibleRecsCount] = useState(15);
-  const [selectedMood, setSelectedMood] = useState<'all' | 'chill' | 'energy' | 'acoustic'>('all');
+  const [discoveryCardSize, setDiscoveryCardSize] = useState<number>(185);
   
   // YouTube Music / Web Search states
   const [searchQuery, setSearchQuery] = useState('');
@@ -667,56 +713,6 @@ export function AideoView() {
     };
   }, []);
 
-  const getFilteredRecommendations = () => {
-    const recs = discoveryData?.recommendations || [];
-    const dislikedPaths = new Set(tracks.filter(t => t.disliked === 1).map(t => t.path));
-    const filteredByDislike = recs.filter((track: any) => !dislikedPaths.has(track.url || track.path));
-    
-    if (selectedMood === 'all') return filteredByDislike;
-
-    return filteredByDislike.filter((track: any) => {
-      const title = (track.title || '').toLowerCase();
-      const artist = (track.artist || '').toLowerCase();
-      
-      // If it's a local track fallback (starts with local_), check its sonic profile if available!
-      if (track.id?.startsWith('local_')) {
-        const localId = parseInt(track.id.replace('local_', ''), 10);
-        const localTrack = tracks.find(t => t.id === localId);
-        if (localTrack) {
-          const energy = localTrack.energy ?? 0.5;
-          const bpm = localTrack.bpm ?? 120;
-          const bass = localTrack.bass_ratio ?? 0.33;
-          const treble = localTrack.treble_ratio ?? 0.33;
-
-          if (selectedMood === 'chill') {
-            return energy < 0.45 || bass > 0.4;
-          }
-          if (selectedMood === 'energy') {
-            return energy > 0.55 || bpm > 125;
-          }
-          if (selectedMood === 'acoustic') {
-            return treble > 0.4 || bpm < 95;
-          }
-        }
-      }
-
-      // Keyword matching fallback for online / general tracks
-      if (selectedMood === 'chill') {
-        const terms = ['chill', 'lofi', 'relax', 'ambient', 'soft', 'slow', 'sleep', 'jazz', 'night', 'lo-fi', 'lullaby', 'calm', 'bedtime'];
-        return terms.some(t => title.includes(t) || artist.includes(t));
-      }
-      if (selectedMood === 'energy') {
-        const terms = ['energy', 'dance', 'club', 'electro', 'house', 'beat', 'remix', 'workout', 'rock', 'synthwave', 'pop', 'party', 'fast', 'edm', 'drum', 'bass', 'rap', 'hip-hop', 'hard'];
-        return terms.some(t => title.includes(t) || artist.includes(t));
-      }
-      if (selectedMood === 'acoustic') {
-        const terms = ['acoustic', 'unplugged', 'vocal', 'live', 'piano', 'solo', 'acapella', 'session', 'guitar', 'plugged', 'ballad', 'indie'];
-        return terms.some(t => title.includes(t) || artist.includes(t));
-      }
-      return true;
-    });
-  };
-
   const fetchRecommendations = async (forceRefresh = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
@@ -733,13 +729,7 @@ export function AideoView() {
         if (cached) {
           setDiscoveryData(cached);
           setIsLoadingRecs(false);
-          if (cached.mixed_for_you && cached.mixed_for_you.length > 0) {
-            setActiveDiscoveryTab('mixed');
-          } else if (cached.recommendations && cached.recommendations.length > 0) {
-            setActiveDiscoveryTab('recommendations');
-          } else if (cached.global_charts && cached.global_charts.length > 0) {
-            setActiveDiscoveryTab('charts');
-          }
+          setActiveDiscoveryTab('all');
         }
       } catch (e) {
         console.warn('Failed to load cached discovery hub:', e);
@@ -871,13 +861,7 @@ export function AideoView() {
       });
 
       setDiscoveryData(resolved);
-      if (resolved.mixed_for_you && resolved.mixed_for_you.length > 0) {
-        setActiveDiscoveryTab('mixed');
-      } else if (resolved.recommendations && resolved.recommendations.length > 0) {
-        setActiveDiscoveryTab('recommendations');
-      } else if (resolved.global_charts && resolved.global_charts.length > 0) {
-        setActiveDiscoveryTab('charts');
-      }
+      setActiveDiscoveryTab('all');
     } catch (err) {
       console.error('Failed to load personalized discovery recommendations:', err);
     } finally {
@@ -941,18 +925,6 @@ export function AideoView() {
         return next;
       });
     }
-  };
-
-  const handleOpenWebBypass = (track: any, _provider?: string) => {
-    const searchString = `${track.artist} - ${track.title}`.trim();
-    navigator.clipboard.writeText(searchString).then(() => {
-      setCopiedId(track.id);
-      setTimeout(() => setCopiedId(null), 2000);
-      
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Copied "${searchString}" to clipboard!`, type: 'success' } 
-      }));
-    });
   };
 
   const handleTogglePreview = async (track: any) => {
@@ -1374,44 +1346,92 @@ export function AideoView() {
     return localArtistTracks.filter((t: any) => (t.title || '').toLowerCase().includes(q));
   }, [localArtistTracks, artistSongFilter]);
 
+  const heroTrack = useMemo(() => {
+    if (currentTrack) return currentTrack;
+    if (recapTracks.length > 0) return recapTracks[0];
+    if (tracks.length > 0) return tracks[0];
+    return null;
+  }, [currentTrack, recapTracks, tracks]);
+
+  const topRotationTracks = useMemo(() => {
+    return recapTracks.slice(0, 3);
+  }, [recapTracks]);
+
+  const audiophileTracks = useMemo(() => {
+    if (audiophileFilter === 'lossless') {
+      const filtered = tracks.filter(t => (t.path || '').toLowerCase().match(/\.(flac|wav|alac|aiff|dsd)$/i));
+      return filtered.length > 0 ? filtered.slice(0, 30) : recapTracks;
+    }
+    if (audiophileFilter === 'rotation') {
+      return recapTracks.slice(0, 30);
+    }
+    if (audiophileFilter === 'recs') {
+      return (discoveryData?.recommendations || []).slice(0, 30);
+    }
+    if (audiophileFilter === 'charts') {
+      return (discoveryData?.global_charts || []).slice(0, 30);
+    }
+    return tracks.length > 0 ? tracks.slice(0, 30) : recapTracks;
+  }, [audiophileFilter, tracks, recapTracks, discoveryData]);
+
+  const getFormatBadge = (track: any) => {
+    const p = (track.path || track.url || '').toLowerCase();
+    if (p.endsWith('.flac')) return { badge: 'FLAC 24/96', cls: 'badge-flac' };
+    if (p.endsWith('.wav')) return { badge: 'WAV 24b', cls: 'badge-hi-res' };
+    if (p.endsWith('.alac') || p.endsWith('.aiff') || p.endsWith('.dsd')) return { badge: 'HI-RES DSD', cls: 'badge-hi-res' };
+    if (p.endsWith('.mp3')) return { badge: 'MP3 320k', cls: 'badge-bitrate' };
+    if (p.endsWith('.m4a') || p.endsWith('.aac') || p.endsWith('.ogg')) return { badge: 'AAC / OGG', cls: 'badge-bitrate' };
+    if (track.url || p.startsWith('http')) return { badge: 'ONLINE STREAM', cls: 'badge-wasapi' };
+    return { badge: 'STUDIO PCM', cls: 'badge-wasapi' };
+  };
+
   const renderTrackCarousel = (tracksList: any[]) => {
     if (!tracksList || tracksList.length === 0) return null;
     const isGrid = discoveryViewMode === 'grid';
     
     return (
-      <div className={isGrid ? "aideo-discovery-grid-layout" : "aideo-discovery-grid"}>
+      <div 
+        className={isGrid ? "aideo-discovery-grid-layout" : "aideo-discovery-grid"}
+        style={isGrid ? { gridTemplateColumns: `repeat(auto-fill, minmax(${discoveryCardSize}px, 1fr))` } : undefined}
+      >
         {tracksList.map((track) => {
+          const isPlaying = playbackCurrentTrack === track.url && playbackStatus === 'Playing';
           if (isGrid) {
             return (
-              <div key={track.id} className="aideo-discovery-grid-card">
+              <div 
+                key={track.id} 
+                className={`aideo-discovery-grid-card ${isPlaying ? 'is-playing' : ''}`}
+              >
                 <div className="discovery-grid-cover-wrap">
-                  {track.cover_url ? (
-                    <img 
-                      src={track.cover_url} 
-                      alt="" 
-                      referrerPolicy="no-referrer"
-                      className="discovery-grid-cover-img"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
-                      <Music size={24} color="var(--text-dim)" />
+                  <TrackCardThumbnail 
+                    path={track.url} 
+                    coverUrl={track.cover_url} 
+                    className="discovery-grid-cover-img" 
+                    fallbackIconSize={24} 
+                  />
+
+                  {isPlaying && (
+                    <div className="discovery-eq-indicator" title="Currently Playing">
+                      <div className="discovery-eq-bar" />
+                      <div className="discovery-eq-bar" />
+                      <div className="discovery-eq-bar" />
                     </div>
                   )}
+
                   <div className="discovery-grid-overlay">
                     <div 
                       className="discovery-grid-play-circle"
                       onClick={() => handleTogglePreview(track)}
                       title={
-                        playbackCurrentTrack === track.url && playbackStatus === 'Playing'
-                          ? "Pause preview"
+                        isPlaying
+                          ? "Pause stream preview"
                           : "Stream online preview"
                       }
                     >
-                      {playbackCurrentTrack === track.url && playbackStatus === 'Playing' ? (
-                        <Pause size={14} fill="currentColor" />
+                      {isPlaying ? (
+                        <Pause size={15} fill="currentColor" />
                       ) : (
-                        <Play size={14} fill="currentColor" style={{ marginLeft: 1 }} />
+                        <Play size={15} fill="currentColor" style={{ marginLeft: 1 }} />
                       )}
                     </div>
                   </div>
@@ -1423,7 +1443,7 @@ export function AideoView() {
                     <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
                   </p>
                   {track.recommendation_source && (
-                    <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`} style={{ fontSize: '7.5px', padding: '2px 6px' }}>
+                    <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
                       {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
                         <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 3 }} />
                       )}
@@ -1434,53 +1454,41 @@ export function AideoView() {
 
                 <div className="discovery-grid-footer">
                   <span className="discovery-grid-dur-badge">{track.duration_raw}</span>
-                  <div className="discovery-grid-badge-row">
-                    <button 
-                      onClick={() => handleOpenWebBypass(track, 'lucida')}
-                      className="discovery-grid-action-btn lucida"
-                      title="Copy & search FLAC on Lucida"
-                    >
-                      {copiedId === `${track.id}-lucida` ? <Check size={10} /> : "L"}
-                    </button>
-                    <button 
-                      onClick={() => handleOpenWebBypass(track, 'squid')}
-                      className="discovery-grid-action-btn squid"
-                      title="Copy & search FLAC on Squid"
-                    >
-                      {copiedId === `${track.id}-squid` ? <Check size={10} /> : "S"}
-                    </button>
-                  </div>
 
                   {downloadedIds.has(track.id) ? (
-                    <div className="discovery-grid-download-btn downloaded" title="Added to Offline Library">
-                      <Check size={10} />
+                    <div className="discovery-download-btn downloaded" title="Added to Offline Library">
+                      <Check size={12} />
                     </div>
                   ) : downloadingIds.has(track.id) ? (
                     <div 
-                      className="discovery-grid-download-btn downloading" 
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center',
-                        width: 20, 
-                        height: 20,
-                        borderRadius: 6,
-                        background: 'rgba(16, 185, 129, 0.1)',
-                        border: '1px solid rgba(16, 185, 129, 0.2)',
-                        color: '#10b981',
-                        position: 'relative',
-                        overflow: 'hidden'
-                      }}
+                      className="discovery-download-btn downloading" 
+                      title="Downloading stream offline..."
                     >
-                      <Loader2 size={8} className="pulse" />
+                      {downloadProgress[track.url] && (
+                        <div 
+                          style={{ 
+                            position: 'absolute', 
+                            left: 0, 
+                            top: 0, 
+                            bottom: 0, 
+                            width: `${downloadProgress[track.url].percent}%`, 
+                            background: 'rgba(16, 185, 129, 0.25)', 
+                            zIndex: 0,
+                            transition: 'width 0.2s ease-out'
+                          }} 
+                        />
+                      )}
+                      <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', fontSize: 9, fontWeight: 700 }}>
+                        {downloadProgress[track.url] ? `${Math.round(downloadProgress[track.url].percent)}%` : <Loader2 size={10} className="pulse" />}
+                      </span>
                     </div>
                   ) : (
                     <button 
                       onClick={() => handleDownloadTrack(track)}
-                      className="discovery-grid-download-btn"
+                      className="discovery-download-btn"
                       title="Download stream offline"
                     >
-                      <Download size={10} />
+                      <Download size={12} />
                     </button>
                   )}
                 </div>
@@ -1490,36 +1498,38 @@ export function AideoView() {
             return (
               <div 
                 key={track.id}
-                className="aideo-discovery-list-item"
+                className={`aideo-discovery-list-item ${isPlaying ? 'is-playing' : ''}`}
               >
                 <div className="discovery-cover-wrap">
-                  {track.cover_url ? (
-                    <img 
-                      src={track.cover_url} 
-                      alt="" 
-                      referrerPolicy="no-referrer"
-                      className="discovery-cover-img"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
-                      <Music size={24} color="var(--text-dim)" />
+                  <TrackCardThumbnail 
+                    path={track.url} 
+                    coverUrl={track.cover_url} 
+                    className="discovery-cover-img" 
+                    fallbackIconSize={20} 
+                  />
+
+                  {isPlaying && (
+                    <div className="discovery-eq-indicator" style={{ top: 4, right: 4, padding: '2px 4px' }} title="Currently Playing">
+                      <div className="discovery-eq-bar" />
+                      <div className="discovery-eq-bar" />
+                      <div className="discovery-eq-bar" />
                     </div>
                   )}
+
                   <div className="discovery-overlay">
                     <div 
                       className="discovery-play-circle"
                       onClick={() => handleTogglePreview(track)}
                       title={
-                        playbackCurrentTrack === track.url && playbackStatus === 'Playing'
+                        isPlaying
                           ? "Pause preview"
                           : "Stream online preview"
                       }
                     >
-                      {playbackCurrentTrack === track.url && playbackStatus === 'Playing' ? (
-                        <Pause size={14} fill="currentColor" />
+                      {isPlaying ? (
+                        <Pause size={13} fill="currentColor" />
                       ) : (
-                        <Play size={14} fill="currentColor" style={{ marginLeft: 1 }} />
+                        <Play size={13} fill="currentColor" style={{ marginLeft: 1 }} />
                       )}
                     </div>
                   </div>
@@ -1533,7 +1543,7 @@ export function AideoView() {
                   {track.recommendation_source && (
                     <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
                       {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
-                        <span className="pulse" style={{ display: 'inline-block', width: 4, height: 4, borderRadius: '50%', background: '#10b981', marginRight: 4 }} />
+                        <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 4 }} />
                       )}
                       {track.recommendation_source}
                     </span>
@@ -1542,22 +1552,6 @@ export function AideoView() {
 
                 <div className="discovery-footer">
                   <span className="discovery-dur-badge">{track.duration_raw}</span>
-                  <div className="discovery-badge-row">
-                    <button 
-                      onClick={() => handleOpenWebBypass(track, 'lucida')}
-                      className="discovery-action-btn lucida"
-                      title="Copy & search lossless FLAC on Lucida.to"
-                    >
-                      {copiedId === `${track.id}-lucida` ? <Check size={10} /> : "Lucida"}
-                    </button>
-                    <button 
-                      onClick={() => handleOpenWebBypass(track, 'squid')}
-                      className="discovery-action-btn squid"
-                      title="Copy & search lossless FLAC on Squid.wtf"
-                    >
-                      {copiedId === `${track.id}-squid` ? <Check size={10} /> : "Squid"}
-                    </button>
-                  </div>
 
                   {downloadedIds.has(track.id) ? (
                     <div className="discovery-download-btn downloaded" title="Added to Offline Library">
@@ -1566,22 +1560,7 @@ export function AideoView() {
                   ) : downloadingIds.has(track.id) ? (
                     <div 
                       className="discovery-download-btn downloading" 
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: 4, 
-                        width: 'auto', 
-                        padding: '0 6px', 
-                        borderRadius: 6,
-                        background: 'rgba(16, 185, 129, 0.1)',
-                        border: '1px solid rgba(16, 185, 129, 0.2)',
-                        color: '#10b981',
-                        fontSize: 9,
-                        fontWeight: 700,
-                        position: 'relative',
-                        overflow: 'hidden',
-                        height: 24
-                      }}
+                      title="Downloading stream offline..."
                     >
                       {downloadProgress[track.url] && (
                         <div 
@@ -1591,21 +1570,14 @@ export function AideoView() {
                             top: 0, 
                             bottom: 0, 
                             width: `${downloadProgress[track.url].percent}%`, 
-                            background: 'rgba(16, 185, 129, 0.18)', 
+                            background: 'rgba(16, 185, 129, 0.25)', 
                             zIndex: 0,
                             transition: 'width 0.2s ease-out'
                           }} 
                         />
                       )}
-                      <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Loader2 size={8} className="pulse" />
-                        {downloadProgress[track.url] ? (
-                          <span>
-                            {Math.round(downloadProgress[track.url].percent)}%
-                          </span>
-                        ) : (
-                          <span>...</span>
-                        )}
+                      <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', fontSize: 9, fontWeight: 700 }}>
+                        {downloadProgress[track.url] ? `${Math.round(downloadProgress[track.url].percent)}%` : <Loader2 size={10} className="pulse" />}
                       </span>
                     </div>
                   ) : (
@@ -1626,6 +1598,1030 @@ export function AideoView() {
     );
   };
 
+  const renderMixCards = (mixes: YoutubeMix[]) => {
+    if (!mixes || mixes.length === 0) return null;
+    return (
+      <div className="aideo-mix-grid">
+        {mixes.map((mix: YoutubeMix) => {
+          const idLower = mix.id.toLowerCase();
+          const titleLower = mix.title.toLowerCase();
+
+          let iconType = 'sparkles';
+          let iconColorClass = 'sm';
+
+          if (idLower.includes('energy') || titleLower.includes('energy') || titleLower.includes('workout')) {
+            iconType = 'energy';
+            iconColorClass = 'dc';
+          } else if (idLower.includes('focus') || titleLower.includes('focus') || titleLower.includes('flow')) {
+            iconType = 'focus';
+            iconColorClass = 'ch';
+          } else if (idLower.includes('chill') || titleLower.includes('chill') || titleLower.includes('unwind') || titleLower.includes('late night')) {
+            iconType = 'chill';
+            iconColorClass = 'ch';
+          } else if (idLower.includes('melancholy') || titleLower.includes('reflections') || titleLower.includes('moody') || titleLower.includes('sad')) {
+            iconType = 'melancholy';
+            iconColorClass = 'rc';
+          } else if (idLower.includes('spotlight') || titleLower.includes('spotlight') || idLower.includes('artist')) {
+            iconType = 'spotlight';
+            iconColorClass = 'sm';
+          } else if (idLower.includes('recap') || titleLower.includes('recap')) {
+            iconType = 'recap';
+            iconColorClass = 'rc';
+          } else if (idLower.includes('discovery') || titleLower.includes('discovery')) {
+            iconType = 'discovery';
+            iconColorClass = 'dc';
+          } else if (idLower.includes('playlist') || titleLower.includes('playlist')) {
+            iconType = 'playlist';
+            iconColorClass = 'dc';
+          }
+
+          const renderIcon = () => {
+            switch (iconType) {
+              case 'energy': return <Zap size={20} />;
+              case 'focus': return <Target size={20} />;
+              case 'chill': return <Moon size={20} />;
+              case 'melancholy': return <CloudRain size={20} />;
+              case 'spotlight': return <Star size={20} />;
+              case 'recap': return <History size={20} />;
+              case 'discovery': return <Compass size={20} />;
+              case 'playlist': return <ListMusic size={20} />;
+              default: return <Sparkles size={20} className="pulse" />;
+            }
+          };
+
+          return (
+            <motion.div 
+              key={mix.id}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => handlePlayDiscoveryMix(mix)}
+              className={`aideo-mix-card ${iconColorClass}`}
+            >
+              <div className="mix-card-content">
+                <div className={`mix-card-icon-wrap ${iconColorClass}`}>
+                  {renderIcon()}
+                </div>
+                <div className="mix-card-text">
+                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{mix.title}</h3>
+                  <p>{mix.description}</p>
+                </div>
+                <button className="mix-play-btn" title={`Play ${mix.title}`}>
+                  <Play size={16} fill="currentColor" />
+                </button>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderResumePrompt = () => {
+    if (!(resumePosition > 0 && currentTrack)) return null;
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', marginBottom: 24, borderRadius: 16, background: 'var(--glass)', border: '1px solid var(--glass-border)', cursor: 'default' }}
+      >
+        <div style={{ width: 46, height: 46, borderRadius: 10, overflow: 'hidden', flexShrink: 0, background: 'var(--glass)' }}>
+          <TrackCardThumbnail path={currentTrack.path} coverUrl={currentTrack.cover_url} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--accent)', marginBottom: 2 }}>Continue where you left off</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {currentTrack.title || baseName(currentTrack.path)}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+            {currentTrack.artist || 'Unknown Artist'} · paused at {fmt(resumePosition)}
+            {currentTrack.duration ? ` of ${fmt(currentTrack.duration)}` : ''}
+          </div>
+        </div>
+        <button
+          className="btn btn-primary"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', fontSize: 12, flexShrink: 0 }}
+          onClick={() => { resumeLastSession(); setView('nowplaying'); }}
+        >
+          <RotateCcw size={14} />
+          Resume
+        </button>
+        <button
+          onClick={dismissResumePrompt}
+          style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, flexShrink: 0 }}
+          title="Dismiss"
+        >
+          <X size={16} />
+        </button>
+      </motion.div>
+    );
+  };
+
+  const renderBentoHeroSection = () => {
+    return (
+      <div className="aideo-bento-grid">
+        {/* Bento Cell 1: Spotlight Master Track */}
+        {heroTrack && (
+          <div className="aideo-bento-card aideo-bento-spotlight">
+            <div className="bento-spotlight-content">
+              <div className="bento-spotlight-thumb-wrap">
+                <TrackCardThumbnail path={heroTrack.path} coverUrl={heroTrack.cover_url} />
+              </div>
+              <div className="bento-spotlight-meta">
+                <div className="bento-spotlight-tag">
+                  <Sparkles size={12} /> Spotlight Feature
+                </div>
+                <h3 className="bento-spotlight-title" title={heroTrack.title || baseName(heroTrack.path)}>
+                  {heroTrack.title || baseName(heroTrack.path)}
+                </h3>
+                <p className="bento-spotlight-artist" title={heroTrack.artist || 'Unknown Artist'}>
+                  <ArtistLink name={heroTrack.artist || 'Unknown Artist'} onClick={() => triggerSearch(heroTrack.artist || 'Unknown Artist')} />
+                  {heroTrack.duration ? ` · ${fmt(heroTrack.duration)}` : ''}
+                </p>
+                <div className="bento-spotlight-actions">
+                  <button
+                    className="bento-play-btn"
+                    onClick={() => {
+                      playTrack(heroTrack as Track);
+                    }}
+                  >
+                    <Play size={14} fill="currentColor" />
+                    Play Spotlight
+                  </button>
+                  <button
+                    className="bento-action-btn"
+                    title="Add to Play Queue"
+                    onClick={() => {
+                      addToQueue(heroTrack as Track);
+                      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added to queue: ${heroTrack.title || baseName(heroTrack.path)}`, type: 'success' } }));
+                    }}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bento Cell 2: Interactive Mood Soundscapes */}
+        <div className="aideo-bento-card aideo-bento-moods">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
+              <Sparkles size={14} color="var(--accent)" />
+              Mood Soundscapes
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, textTransform: 'uppercase' }}>1-Click Mix</span>
+          </div>
+          <div className="bento-mood-chips">
+            {[
+              { label: 'Chill', color: '#06b6d4', icon: <Moon size={13} color="#06b6d4" /> },
+              { label: 'Energetic', color: '#f59e0b', icon: <Flame size={13} color="#f59e0b" /> },
+              { label: 'Focus', color: '#10b981', icon: <Target size={13} color="#10b981" /> },
+              { label: 'Melancholic', color: '#a855f7', icon: <CloudRain size={13} color="#a855f7" /> },
+              { label: 'Happy', color: '#ec4899', icon: <Star size={13} color="#ec4899" /> },
+            ].map(m => (
+              <button
+                key={m.label}
+                className={`bento-mood-chip ${activeMood === m.label ? 'active' : ''}`}
+                onClick={async () => {
+                  setActiveMood(m.label);
+                  setGeneratingMix(true);
+                  try {
+                    await generateSmartMix(m.label, activeSource);
+                  } finally {
+                    setGeneratingMix(false);
+                  }
+                }}
+              >
+                {m.icon}
+                <span>{m.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Bento Cell 3: Live Library Pulse */}
+        <div className="aideo-bento-card aideo-bento-pulse">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
+              <Activity size={14} color="#10b981" />
+              Library Pulse & DSP
+            </div>
+            <span style={{ fontSize: 10, color: '#10b981', fontWeight: 700, background: 'rgba(16, 185, 129, 0.1)', padding: '2px 6px', borderRadius: 4 }}>
+              BIT-PERFECT
+            </span>
+          </div>
+
+          <div className="bento-pulse-bars">
+            {Array.from({ length: 18 }).map((_, i) => (
+              <div key={`pulse-${i}`} className="bento-pulse-bar" style={{ animationDelay: `${i * 0.08}s`, height: `${20 + ((i * 17) % 75)}%` }} />
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--glass-border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              <strong style={{ color: '#fff' }}>{tracks.length}</strong> master tracks · <strong style={{ color: '#fff' }}>{totalPlays}</strong> plays
+            </div>
+            <button
+              onClick={() => setView('settings')}
+              className="btn btn-secondary"
+              style={{ fontSize: 11, padding: '4px 10px', height: 26, display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <Sliders size={11} />
+              Audio Cockpit
+            </button>
+          </div>
+        </div>
+
+        {/* Bento Cell 4: Top Heavy Rotation Stack */}
+        <div className="aideo-bento-card aideo-bento-rotation">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
+              <Flame size={14} color="#f59e0b" />
+              Heavy Rotation
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Top Played</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {topRotationTracks.map((t, idx) => (
+              <div
+                key={t.id || t.path}
+                className="bento-rotation-item"
+                onClick={() => { playTrack(t); setView('nowplaying'); }}
+              >
+                <span style={{ fontSize: 11, fontWeight: 800, color: idx === 0 ? 'var(--accent)' : 'var(--text-dim)', width: 16 }}>
+                  #{idx + 1}
+                </span>
+                <div style={{ width: 28, height: 28, borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
+                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.title || baseName(t.path)}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.artist || 'Unknown Artist'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {playCounts[t.path] > 0 && (
+                    <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <Star size={9} fill="#f59e0b" /> {playCounts[t.path]}
+                    </span>
+                  )}
+                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--glass-h)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Play size={10} fill="currentColor" style={{ marginLeft: 1 }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAudiophileHudSection = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Audiophile HUD Telemetry Header */}
+        <div className="aideo-audiophile-hud">
+          <div className="audiophile-hud-left">
+            <Activity size={18} color="#06b6d4" />
+            <span className="audiophile-hud-title">AIDEO // AUDIO TELEMETRY ENGINE</span>
+            <span className="audiophile-badge badge-flac">FLAC LOSSLESS</span>
+            <span className="audiophile-badge badge-wasapi">BIT-PERFECT WASAPI</span>
+            <span className="audiophile-badge badge-hi-res">24-BIT / 96KHZ</span>
+            <span className="audiophile-badge badge-bitrate">{tracks.length} MASTER TRACKS</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-dim)' }}>
+              PLAYS: <strong style={{ color: '#fff' }}>{totalPlays}</strong>
+            </span>
+            <button
+              onClick={() => fetchRecommendations(true)}
+              className="btn btn-secondary"
+              style={{ fontSize: 11, height: 28, padding: '0 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <RefreshCw size={11} className={isRefreshingRecs ? "spin" : ""} />
+              Sync
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Chips Bar */}
+        <div className="aideo-audiophile-filters">
+          {[
+            { id: 'all' as const, label: 'ALL MASTER TRACKS' },
+            { id: 'lossless' as const, label: 'LOSSLESS & FLAC' },
+            { id: 'rotation' as const, label: 'HEAVY ROTATION' },
+            { id: 'recs' as const, label: 'DISCOVERY FEED' },
+            { id: 'charts' as const, label: 'GLOBAL CHARTS' },
+          ].map(f => (
+            <button
+              key={f.id}
+              onClick={() => setAudiophileFilter(f.id)}
+              className={`audiophile-filter-btn ${audiophileFilter === f.id ? 'active' : ''}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Audiophile Master Table */}
+        <div className="aideo-audiophile-table-wrap">
+          <table className="aideo-audiophile-table">
+            <thead>
+              <tr>
+                <th style={{ width: 40 }}>#</th>
+                <th>TRACK TITLE & ARTIST</th>
+                <th style={{ width: 140 }}>AUDIO SPEC</th>
+                <th style={{ width: 90, textAlign: 'right' }}>DURATION</th>
+                <th style={{ width: 90, textAlign: 'right' }}>PLAYS</th>
+                <th style={{ width: 100, textAlign: 'center' }}>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {audiophileTracks.map((t: any, idx) => {
+                const fmtInfo = getFormatBadge(t);
+                const trackPath = t.path || t.url || '';
+                const isPlaying = (playbackCurrentTrack === t.path || playbackCurrentTrack === t.url) && playbackStatus === 'Playing';
+                return (
+                  <tr
+                    key={t.id || t.path || idx}
+                    onClick={() => {
+                      if (t.path) playTrack(t as Track);
+                      else handleTogglePreview(t);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <td className="audiophile-idx-col">{String(idx + 1).padStart(2, '0')}</td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: '#111' }}>
+                          <TrackCardThumbnail path={t.path || t.url} coverUrl={t.cover_url} />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: isPlaying ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {t.title || baseName(trackPath)}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                            {t.artist || 'Unknown Artist'}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`audiophile-badge ${fmtInfo.cls}`}>
+                        {fmtInfo.badge}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text-dim)' }}>
+                      {fmt(t.duration)}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: (t.path && playCounts[t.path] > 0) ? '#f59e0b' : 'var(--text-dim)' }}>
+                      {t.path ? (playCounts[t.path] || 0) : 0}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => {
+                            if (t.path) playTrack(t as Track);
+                            else handleTogglePreview(t);
+                          }}
+                          className="btn btn-secondary"
+                          style={{ width: 28, height: 28, padding: 0, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          title="Play Track"
+                        >
+                          {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
+                        </button>
+                        <button
+                          onClick={() => {
+                            addToQueue(t as any);
+                            window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Queued: ${t.title || baseName(trackPath)}`, type: 'success' } }));
+                          }}
+                          className="btn btn-secondary"
+                          style={{ width: 28, height: 28, padding: 0, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          title="Add to Queue"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCinematicHeroSection = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+        {/* Cinematic Ambient Hero Banner */}
+        {heroTrack && (
+          <div className="aideo-cinematic-hero">
+            <div className="cinematic-hero-scrim" />
+            <div className="cinematic-hero-body">
+              <div style={{ maxWidth: 640 }}>
+                <div className="cinematic-hero-tag">
+                  <Flame size={14} color="#fbbf24" />
+                  FEATURED SPOTLIGHT MASTER
+                </div>
+                <h1 className="cinematic-hero-title">
+                  {heroTrack.title || baseName(heroTrack.path)}
+                </h1>
+                <p className="cinematic-hero-artist">
+                  <ArtistLink name={heroTrack.artist || 'Unknown Artist'} onClick={() => triggerSearch(heroTrack.artist || 'Unknown Artist')} />
+                  {heroTrack.album ? ` · ${heroTrack.album}` : ''}
+                  {heroTrack.duration ? ` · ${fmt(heroTrack.duration)}` : ''}
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <button
+                    className="cinematic-hero-play-btn"
+                    onClick={() => {
+                      playTrack(heroTrack);
+                    }}
+                  >
+                    <Play size={16} fill="currentColor" />
+                    Play Master Track
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ borderRadius: 99, padding: '12px 22px', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}
+                    onClick={() => {
+                      addToQueue(heroTrack);
+                      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added to queue: ${heroTrack.title || baseName(heroTrack.path)}`, type: 'success' } }));
+                    }}
+                  >
+                    <Plus size={15} />
+                    Queue Next
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ width: 140, height: 140, borderRadius: 20, overflow: 'hidden', flexShrink: 0, boxShadow: 'var(--shadow-cover)', border: '1px solid var(--glass-border)' }}>
+                <TrackCardThumbnail path={heroTrack.path} coverUrl={heroTrack.cover_url} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Cinematic Mood Stations */}
+        <div className="aideo-section" style={{ margin: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <Sparkles size={18} color="var(--accent)" />
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, letterSpacing: -0.3, color: 'var(--text)' }}>
+              Cinematic Mood Stations
+            </h3>
+          </div>
+
+          <div className="aideo-cinematic-stations">
+            {[
+              { title: 'Chill Wave', sub: 'Atmospheric Ambient & Lo-Fi', mood: 'Chill', grad: 'linear-gradient(135deg, rgba(6, 182, 212, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(6, 182, 212, 0.3)' },
+              { title: 'Hyperdrive Energy', sub: 'High-BPM Electronic & Beats', mood: 'Energetic', grad: 'linear-gradient(135deg, rgba(245, 158, 11, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(245, 158, 11, 0.3)' },
+              { title: 'Deep Zen Focus', sub: 'Binaural & Instrumental Waves', mood: 'Focus', grad: 'linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(16, 185, 129, 0.3)' },
+              { title: 'Midnight Melancholy', sub: 'Nocturnal Soul & Acoustic', mood: 'Melancholic', grad: 'linear-gradient(135deg, rgba(168, 85, 247, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(168, 85, 247, 0.3)' },
+              { title: 'Golden Euphoria', sub: 'Uplifting Pop & Summer Anthems', mood: 'Happy', grad: 'linear-gradient(135deg, rgba(236, 72, 153, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(236, 72, 153, 0.3)' },
+            ].map(st => (
+              <div
+                key={st.title}
+                className="cinematic-station-card"
+                style={{ background: st.grad, borderColor: st.border }}
+                onClick={async () => {
+                  setActiveMood(st.mood);
+                  setGeneratingMix(true);
+                  try {
+                    await generateSmartMix(st.mood, activeSource);
+                  } finally {
+                    setGeneratingMix(false);
+                  }
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', marginBottom: 2 }}>{st.title}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{st.sub}</div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#fff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+                    <Play size={14} fill="currentColor" style={{ marginLeft: 2 }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDiscoveryHubSection = () => {
+    return (
+      <section className="aideo-section">
+        <div className="aideo-discovery-header">
+          <div className="aideo-discovery-title-wrap">
+            <h2 className="aideo-sec-title" style={{ margin: 0 }}>Discovery Hub</h2>
+            <p style={{ margin: '3px 0 0 0', fontSize: 12, color: 'var(--text-dim)' }}>
+              Personalized curation derived from your offline library & streaming trends
+            </p>
+          </div>
+
+          <div className="aideo-discovery-toolbar">
+            {/* Layout Selector: Multi-Shelf vs Unified Feed */}
+            <div className="discovery-layout-toggle" title={`Layout: ${discoveryLayout === 'shelves' ? 'Multi-Shelf View' : 'Unified Feed'}`}>
+              <button 
+                onClick={() => setDiscoveryLayout('shelves')}
+                className={`discovery-layout-btn ${discoveryLayout === 'shelves' ? 'active' : ''}`}
+                title="Multi-Shelf View"
+              >
+                <Layers size={13} />
+                <span>Shelves</span>
+              </button>
+              <button 
+                onClick={() => setDiscoveryLayout('unified')}
+                className={`discovery-layout-btn ${discoveryLayout === 'unified' ? 'active' : ''}`}
+                title="Unified Feed View"
+              >
+                <LayoutGrid size={13} />
+                <span>Unified</span>
+              </button>
+            </div>
+
+            {/* Size Slider (Square Small / Big) */}
+            {discoveryViewMode === 'grid' && (
+              <div className="discovery-size-slider-wrap" title={`Grid Card Size: ${discoveryCardSize}px`}>
+                <LayoutGrid size={11} className="discovery-size-icon-small" />
+                <input 
+                  type="range"
+                  min={130}
+                  max={280}
+                  step={5}
+                  value={discoveryCardSize}
+                  onChange={(e) => setDiscoveryCardSize(Number(e.target.value))}
+                  className="discovery-size-slider"
+                  style={{ '--slider-pct': `${Math.round(((discoveryCardSize - 130) / (280 - 130)) * 100)}%` } as React.CSSProperties}
+                  aria-label="Adjust square card size"
+                />
+                <LayoutGrid size={15} className="discovery-size-icon-large" />
+              </div>
+            )}
+
+            <div className="discovery-view-toggle">
+              <button 
+                onClick={() => setDiscoveryViewMode('grid')}
+                className={`discovery-view-btn ${discoveryViewMode === 'grid' ? 'active' : ''}`}
+                title="Grid View"
+              >
+                <LayoutGrid size={14} />
+              </button>
+              <button 
+                onClick={() => setDiscoveryViewMode('list')}
+                className={`discovery-view-btn ${discoveryViewMode === 'list' ? 'active' : ''}`}
+                title="List View"
+              >
+                <List size={14} />
+              </button>
+            </div>
+
+            <button 
+              onClick={() => fetchRecommendations(true)} 
+              disabled={isRefreshingRecs || isLoadingRecs}
+              className="discovery-refresh-btn"
+              title="Re-run discovery algorithm"
+            >
+              <RefreshCw size={13} className={isRefreshingRecs || isLoadingRecs ? "spin" : ""} />
+              <span>{isRefreshingRecs ? "Curating..." : "Refresh Recommendations"}</span>
+            </button>
+          </div>
+        </div>
+
+        {isLoadingRecs ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-dim)', fontSize: 12, fontWeight: 500 }}>
+              <Loader2 className="spin" size={14} style={{ color: 'var(--accent)' }} />
+              <span>Curating personalized recommendations from your listening habits...</span>
+            </div>
+            <div 
+              className="discovery-skeleton-grid"
+              style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${discoveryCardSize}px, 1fr))` }}
+            >
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={`skel-${i}`} className="discovery-skeleton-card">
+                  <div className="discovery-skeleton-cover" />
+                  <div className="discovery-skeleton-line" />
+                  <div className="discovery-skeleton-line short" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : discoveryData ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: discoveryLayout === 'shelves' ? 12 : 0 }}>
+            {discoveryLayout === 'shelves' ? (
+              <>
+                {/* Shelf 1: Jump Back In (Recently Played) */}
+                {discoveryData.recently_played && discoveryData.recently_played.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <RotateCcw size={17} color="var(--accent)" />
+                        <h3 className="discovery-shelf-title">Jump Back In</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">{discoveryData.recently_played.length} tracks</span>
+                    </div>
+                    {renderTrackCarousel(discoveryData.recently_played.slice(0, 12))}
+                  </div>
+                )}
+
+                {/* Shelf 2: Made For You Mixes */}
+                {discoveryData.mixed_for_you && discoveryData.mixed_for_you.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <Sparkles size={17} color="#06b6d4" />
+                        <h3 className="discovery-shelf-title">Made For You</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">Personalized Station Mixes</span>
+                    </div>
+                    {renderMixCards(discoveryData.mixed_for_you)}
+                  </div>
+                )}
+
+                {/* Shelf 3: Recommended For You (similar-to-loved + same artist algorithm) */}
+                {discoveryData.recommendations && discoveryData.recommendations.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <Target size={17} color="var(--accent)" />
+                        <h3 className="discovery-shelf-title">Recommended For You</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">Similar To Songs You Love</span>
+                    </div>
+                    {renderTrackCarousel(discoveryData.recommendations.slice(0, 12))}
+                  </div>
+                )}
+
+                {/* Shelf 4: Forgotten Gems */}
+                {discoveryData.forgotten_gems && discoveryData.forgotten_gems.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <Clock size={17} color="#a855f7" />
+                        <h3 className="discovery-shelf-title">Forgotten Gems</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">Old Favorites You Haven't Played Recently</span>
+                    </div>
+                    {renderTrackCarousel(discoveryData.forgotten_gems.slice(0, 12))}
+                  </div>
+                )}
+
+                {/* Shelf 5: Curated Playlist Mixes */}
+                {discoveryData.playlist_mixes && discoveryData.playlist_mixes.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <ListMusic size={17} color="#ec4899" />
+                        <h3 className="discovery-shelf-title">Curated Playlist Mixes</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">Ready to Play</span>
+                    </div>
+                    {renderMixCards(discoveryData.playlist_mixes)}
+                  </div>
+                )}
+
+                {/* Shelf 6: Heavy Rotation */}
+                {discoveryData.heavy_rotation && discoveryData.heavy_rotation.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <Flame size={17} color="#f59e0b" />
+                        <h3 className="discovery-shelf-title">Heavy Rotation</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">Your Most Repeated Listening Trends</span>
+                    </div>
+                    {renderTrackCarousel(discoveryData.heavy_rotation.slice(0, 12))}
+                  </div>
+                )}
+
+                {/* Shelf 7: Global Trends & Charts */}
+                {discoveryData.global_charts && discoveryData.global_charts.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <Compass size={17} color="#3b82f6" />
+                        <h3 className="discovery-shelf-title">Global Trends & Charts</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">Last.fm Real-Time Discovery</span>
+                    </div>
+                    {renderTrackCarousel(discoveryData.global_charts.slice(0, 12))}
+                  </div>
+                )}
+              </>
+            ) : (
+              /* Unified Feed View */
+              <div className="discovery-unified-container">
+                <div className="discovery-unified-tabs">
+                  {buildUnifiedTabs(discoveryData).map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setActiveDiscoveryTab(tab.id);
+                        setVisibleRecsCount(15);
+                      }}
+                      className={`discovery-unified-tab ${activeDiscoveryTab === tab.id ? 'active' : ''}`}
+                    >
+                      <span>{tab.label}</span>
+                      {tab.count > 0 && <span className="tab-badge">{tab.count}</span>}
+                    </button>
+                  ))}
+                </div>
+
+                {activeDiscoveryTab === 'all' && discoveryData.mixed_for_you && discoveryData.mixed_for_you.length > 0 && (
+                  <div className="discovery-unified-section">
+                    <div className="discovery-unified-section-title">
+                      <Sparkles size={14} color="#06b6d4" />
+                      <span>Made For You</span>
+                    </div>
+                    {renderMixCards(discoveryData.mixed_for_you)}
+                  </div>
+                )}
+
+                {activeDiscoveryTab === 'all' && discoveryData.playlist_mixes && discoveryData.playlist_mixes.length > 0 && (
+                  <div className="discovery-unified-section">
+                    <div className="discovery-unified-section-title">
+                      <ListMusic size={14} color="#ec4899" />
+                      <span>Curated Playlist Mixes</span>
+                    </div>
+                    {renderMixCards(discoveryData.playlist_mixes)}
+                  </div>
+                )}
+
+                {(() => {
+                  const tracksToDisplay = getUnifiedTabTracks(
+                    discoveryData,
+                    (activeDiscoveryTab as UnifiedTabId) || 'all',
+                  );
+
+                  if (tracksToDisplay.length === 0) {
+                    return (
+                      <div className="aideo-empty-box" style={{ margin: '20px 0' }}>
+                        <Compass size={28} />
+                        <p>No tracks currently curated in this feed category.</p>
+                      </div>
+                    );
+                  }
+
+                  const paginatedTracks = tracksToDisplay.slice(0, visibleRecsCount);
+
+                  return (
+                    <div>
+                      {renderTrackCarousel(paginatedTracks)}
+                      {tracksToDisplay.length > visibleRecsCount && (
+                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                          <button
+                            onClick={() => setVisibleRecsCount(prev => prev + 15)}
+                            className="discovery-cta-secondary"
+                          >
+                            <span>Load More Discovery Tracks</span>
+                            <span style={{ fontSize: 11, opacity: 0.7 }}>
+                              ({visibleRecsCount} of {tracksToDisplay.length})
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 180, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 16, padding: 24, textAlign: 'center' }}>
+            <Sparkles size={24} color="var(--accent)" style={{ marginBottom: 8 }} />
+            <p style={{ margin: '0 0 12px 0', fontSize: 13 }}>Personalized discovery mixes are ready to be curated.</p>
+            <button className="btn btn-primary" onClick={() => fetchRecommendations(true)} style={{ padding: '8px 18px', fontSize: 12 }}>
+              Load Recommendations
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const renderQuickRecapSection = () => {
+    return (
+      <section className="aideo-section">
+        <h2 className="aideo-sec-title">Quick Recap</h2>
+        {recapTracks.length > 0 ? (
+          <div className="aideo-recap-grid">
+            {recapTracks.map((t) => (
+              <div 
+                key={t.id || t.path} 
+                className="aideo-recap-item"
+                onClick={() => { playTrack(t); setView('nowplaying'); }}
+              >
+                <div className="aideo-item-cover-wrap">
+                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
+                  <div className="aideo-item-play-overlay">
+                    <Play size={16} fill="white" color="white" />
+                  </div>
+                </div>
+                <div className="aideo-item-info">
+                  <div className="aideo-item-title" title={t.title || baseName(t.path)}>
+                    {t.title || baseName(t.path)}
+                  </div>
+                  <div className="aideo-item-artist" title={t.artist || 'Unknown Artist'}>
+                    <ArtistLink name={t.artist || 'Unknown Artist'} onClick={() => triggerSearch(t.artist || 'Unknown Artist')} />
+                  </div>
+                </div>
+                <div className="aideo-item-duration">{fmt(t.duration)}</div>
+                {playCounts[t.path] > 0 && (
+                  <div className="aideo-item-badge">
+                    <Star size={10} fill="var(--accent)" color="var(--accent)" style={{ marginRight: 4 }} />
+                    {playCounts[t.path]} {playCounts[t.path] === 1 ? 'play' : 'plays'}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="aideo-empty-box">
+            <Music size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
+            <p style={{ marginBottom: 16 }}>Add folders in settings to scan and load tracks into your library.</p>
+            <button className="btn btn-primary" onClick={() => setView('settings')} style={{ padding: '8px 16px', fontSize: 12 }}>
+              Open Settings
+            </button>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const renderRecentlyPlayedSection = () => {
+    return (
+      <section className="aideo-section" style={{ marginBottom: 40 }}>
+        <h2 className="aideo-sec-title">Recently Played</h2>
+        {recentTracks.length > 0 ? (
+          <div className="aideo-carousel">
+            {recentTracks.map(t => (
+              <motion.div 
+                key={t.id || t.path}
+                whileHover={{ scale: 1.03 }}
+                className="aideo-carousel-card"
+                onClick={() => { playTrack(t); setView('nowplaying'); }}
+              >
+                <div className="carousel-cover-wrap">
+                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
+                  <div className="carousel-play-overlay">
+                    <div className="carousel-play-btn-circle">
+                      <Play size={20} fill="white" color="white" />
+                    </div>
+                  </div>
+                </div>
+                <div className="carousel-meta">
+                  <h4 className="carousel-title" title={t.title || baseName(t.path)}>
+                    {t.title || baseName(t.path)}
+                  </h4>
+                  <p className="carousel-artist" title={t.artist || 'Unknown Artist'}>
+                    <ArtistLink name={t.artist || 'Unknown Artist'} onClick={() => triggerSearch(t.artist || 'Unknown Artist')} />
+                  </p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        ) : (
+          <div className="aideo-empty-box">
+            <History size={32} />
+            <p>Your play history is empty. Listen to some tracks from your library first!</p>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const renderSmartMixBuilderSection = () => {
+    return (
+      <section className="aideo-section" style={{ marginBottom: 32 }}>
+        <h2 className="aideo-sec-title">Smart Mix Builder</h2>
+        <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline playlists custom-tailored to your listening trends, habits, and mood.</p>
+        
+        <div style={{
+          background: 'var(--glass)',
+          border: '1px solid var(--glass-border)',
+          borderRadius: 16,
+          padding: 22,
+          backdropFilter: 'blur(16px)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gap: 20,
+          alignItems: 'center'
+        }}>
+          {/* Mood Selector */}
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Select Mood Profile</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {['Energetic', 'Chill', 'Focus', 'Melancholic', 'Happy'].map(m => {
+                const active = activeMood === m;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => setActiveMood(m)}
+                    style={{
+                      background: active ? 'rgba(6, 182, 212, 0.12)' : 'var(--glass)',
+                      border: '1px solid ' + (active ? 'rgba(6, 182, 212, 0.35)' : 'var(--glass-border)'),
+                      borderRadius: 8,
+                      padding: '6px 12px',
+                      color: active ? '#22d3ee' : 'var(--text-dim)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
+                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
+                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass)'; }}
+                  >
+                    {m}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Seed Trend Source Selector */}
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Seed Trend Source</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {['Library History', 'Last.fm Trends', 'ListenBrainz Scrobbles'].map(s => {
+                const active = activeSource === s;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setActiveSource(s)}
+                    style={{
+                      background: active ? 'rgba(6, 182, 212, 0.12)' : 'var(--glass)',
+                      border: '1px solid ' + (active ? 'rgba(6, 182, 212, 0.35)' : 'var(--glass-border)'),
+                      borderRadius: 8,
+                      padding: '6px 12px',
+                      color: active ? '#22d3ee' : 'var(--text-dim)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
+                    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
+                    onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass)'; }}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Generator trigger button */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={handleGenerateSmartMix}
+              disabled={generatingMix}
+              style={{
+                padding: '12px 24px',
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 700,
+                background: 'var(--accent)',
+                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                cursor: generatingMix ? 'wait' : 'pointer',
+                border: 'none',
+                color: 'white',
+                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                opacity: generatingMix ? 0.75 : 1
+              }}
+              onMouseEnter={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'none'; }}
+            >
+              {generatingMix ? (
+                <>
+                  <Loader2 className="spin" size={15} /> Analyzing Patterns...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={15} /> Generate & Play Smart Mix
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  };
+
   return (
     <div className="aideo-home-wrap">
       {/* Background tint overlay */}
@@ -1635,7 +2631,7 @@ export function AideoView() {
       <div style={{ marginBottom: 36, maxWidth: 640, position: 'relative' }} ref={dropdownRef}>
         <form onSubmit={handleAideoSearch} style={{ display: 'flex', gap: 12 }}>
           <div style={{ position: 'relative', flex: 1 }}>
-            <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center' }}>
+            <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
               <Search size={18} />
             </div>
             <input 
@@ -1660,18 +2656,18 @@ export function AideoView() {
                 fontSize: 14,
                 fontWeight: 500,
                 outline: 'none',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.2), inset 0 2px 4px rgba(255,255,255,0.02)',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
               onFocusCapture={(e) => {
                 e.target.style.borderColor = 'rgba(var(--accent-rgb), 0.5)';
-                e.target.style.boxShadow = '0 0 20px rgba(var(--accent-rgb), 0.15), inset 0 2px 4px rgba(255,255,255,0.02)';
-                e.target.style.background = 'rgba(255,255,255,0.05)';
+                e.target.style.boxShadow = '0 0 20px rgba(var(--accent-rgb), 0.15)';
+                e.target.style.background = 'var(--glass-h)';
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = 'rgba(255,255,255,0.08)';
-                e.target.style.boxShadow = '0 4px 20px rgba(0,0,0,0.2), inset 0 2px 4px rgba(255,255,255,0.02)';
-                e.target.style.background = 'rgba(255,255,255,0.03)';
+                e.target.style.borderColor = 'var(--glass-border)';
+                e.target.style.boxShadow = '0 4px 20px rgba(0,0,0,0.2)';
+                e.target.style.background = 'var(--glass)';
               }}
             />
             {searchQuery && (
@@ -1689,7 +2685,7 @@ export function AideoView() {
                   transform: 'translateY(-50%)',
                   background: 'none',
                   border: 'none',
-                  color: 'rgba(255,255,255,0.4)',
+                  color: 'var(--text-dim)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -1698,12 +2694,12 @@ export function AideoView() {
                   transition: 'background 0.2s, color 0.2s',
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+                  e.currentTarget.style.background = 'var(--glass-h)';
                   e.currentTarget.style.color = '#fff';
                 }}
                 onMouseLeave={e => {
                   e.currentTarget.style.background = 'none';
-                  e.currentTarget.style.color = 'rgba(255,255,255,0.4)';
+                  e.currentTarget.style.color = 'var(--text-dim)';
                 }}
               >
                 <X size={16} />
@@ -1753,7 +2749,7 @@ export function AideoView() {
             background: 'rgba(12, 12, 20, 0.96)',
             backdropFilter: 'blur(24px)',
             borderRadius: 16,
-            border: '1px solid rgba(255, 255, 255, 0.08)',
+            border: '1px solid var(--glass-border)',
             boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
             zIndex: 1000,
             overflow: 'hidden',
@@ -1776,7 +2772,7 @@ export function AideoView() {
                 }}
                 className="dropdown-item-hover"
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'rgba(255, 255, 255, 0.85)', fontSize: 13, fontWeight: 500, flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'var(--text)', fontSize: 13, fontWeight: 500, flex: 1, minWidth: 0 }}>
                   <History size={14} style={{ color: 'var(--text-dim)', flexShrink: 0 }} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q}</span>
                 </div>
@@ -1785,7 +2781,7 @@ export function AideoView() {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: 'rgba(255,255,255,0.4)',
+                    color: 'var(--text-dim)',
                     cursor: 'pointer',
                     padding: 4,
                     display: 'flex',
@@ -1799,7 +2795,7 @@ export function AideoView() {
                   }}
                   onMouseLeave={e => {
                     e.currentTarget.style.background = 'none';
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.4)';
+                    e.currentTarget.style.color = 'var(--text-dim)';
                   }}
                 >
                   <X size={13} />
@@ -1818,7 +2814,7 @@ export function AideoView() {
                   padding: '8px 16px',
                   cursor: 'pointer',
                   transition: 'background 0.2s',
-                  color: 'rgba(255, 255, 255, 0.85)',
+                  color: 'var(--text)',
                   fontSize: 13,
                   fontWeight: 500,
                   gap: 12,
@@ -1840,7 +2836,7 @@ export function AideoView() {
                   color: 'var(--text-dim)',
                   textTransform: 'uppercase',
                   letterSpacing: 0.5,
-                  borderTop: '1px solid rgba(255,255,255,0.06)',
+                  borderTop: '1px solid var(--glass-border)',
                   marginTop: 6,
                 }}>
                   Songs
@@ -1861,18 +2857,12 @@ export function AideoView() {
                     className="dropdown-item-hover"
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
-                      {track.cover_url ? (
-                        <img 
-                          src={track.cover_url} 
-                          alt="" 
-                          style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div style={{ width: 36, height: 36, borderRadius: 6, background: '#1a1a24', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <Music size={16} color="var(--text-dim)" />
-                        </div>
-                      )}
+                      <TrackCardThumbnail 
+                        path={track.url} 
+                        coverUrl={track.cover_url} 
+                        className="aideo-search-thumb" 
+                        fallbackIconSize={16} 
+                      />
                       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {track.title}
@@ -1917,13 +2907,13 @@ export function AideoView() {
                 gap: 8,
                 transition: 'all 0.2s',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)'}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-h)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--glass)'}
             >
               <ArrowLeft size={16} />
               Back to Dashboard
             </button>
-            <h1 style={{ fontSize: 28, fontWeight: 800, color: 'white', margin: 0 }}>
+            <h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--text)', margin: 0 }}>
               Search Results for <span style={{ color: 'var(--accent)' }}>"{searchQuery}"</span>
             </h1>
           </div>
@@ -1940,8 +2930,8 @@ export function AideoView() {
                 position: 'relative',
                 borderRadius: 20,
                 overflow: 'hidden',
-                background: 'rgba(255,255,255,0.02)',
-                border: '1px solid rgba(255,255,255,0.06)',
+                background: 'var(--glass)',
+                border: '1px solid var(--glass-border)',
                 padding: '40px',
                 display: 'flex',
                 gap: '32px',
@@ -1972,7 +2962,7 @@ export function AideoView() {
                   borderRadius: 20,
                   overflow: 'hidden',
                   boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                  border: '1px solid rgba(255,255,255,0.1)',
+                  border: '1px solid var(--glass-border)',
                   zIndex: 1,
                   flexShrink: 0,
                   background: '#1a1a24',
@@ -1995,7 +2985,7 @@ export function AideoView() {
                 {/* Artist Information & Actions */}
                 <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 16, flex: 1 }}>
                   <div>
-                    <h2 style={{ fontSize: '40px', fontWeight: 900, color: 'white', margin: '0 0 8px 0', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
+                    <h2 style={{ fontSize: '40px', fontWeight: 900, color: 'var(--text)', margin: '0 0 8px 0', letterSpacing: '-0.5px', lineHeight: 1.1 }}>
                       {artistProfile.name}
                     </h2>
                     <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--text-dim)', fontWeight: 500 }}>
@@ -2014,7 +3004,7 @@ export function AideoView() {
                       <p style={{
                         fontSize: 13,
                         lineHeight: 1.6,
-                        color: 'rgba(255,255,255,0.75)',
+                        color: 'var(--text-dim)',
                         margin: 0,
                         display: '-webkit-box',
                         WebkitLineClamp: showFullBio ? 'unset' : 3,
@@ -2134,7 +3124,7 @@ export function AideoView() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                   {/* Tabs */}
-                  <div style={{ display: 'flex', gap: 6, background: 'rgba(255, 255, 255, 0.03)', padding: 4, borderRadius: 14, border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                  <div style={{ display: 'flex', gap: 6, background: 'var(--glass)', padding: 4, borderRadius: 14, border: '1px solid var(--glass-border)' }}>
                     <button
                       onClick={() => setArtistActiveTab('popular')}
                       style={{
@@ -2213,8 +3203,8 @@ export function AideoView() {
                         width: '100%',
                         padding: '8px 12px 8px 34px',
                         borderRadius: 12,
-                        background: 'rgba(255, 255, 255, 0.04)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        background: 'var(--glass)',
+                        border: '1px solid var(--glass-border)',
                         color: '#fff',
                         fontSize: 12,
                         outline: 'none',
@@ -2333,7 +3323,7 @@ export function AideoView() {
                               display: 'flex',
                               alignItems: 'center',
                               padding: '12px 20px',
-                              borderBottom: idx === filteredLocalTracks.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.04)',
+                              borderBottom: idx === filteredLocalTracks.length - 1 ? 'none' : '1px solid var(--glass-border)',
                               cursor: 'pointer',
                               gap: 16
                             }}
@@ -2378,560 +3368,89 @@ export function AideoView() {
         </div>
       ) : (
         <>
-          {/* Greeting Header */}
-          <div className="aideo-greeting-header">
-            <div className="aideo-header-info">
-              <motion.h1 
-                initial={{ opacity: 0, y: -15 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                transition={{ duration: 0.5 }}
-                className="aideo-title"
-              >
-                {greeting}, Listener
-              </motion.h1>
-              <p className="aideo-subtitle">Your personalized music portal is fully customized and ready.</p>
-            </div>
-            <div className="aideo-header-stats">
-              <div className="aideo-stat-box">
-                <span className="aideo-stat-num">{tracks.length}</span>
-                <span className="aideo-stat-label">Tracks</span>
+          {aideoPageDesign === 'bento' && (
+            <div className="aideo-bento-container">
+              {/* Greeting */}
+              <div className="aideo-greeting-header" style={{ marginBottom: 24 }}>
+                <div className="aideo-header-info">
+                  <motion.h1 initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="aideo-title">
+                    {greeting}, Listener
+                  </motion.h1>
+                  <p className="aideo-subtitle">Editorial Curation · Personalized Discovery Bento</p>
+                </div>
+                <div className="aideo-header-stats">
+                  <div className="aideo-stat-box">
+                    <span className="aideo-stat-num">{tracks.length}</span>
+                    <span className="aideo-stat-label">Tracks</span>
+                  </div>
+                  <div className="aideo-stat-box">
+                    <span className="aideo-stat-num">{totalPlays}</span>
+                    <span className="aideo-stat-label">Plays</span>
+                  </div>
+                </div>
               </div>
-              <div className="aideo-stat-box">
-                <span className="aideo-stat-num">{totalPlays}</span>
-                <span className="aideo-stat-label">Total Plays</span>
-              </div>
-            </div>
-          </div>
 
-          {/* Continue Where You Left Off */}
-          {resumePosition > 0 && currentTrack && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', marginBottom: 24, borderRadius: 16, background: 'var(--glass)', border: '1px solid var(--glass-border)', cursor: 'default' }}
-            >
-              <div style={{ width: 46, height: 46, borderRadius: 10, overflow: 'hidden', flexShrink: 0, background: 'rgba(255,255,255,0.04)' }}>
-                <TrackCardThumbnail path={currentTrack.path} coverUrl={currentTrack.cover_url} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--accent)', marginBottom: 2 }}>Continue where you left off</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {currentTrack.title || baseName(currentTrack.path)}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-                  {currentTrack.artist || 'Unknown Artist'} · paused at {fmt(resumePosition)}
-                  {currentTrack.duration ? ` of ${fmt(currentTrack.duration)}` : ''}
-                </div>
-              </div>
-              <button
-                className="btn btn-primary"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', fontSize: 12, flexShrink: 0 }}
-                onClick={() => { resumeLastSession(); setView('nowplaying'); }}
-              >
-                <RotateCcw size={14} />
-                Resume
-              </button>
-              <button
-                onClick={dismissResumePrompt}
-                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, flexShrink: 0 }}
-                title="Dismiss"
-              >
-                <X size={16} />
-              </button>
-            </motion.div>
+              {renderResumePrompt()}
+              {renderBentoHeroSection()}
+              {renderDiscoveryHubSection()}
+              {renderRecentlyPlayedSection()}
+              {showSmartMixWidget && renderSmartMixBuilderSection()}
+            </div>
           )}
 
-
-
-          {/* Section: Aideo Discovery Hub */}
-          <section className="aideo-section">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h2 className="aideo-sec-title" style={{ margin: 0 }}>Discovery Hub</h2>
-                <span style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 20, background: 'rgba(139, 92, 246, 0.1)', color: 'var(--accent)', border: '1px solid rgba(139, 92, 246, 0.2)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Tailored for You</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <button 
-                  onClick={() => setDiscoveryViewMode(prev => prev === 'list' ? 'grid' : 'list')}
-                  style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text)'}
-                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
-                  title={discoveryViewMode === 'list' ? "Switch to Grid view" : "Switch to List view"}
-                >
-                  {discoveryViewMode === 'list' ? <LayoutGrid size={12} /> : <List size={12} />}
-                  {discoveryViewMode === 'list' ? "Grid View" : "List View"}
-                </button>
-                <button 
-                  onClick={() => fetchRecommendations(true)} 
-                  disabled={isRefreshingRecs || isLoadingRecs}
-                  style={{ background: 'none', border: 'none', color: isRefreshingRecs ? 'var(--accent)' : 'var(--text-dim)', cursor: isRefreshingRecs ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, transition: 'color 0.2s' }}
-                  onMouseEnter={(e) => { if (!isRefreshingRecs) e.currentTarget.style.color = 'var(--text)'; }}
-                  onMouseLeave={(e) => { if (!isRefreshingRecs) e.currentTarget.style.color = 'var(--text-dim)'; }}
-                >
-                  <RefreshCw size={12} className={isRefreshingRecs || isLoadingRecs ? "spin" : ""} />
-                  {isRefreshingRecs ? "Refreshing..." : "Refresh Recommendations"}
-                </button>
-              </div>
+          {aideoPageDesign === 'audiophile' && (
+            <div className="aideo-audiophile-container">
+              {renderAudiophileHudSection()}
+              {renderResumePrompt()}
+              {renderDiscoveryHubSection()}
+              {renderRecentlyPlayedSection()}
+              {showSmartMixWidget && renderSmartMixBuilderSection()}
             </div>
+          )}
 
-            {isLoadingRecs ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 260, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20 }}>
-                <Loader2 className="spin" size={28} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-                <span style={{ fontSize: 13, fontWeight: 500 }}>Curating recommendations based on your offline history...</span>
-              </div>
-            ) : discoveryData ? (
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* Permanent Mixed for You Shelf at the Top */}
-                {discoveryData.mixed_for_you && discoveryData.mixed_for_you.length > 0 && (
-                  <div style={{ marginBottom: 32 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                      <Layers size={18} color="var(--accent)" />
-                      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Mixed for You</h2>
-                    </div>
-                    <div className="aideo-mix-grid">
-                      {discoveryData.mixed_for_you.map((mix: YoutubeMix) => {
-                        const isRecap = mix.id.includes('recap');
-                        const isDiscovery = mix.id.includes('discovery');
-                        const isChill = mix.id.includes('chill');
-                        const isArtist = mix.id.includes('artist_mix');
-                        const isGenre = mix.id.includes('genre_mix');
-                        
-                        let iconType = 'sparkles';
-                        let iconColorClass = 'sm';
-                        if (isRecap) { iconType = 'recap'; iconColorClass = 'rc'; }
-                        else if (isDiscovery || isArtist || isGenre) { iconType = 'discovery'; iconColorClass = 'dc'; }
-                        else if (isChill) { iconType = 'chill'; iconColorClass = 'ch'; }
-
-                        const renderIcon = () => {
-                          switch (iconType) {
-                            case 'recap': return <History size={22} />;
-                            case 'discovery': return <Compass size={22} />;
-                            case 'chill': return <Moon size={22} />;
-                            default: return <Sparkles size={22} className="pulse" />;
-                          }
-                        };
-
-                        return (
-                          <motion.div 
-                            key={mix.id}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() => handlePlayDiscoveryMix(mix)}
-                            className={`aideo-mix-card ${iconColorClass}`}
-                          >
-                            <div className="mix-card-content">
-                              <div className={`mix-card-icon-wrap ${iconColorClass}`}>
-                                {renderIcon()}
-                              </div>
-                              <div className="mix-card-text">
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{mix.title}</h3>
-                                  <span style={{
-                                    fontSize: 8,
-                                    fontWeight: 800,
-                                    padding: '2px 5px',
-                                    borderRadius: 10,
-                                    background: mix.id.startsWith('local_mix_') ? 'rgba(255,255,255,0.06)' : 'rgba(59, 130, 246, 0.15)',
-                                    color: mix.id.startsWith('local_mix_') ? 'var(--text-dim)' : '#60a5fa',
-                                    border: mix.id.startsWith('local_mix_') ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(59, 130, 246, 0.2)',
-                                    textTransform: 'uppercase',
-                                    lineHeight: 1
-                                  }}>
-                                    {mix.id.startsWith('local_mix_') ? 'Local' : 'Hybrid'}
-                                  </span>
-                                </div>
-                                <p style={{ margin: '2px 0 0 0', fontSize: 11, color: 'var(--text-dim)' }}>{mix.description}</p>
-                              </div>
-                              <button className="mix-play-btn">
-                                <Play size={18} fill="currentColor" />
-                              </button>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Premium Tab Switched Bar */}
-                <div style={{ 
-                  display: 'flex', 
-                  gap: 8, 
-                  padding: 4, 
-                  background: 'rgba(255, 255, 255, 0.03)', 
-                  border: '1px solid rgba(255, 255, 255, 0.06)', 
-                  borderRadius: 12, 
-                  marginBottom: 20,
-                  width: 'fit-content'
-                }}>
-
-
-                  {discoveryData.recommendations && discoveryData.recommendations.length > 0 && (
-                    <button
-                      onClick={() => setActiveDiscoveryTab('recommendations')}
-                      className={`settings-tab-btn ${activeDiscoveryTab === 'recommendations' ? 'active' : ''}`}
-                      style={{
-                        padding: '8px 16px',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        borderRadius: 8,
-                        cursor: 'pointer',
-                        background: activeDiscoveryTab === 'recommendations' ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
-                        border: 'none',
-                        color: activeDiscoveryTab === 'recommendations' ? 'var(--accent)' : 'var(--text-dim)',
-                        transition: 'all 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6
-                      }}
-                    >
-                      <Sparkles size={12} />
-                      {tracks.length > 0 ? "Tailored Mix" : "Curated Seeds"}
-                    </button>
-                  )}
-                </div>
-
-                {/* Shelf Content */}
-                <motion.div
-                  key={activeDiscoveryTab === 'mixed' ? 'recommendations' : activeDiscoveryTab}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                >
-                  {(activeDiscoveryTab === 'recommendations' || activeDiscoveryTab === 'mixed') && (() => {
-                    const filteredRecs = activeDiscoveryTab === 'recommendations' ? getFilteredRecommendations() : (discoveryData.recommendations || []);
-                    return (
-                      <>
-                        {activeDiscoveryTab === 'recommendations' && (
-                          <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-                            {[
-                              { id: 'all', label: '✨ All Tracks' },
-                              { id: 'chill', label: '☕ Relaxed & Chill' },
-                              { id: 'energy', label: '⚡ High Energy' },
-                              { id: 'acoustic', label: '🎸 Acoustic & Vocal' }
-                            ].map(mood => (
-                              <button
-                                key={mood.id}
-                                onClick={() => { setSelectedMood(mood.id as any); setVisibleRecsCount(15); }}
-                                style={{
-                                  padding: '6px 14px',
-                                  borderRadius: 16,
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  border: '1px solid rgba(255, 255, 255, 0.06)',
-                                  background: selectedMood === mood.id ? 'var(--accent)' : 'rgba(255, 255, 255, 0.02)',
-                                  color: selectedMood === mood.id ? 'white' : 'var(--text-dim)',
-                                  cursor: 'pointer',
-                                  transition: 'all 0.2s',
-                                }}
-                                onMouseEnter={(e) => {
-                                  if (selectedMood !== mood.id) e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-                                }}
-                                onMouseLeave={(e) => {
-                                  if (selectedMood !== mood.id) e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
-                                }}
-                              >
-                                {mood.label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {filteredRecs.length > 0 ? renderTrackCarousel(filteredRecs.slice(0, visibleRecsCount)) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', background: 'rgba(255,255,255,0.01)', borderRadius: 12, border: '1px dashed rgba(255,255,255,0.05)' }}>
-                            <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>
-                              No tracks matched this category in your current recommendations.
-                            </span>
-                          </div>
-                        )}
-                        {filteredRecs.length > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 28, flexWrap: 'wrap' }}>
-                            {filteredRecs.length > visibleRecsCount ? (
-                              <button
-                                onClick={() => setVisibleRecsCount(prev => prev + 15)}
-                                style={{
-                                  background: 'var(--accent)',
-                                  border: 'none',
-                                  color: '#fff',
-                                  padding: '10px 24px',
-                                  borderRadius: 24,
-                                  fontSize: 12,
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 8,
-                                  boxShadow: '0 4px 16px rgba(139, 92, 246, 0.25)'
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.transform = 'translateY(-1px)';
-                                  e.currentTarget.style.boxShadow = '0 6px 20px rgba(139, 92, 246, 0.35)';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.transform = 'none';
-                                  e.currentTarget.style.boxShadow = '0 4px 16px rgba(139, 92, 246, 0.25)';
-                                }}
-                              >
-                                <ChevronDown size={14} />
-                                Show More Recommendations ({Math.min(visibleRecsCount, filteredRecs.length)} of {filteredRecs.length})
-                              </button>
-                            ) : null}
-
-                            <button
-                              onClick={() => fetchRecommendations(true)}
-                              disabled={isRefreshingRecs || isLoadingRecs}
-                              style={{
-                                background: 'rgba(255, 255, 255, 0.04)',
-                                border: '1px solid rgba(255, 255, 255, 0.1)',
-                                color: '#fff',
-                                padding: '10px 20px',
-                                borderRadius: 24,
-                                fontSize: 12,
-                                fontWeight: 700,
-                                cursor: isRefreshingRecs ? 'wait' : 'pointer',
-                                transition: 'all 0.2s',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8
-                              }}
-                              onMouseEnter={(e) => {
-                                if (!isRefreshingRecs) {
-                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                if (!isRefreshingRecs) {
-                                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
-                                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                                }
-                              }}
-                            >
-                              <Sparkles size={14} className={isRefreshingRecs ? "spin" : ""} color="var(--accent)" />
-                              {isRefreshingRecs ? "Finding New Tracks..." : "Discover More Fresh Tracks"}
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                  {activeDiscoveryTab === 'charts' && (() => {
-                    const dislikedPaths = new Set(tracks.filter(t => t.disliked === 1).map(t => t.path));
-                    const chartsFiltered = (discoveryData.global_charts || []).filter((t: any) => !dislikedPaths.has(t.url || t.path));
-                    return renderTrackCarousel(chartsFiltered);
-                  })()}
-                </motion.div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 180, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20, padding: 24, textAlign: 'center' }}>
-                <Sparkles size={24} color="var(--accent)" style={{ marginBottom: 8 }} />
-                <p style={{ margin: '0 0 12px 0', fontSize: 13 }}>Personalized discovery mixes are ready to be curated.</p>
-                <button className="btn btn-primary" onClick={() => fetchRecommendations(true)} style={{ padding: '8px 16px', fontSize: 12 }}>
-                  Load Recommendations
-                </button>
-              </div>
-            )}
-          </section>
-          <section className="aideo-section">
-            <h2 className="aideo-sec-title">Quick Recap</h2>
-            {recapTracks.length > 0 ? (
-              <div className="aideo-recap-grid">
-                {recapTracks.map((t) => (
-                  <div 
-                    key={t.id || t.path} 
-                    className="aideo-recap-item"
-                    onClick={() => { playTrack(t); setView('nowplaying'); }}
-                  >
-                    <div className="aideo-item-cover-wrap">
-                      <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
-                      <div className="aideo-item-play-overlay">
-                        <Play size={16} fill="white" color="white" />
-                      </div>
-                    </div>
-                    <div className="aideo-item-info">
-                      <div className="aideo-item-title" title={t.title || baseName(t.path)}>
-                        {t.title || baseName(t.path)}
-                      </div>
-                      <div className="aideo-item-artist" title={t.artist || 'Unknown Artist'}>
-                        <ArtistLink name={t.artist || 'Unknown Artist'} onClick={() => triggerSearch(t.artist || 'Unknown Artist')} />
-                      </div>
-                    </div>
-                    <div className="aideo-item-duration">{fmt(t.duration)}</div>
-                    {playCounts[t.path] > 0 && (
-                      <div className="aideo-item-badge">
-                        <Star size={10} fill="var(--accent)" color="var(--accent)" style={{ marginRight: 4 }} />
-                        {playCounts[t.path]} {playCounts[t.path] === 1 ? 'play' : 'plays'}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="aideo-empty-box">
-                <Music size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-                <p style={{ marginBottom: 16 }}>Add folders in settings to scan and load tracks into your library.</p>
-                <button className="btn btn-primary" onClick={() => setView('settings')} style={{ padding: '8px 16px', fontSize: 12 }}>
-                  Open Settings
-                </button>
-              </div>
-            )}
-          </section>
-     
-          {/* Section: Recently Played Horizontal Carousel */}
-          <section className="aideo-section" style={{ marginBottom: 40 }}>
-            <h2 className="aideo-sec-title">Recently Played</h2>
-            {recentTracks.length > 0 ? (
-              <div className="aideo-carousel">
-                {recentTracks.map(t => (
-                  <motion.div 
-                    key={t.id || t.path}
-                    whileHover={{ scale: 1.03 }}
-                    className="aideo-carousel-card"
-                    onClick={() => { playTrack(t); setView('nowplaying'); }}
-                  >
-                    <div className="carousel-cover-wrap">
-                      <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
-                      <div className="carousel-play-overlay">
-                        <div className="carousel-play-btn-circle">
-                          <Play size={20} fill="white" color="white" />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="carousel-meta">
-                      <h4 className="carousel-title" title={t.title || baseName(t.path)}>
-                        {t.title || baseName(t.path)}
-                      </h4>
-                      <p className="carousel-artist" title={t.artist || 'Unknown Artist'}>
-                        <ArtistLink name={t.artist || 'Unknown Artist'} onClick={() => triggerSearch(t.artist || 'Unknown Artist')} />
-                      </p>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            ) : (
-              <div className="aideo-empty-box">
-                <History size={32} />
-                <p>Your play history is empty. Listen to some tracks from your library first!</p>
-              </div>
-            )}
-          </section>
-
-          {/* Section: Smart Mix Builder */}
-          {showSmartMixWidget && (
-          <section className="aideo-section" style={{ marginBottom: 32 }}>
-            <h2 className="aideo-sec-title">Smart Mix Builder</h2>
-            <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline playlists custom-tailored to your listening trends, habits, and mood.</p>
-            
-            <div style={{
-              background: 'var(--glass)',
-              border: '1px solid var(--glass-border)',
-              borderRadius: 20,
-              padding: 24,
-              backdropFilter: 'blur(20px)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-              gap: 24,
-              alignItems: 'center'
-            }}>
-              {/* Mood Selector */}
-              <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Select Mood</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {['Energetic', 'Chill', 'Focus', 'Melancholic', 'Happy'].map(m => {
-                    const active = activeMood === m;
-                    return (
-                      <button
-                        key={m}
-                        onClick={() => setActiveMood(m)}
-                        style={{
-                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
-                          border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
-                          borderRadius: 8,
-                          padding: '6px 12px',
-                          color: active ? 'white' : 'var(--text-dim)',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                        }}
-                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
-                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-                      >
-                        {m}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Seed Trend Source Selector */}
-              <div>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Seed Trend Source</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {['Library History', 'Last.fm Trends', 'ListenBrainz Scrobbles'].map(s => {
-                    const active = activeSource === s;
-                    return (
-                      <button
-                        key={s}
-                        onClick={() => setActiveSource(s)}
-                        style={{
-                          background: active ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
-                          border: '1px solid ' + (active ? 'var(--accent)' : 'var(--glass-border)'),
-                          borderRadius: 8,
-                          padding: '6px 12px',
-                          color: active ? 'white' : 'var(--text-dim)',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                        }}
-                        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--glass-h)'; }}
-                        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-                      >
-                        {s}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Generator trigger button */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  onClick={handleGenerateSmartMix}
-                  disabled={generatingMix}
-                  style={{
-                    padding: '14px 28px',
-                    borderRadius: 12,
-                    fontSize: 14,
-                    fontWeight: 700,
-                    background: 'linear-gradient(135deg, #a855f7, #6366f1)',
-                    boxShadow: '0 0 20px rgba(168, 85, 247, 0.45)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    cursor: 'pointer',
-                    border: 'none',
-                    color: 'white',
-                    transition: 'transform 0.2s, opacity 0.2s',
-                    opacity: generatingMix ? 0.75 : 1
-                  }}
-                  onMouseEnter={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.03)'; }}
-                  onMouseLeave={(e) => { if (!generatingMix) e.currentTarget.style.transform = 'scale(1.0)'; }}
-                >
-                  {generatingMix ? (
-                    <>
-                      <Loader2 className="spin" size={16} /> Analyzing Patterns...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={16} /> Generate & Play Smart Mix
-                    </>
-                  )}
-                </button>
-              </div>
+          {aideoPageDesign === 'cinematic' && (
+            <div className="aideo-cinematic-container">
+              {renderCinematicHeroSection()}
+              {renderResumePrompt()}
+              {renderDiscoveryHubSection()}
+              {renderRecentlyPlayedSection()}
+              {showSmartMixWidget && renderSmartMixBuilderSection()}
             </div>
-          </section>
+          )}
+
+          {(aideoPageDesign === 'classic' || !['bento', 'audiophile', 'cinematic'].includes(aideoPageDesign)) && (
+            <>
+              {/* Greeting Header */}
+              <div className="aideo-greeting-header">
+                <div className="aideo-header-info">
+                  <motion.h1 
+                    initial={{ opacity: 0, y: -15 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    transition={{ duration: 0.5 }}
+                    className="aideo-title"
+                  >
+                    {greeting}, Listener
+                  </motion.h1>
+                  <p className="aideo-subtitle">Your personalized music portal is fully customized and ready.</p>
+                </div>
+                <div className="aideo-header-stats">
+                  <div className="aideo-stat-box">
+                    <span className="aideo-stat-num">{tracks.length}</span>
+                    <span className="aideo-stat-label">Tracks</span>
+                  </div>
+                  <div className="aideo-stat-box">
+                    <span className="aideo-stat-num">{totalPlays}</span>
+                    <span className="aideo-stat-label">Total Plays</span>
+                  </div>
+                </div>
+              </div>
+
+              {renderResumePrompt()}
+              {renderDiscoveryHubSection()}
+              {renderQuickRecapSection()}
+              {renderRecentlyPlayedSection()}
+              {showSmartMixWidget && renderSmartMixBuilderSection()}
+            </>
           )}
         </>
       )}

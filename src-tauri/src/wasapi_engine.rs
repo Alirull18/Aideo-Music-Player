@@ -4,7 +4,7 @@ use wasapi::{
     WaveFormat,
 };
 #[cfg(target_os = "windows")]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
 #[cfg(target_os = "windows")]
@@ -24,16 +24,73 @@ impl Drop for WasapiStream {
     }
 }
 
+/// Hardware action derived from the player's playing/paused state and whether
+/// the exclusive device lock is currently held. Stopping the stream releases
+/// WASAPI's exclusive-mode lock so other apps can play while we are paused.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HwAction {
+    /// Playing and lock held — run the normal render loop iteration.
+    Run,
+    /// Paused while holding the lock — call stop_stream() to release it.
+    Stop,
+    /// Resumed without the lock — call start_stream() to reacquire it.
+    Start,
+    /// Paused and lock already released — idle until playback resumes.
+    Idle,
+}
+
+pub fn decide_hw_action(is_playing: bool, hw_running: bool) -> HwAction {
+    match (is_playing, hw_running) {
+        (true, true) => HwAction::Run,
+        (false, true) => HwAction::Stop,
+        (true, false) => HwAction::Start,
+        (false, false) => HwAction::Idle,
+    }
+}
+
+pub fn build_exclusive_rate_candidates(
+    requested_rate: u32,
+    default_rate: Option<u32>,
+    upsample_target: u32,
+) -> Vec<u32> {
+    let mut rates = Vec::with_capacity(8);
+    if upsample_target > 0 {
+        rates.push(upsample_target);
+    }
+    if requested_rate > 0 {
+        rates.push(requested_rate);
+    }
+    if let Some(def) = default_rate {
+        if def > 0 {
+            rates.push(def);
+        }
+    }
+    for &std_rate in &[48000, 44100, 96000, 88200, 192000, 176400, 384000, 352800] {
+        rates.push(std_rate);
+    }
+    let mut unique = Vec::new();
+    for r in rates {
+        if !unique.contains(&r) {
+            unique.push(r);
+        }
+    }
+    unique
+}
+
+const HW_RESTART_DELAY_MS: u64 = 20;
+const MAX_START_FAILURES: u32 = 10;
+
 #[cfg(target_os = "windows")]
 pub fn start_exclusive_stream<F, E>(
     device_name: &str,
     sample_rate: u32,
     channels: u16,
     timing_mode: &str,
+    playing_flag: Arc<AtomicU8>,
     dither_enabled: bool,
     mut callback: F,
     mut on_error: E,
-) -> Result<(WasapiStream, u16, bool), String>
+) -> Result<(WasapiStream, u16, bool, u32), String>
 where
     F: FnMut(&mut [f32]) + Send + 'static,
     E: FnMut(String) + Send + 'static,
@@ -43,7 +100,7 @@ where
     let dev_name = device_name.to_string();
     let timing_str = timing_mode.to_string();
 
-    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(u16, bool), String>>(1);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(u16, bool, u32), String>>(1);
 
     let handle = thread::spawn(move || {
         let _ = initialize_mta();
@@ -162,6 +219,9 @@ where
             }
         };
 
+        let default_device_rate = device.get_device_format().ok().map(|f| f.get_samplespersec() as u32);
+        let candidate_rates = build_exclusive_rate_candidates(sample_rate, default_device_rate, 0);
+
         let test_formats = [
             (32, 32, true),  // 32-bit Float
             (32, 32, false), // 32-bit Int
@@ -173,49 +233,87 @@ where
         let mut successful_client = None;
         let mut negotiated_format = None;
 
-        for &(bits, valid_bits, is_float) in &test_formats {
-            let mut test_client = match device.get_iaudioclient() {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            let sample_type = if is_float { SampleType::Float } else { SampleType::Int };
-            let format = WaveFormat::new(
-                bits,
-                valid_bits,
-                &sample_type,
-                sample_rate as usize,
-                channels as usize,
-                None,
-            );
-
-            if test_client.is_supported(&format, &ShareMode::Exclusive).is_ok() {
-                let is_polling = timing_str == "polling";
-                let (def_period, min_period) = test_client.get_device_period().unwrap_or((100000, 30000));
-                // Enforce a stable period of at least 10ms (100,000 hns) to prevent starvation on low-latency DACs
-                let target_period = std::cmp::max(def_period, 100000).max(min_period);
-                
-                let mode = if is_polling {
-                    StreamMode::PollingExclusive { 
-                        buffer_duration_hns: target_period * 3, // Request 3 periods of buffer duration for safety margin
-                        period_hns: target_period 
-                    }
-                } else {
-                    StreamMode::EventsExclusive { period_hns: target_period }
+        'rate_loop: for &cand_rate in &candidate_rates {
+            for &(bits, valid_bits, is_float) in &test_formats {
+                let mut test_client = match device.get_iaudioclient() {
+                    Ok(c) => c,
+                    Err(_) => continue,
                 };
 
-                if test_client.initialize_client(&format, &Direction::Render, &mode).is_ok() {
-                    successful_client = Some(test_client);
-                    negotiated_format = Some((format, bits, valid_bits, is_float));
-                    break;
+                let sample_type = if is_float { SampleType::Float } else { SampleType::Int };
+                let raw_format = WaveFormat::new(
+                    bits,
+                    valid_bits,
+                    &sample_type,
+                    cand_rate as usize,
+                    channels as usize,
+                    None,
+                );
+
+                // Use is_supported_exclusive_with_quirks for comprehensive format checking
+                let supported_format = test_client
+                    .is_supported_exclusive_with_quirks(&raw_format)
+                    .or_else(|_| test_client.is_supported(&raw_format, &ShareMode::Exclusive).map(|_| raw_format.clone()));
+
+                if let Ok(format) = supported_format {
+                    let is_polling = timing_str == "polling";
+                    let (def_period, min_period) = test_client.get_device_period().unwrap_or((100000, 30000));
+                    
+                    // Align period to 128-byte frame boundary (satisfies Intel HDA, Realtek, and USB DACs)
+                    let aligned_period = test_client
+                        .calculate_aligned_period_near(def_period, Some(128), &format)
+                        .unwrap_or(std::cmp::max(def_period, min_period));
+                    
+                    let mode = if is_polling {
+                        StreamMode::PollingExclusive { 
+                            period_hns: aligned_period,
+                            buffer_duration_hns: 4 * aligned_period, 
+                        }
+                    } else {
+                        StreamMode::EventsExclusive { period_hns: aligned_period }
+                    };
+
+                    let mut init_res = test_client.initialize_client(&format, &Direction::Render, &mode);
+                    
+                    // Handle AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED recovery
+                    if let Err(wasapi::WasapiError::Windows(ref werr)) = init_res {
+                        if werr.code().0 == windows::Win32::Media::Audio::AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED.0 {
+                            if let Ok(buf_size) = test_client.get_buffer_size() {
+                                let recovery_period = wasapi::calculate_period_100ns(
+                                    buf_size as i64,
+                                    format.get_samplespersec() as i64,
+                                );
+                                if let Ok(mut fresh_client) = device.get_iaudioclient() {
+                                    let recovery_mode = if is_polling {
+                                        StreamMode::PollingExclusive { 
+                                            period_hns: recovery_period,
+                                            buffer_duration_hns: 4 * recovery_period, 
+                                        }
+                                    } else {
+                                        StreamMode::EventsExclusive { period_hns: recovery_period }
+                                    };
+                                    if fresh_client.initialize_client(&format, &Direction::Render, &recovery_mode).is_ok() {
+                                        test_client = fresh_client;
+                                        init_res = Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if init_res.is_ok() {
+                        successful_client = Some(test_client);
+                        negotiated_format = Some((format, bits, valid_bits, is_float, cand_rate));
+                        break 'rate_loop;
+                    }
                 }
             }
         }
 
-        let (_format, bits, valid_bits, is_float) = match negotiated_format {
+        let (_format, bits, valid_bits, is_float, negotiated_rate) = match negotiated_format {
             Some(f) => f,
             None => {
-                let _ = tx.send(Err(format!("Device does not support Exclusive Mode at {}Hz", sample_rate)));
+                let _ = tx.send(Err(format!("Device does not support Exclusive Mode (attempted rates: {:?})", candidate_rates)));
                 return;
             }
         };
@@ -250,7 +348,7 @@ where
         }
 
         let num_frames = if is_polling {
-            (buffer_size / 3) as usize
+            (buffer_size / 4).max(1) as usize
         } else {
             buffer_size as usize
         };
@@ -262,8 +360,7 @@ where
 
         // PRE-FILL FIRST BUFFER WITH SILENCE BEFORE STARTING STREAM
         if is_polling {
-            // Pre-fill all 3 buffer periods with silence
-            for _ in 0..3 {
+            for _ in 0..4 {
                 let _ = render_client.write_to_device(
                     num_frames,
                     &output_bytes,
@@ -278,17 +375,9 @@ where
             );
         }
 
-        // Notify main thread of success FIRST
-        if tx.send(Ok((valid_bits as u16, is_float))).is_err() {
+        // Notify main thread of success FIRST (including negotiated_rate)
+        if tx.send(Ok((valid_bits as u16, is_float, negotiated_rate))).is_err() {
             // Main thread dropped the receiver, abort
-            return;
-        }
-
-        // Give the main thread a brief head start (50ms) to fill the ringbuffer
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        if let Err(e) = client.start_stream() {
-            on_error(format!("WASAPI exclusive start_stream failed: {}", e));
             return;
         }
 
@@ -302,14 +391,52 @@ where
             }};
         }
 
+        // The exclusive device lock is only held while the stream is running.
+        // Pause -> stop_stream() releases it so Windows apps regain audio;
+        // Resume -> start_stream() reacquires it.
+        let mut hw_running = false;
+        let mut start_failures = 0u32;
+
         while !shutdown_clone.load(Ordering::Relaxed) {
+            match decide_hw_action(
+                playing_flag.load(Ordering::Relaxed) == 1,
+                hw_running,
+            ) {
+                HwAction::Stop => {
+                    let _ = client.stop_stream();
+                    hw_running = false;
+                    std::thread::sleep(std::time::Duration::from_millis(HW_RESTART_DELAY_MS));
+                    continue;
+                }
+                HwAction::Start => {
+                    // Brief head start so the producer can fill the ring buffer
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    if client.start_stream().is_ok() {
+                        hw_running = true;
+                        start_failures = 0;
+                    } else {
+                        start_failures += 1;
+                        if start_failures >= MAX_START_FAILURES {
+                            on_error("WASAPI exclusive start_stream failed".to_string());
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                HwAction::Idle => {
+                    std::thread::sleep(std::time::Duration::from_millis(HW_RESTART_DELAY_MS));
+                    continue;
+                }
+                HwAction::Run => {}
+            }
+
             if is_polling {
-                // In Polling mode, sleep for half of the buffer period duration, then query padding
-                let sleep_ms = ((num_frames as f32 / sample_rate as f32) * 500.0) as u64;
+                // In Polling mode, sleep for half of the buffer period duration, then query available space
+                let sleep_ms = ((num_frames as f32 / negotiated_rate as f32) * 500.0) as u64;
                 std::thread::sleep(std::time::Duration::from_millis(std::cmp::max(sleep_ms, 2)));
 
-                let padding = match client.get_current_padding() {
-                    Ok(p) => p,
+                let avail_frames = match client.get_available_space_in_frames() {
+                    Ok(f) => f,
                     Err(_) => {
                         if !shutdown_clone.load(Ordering::Relaxed) {
                             on_error("WASAPI exclusive polling error".to_string());
@@ -318,8 +445,7 @@ where
                     }
                 };
 
-                let available_frames = buffer_size - padding;
-                if available_frames < num_frames as u32 {
+                if avail_frames < num_frames as u32 {
                     // Not enough space to write a full chunk yet, sleep and wait
                     continue;
                 }
@@ -455,13 +581,14 @@ where
     });
 
     match rx.recv() {
-        Ok(Ok((bits, is_float))) => Ok((
+        Ok(Ok((bits, is_float, negotiated_rate))) => Ok((
             WasapiStream {
                 shutdown,
                 handle: Some(handle),
             },
             bits,
             is_float,
+            negotiated_rate,
         )),
         Ok(Err(e)) => Err(e),
         Err(_) => Err("WASAPI initialization thread panicked".to_string()),
@@ -474,13 +601,70 @@ pub fn start_exclusive_stream<F, E>(
     _sample_rate: u32,
     _channels: u16,
     _timing_mode: &str,
+    _playing_flag: std::sync::Arc<std::sync::atomic::AtomicU8>,
     _dither_enabled: bool,
     _callback: F,
     _on_error: E,
-) -> Result<(WasapiStream, u16, bool), String>
+) -> Result<(WasapiStream, u16, bool, u32), String>
 where
     F: FnMut(&mut [f32]) + Send + 'static,
     E: FnMut(String) + Send + 'static,
 {
     Err("Exclusive mode only supported on Windows".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_exclusive_rate_candidates_prioritizes_requested() {
+        let candidates = build_exclusive_rate_candidates(44100, Some(48000), 0);
+        assert_eq!(candidates[0], 44100);
+        assert_eq!(candidates[1], 48000);
+        assert!(candidates.contains(&96000));
+        assert!(candidates.contains(&192000));
+    }
+
+    #[test]
+    fn test_build_exclusive_rate_candidates_prioritizes_upsample_target() {
+        let candidates = build_exclusive_rate_candidates(44100, Some(48000), 96000);
+        assert_eq!(candidates[0], 96000);
+        assert_eq!(candidates[1], 44100);
+        assert_eq!(candidates[2], 48000);
+    }
+
+    #[test]
+    fn keeps_hardware_running_while_playing() {
+        assert!(matches!(decide_hw_action(true, true), HwAction::Run));
+    }
+
+    #[test]
+    fn stops_hardware_when_paused_to_release_device_lock() {
+        // Pausing must stop the exclusive stream so Windows regains the endpoint
+        // and other apps' audio resumes while Aideo is paused.
+        assert!(matches!(decide_hw_action(false, true), HwAction::Stop));
+    }
+
+    #[test]
+    fn restarts_hardware_on_resume() {
+        assert!(matches!(decide_hw_action(true, false), HwAction::Start));
+    }
+
+    #[test]
+    fn stays_idle_when_paused_and_already_stopped() {
+        assert!(matches!(decide_hw_action(false, false), HwAction::Idle));
+    }
+
+    #[test]
+    fn drop_signals_shutdown_without_joined_thread() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let stream = WasapiStream {
+            shutdown: Arc::clone(&shutdown),
+            handle: None,
+        };
+        assert!(!shutdown.load(Ordering::SeqCst));
+        drop(stream);
+        assert!(shutdown.load(Ordering::SeqCst));
+    }
 }

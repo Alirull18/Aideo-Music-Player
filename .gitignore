@@ -1,19 +1,28 @@
-# Dependencies & Build Output
-node_modules
-dist
-dist-ssr
+# Dependencies & Package Managers
+node_modules/
+dist/
+dist-ssr/
 *.local
-src-tauri/target
-src-tauri/bin/
-src-tauri/gen/
-target/
 .turbo/
 .parcel-cache/
 .cache/
 *.tsbuildinfo
 .eslintcache
 
-# Database & Storage
+# Tauri & Rust Build Output
+src-tauri/target/
+src-tauri/bin/
+src-tauri/gen/
+target/
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+*.o
+*.rlib
+
+# Database & SQLite Storage
 *.db
 *.db-journal
 *.db-wal
@@ -27,7 +36,7 @@ src-tauri/*.db
 src-tauri/*.db-journal
 
 # Logs & Diagnostics
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -38,6 +47,11 @@ build_errors.txt
 coverage/
 *.lcov
 .nyc_output/
+test-results/
+playwright-report/
+blob-report/
+vite.config.ts.timestamp-*
+vitest.config.ts.timestamp-*
 
 # Environment & Sensitive Keys
 .env
@@ -61,9 +75,11 @@ final_aideo.key
 # Editor & OS Files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
 *.suo
 *.ntvs*
 *.njsproj
@@ -73,8 +89,37 @@ Thumbs.db
 *.backup
 *.tmp
 *.temp
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
 
-# Executables & Binaries
+# AI Agent, Tooling & Audit Artifacts
+.gemini/
+.agents/
+.agent/
+.kilo/
+.opencode/
+.code-review-graph/
+.cursor/
+.claude/
+.windsurf/
+.zed/
+opencode.json
+handler.md
+task.md
+docs/AI_CONTEXT.md
+docs/ARCHITECTURE.md
+ponytail/
+AUDIT_REPORT.md
+WEB_STREAM_AUDIT.md
+codebase_audit_report.md
+*AUDIT*.md
+*_audit.md
+*audit*.md
+*.patch
+*.diff
+
+# Executables & Native Binaries
 ffmpeg.exe
 yt-dlp.exe
 ytdlp.exe
@@ -85,30 +130,24 @@ ytdlp.exe
 *.dylib
 *.so
 
-# Temporary & Test Audio/Scripts
+# Scratch, Temporary & Audio Test Files
 scratch/
+temp/
+tmp/
 test.wav
 *.wav
+*.mp3
+*.flac
+*.dsd
+*.dff
+*.dsf
+*.aac
+*.alac
+*.m4a
 patch_player.py
 patch_player.ps1
+Untitled-*.txt
 Untitled-1.txt
-
-# Agent, Tools & IDE Caches
-.agents/
-.agent/
-.kilo/
-.opencode/
-opencode.json
-handler.md
-task.md
-docs/AI_CONTEXT.md
-docs/ARCHITECTURE.md
-.code-review-graph/
-ponytail/
-AUDIT_REPORT.md
-WEB_STREAM_AUDIT.md
-*AUDIT*.md
-*_audit.md
 
 
 

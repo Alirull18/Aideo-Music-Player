@@ -285,16 +285,17 @@ pub fn is_trusted_oauth_host(host: &str) -> bool {
 async fn open_oauth_window(app_handle: tauri::AppHandle, url: String, provider: String) -> Result<(), String> {
     let parsed_url = url.parse::<tauri::Url>().map_err(|e| format!("Invalid OAuth URL: {}", e))?;
     
-    // Validate scheme
-    let scheme = parsed_url.scheme();
-    if scheme != "https" && scheme != "http" {
-        return Err("Security violation: OAuth URL must use HTTPS".to_string());
-    }
-
     // Validate host allowlist
     let host = parsed_url.host_str().ok_or_else(|| "Missing host in OAuth URL".to_string())?;
     if !is_trusted_oauth_host(host) {
         return Err(format!("Security violation: Target domain '{}' is not permitted for authentication", host));
+    }
+
+    // Validate scheme: HTTPS required for external providers; HTTP permitted only for local dev (localhost/127.0.0.1)
+    let scheme = parsed_url.scheme();
+    let is_local = host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1";
+    if scheme != "https" && !(scheme == "http" && is_local) {
+        return Err("Security violation: OAuth URL must use HTTPS".to_string());
     }
 
     let title = format!("Sign in with {}", if provider == "google" { "Google" } else { "GitHub" });
@@ -313,8 +314,13 @@ async fn open_oauth_window(app_handle: tauri::AppHandle, url: String, provider: 
     .inner_size(500.0, 650.0)
     .resizable(true)
     .on_navigation(move |nav_url| {
+        let is_callback = if let Some(nav_host) = nav_url.host_str() {
+            (nav_host.eq_ignore_ascii_case("localhost") && nav_url.port() == Some(1420))
+                || nav_host.eq_ignore_ascii_case("alirull18.github.io")
+        } else {
+            false
+        };
         let nav_str = nav_url.to_string();
-        let is_callback = nav_str.contains("localhost:1420") || nav_str.contains("alirull18.github.io");
         
         if is_callback && (nav_str.contains("access_token=") || nav_str.contains("code=")) {
             let _ = app_handle_clone.emit("oauth-callback-url", nav_str.clone());
@@ -453,7 +459,7 @@ async fn get_kugou_krc(id: String, accesskey: String) -> Result<String, String> 
     let client = get_http_client();
     let timeout_dur = std::time::Duration::from_millis(3500);
     let url = format!(
-        "http://lyrics.kugou.com/download?ver=1&client=pc&id={}&accesskey={}&fmt=krc&charset=utf8",
+        "https://lyrics.kugou.com/download?ver=1&client=pc&id={}&accesskey={}&fmt=krc&charset=utf8",
         urlencoding::encode(&id),
         urlencoding::encode(&accesskey)
     );
@@ -1424,13 +1430,72 @@ fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
     db::get_all_tracks(&conn).map_err(|e| e.to_string())
 }
 
+pub fn verify_authorized_library_track(conn: &rusqlite::Connection, path: &str) -> Result<std::path::PathBuf, String> {
+    let audio_path = std::path::Path::new(path);
+    if !audio_path.exists() {
+        return Err("File does not exist on disk".to_string());
+    }
+    let canonical_target = dunce::canonicalize(audio_path)
+        .map_err(|e| format!("Invalid track path: {}", e))?;
+
+    let registered_dirs = db::get_library_directories(conn).unwrap_or_default();
+    let mut is_contained = false;
+
+    for dir in &registered_dirs {
+        if let Ok(canon_dir) = dunce::canonicalize(dir) {
+            if canonical_target.starts_with(&canon_dir) {
+                is_contained = true;
+                break;
+            }
+        }
+    }
+
+    if !is_contained && registered_dirs.is_empty() {
+        if let Some(audio_dir) = dirs::audio_dir() {
+            if let Ok(canon_audio) = dunce::canonicalize(&audio_dir) {
+                if canonical_target.starts_with(&canon_audio) {
+                    is_contained = true;
+                }
+            }
+        }
+    }
+
+    if !registered_dirs.is_empty() && !is_contained {
+        let track_in_db: bool = conn
+            .query_row(
+                "SELECT 1 FROM tracks WHERE path = ?1 LIMIT 1",
+                rusqlite::params![path],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !track_in_db {
+            return Err("Security violation: Track path is outside authorized music library directories".to_string());
+        }
+    }
+
+    Ok(canonical_target)
+}
+
 #[tauri::command]
-fn delete_track(path: String, state: State<'_, AppState>) -> Result<(), String> {
+fn delete_track(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let mut conn = safe_lock(&state.db);
 
-    // 1. Online / Cloud tracks handling
-    if path.starts_with("http://") || path.starts_with("https://") {
+    // 1. Handle online/cloud tracks
+    let is_online = {
+        let mut stmt = conn.prepare_cached("SELECT format FROM tracks WHERE path = ?1")
+            .map_err(|e| e.to_string())?;
+        let format: Option<String> = stmt.query_row(rusqlite::params![&path], |row| row.get(0)).ok();
+        format.map(|f| f == "Tidal FLAC" || f == "YouTube Direct" || f == "Subsonic" || f == "Jellyfin" || f == "Direct Stream").unwrap_or(false)
+            || path.starts_with("http://") 
+            || path.starts_with("https://") 
+            || path.starts_with("subsonic:") 
+            || path.starts_with("jellyfin:")
+            || (path.len() == 11 && !path.contains('/') && !path.contains('\\'))
+    };
+
+    if is_online {
         db::delete_track(&mut conn, &path).map_err(|e| e.to_string())?;
+        let _ = conn.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![&path]);
         
         let hash = format!("{:x}", md5::compute(path.as_bytes()));
         if let Some(data_dir) = dirs::data_dir() {
@@ -1459,36 +1524,7 @@ fn delete_track(path: String, state: State<'_, AppState>) -> Result<(), String> 
     // 3. Canonicalize path and verify containment within library directories
     let audio_path = std::path::Path::new(&path);
     if audio_path.exists() {
-        let canonical_target = dunce::canonicalize(audio_path)
-            .map_err(|e| format!("Invalid track path: {}", e))?;
-
-        let registered_dirs = db::get_library_directories(&conn).unwrap_or_default();
-        let mut is_contained = false;
-
-        for dir in &registered_dirs {
-            if let Ok(canon_dir) = dunce::canonicalize(dir) {
-                if canonical_target.starts_with(&canon_dir) {
-                    is_contained = true;
-                    break;
-                }
-            }
-        }
-
-        // Also permit default system audio directory if registered_dirs is empty
-        if !is_contained && registered_dirs.is_empty() {
-            if let Some(audio_dir) = dirs::audio_dir() {
-                if let Ok(canon_audio) = dunce::canonicalize(&audio_dir) {
-                    if canonical_target.starts_with(&canon_audio) {
-                        is_contained = true;
-                    }
-                }
-            }
-        }
-
-        // If registered dirs exist and target is outside, deny access
-        if !registered_dirs.is_empty() && !is_contained {
-            return Err("Security violation: Track path is outside authorized music library directories".to_string());
-        }
+        let canonical_target = verify_authorized_library_track(&conn, &path)?;
 
         // 4. Atomic database transaction with filesystem deletion rollback
         let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1600,7 +1636,7 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
+async fn apply_online_cover(state: State<'_, AppState>, path: String, url: String) -> Result<(), String> {
     if let Ok(parsed) = url::Url::parse(&url) {
         if parsed.scheme() != "http" && parsed.scheme() != "https" {
             return Err("Invalid image URL scheme".to_string());
@@ -1608,6 +1644,11 @@ async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
     } else {
         return Err("Invalid image URL".to_string());
     }
+
+    let canonical_target = {
+        let conn = safe_lock(&state.db);
+        verify_authorized_library_track(&conn, &path)?
+    };
 
     let client = get_http_client();
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
@@ -1619,9 +1660,8 @@ async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
         return Err("Cover image exceeds 15MB size limit".to_string());
     }
 
-    let audio_path = std::path::Path::new(&path);
-    let parent = audio_path.parent().ok_or("Invalid path")?;
-    let stem = audio_path.file_stem().ok_or("Invalid filename")?.to_str().ok_or("Invalid UTF-8 in stem")?;
+    let parent = canonical_target.parent().ok_or("Invalid path")?;
+    let stem = canonical_target.file_stem().ok_or("Invalid filename")?.to_str().ok_or("Invalid UTF-8 in stem")?;
     
     // Choose extension based on URL or keep it jpg
     let ext = if url.to_lowercase().contains(".png") { "png" } else { "jpg" };
@@ -1632,7 +1672,7 @@ async fn apply_online_cover(path: String, url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn apply_local_cover(path: String, base64_data: String) -> Result<(), String> {
+async fn apply_local_cover(state: State<'_, AppState>, path: String, base64_data: String) -> Result<(), String> {
     use base64::Engine;
     let clean_base64 = if let Some(pos) = base64_data.find(",") {
         &base64_data[pos + 1..]
@@ -1642,9 +1682,13 @@ async fn apply_local_cover(path: String, base64_data: String) -> Result<(), Stri
 
     let decoded = base64::engine::general_purpose::STANDARD.decode(clean_base64.trim().as_bytes()).map_err(|e| e.to_string())?;
     
-    let audio_path = std::path::Path::new(&path);
-    let parent = audio_path.parent().ok_or("Invalid path")?;
-    let stem = audio_path.file_stem().ok_or("Invalid filename")?.to_str().ok_or("Invalid UTF-8 in stem")?;
+    let canonical_target = {
+        let conn = safe_lock(&state.db);
+        verify_authorized_library_track(&conn, &path)?
+    };
+
+    let parent = canonical_target.parent().ok_or("Invalid path")?;
+    let stem = canonical_target.file_stem().ok_or("Invalid filename")?.to_str().ok_or("Invalid UTF-8 in stem")?;
 
     // Determine extension based on data URL mime type
     let ext = if base64_data.contains("image/png") { "png" } else { "jpg" };

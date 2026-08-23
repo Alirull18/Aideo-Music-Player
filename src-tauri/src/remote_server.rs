@@ -99,15 +99,20 @@ pub async fn start_remote_server(app_handle: AppHandle, app_state: Arc<crate::Ap
     }
 }
 
+pub fn is_websocket_upgrade_request(request_str: &str) -> bool {
+    let req_lower = request_str.to_ascii_lowercase();
+    req_lower.contains("upgrade: websocket") || (req_lower.contains("upgrade:") && req_lower.contains("websocket"))
+}
+
 async fn handle_connection(stream: TcpStream, addr: SocketAddr, app_handle: AppHandle, state: Arc<crate::AppState>) {
-    let mut buf = [0u8; 1024];
+    let mut buf = [0u8; 4096];
     let bytes_read = match stream.peek(&mut buf).await {
         Ok(n) => n,
         Err(_) => return,
     };
     
     let request_str = String::from_utf8_lossy(&buf[..bytes_read]);
-    if request_str.contains("Upgrade: websocket") {
+    if is_websocket_upgrade_request(&request_str) {
         let mut pin_valid = false;
         #[allow(clippy::result_large_err)]
         let callback = |req: &tokio_tungstenite::tungstenite::handshake::server::Request, response: tokio_tungstenite::tungstenite::handshake::server::Response| {
@@ -1147,5 +1152,17 @@ mod tests {
     fn test_extract_auth_header_from_raw_http() {
         let req = "GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer my_token\r\n\r\n";
         assert_eq!(extract_auth_header_from_raw_http(req), Some("Bearer my_token"));
+    }
+
+    #[test]
+    fn test_is_websocket_upgrade_request() {
+        let standard_req = "GET / HTTP/1.1\r\nHost: localhost:38562\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n";
+        assert!(is_websocket_upgrade_request(standard_req));
+
+        let mixed_case_req = "GET / HTTP/1.1\r\nHost: localhost:38562\r\nUpgrade: WebSocket\r\nConnection: Upgrade\r\n\r\n";
+        assert!(is_websocket_upgrade_request(mixed_case_req));
+
+        let http_req = "GET /?pin=123 HTTP/1.1\r\nHost: localhost:38562\r\nAccept: text/html\r\n\r\n";
+        assert!(!is_websocket_upgrade_request(http_req));
     }
 }

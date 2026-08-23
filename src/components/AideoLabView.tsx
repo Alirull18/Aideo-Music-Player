@@ -84,7 +84,7 @@ function getBiquadMagnitudeDb(f: number, fs: number, b0: number, b1: number, b2:
 const getSourceStyle = (source: string) => {
   const s = source.toLowerCase();
   if (s.includes('oratory')) return { bg: 'rgba(59, 130, 246, 0.12)', border: 'rgba(59, 130, 246, 0.35)', color: '#60a5fa', label: 'oratory1990' };
-  if (s.includes('crinacle')) return { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', color: '#34d399', label: 'crinacle' };
+  if (s.includes('crinacle')) return { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', color: 'var(--emerald-ink)', label: 'crinacle' };
   if (s.includes('rtings')) return { bg: 'rgba(249, 115, 22, 0.12)', border: 'rgba(249, 115, 22, 0.35)', color: '#fb923c', label: 'Rtings' };
   if (s.includes('innerfidelity')) return { bg: 'rgba(234, 179, 8, 0.12)', border: 'rgba(234, 179, 8, 0.35)', color: '#facc15', label: 'Innerfidelity' };
   if (s.includes('raa')) return { bg: 'rgba(236, 72, 153, 0.12)', border: 'rgba(236, 72, 153, 0.35)', color: '#f472b6', label: 'RAA' };
@@ -772,7 +772,7 @@ export function AideoLabView() {
       height: '100%',
       background: 'transparent',
       color: 'var(--text)',
-      padding: '30px 40px',
+      padding: '30px 40px calc(var(--player-h) + 40px) 40px',
       overflowY: 'auto'
     }}>
       {/* Header */}
@@ -792,7 +792,7 @@ export function AideoLabView() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              background: 'rgba(0, 0, 0, 0.35)',
+              background: 'var(--glass-h)',
               padding: 3,
               borderRadius: 10,
               border: '1px solid var(--glass-border)',
@@ -811,7 +811,7 @@ export function AideoLabView() {
                 fontSize: 11,
                 fontWeight: 700,
                 background: !dsp.enabled ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
-                color: !dsp.enabled ? '#22d3ee' : 'var(--text-dim)',
+                color: !dsp.enabled ? 'var(--cyan-ink)' : 'var(--text-dim)',
                 border: !dsp.enabled ? '1px solid rgba(6, 182, 212, 0.4)' : '1px solid transparent',
                 transition: 'all 0.2s',
                 boxShadow: !dsp.enabled ? '0 0 10px rgba(6, 182, 212, 0.2)' : 'none'
@@ -829,7 +829,7 @@ export function AideoLabView() {
                 fontSize: 11,
                 fontWeight: 700,
                 background: dsp.enabled ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-                color: dsp.enabled ? '#34d399' : 'var(--text-dim)',
+                color: dsp.enabled ? 'var(--emerald-ink)' : 'var(--text-dim)',
                 border: dsp.enabled ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid transparent',
                 transition: 'all 0.2s',
                 boxShadow: dsp.enabled ? '0 0 10px rgba(16, 185, 129, 0.2)' : 'none'
@@ -842,7 +842,7 @@ export function AideoLabView() {
               style={{
                 fontSize: 9,
                 fontWeight: 800,
-                background: 'rgba(255, 255, 255, 0.1)',
+                background: 'var(--glass-h)',
                 color: 'var(--text-dim)',
                 padding: '2px 5px',
                 borderRadius: 4,
@@ -938,7 +938,7 @@ export function AideoLabView() {
                         fontSize: 11,
                         padding: '6px 12px',
                         background: dsp.eq_enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                        color: dsp.eq_enabled ? '#34d399' : '#f87171',
+                        color: dsp.eq_enabled ? 'var(--emerald-ink)' : 'var(--red-ink)',
                         border: 'none'
                       }}
                     >
@@ -954,7 +954,7 @@ export function AideoLabView() {
                   height: 200,
                   background: 'rgba(0, 0, 0, 0.3)',
                   borderRadius: 12,
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--glass-border)',
                   overflow: 'hidden'
                 }}>
                   {/* Waterfall Spectrogram Overlay */}
@@ -1183,7 +1183,7 @@ export function AideoLabView() {
                       exit={{ height: 0, opacity: 0 }}
                       style={{ overflow: 'hidden', marginTop: 14 }}
                     >
-                      <div style={{ display: 'flex', gap: 10, background: 'rgba(0,0,0,0.18)', padding: 10, borderRadius: 8, border: '1px solid rgba(255,255,255,0.03)', marginBottom: 12 }}>
+                      <div style={{ display: 'flex', gap: 10, background: 'var(--glass)', padding: 10, borderRadius: 8, border: '1px solid var(--glass-border)', marginBottom: 12 }}>
                         <Search size={16} style={{ color: 'var(--text-dim)', alignSelf: 'center', marginLeft: 4 }} />
                         <input
                           type="text"
@@ -1327,8 +1327,8 @@ export function AideoLabView() {
                     width: 70,
                     height: 70,
                     borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.15)',
+                    background: 'var(--glass-h)',
+                    border: '1px solid var(--glass-border)',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
@@ -1336,10 +1336,10 @@ export function AideoLabView() {
                     position: 'relative'
                   }}>
                     {/* Ears */}
-                    <div style={{ position: 'absolute', left: -5, width: 6, height: 18, borderRadius: 3, background: 'rgba(255,255,255,0.2)' }} />
-                    <div style={{ position: 'absolute', right: -5, width: 6, height: 18, borderRadius: 3, background: 'rgba(255,255,255,0.2)' }} />
+                    <div style={{ position: 'absolute', left: -5, width: 6, height: 18, borderRadius: 3, background: 'var(--glass-h)' }} />
+                    <div style={{ position: 'absolute', right: -5, width: 6, height: 18, borderRadius: 3, background: 'var(--glass-h)' }} />
                     {/* Nose */}
-                    <div style={{ position: 'absolute', top: -5, width: 10, height: 10, transform: 'rotate(45deg)', background: 'rgba(255,255,255,0.06)', borderLeft: '1px solid rgba(255,255,255,0.15)', borderTop: '1px solid rgba(255,255,255,0.15)' }} />
+                    <div style={{ position: 'absolute', top: -5, width: 10, height: 10, transform: 'rotate(45deg)', background: 'var(--glass-h)', borderLeft: '1px solid var(--glass-border)', borderTop: '1px solid var(--glass-border)' }} />
                     
                     <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.4 }}>LISTENER</span>
                   </div>
@@ -1375,8 +1375,8 @@ export function AideoLabView() {
                     <div style={{
                       width: 24,
                       height: 36,
-                      background: dsp.spatial_enabled ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255,255,255,0.03)',
-                      border: dsp.spatial_enabled ? '1.5px solid #06b6d4' : '1px solid rgba(255,255,255,0.05)',
+                      background: dsp.spatial_enabled ? 'rgba(6, 182, 212, 0.15)' : 'var(--glass)',
+                      border: dsp.spatial_enabled ? '1.5px solid #06b6d4' : '1px solid var(--glass-border)',
                       borderRadius: 4,
                       position: 'relative',
                       zIndex: 2
@@ -1415,8 +1415,8 @@ export function AideoLabView() {
                     <div style={{
                       width: 24,
                       height: 36,
-                      background: dsp.spatial_enabled ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255,255,255,0.03)',
-                      border: dsp.spatial_enabled ? '1.5px solid #06b6d4' : '1px solid rgba(255,255,255,0.05)',
+                      background: dsp.spatial_enabled ? 'rgba(6, 182, 212, 0.15)' : 'var(--glass)',
+                      border: dsp.spatial_enabled ? '1.5px solid #06b6d4' : '1px solid var(--glass-border)',
                       borderRadius: 4,
                       position: 'relative',
                       zIndex: 2
@@ -1574,8 +1574,8 @@ export function AideoLabView() {
                             gap: 8,
                             padding: '8px 14px',
                             fontSize: 11,
-                            background: 'rgba(255,255,255,0.05)',
-                            border: '1px dashed rgba(255,255,255,0.15)',
+                            background: 'var(--glass-h)',
+                            border: '1px dashed var(--glass-border)',
                             borderRadius: 6
                           }}
                         >
@@ -1682,10 +1682,10 @@ export function AideoLabView() {
                   fontSize: 12,
                   fontWeight: 700,
                   color: 'var(--text)',
-                  background: 'rgba(255,255,255,0.03)',
+                  background: 'var(--glass)',
                   padding: '6px 14px',
                   borderRadius: 20,
-                  border: '1px solid rgba(255,255,255,0.04)'
+                  border: '1px solid var(--glass-border)'
                 }}>
                   Current: <span style={{ color: accentColor || 'var(--dynamic-accent)' }}>{getActiveXYLabel()}</span>
                 </div>
@@ -1707,7 +1707,7 @@ export function AideoLabView() {
                         fontSize: 10,
                         padding: '4px 10px',
                         background: dsp.subsonic_enabled ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-                        color: dsp.subsonic_enabled ? '#34d399' : 'var(--text-dim)'
+                        color: dsp.subsonic_enabled ? 'var(--emerald-ink)' : 'var(--text-dim)'
                       }}
                     >
                       {dsp.subsonic_enabled ? 'ENABLED' : 'DISABLED'}
@@ -1786,7 +1786,7 @@ export function AideoLabView() {
                   </div>
 
                   {/* Auto-Headroom Guard */}
-                  <div style={{ marginBottom: 18, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 16 }}>
+                  <div style={{ marginBottom: 18, borderTop: '1px solid var(--glass-border)', paddingTop: 16 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Auto-Headroom Guard</span>
@@ -1801,7 +1801,7 @@ export function AideoLabView() {
                           fontSize: 10,
                           padding: '4px 10px',
                           background: dsp.auto_headroom ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-                          color: dsp.auto_headroom ? '#34d399' : 'var(--text-dim)'
+                          color: dsp.auto_headroom ? 'var(--emerald-ink)' : 'var(--text-dim)'
                         }}
                       >
                         {dsp.auto_headroom ? 'ENABLED' : 'DISABLED'}
@@ -1842,7 +1842,7 @@ export function AideoLabView() {
                       </p>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', background: 'rgba(255, 255, 255, 0.02)', padding: 3, borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.04)', gap: 4 }}>
+                  <div style={{ display: 'flex', background: 'var(--glass)', padding: 3, borderRadius: 8, border: '1px solid var(--glass-border)', gap: 4 }}>
                     {[
                       { id: 'linear', label: 'Linear Phase', desc: 'Symmetric pre-ringing, traditional' },
                       { id: 'minimum', label: 'Minimum Phase', desc: 'No pre-ringing, natural decay' },
@@ -1855,7 +1855,7 @@ export function AideoLabView() {
                         title={opt.desc}
                         style={{
                           flex: 1,
-                          background: dsp.resampler_phase_mode === opt.id ? 'rgba(255, 255, 255, 0.07)' : 'transparent',
+                          background: dsp.resampler_phase_mode === opt.id ? 'var(--glass-h)' : 'transparent',
                           border: 'none',
                           color: dsp.resampler_phase_mode === opt.id ? 'white' : 'var(--text-dim)',
                           padding: '6px 8px',
@@ -1926,7 +1926,7 @@ export function AideoLabView() {
                             padding: '4px 8px',
                             borderRadius: 6,
                             border: '1px solid var(--glass-border)',
-                            background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                            background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'var(--glass)',
                             color: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'white' : 'var(--text)',
                             cursor: 'pointer',
                             fontWeight: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 700 : 500,
@@ -1990,7 +1990,7 @@ export function AideoLabView() {
                         fontSize: 11,
                         padding: '6px 12px',
                         background: dsp.aideo_filter_enabled ? 'rgba(139, 92, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                        color: dsp.aideo_filter_enabled ? '#a78bfa' : '#f87171',
+                        color: dsp.aideo_filter_enabled ? 'var(--accent)' : 'var(--red-ink)',
                         border: 'none',
                         fontWeight: 700
                       }}
@@ -2072,10 +2072,10 @@ export function AideoLabView() {
                 {/* Real-time notice */}
                 <div style={{
                   marginTop: 24,
-                  background: 'rgba(255, 255, 255, 0.02)',
+                  background: 'var(--glass)',
                   padding: '12px 18px',
                   borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.04)',
+                  border: '1px solid var(--glass-border)',
                   fontSize: 11,
                   color: 'var(--text-dim)',
                   lineHeight: 1.4,
@@ -2107,7 +2107,7 @@ export function AideoLabView() {
                       fontSize: 11,
                       padding: '6px 12px',
                       background: dsp.saturation_enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                      color: dsp.saturation_enabled ? '#34d399' : '#f87171',
+                      color: dsp.saturation_enabled ? 'var(--emerald-ink)' : 'var(--red-ink)',
                       border: 'none',
                       fontWeight: 700
                     }}

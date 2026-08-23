@@ -187,12 +187,12 @@ export function ToastContainer() {
             exit={{ opacity: 0, y: 15, scale: 0.95 }}
             style={{
               width: 320,
-              background: 'rgba(20, 20, 32, 0.92)',
+              background: 'var(--toast-bg)',
               backdropFilter: 'blur(16px)',
-              border: '1px solid rgba(139, 92, 246, 0.3)',
+              border: '1px solid var(--toast-border)',
               borderRadius: 12,
               padding: '14px 18px',
-              boxShadow: '0 12px 36px rgba(0,0,0,0.5), 0 0 20px rgba(139, 92, 246, 0.2)',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.18), 0 0 20px rgba(139, 92, 246, 0.08)',
               pointerEvents: 'auto',
               display: 'flex',
               flexDirection: 'column',
@@ -204,7 +204,7 @@ export function ToastContainer() {
                 style={{ 
                   width: 20, 
                   height: 20, 
-                  border: '2.5px solid rgba(255,255,255,0.15)', 
+                  border: '2.5px solid var(--toast-track)', 
                   borderTopColor: 'var(--accent, #8b5cf6)', 
                   borderRadius: '50%',
                   animation: 'aideo-spin 0.8s linear infinite',
@@ -212,43 +212,23 @@ export function ToastContainer() {
                 }} 
               />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--toast-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {bufferingState.title}
                 </div>
-                <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.65)', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--toast-text-dim)', marginTop: 2 }}>
                   Starting stream & pre-buffering audio...
                 </div>
               </div>
               <button
                 onClick={() => setBufferingState(null)}
                 title="Dismiss notification"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  border: 'none',
-                  color: 'rgba(255, 255, 255, 0.6)',
-                  cursor: 'pointer',
-                  padding: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: 6,
-                  transition: 'background 0.2s, color 0.2s',
-                  flexShrink: 0
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)';
-                  e.currentTarget.style.color = '#ffffff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-                  e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)';
-                }}
+                className="toast-dismiss"
               >
                 <X size={14} />
               </button>
             </div>
             {/* Animated Progress Bar */}
-            <div style={{ height: 3, width: '100%', background: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
+            <div style={{ height: 3, width: '100%', background: 'var(--toast-track)', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
               <motion.div
                 initial={{ x: '-100%' }}
                 animate={{ x: '100%' }}
@@ -271,15 +251,16 @@ export function ToastContainer() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             style={{
-              background: t.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : 
-                          t.type === 'success' ? 'rgba(16, 185, 129, 0.95)' : 
-                          'rgba(30, 30, 40, 0.95)',
-              color: 'white',
+              background: t.type === 'error' ? 'rgba(220, 38, 38, 0.95)' : 
+                          t.type === 'success' ? 'rgba(5, 150, 105, 0.95)' : 
+                          'var(--toast-bg)',
+              color: t.type === 'info' ? 'var(--toast-text)' : '#ffffff',
+              border: t.type === 'info' ? '1px solid var(--toast-border)' : 'none',
               padding: '12px 20px',
               borderRadius: 8,
               fontSize: 14,
               fontWeight: 500,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
               backdropFilter: 'blur(8px)',
               pointerEvents: 'auto',
               whiteSpace: 'pre-wrap',

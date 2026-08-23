@@ -14,7 +14,8 @@ const getSavedShortcuts = () => {
     volumeUp: 'ArrowUp',
     volumeDown: 'ArrowDown',
     mute: 'm',
-    dspBypass: 'b'
+    dspBypass: 'b',
+    fullscreenToggle: 'F11'
   };
   if (raw) {
     try {
@@ -59,7 +60,8 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   developerNotifications: safeGetStorage('aideo-developer-notifications') === 'true',
   discoveryData: null,
   isLoadingRecs: true,
-  activeDiscoveryTab: 'recommendations',
+  activeDiscoveryTab: 'all',
+  discoveryLayout: (safeGetStorage('aideo-discovery-layout') as 'shelves' | 'unified') || 'shelves',
   customPrompt: {
     open: false,
     title: '',
@@ -76,6 +78,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   colorScheme: (safeGetStorage('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
   albumArtFit: (safeGetStorage('aideo-album-art-fit') as 'cover' | 'contain') || 'contain',
   playerBarDesign: (safeGetStorage('aideo-playerbar-design') as any) || 'classic',
+  aideoPageDesign: (safeGetStorage('aideo-page-design') as any) || 'classic',
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
 
   setCustomPrompt: (prompt: any) => set(s => ({
@@ -133,6 +136,10 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setDiscoveryData: (discoveryData: any) => set({ discoveryData }),
   setIsLoadingRecs: (isLoadingRecs: boolean) => set({ isLoadingRecs }),
   setActiveDiscoveryTab: (activeDiscoveryTab: string) => set({ activeDiscoveryTab }),
+  setDiscoveryLayout: (discoveryLayout: 'shelves' | 'unified') => {
+    localStorage.setItem('aideo-discovery-layout', discoveryLayout);
+    set({ discoveryLayout });
+  },
 
   toggleNotificationsEnabled: () => {
     const next = !get().notificationsEnabled;
@@ -307,6 +314,11 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setPlayerBarDesign: (design: any) => {
     safeSetStorage('aideo-playerbar-design', design);
     set({ playerBarDesign: design });
+  },
+
+  setAideoPageDesign: (design: any) => {
+    safeSetStorage('aideo-page-design', design);
+    set({ aideoPageDesign: design });
   },
 
   setPlayerBarTransparent: (transparent: boolean) => {

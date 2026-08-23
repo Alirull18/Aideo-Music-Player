@@ -733,18 +733,18 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     if (isSkipping) return;
     isSkipping = true;
     try {
-      const { tracks, currentTrackIndex, shuffle, repeat, queue, playFromQueue, playTrack, currentTrack } = get();
-
-      // Repeat One: replay current track immediately
-      if (repeat === 'one' && currentTrack) {
-        await playTrack(currentTrack, true, false);
-        return;
-      }
+      const { tracks, shuffle, repeat, queue, playFromQueue, playTrack, currentTrack } = get();
 
       // Manual queue priority
       if (queue.length > 0) {
          await playFromQueue(0);
          return;
+      }
+
+      // Repeat One: replay current track immediately
+      if (repeat === 'one' && currentTrack) {
+        await playTrack(currentTrack, true, false);
+        return;
       }
 
       // Prevent cloud/online streams from falling back to local files, and trigger Autoplay Loop if enabled
@@ -790,7 +790,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         return;
       }
 
-      const nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) + 1;
+      const nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : -1) + 1;
 
       // Repeat None: stop at end of library
       if (repeat === 'none' && nextIndex >= activeTracks.length) {
@@ -809,14 +809,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   getNextTrackToPlay: () => {
-    const { tracks, currentTrackIndex, shuffle, repeat, queue, currentTrack } = get();
-
-    if (repeat === 'one' && currentTrack) {
-      return currentTrack;
-    }
+    const { tracks, shuffle, repeat, queue, currentTrack } = get();
 
     if (queue.length > 0) {
       return queue[0];
+    }
+
+    if (repeat === 'one' && currentTrack) {
+      return currentTrack;
     }
 
     const isCurrentOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
@@ -832,7 +832,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       return null;
     }
 
-    const nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) + 1;
+    const nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : -1) + 1;
 
     if (repeat === 'none' && nextIndex >= activeTracks.length) {
       return null;
@@ -842,7 +842,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   getNextTracksToPlay: (count = 2) => {
-    const { tracks, currentTrackIndex, shuffle, repeat, queue, currentTrack } = get();
+    const { tracks, shuffle, repeat, queue, currentTrack } = get();
     const result: Track[] = [];
 
     // 1. First take from the active queue
@@ -865,7 +865,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
         if (activeTracks.length > 0) {
           const currentActiveIdx = activeTracks.findIndex(t => pathsEqual(t.path, currentTrack?.path || ''));
-          let nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) + 1;
+          let nextIndex = (currentActiveIdx !== -1 ? currentActiveIdx : -1) + 1;
 
           for (let i = 0; i < remaining; i++) {
             if (shuffle) {
@@ -931,7 +931,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     isSkipping = true;
     try {
       const state = get();
-      const { playHistory, tracks, currentTrackIndex, currentTrack } = state;
+      const { playHistory, tracks, currentTrack } = state;
       
       // If we have history, pop the last track and play it
       if (playHistory.length > 0) {
@@ -951,7 +951,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       if (activeTracks.length === 0) return;
       const currentActiveIdx = activeTracks.findIndex(t => pathsEqual(t.path, currentTrack?.path || ''));
-      const prevIndex = ((currentActiveIdx !== -1 ? currentActiveIdx : currentTrackIndex) - 1 + activeTracks.length) % activeTracks.length;
+      const prevIndex = ((currentActiveIdx !== -1 ? currentActiveIdx : 0) - 1 + activeTracks.length) % activeTracks.length;
       await get().playTrack(activeTracks[prevIndex], undefined, false);
     } finally {
       setTimeout(() => {

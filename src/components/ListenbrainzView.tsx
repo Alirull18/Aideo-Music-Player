@@ -85,7 +85,7 @@ export function ListenbrainzView() {
   };
 
   return (
-    <div className="lastfm-dashboard" style={{ padding: '40px 60px', overflowY: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <div className="lastfm-dashboard" style={{ padding: '40px 60px calc(var(--player-h) + 40px) 60px', overflowY: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 28 }}>
       
       {/* Premium Gradient Glow Header */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
@@ -144,7 +144,7 @@ export function ListenbrainzView() {
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
         style={{ 
-          background: 'rgba(255,255,255,0.02)', 
+          background: 'var(--glass)', 
           border: '1px solid var(--glass-border)',
           borderRadius: 14, 
           padding: '24px 28px',
@@ -275,8 +275,8 @@ export function ListenbrainzView() {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: Math.min(index * 0.03, 0.4) }}
                         style={{
-                          background: 'rgba(255,255,255,0.01)',
-                          border: '1px solid rgba(255,255,255,0.03)',
+                          background: 'var(--glass)',
+                          border: '1px solid var(--glass-border)',
                           borderRadius: 8,
                           padding: '12px 18px',
                           display: 'flex',
@@ -286,16 +286,16 @@ export function ListenbrainzView() {
                           transition: 'background 0.2s'
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-                          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
+                          e.currentTarget.style.background = 'var(--glass-h)';
+                          e.currentTarget.style.borderColor = 'var(--glass-border)';
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'rgba(255,255,255,0.01)';
-                          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.03)';
+                          e.currentTarget.style.background = 'var(--glass)';
+                          e.currentTarget.style.borderColor = 'var(--glass-h)';
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.03)', width: 32, height: 32, borderRadius: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--glass-h)', width: 32, height: 32, borderRadius: 6 }}>
                             <Disc size={16} color="var(--text-dim)" />
                           </div>
                           <div style={{ minWidth: 0 }}>
@@ -316,8 +316,8 @@ export function ListenbrainzView() {
                             onClick={() => handleSearchSong(meta.artist_name, meta.track_name)}
                             title="Find track in Aideo Search"
                             style={{
-                              background: 'rgba(255,255,255,0.04)',
-                              border: '1px solid rgba(255,255,255,0.06)',
+                              background: 'var(--glass-h)',
+                              border: '1px solid var(--glass-border)',
                               color: 'white',
                               cursor: 'pointer',
                               padding: 6,
@@ -333,8 +333,8 @@ export function ListenbrainzView() {
                               e.currentTarget.style.color = '#ff9e59';
                             }}
                             onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-                              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
+                              e.currentTarget.style.background = 'var(--glass-h)';
+                              e.currentTarget.style.borderColor = 'var(--glass-border)';
                               e.currentTarget.style.color = 'white';
                             }}
                           >
@@ -382,8 +382,8 @@ export function ListenbrainzView() {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: Math.min(index * 0.03, 0.4) }}
                         style={{
-                          background: 'rgba(255,255,255,0.01)',
-                          border: '1px solid rgba(255,255,255,0.03)',
+                          background: 'var(--glass)',
+                          border: '1px solid var(--glass-border)',
                           borderRadius: 8,
                           padding: '12px 18px',
                           display: 'flex',
@@ -393,12 +393,12 @@ export function ListenbrainzView() {
                           transition: 'background 0.2s'
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-                          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
+                          e.currentTarget.style.background = 'var(--glass-h)';
+                          e.currentTarget.style.borderColor = 'var(--glass-border)';
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'rgba(255,255,255,0.01)';
-                          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.03)';
+                          e.currentTarget.style.background = 'var(--glass)';
+                          e.currentTarget.style.borderColor = 'var(--glass-h)';
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flex: 1 }}>

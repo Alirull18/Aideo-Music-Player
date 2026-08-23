@@ -148,11 +148,16 @@ fn select_output_config(
         }
     }
 
-    // Final Fallback: Default (Shared Mode)
-    if configs.is_empty() {
-        if let Ok(def) = device.default_output_config() {
-            println!("AUDIOPHILE: Falling back to Default Shared Config: {}Hz", def.sample_rate());
-            configs.push((def.config(), def.sample_format()));
+    // Final Fallback: Default (Shared Mode) - Always append if not already in configs
+    if let Ok(def) = device.default_output_config() {
+        let def_cfg = def.config();
+        let def_fmt = def.sample_format();
+        let already_present = configs.iter().any(|(c, f)| {
+            c.sample_rate == def_cfg.sample_rate && c.channels == def_cfg.channels && *f == def_fmt
+        });
+        if !already_present {
+            println!("AUDIOPHILE: Adding Default Shared Config fallback: {}Hz ({:?})", def.sample_rate(), def_fmt);
+            configs.push((def_cfg, def_fmt));
         }
     }
 
@@ -164,9 +169,52 @@ fn select_output_config(
 }
 
 lazy_static::lazy_static! {
-    static ref YOUTUBE_URL_CACHE: std::sync::Mutex<std::collections::HashMap<String, String>> = std::sync::Mutex::new(std::collections::HashMap::new());
+    static ref YOUTUBE_URL_CACHE: std::sync::Mutex<std::collections::HashMap<String, YoutubeUrlCacheEntry>> = std::sync::Mutex::new(std::collections::HashMap::new());
     static ref ACTIVE_DOWNLOADS: std::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>> = std::sync::Mutex::new(std::collections::HashMap::new());
     static ref ACTIVE_DOWNLOAD_PROCS: std::sync::Mutex<std::collections::HashMap<String, Arc<std::sync::Mutex<Option<std::process::Child>>>>> = std::sync::Mutex::new(std::collections::HashMap::new());
+}
+
+/// Resolved googlevideo direct URLs expire server-side (~6h) and are IP-bound,
+/// so a cached link must never be served past this TTL.
+pub const YOUTUBE_URL_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60 * 60);
+
+struct YoutubeUrlCacheEntry {
+    url: String,
+    inserted_at: std::time::Instant,
+}
+
+/// Returns the cached direct stream URL for `key` only if it is still within
+/// the TTL; expired entries are pruned on access.
+pub fn get_cached_youtube_url(key: &str, now: std::time::Instant) -> Option<String> {
+    let mut cache = YOUTUBE_URL_CACHE.lock().ok()?;
+    if let Some(entry) = cache.get(key) {
+        if now.duration_since(entry.inserted_at) < YOUTUBE_URL_TTL {
+            return Some(entry.url.clone());
+        }
+        cache.remove(key);
+    }
+    None
+}
+
+pub fn insert_cached_youtube_url(key: String, direct_url: String, now: std::time::Instant) {
+    if let Ok(mut cache) = YOUTUBE_URL_CACHE.lock() {
+        cache.insert(key, YoutubeUrlCacheEntry { url: direct_url, inserted_at: now });
+    }
+}
+
+/// Evicts the entry for `key` only if it still holds `expected_dead_url`.
+/// Conditional eviction prevents discarding a freshly re-resolved URL that a
+/// background pre-resolve may have installed while playback was failing.
+pub fn invalidate_youtube_url_if(key: &str, expected_dead_url: &str) -> bool {
+    if let Ok(mut cache) = YOUTUBE_URL_CACHE.lock() {
+        let matches = cache.get(key).map_or(false, |e| e.url == expected_dead_url);
+        if matches {
+            cache.remove(key);
+            println!("[player] Evicted expired/dead YouTube stream URL from cache for track.");
+        }
+        return matches;
+    }
+    false
 }
 
 struct GrowingFileReader {
@@ -828,10 +876,9 @@ pub fn resolve_youtube_url(url: &str) -> String {
     
     // Check cache first
     {
-        let cache = safe_lock(&YOUTUBE_URL_CACHE);
-        if let Some(cached) = cache.get(url) {
+        if let Some(cached) = get_cached_youtube_url(url, std::time::Instant::now()) {
             println!("[player] Using cached direct stream URL for YouTube video.");
-            return cached.clone();
+            return cached;
         }
     }
     
@@ -865,8 +912,7 @@ pub fn resolve_youtube_url(url: &str) -> String {
     
     if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_1) {
         println!("[player] Successfully extracted YouTube direct stream URL on first attempt!");
-        let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-        cache.insert(url.to_string(), direct.clone());
+        insert_cached_youtube_url(url.to_string(), direct.clone(), std::time::Instant::now());
         return direct;
     }
     
@@ -889,8 +935,7 @@ pub fn resolve_youtube_url(url: &str) -> String {
         
     if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_1) {
         println!("[player] Successfully extracted YouTube direct stream URL after update!");
-        let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-        cache.insert(url.to_string(), direct.clone());
+        insert_cached_youtube_url(url.to_string(), direct.clone(), std::time::Instant::now());
         return direct;
     }
     
@@ -911,8 +956,7 @@ pub fn resolve_youtube_url(url: &str) -> String {
     
     if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_3) {
         println!("[player] Successfully extracted YouTube direct stream URL with client bypass!");
-        let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-        cache.insert(url.to_string(), direct.clone());
+        insert_cached_youtube_url(url.to_string(), direct.clone(), std::time::Instant::now());
         return direct;
     }
     
@@ -962,18 +1006,14 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut success = false;
         // Resolve the direct URL
-        let mut resolved_url = {
-            let cache = safe_lock(&YOUTUBE_URL_CACHE);
-            cache.get(&url).cloned()
-        };
+        let mut resolved_url = get_cached_youtube_url(&url, std::time::Instant::now());
         
         if resolved_url.is_none() {
             println!("[player-bg] Pre-resolving direct stream URL in background for '{}'...", url);
             let direct = resolve_youtube_url(&url);
             if direct != url && direct.contains("googlevideo.com") {
                 println!("[player-bg] Background pre-resolve successful! Caching direct stream URL.");
-                let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-                cache.insert(url.clone(), direct.clone());
+                insert_cached_youtube_url(url.clone(), direct.clone(), std::time::Instant::now());
                 resolved_url = Some(direct);
             }
         }
@@ -1123,6 +1163,7 @@ fn prepare_decoder(
             if !use_cache {
                 let hash = format!("{:x}", md5::compute(path.as_bytes()));
                 let mut already_downloading = false;
+                let mut buffered_direct_url: Option<String> = None;
                 {
                     if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
                         if active.contains_key(&hash) {
@@ -1134,27 +1175,26 @@ fn prepare_decoder(
                 }
 
                 if !already_downloading {
-                    let mut resolved_url = {
-                        let cache = safe_lock(&YOUTUBE_URL_CACHE);
-                        cache.get(path).cloned()
-                    };
+                    let mut resolved_url = get_cached_youtube_url(path, std::time::Instant::now());
 
                     if resolved_url.is_none() {
                         println!("[player] YouTube URL cache miss. Resolving direct stream URL first...");
                         let direct = resolve_youtube_url(path);
                         if direct != *path && direct.contains("googlevideo.com") {
-                            let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-                            cache.insert(path.to_string(), direct.clone());
+                            insert_cached_youtube_url(path.to_string(), direct.clone(), std::time::Instant::now());
                             resolved_url = Some(direct);
                         } else {
                             if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
                                 active.remove(&hash);
                             }
-                            return Err("Failed to resolve YouTube stream URL. Please check your internet connection.".to_string());
+                            return Err("Could not extract the audio stream URL (YouTube may be throttling or temporarily unavailable). Please try again.".to_string());
                         }
                     }
 
                     if let Some(direct) = resolved_url {
+                        // Remember which direct link this playback attempt relies on,
+                        // so it can be evicted below if buffering never makes progress.
+                        buffered_direct_url = Some(direct.clone());
                         println!("[player] Spawning background transcoder for YouTube stream...");
                         spawn_youtube_downloader(
                             path.to_string(),
@@ -1184,7 +1224,13 @@ fn prepare_decoder(
                         if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
                             active.remove(&hash);
                         }
-                        return Err("Buffering timed out. Please check your internet connection and verify that the yt-dlp plugin is working.".to_string());
+                        // Nothing was written: the resolved googlevideo link is almost
+                        // certainly expired/dead. Evict it so the very next attempt
+                        // re-resolves a fresh URL instead of failing forever until restart.
+                        if let Some(dead) = buffered_direct_url.take() {
+                            invalidate_youtube_url_if(path, &dead);
+                        }
+                        return Err("Stream buffering timed out. The stream link may have expired or your connection dropped - try playing again.".to_string());
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
@@ -1321,12 +1367,9 @@ fn prepare_decoder(
         if is_youtube_stream {
             if path.contains("googlevideo.com") {
                 cached_direct_url = Some(path.to_string());
-            } else {
-                let cache = safe_lock(&YOUTUBE_URL_CACHE);
-                if let Some(direct_url) = cache.get(path) {
-                    println!("[player] YouTube URL cache hit! Using cached direct stream URL for seeking.");
-                    cached_direct_url = Some(direct_url.clone());
-                }
+            } else if let Some(direct_url) = get_cached_youtube_url(path, std::time::Instant::now()) {
+                println!("[player] YouTube URL cache hit! Using cached direct stream URL for seeking.");
+                cached_direct_url = Some(direct_url);
             }
 
             if cached_direct_url.is_none() {
@@ -1334,8 +1377,7 @@ fn prepare_decoder(
                 let direct_url = resolve_youtube_url(path);
                 if direct_url != *path && direct_url.contains("googlevideo.com") {
                     println!("[player] Caching resolved direct stream URL.");
-                    let mut cache = safe_lock(&YOUTUBE_URL_CACHE);
-                    cache.insert(path.to_string(), direct_url.clone());
+                    insert_cached_youtube_url(path.to_string(), direct_url.clone(), std::time::Instant::now());
                     cached_direct_url = Some(direct_url);
                 }
             }
@@ -3717,8 +3759,7 @@ fn play_file(
         if let Some((config, _)) = configs_to_try.first() {
             let rate = config.sample_rate;
             let channels = config.channels;
-            
-            let max_ring = rate as usize * channels as usize * 3;
+            let max_ring = (rate.max(192000) as usize) * (channels as usize) * 3;
             let rb = RingBuffer::<f32>::new(max_ring);
             let (prod, mut cons) = rb.split();
             
@@ -3735,11 +3776,12 @@ fn play_file(
             let cmd_tx_cb = cmd_tx.clone();
             let app_handle_cb = app_handle.clone();
             let mut current_gain = 0.0f32;
-            if let Ok((wasapi_stream, bits, float)) = crate::wasapi_engine::start_exclusive_stream(
+            if let Ok((wasapi_stream, bits, float, negotiated_rate)) = crate::wasapi_engine::start_exclusive_stream(
                 &actual_dev_name,
                 rate,
                 channels,
                 &exclusive_timing,
+                Arc::clone(&stream_paused),
                 dither_enabled,
                 move |data: &mut [f32]| {
                     let paused = paused_cb.load(Ordering::Relaxed) != 1;
@@ -3788,16 +3830,22 @@ fn play_file(
                     let _ = cmd_tx_cb.send(PlayerCommand::RestartStream);
                 }
             ) {
-                println!("[player] Successfully locked TRUE WASAPI Exclusive Mode!");
-                let _ = app_handle.emit("playback-success", "WASAPI Exclusive Mode Active");
-                stream_info = Some((ActiveStream::Wasapi(wasapi_stream), config.clone()));
+                println!("[player] Successfully locked TRUE WASAPI Exclusive Mode at {}Hz ({} bits)!", negotiated_rate, bits);
+                let _ = app_handle.emit("playback-success", format!("WASAPI Exclusive Mode Active ({}Hz)", negotiated_rate));
+                let mut exclusive_cfg = config.clone();
+                exclusive_cfg.sample_rate = negotiated_rate;
+                stream_info = Some((ActiveStream::Wasapi(wasapi_stream), exclusive_cfg));
                 prod_opt = Some(prod);
-                output_bits = bits;
+                output_bits = bits as usize;
                 is_float = float;
             } else {
                 println!("[player] TRUE WASAPI Exclusive Mode failed. Falling back to CPAL Shared Mode.");
-                let _ = app_handle.emit("playback-error", "Device does not support WASAPI Exclusive Mode. Falling back to Shared Mode.");
-                exclusive_mode.store(false, Ordering::Relaxed);
+                // Keep the user's Exclusive preference ON — only this session falls
+                // back to shared mode, so the next track/rebuild retries exclusive.
+                let _ = app_handle.emit("ui-toast", serde_json::json!({
+                    "message": "Exclusive Mode not supported on this device — playing in Shared Mode (preference stays ON).",
+                    "type": "warning"
+                }));
             }
         }
     }
@@ -4067,7 +4115,11 @@ fn play_file(
             let _ = prod.push_slice(&silence);
 
             let _ = s.play();
-            println!("[player] AUDIOPHILE: Exclusive hardware stream established!");
+            if request_exclusive {
+                println!("[player] AUDIOPHILE: Shared fallback stream established (exclusive unavailable).");
+            } else {
+                println!("[player] AUDIOPHILE: Shared stream established.");
+            }
             println!("         -> Host: {:?}", host.id());
             println!("         -> Rate: {}Hz", config.sample_rate);
             stream_info = Some((ActiveStream::Cpal(s), config));
@@ -4088,7 +4140,7 @@ fn play_file(
             }
             break;
         } else if let Err(e) = stream_res {
-            eprintln!("[player] Could not establish exclusive stream: {}.", e);
+            eprintln!("[player] Could not establish output stream: {}.", e);
             if let Ok(supported) = device.supported_output_configs() {
                 println!("[player] Probing device capabilities for \"{}\":", device_display_name);
                 for (idx, c) in supported.enumerate() {
@@ -5114,4 +5166,6 @@ fn measure_latency(url_str: &str) -> Option<u32> {
 }
 
 mod dsp_tests;
+
+mod url_cache_tests;
 

@@ -55,6 +55,10 @@ export interface DiscoveryHubData {
   recommendations: YoutubeTrack[];
   global_charts: YoutubeTrack[];
   mixed_for_you: YoutubeMix[];
+  recently_played?: YoutubeTrack[];
+  heavy_rotation?: YoutubeTrack[];
+  forgotten_gems?: YoutubeTrack[];
+  playlist_mixes?: YoutubeMix[];
 }
 
 export interface Playlist {
@@ -482,9 +486,11 @@ export interface PlayerState {
   discoveryData: DiscoveryHubData | null;
   isLoadingRecs: boolean;
   activeDiscoveryTab: string;
+  discoveryLayout: 'shelves' | 'unified';
   setDiscoveryData: (data: DiscoveryHubData | null) => void;
   setIsLoadingRecs: (loading: boolean) => void;
   setActiveDiscoveryTab: (tab: string) => void;
+  setDiscoveryLayout: (layout: 'shelves' | 'unified') => void;
   cacheSizeLimit: number;
   setCacheSizeLimit: (limit: number) => void;
 
@@ -544,6 +550,10 @@ export interface PlayerState {
   playerBarDesign: PlayerBarDesign;
   setPlayerBarDesign: (design: PlayerBarDesign) => void;
 
+  // Aideo Page Design Layout
+  aideoPageDesign: AideoPageDesign;
+  setAideoPageDesign: (design: AideoPageDesign) => void;
+
   // Player Bar Transparency (Glassmorphism)
   playerBarTransparent: boolean;
   setPlayerBarTransparent: (transparent: boolean) => void;
@@ -551,6 +561,7 @@ export interface PlayerState {
 }
 
 export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 'vinyl';
+export type AideoPageDesign = 'classic' | 'bento' | 'audiophile' | 'cinematic';
 
 function rgbToHsl(r: number, g: number, b: number) {
   r /= 255; g /= 255; b /= 255;

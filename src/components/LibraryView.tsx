@@ -159,7 +159,7 @@ function CloudCacheButton({ streamUrl, cacheCloudTrack, deleteCachedTrack, cache
       style={{
         background: 'transparent',
         border: 'none',
-        color: 'rgba(255, 255, 255, 0.4)',
+        color: 'var(--text-dim)',
         cursor: 'pointer',
         padding: 6,
         display: 'flex',
@@ -168,8 +168,8 @@ function CloudCacheButton({ streamUrl, cacheCloudTrack, deleteCachedTrack, cache
         transition: 'color 0.2s',
         borderRadius: 6,
       }}
-      onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-      onMouseLeave={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.4)'}
+      onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text)'}
+      onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
       title="Cache Offline"
     >
       <DownloadCloud size={14} />
@@ -474,7 +474,7 @@ const TrackRow = memo(({
                   style={{ 
                     position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 3000, 
                     background: 'rgba(20, 20, 30, 0.95)', backdropFilter: 'blur(16px)',
-                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, 
+                    border: '1px solid var(--glass-border)', borderRadius: 12, 
                     padding: 6, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
                     display: 'flex', flexDirection: 'column', gap: 2, transformOrigin: 'top right'
                   }}
@@ -483,7 +483,7 @@ const TrackRow = memo(({
                   <div
                     onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); playNextInQueue(t); }}
                     style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     Play Next
@@ -491,7 +491,7 @@ const TrackRow = memo(({
                   <div
                     onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); addToQueue(t); }}
                     style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     Add to Queue
@@ -500,13 +500,13 @@ const TrackRow = memo(({
                   <div
                     onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setCoverArtModalTrack(t); }}
                     style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     Manage Cover Art
                   </div>
 
-                  <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
+                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
 
                   <div
                     onClick={async (e) => { 
@@ -567,7 +567,7 @@ const TrackRow = memo(({
                     Sonic Mix
                   </div>
 
-                  <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
+                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
                   <div
                     onClick={(e) => { 
                       e.stopPropagation(); 
@@ -588,12 +588,12 @@ const TrackRow = memo(({
                       setEditModalFor(t); 
                     }}
                     style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     Edit Song Data
                   </div>
-                  <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
+                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
 
                   {currentPlaylist ? (() => {
                     const currentPlaylistTracks = useStore.getState().tracks;
@@ -611,7 +611,7 @@ const TrackRow = memo(({
                               setMenuOpenFor(null); 
                             }}
                             style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
                             <ArrowUp size={14} /> Move Up
@@ -625,7 +625,7 @@ const TrackRow = memo(({
                               setMenuOpenFor(null); 
                             }}
                             style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                           >
                             <ArrowDown size={14} /> Move Down
@@ -645,14 +645,14 @@ const TrackRow = memo(({
                     <div
                       onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setPlaylistModalFor(t); }}
                       style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                       onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                       Add to Playlist...
                     </div>
                   )}
 
-                  <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 6px' }} />
+                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
 
                   <div
                     onClick={(e) => { 
@@ -768,7 +768,7 @@ const CloudTrackRow = memo(({
                   style={{ 
                     position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 3000, 
                     background: 'rgba(20, 20, 30, 0.95)', backdropFilter: 'blur(16px)',
-                    border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, 
+                    border: '1px solid var(--glass-border)', borderRadius: 12, 
                     padding: 6, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
                     display: 'flex', flexDirection: 'column', gap: 2, transformOrigin: 'top right'
                   }}
@@ -777,7 +777,7 @@ const CloudTrackRow = memo(({
                   <div
                     onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); playNextInQueue(vt); }}
                     style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     Play Next
@@ -785,7 +785,7 @@ const CloudTrackRow = memo(({
                   <div
                     onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); addToQueue(vt); }}
                     style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     Add to Queue
@@ -1460,12 +1460,12 @@ export function LibraryView() {
                   }}
                   style={{
                     width: '100%',
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    background: 'var(--glass)',
+                    border: '1px solid var(--glass-border)',
                     backdropFilter: 'blur(12px)',
                     borderRadius: 20,
                     padding: '8px 32px 8px 38px',
-                    color: 'white',
+                    color: 'var(--text)',
                     outline: 'none',
                     fontSize: 13,
                     boxSizing: 'border-box',
@@ -1473,12 +1473,12 @@ export function LibraryView() {
                   }}
                   onFocus={(e) => {
                     e.target.style.borderColor = 'rgba(var(--accent-rgb), 0.5)';
-                    e.target.style.background = 'rgba(255, 255, 255, 0.08)';
+                    e.target.style.background = 'var(--glass-h)';
                     e.target.style.boxShadow = '0 0 12px rgba(var(--accent-rgb), 0.25)';
                   }}
                   onBlur={(e) => {
-                    e.target.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                    e.target.style.background = 'rgba(255, 255, 255, 0.05)';
+                    e.target.style.borderColor = 'var(--glass-border)';
+                    e.target.style.background = 'var(--glass)';
                     e.target.style.boxShadow = 'none';
                   }}
                 />
@@ -1516,20 +1516,20 @@ export function LibraryView() {
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: 8, 
-                  background: 'rgba(255, 255, 255, 0.05)', 
-                  border: '1px solid rgba(255, 255, 255, 0.1)', 
+                  background: 'var(--glass)', 
+                  border: '1px solid var(--glass-border)', 
                   backdropFilter: 'blur(12px)',
                   borderRadius: 20, 
                   padding: '5px 12px 5px 14px',
                   transition: 'all 0.2s',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.45)';
+                  e.currentTarget.style.background = 'var(--glass-h)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                  e.currentTarget.style.borderColor = 'var(--glass-border)';
+                  e.currentTarget.style.background = 'var(--glass)';
                 }}
               >
                 <ArrowUpDown size={14} color="var(--accent)" />
@@ -1747,11 +1747,11 @@ export function LibraryView() {
                       transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                       background: isActive 
                         ? 'var(--dynamic-accent, #8b5cf6)' 
-                        : 'rgba(255, 255, 255, 0.04)',
+                        : 'var(--glass)',
                       color: isActive ? '#ffffff' : 'var(--text-dim)',
                       border: isActive 
-                        ? '1px solid rgba(255, 255, 255, 0.3)' 
-                        : '1px solid rgba(255, 255, 255, 0.08)',
+                        ? '1px solid rgba(var(--accent-rgb), 0.5)' 
+                        : '1px solid var(--glass-border)',
                       backdropFilter: 'blur(10px)',
                       boxShadow: isActive 
                         ? '0 0 14px rgba(var(--accent-rgb), 0.35)' 
@@ -1759,16 +1759,16 @@ export function LibraryView() {
                     }}
                     onMouseEnter={(e) => {
                       if (!isActive) {
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                        e.currentTarget.style.background = 'var(--glass-h)';
                         e.currentTarget.style.color = '#ffffff';
-                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+                        e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (!isActive) {
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+                        e.currentTarget.style.background = 'var(--glass)';
                         e.currentTarget.style.color = 'var(--text-dim)';
-                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                        e.currentTarget.style.borderColor = 'var(--glass-h)';
                       }
                     }}
                   >
@@ -1779,7 +1779,7 @@ export function LibraryView() {
                       padding: '1px 6px',
                       borderRadius: 10,
                       fontWeight: 700,
-                      background: isActive ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.06)',
+                      background: isActive ? 'var(--accent)' : 'var(--glass-h)',
                       color: isActive ? '#ffffff' : 'var(--text-dim)',
                     }}>
                       {chip.count}
@@ -2101,9 +2101,9 @@ export function LibraryView() {
                         setPlaylistModalFor(null); 
                         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added to ${p.name}`, type: 'success' } })); 
                       }}
-                      style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, cursor: 'pointer', transition: 'background 0.2s', fontSize: 14, fontWeight: 500 }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                      style={{ padding: '12px 16px', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 8, cursor: 'pointer', transition: 'background 0.2s', fontSize: 14, fontWeight: 500 }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'var(--glass)'}
                     >
                       {p.name}
                     </div>
@@ -2254,9 +2254,9 @@ export function LibraryView() {
                         setSelectedTrackPaths([]);
                         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added ${selectedTrackPaths.length} songs to ${p.name}`, type: 'success' } })); 
                       }}
-                      style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, cursor: 'pointer', transition: 'background 0.2s', fontSize: 14, fontWeight: 500 }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                      style={{ padding: '12px 16px', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 8, cursor: 'pointer', transition: 'background 0.2s', fontSize: 14, fontWeight: 500 }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'var(--glass)'}
                     >
                       {p.name}
                     </div>
@@ -2317,7 +2317,7 @@ export function LibraryView() {
               <span>{selectedTrackPaths.length} selected</span>
             </div>
 
-            <div style={{ height: 22, width: 1, background: 'rgba(255, 255, 255, 0.15)' }} />
+            <div style={{ height: 22, width: 1, background: 'var(--glass-border)' }} />
 
             <button
               className="btn btn-primary"

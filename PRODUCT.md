@@ -1,28 +1,35 @@
 # Product
 
 ## Register
-brand
+
+product
 
 ## Users
-Audiophiles, music collectors, and focused listeners who keep a local library (FLAC, WAV, vinyl rips) and want hardware-precise playback on Windows. Context is late-night desk listening: headphones on, lights low, attention on the sound, not on the tool. They value transparency over decoration.
+
+Desktop music listeners on Windows who care about audio quality. Two overlapping groups: local-library owners (FLAC/DSD collections, bit-perfect playback, DSP/EQ tuning) and streamers (YouTube discovery, charts, scrobbling to Last.fm/ListenBrainz). They live in this app for long sessions, often alongside other work, sometimes in bright rooms where a dark-only UI glares.
 
 ## Product Purpose
-Aideo is a high-performance desktop music engine built with Tauri + Rust + React. It delivers bit-transparent playback, studio-grade DSP, smart hardware auto-matching, and real-time lyric translation with a calm, obsidian interface that gets out of the way of the music. Success is when a listener trusts what they hear and forgets the player.
+
+Aideo is a Tauri v2 desktop music player combining a local library with streaming discovery: WASAPI-exclusive bit-perfect output, per-track DSP/Audio Lab, synced lyrics, queue management, listening insights, and scrobbling. Success is effortless daily driving: find music fast, play it back exactly right, keep the window open all day.
 
 ## Brand Personality
-Calibrated, obsidian, late-night. Voice is precise and quiet, not loud. Confident without hype, like a mastering console. Three words: precise, still, luminous.
+
+Precise, calm, enthusiast. Confident like measurement gear, relaxed like a listening room. Voice is short and concrete; the UI never competes with album art.
 
 ## Anti-references
-- Generic SaaS landing with cream sand background, purple gradient text, and three identical icon cards
-- Editorial-magazine landing with italic serif drop caps and ruled separators as the whole personality
-- Glassmorphism dashboard with blurred cards and neon glows used as decoration
-- Brutalist terminal mono page that shouts technical for costume
+
+- Gamer-audio RGB soup: glowing gradients everywhere, neon on neon.
+- Dashboard clutter: stat cards stacked on stat cards, chrome thicker than content.
+- Gray-on-gray light themes where muted text fails contrast on tinted near-white.
 
 ## Design Principles
-1. Sound first, interface second. Every visual choice must serve listening clarity.
-2. Obsidian stillness. Dark, quiet surfaces that let color and typography speak deliberately.
-3. Hardware honesty. Show real signal paths, real specs, not invented metrics.
-4. Calibrated craft. Tight details, considered spacing, motion that feels like a fader, not a bounce.
+
+1. Album art is the hero; chrome recedes. Immersive surfaces (Now Playing cinema, Wrapped) stay art-driven dark even in light mode.
+2. Elevation over decoration in light mode: crisp near-white canvas, white raised surfaces, hairline borders, soft layered shadows. No muddy tinted panels.
+3. Accent is information, not garnish: primary actions, active states, playing row. One accent at a time (the user's dynamic accent).
+4. Every state exists: hover, active, selected, disabled, error. Same button shape everywhere.
+5. Light mode is a first-class theme, not inverted dark: tokens first, targeted overrides second, contrast >= 4.5:1 for body text.
 
 ## Accessibility & Inclusion
-WCAG AA minimum, AAA for body text on dark. Full keyboard nav, visible focus, reduced-motion alternative for all choreography, captions for audio demos.
+
+WCAG AA targets: body text >= 4.5:1 against its surface in both themes; large text >= 3:1. Dynamic accent colors are tuned for dark backgrounds, so light mode must darken the accent for legibility. Respect reduced motion where animation exists. Keyboard operability for player controls and navigation.

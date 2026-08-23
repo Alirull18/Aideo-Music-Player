@@ -356,7 +356,7 @@ export function TagEditorModal() {
           flexDirection: 'column',
           background: 'rgba(18, 18, 26, 0.95)',
           backdropFilter: 'blur(32px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+          border: '1px solid var(--glass-border)',
           borderRadius: 16,
           boxShadow: '0 24px 60px rgba(0, 0, 0, 0.6)',
           overflow: 'hidden',
@@ -369,7 +369,7 @@ export function TagEditorModal() {
         {/* Header */}
         <div style={{
           padding: '16px 20px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          borderBottom: '1px solid var(--glass-border)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -401,7 +401,7 @@ export function TagEditorModal() {
           gap: 6,
           padding: '10px 20px',
           background: 'rgba(0, 0, 0, 0.2)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+          borderBottom: '1px solid var(--glass-border)',
         }}>
           <button
             onClick={() => setActiveTab('tags')}
@@ -513,8 +513,8 @@ export function TagEditorModal() {
                         onChange={e => setTitle(e.target.value)}
                         placeholder="Song title"
                         style={{
-                          background: 'rgba(255, 255, 255, 0.04)',
-                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          background: 'var(--glass)',
+                          border: '1px solid var(--glass-border)',
                           borderRadius: 8,
                           padding: '8px 12px',
                           color: 'white',
@@ -535,8 +535,8 @@ export function TagEditorModal() {
                         onChange={e => setArtist(e.target.value)}
                         placeholder="Artist name"
                         style={{
-                          background: 'rgba(255, 255, 255, 0.04)',
-                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          background: 'var(--glass)',
+                          border: '1px solid var(--glass-border)',
                           borderRadius: 8,
                           padding: '8px 12px',
                           color: 'white',
@@ -555,8 +555,8 @@ export function TagEditorModal() {
                         onChange={e => setAlbum(e.target.value)}
                         placeholder="Album name"
                         style={{
-                          background: 'rgba(255, 255, 255, 0.04)',
-                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          background: 'var(--glass)',
+                          border: '1px solid var(--glass-border)',
                           borderRadius: 8,
                           padding: '8px 12px',
                           color: 'white',
@@ -577,8 +577,8 @@ export function TagEditorModal() {
                         onChange={e => setAlbumArtist(e.target.value)}
                         placeholder="Album artist (optional)"
                         style={{
-                          background: 'rgba(255, 255, 255, 0.04)',
-                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          background: 'var(--glass)',
+                          border: '1px solid var(--glass-border)',
                           borderRadius: 8,
                           padding: '8px 12px',
                           color: 'white',
@@ -598,8 +598,8 @@ export function TagEditorModal() {
                           onChange={e => setYear(e.target.value)}
                           placeholder="YYYY"
                           style={{
-                            background: 'rgba(255, 255, 255, 0.04)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            background: 'var(--glass)',
+                            border: '1px solid var(--glass-border)',
                             borderRadius: 8,
                             padding: '8px 12px',
                             color: 'white',
@@ -618,8 +618,8 @@ export function TagEditorModal() {
                           onChange={e => setGenre(e.target.value)}
                           placeholder="e.g. Rock"
                           style={{
-                            background: 'rgba(255, 255, 255, 0.04)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            background: 'var(--glass)',
+                            border: '1px solid var(--glass-border)',
                             borderRadius: 8,
                             padding: '8px 12px',
                             color: 'white',
@@ -643,8 +643,8 @@ export function TagEditorModal() {
                             onChange={e => setTrackNumber(e.target.value)}
                             placeholder="1"
                             style={{
-                              background: 'rgba(255, 255, 255, 0.04)',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              background: 'var(--glass)',
+                              border: '1px solid var(--glass-border)',
                               borderRadius: 8,
                               padding: '8px 12px',
                               color: 'white',
@@ -662,8 +662,8 @@ export function TagEditorModal() {
                             onChange={e => setTrackTotal(e.target.value)}
                             placeholder="12"
                             style={{
-                              background: 'rgba(255, 255, 255, 0.04)',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              background: 'var(--glass)',
+                              border: '1px solid var(--glass-border)',
                               borderRadius: 8,
                               padding: '8px 12px',
                               color: 'white',
@@ -684,8 +684,8 @@ export function TagEditorModal() {
                             onChange={e => setDiscNumber(e.target.value)}
                             placeholder="1"
                             style={{
-                              background: 'rgba(255, 255, 255, 0.04)',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              background: 'var(--glass)',
+                              border: '1px solid var(--glass-border)',
                               borderRadius: 8,
                               padding: '8px 12px',
                               color: 'white',
@@ -703,8 +703,8 @@ export function TagEditorModal() {
                             onChange={e => setDiscTotal(e.target.value)}
                             placeholder="1"
                             style={{
-                              background: 'rgba(255, 255, 255, 0.04)',
-                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              background: 'var(--glass)',
+                              border: '1px solid var(--glass-border)',
                               borderRadius: 8,
                               padding: '8px 12px',
                               color: 'white',
@@ -726,8 +726,8 @@ export function TagEditorModal() {
                       onChange={e => setComment(e.target.value)}
                       placeholder="Comment tag"
                       style={{
-                        background: 'rgba(255, 255, 255, 0.04)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        background: 'var(--glass)',
+                        border: '1px solid var(--glass-border)',
                         borderRadius: 8,
                         padding: '8px 12px',
                         color: 'white',
@@ -749,7 +749,7 @@ export function TagEditorModal() {
                         height: 180,
                         borderRadius: 12,
                         background: 'rgba(0, 0, 0, 0.4)',
-                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        border: '1px solid var(--glass-border)',
                         overflow: 'hidden',
                         display: 'flex',
                         alignItems: 'center',
@@ -809,12 +809,12 @@ export function TagEditorModal() {
                         }}
                         onClick={() => fileInputRef.current?.click()}
                         style={{
-                          border: `2px dashed ${dragActive ? 'var(--accent)' : 'rgba(255, 255, 255, 0.15)'}`,
+                          border: `2px dashed ${dragActive ? 'var(--accent)' : 'var(--glass-border)'}`,
                           borderRadius: 12,
                           padding: '24px 16px',
                           textAlign: 'center',
                           cursor: 'pointer',
-                          background: dragActive ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                          background: dragActive ? 'rgba(139, 92, 246, 0.08)' : 'var(--glass)',
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
@@ -850,8 +850,8 @@ export function TagEditorModal() {
                           onKeyDown={e => e.key === 'Enter' && handleSearchOnlineCovers(coverSearchQuery)}
                           style={{
                             flex: 1,
-                            background: 'rgba(255, 255, 255, 0.04)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            background: 'var(--glass)',
+                            border: '1px solid var(--glass-border)',
                             borderRadius: 8,
                             padding: '8px 12px',
                             color: 'white',
@@ -896,8 +896,8 @@ export function TagEditorModal() {
                             style={{
                               padding: 6,
                               borderRadius: 8,
-                              background: 'rgba(255, 255, 255, 0.03)',
-                              border: '1px solid rgba(255, 255, 255, 0.08)',
+                              background: 'var(--glass)',
+                              border: '1px solid var(--glass-border)',
                               cursor: 'pointer',
                               display: 'flex',
                               flexDirection: 'column',
@@ -940,7 +940,7 @@ export function TagEditorModal() {
                     style={{
                       width: '100%',
                       background: 'rgba(0, 0, 0, 0.3)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      border: '1px solid var(--glass-border)',
                       borderRadius: 8,
                       padding: 12,
                       color: 'white',
@@ -962,7 +962,7 @@ export function TagEditorModal() {
         {/* Footer Actions */}
         <div style={{
           padding: '14px 20px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+          borderTop: '1px solid var(--glass-border)',
           background: 'rgba(0, 0, 0, 0.3)',
           display: 'flex',
           justifyContent: 'space-between',
@@ -977,8 +977,8 @@ export function TagEditorModal() {
               onClick={handleClose}
               style={{
                 padding: '8px 16px',
-                background: 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                background: 'var(--glass-h)',
+                border: '1px solid var(--glass-border)',
                 borderRadius: 8,
                 color: 'white',
                 fontSize: 12,

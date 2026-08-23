@@ -144,6 +144,61 @@ mod dsp_tests {
             transient[0][0]
         );
     }
+
+    #[test]
+    fn test_resampler_bridges_44100_to_48000_without_distortion_or_nans() {
+        use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+        let chunk_size = 1024;
+        let mut resampler = SincFixedIn::<f32>::new(
+            48000.0 / 44100.0,
+            2.0,
+            SincInterpolationParameters {
+                sinc_len: 64,
+                f_cutoff: 0.96,
+                interpolation: SincInterpolationType::Cubic,
+                oversampling_factor: 128,
+                window: WindowFunction::BlackmanHarris2,
+            },
+            chunk_size,
+            2,
+        ).expect("Resampler initialization from 44.1kHz to 48kHz must succeed");
+
+        let input = vec![vec![0.5f32; chunk_size], vec![-0.5f32; chunk_size]];
+        let output = resampler.process(&input, None).expect("Resampling process must succeed");
+        assert_eq!(output.len(), 2);
+        assert!(!output[0].is_empty());
+        for sample in &output[0] {
+            assert!(sample.is_finite() && !sample.is_nan());
+            assert!(sample.abs() <= 1.0);
+        }
+    }
+
+    #[test]
+    fn test_resampler_bridges_44100_to_96000_high_res() {
+        use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+        let chunk_size = 1024;
+        let mut resampler = SincFixedIn::<f32>::new(
+            96000.0 / 44100.0,
+            2.0,
+            SincInterpolationParameters {
+                sinc_len: 128,
+                f_cutoff: 0.985,
+                interpolation: SincInterpolationType::Cubic,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            },
+            chunk_size,
+            2,
+        ).expect("Resampler initialization from 44.1kHz to 96kHz must succeed");
+
+        let input = vec![vec![0.25f32; chunk_size], vec![0.75f32; chunk_size]];
+        let output = resampler.process(&input, None).expect("Resampling process must succeed");
+        assert_eq!(output.len(), 2);
+        assert!(!output[0].is_empty());
+        for sample in &output[0] {
+            assert!(sample.is_finite() && !sample.is_nan());
+        }
+    }
 }
 
 

@@ -576,7 +576,7 @@ export function ListeningInsightsView() {
                       <h2 style={{ fontSize: 28, fontWeight: 900, letterSpacing: -0.5, lineHeight: 1.2 }}>
                         Your Music Journey<br />on Aideo
                       </h2>
-                      <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 14 }}>
+                      <p style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 14 }}>
                         Let's take a look at your listening stats, calculated completely locally on your device.
                       </p>
                       <div style={{ fontSize: 10, color: 'var(--accent)', textTransform: 'uppercase', fontWeight: 800, marginTop: 40, letterSpacing: 1.5 }}>
@@ -598,7 +598,7 @@ export function ListeningInsightsView() {
                       <div className="wrapped-big-number">
                         {Math.round(insights!.total_listening_time_secs / 60)}
                       </div>
-                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>
+                      <p style={{ fontSize: 14, color: 'var(--text-dim)', lineHeight: 1.5 }}>
                         total minutes of playback recorded locally. That's {insights!.total_plays} individual scrobbles with a skip rate of {insights!.skip_rate.toFixed(0)}%!
                       </p>
                     </motion.div>
@@ -619,12 +619,12 @@ export function ListeningInsightsView() {
                           <div style={{ fontSize: 36, fontWeight: 900, color: '#fff', letterSpacing: -1 }}>
                             {insights!.top_artists[0].artist}
                           </div>
-                          <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', marginTop: 8, lineHeight: 1.5 }}>
+                          <p style={{ fontSize: 14, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.5 }}>
                             was your top listened artist. You scrobbled them {insights!.top_artists[0].play_count} times!
                           </p>
                         </div>
                       ) : (
-                        <p style={{ color: 'rgba(255,255,255,0.5)', marginTop: 20 }}>No artist metadata recorded.</p>
+                        <p style={{ color: 'var(--text-dim)', marginTop: 20 }}>No artist metadata recorded.</p>
                       )}
                     </motion.div>
                   )}

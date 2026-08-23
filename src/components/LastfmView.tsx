@@ -27,7 +27,7 @@ export function LastfmView() {
   }
 
   return (
-    <div className="lastfm-dashboard" style={{ padding: '40px 60px', overflowY: 'auto', height: '100%' }}>
+    <div className="lastfm-dashboard" style={{ padding: '40px 60px calc(var(--player-h) + 40px) 60px', overflowY: 'auto', height: '100%' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 }}>
         <div>
           <h1 style={{ fontSize: 32, margin: 0 }}>Last.fm Dashboard</h1>
@@ -54,7 +54,7 @@ export function LastfmView() {
           ) : lastfmUser.image?.[2]?.['#text'] ? (
             <img src={lastfmUser.image[2]['#text']} alt="avatar" className="lfm-avatar" />
           ) : (
-            <div className="lfm-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.05)' }}>
+            <div className="lfm-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--glass-h)' }}>
               <Users size={40} color="var(--accent)" />
             </div>
           )}
@@ -136,7 +136,7 @@ export function LastfmView() {
                   <div className="lfm-item-sub" style={{ fontSize: 12 }}>{(parseInt(artist.playcount) || 0).toLocaleString()} scrobbles</div>
                 </div>
                 {lastfmTopArtists[0] && (
-                  <div style={{ width: 60, height: 4, background: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
+                  <div style={{ width: 60, height: 4, background: 'var(--glass-h)', borderRadius: 2 }}>
                     <div style={{ 
                       height: '100%', 
                       width: `${Math.min(100, (parseInt(artist.playcount) / (parseInt(lastfmTopArtists[0].playcount) || 1)) * 100)}%`,

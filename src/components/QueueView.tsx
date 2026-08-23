@@ -270,7 +270,7 @@ export function QueueView() {
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); reorderQueue(i, i - 1); }}
                                   title="Move Up"
-                                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'white', display: 'flex' }}
+                                  style={{ background: 'var(--glass-h)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'var(--text)', display: 'flex' }}
                                 >
                                   <ArrowUp size={13} />
                                 </button>
@@ -279,7 +279,7 @@ export function QueueView() {
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); reorderQueue(i, i + 1); }}
                                   title="Move Down"
-                                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'white', display: 'flex' }}
+                                  style={{ background: 'var(--glass-h)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'var(--text)', display: 'flex' }}
                                 >
                                   <ArrowDown size={13} />
                                 </button>

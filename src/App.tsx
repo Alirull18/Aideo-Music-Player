@@ -28,6 +28,7 @@ import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
 import { OnboardingWizard } from './components/OnboardingWizard';
+import { toggleOsFullscreen } from './utils/windowFullscreen';
 import { CoverArtModal } from './components/CoverArtModal';
 import { TagEditorModal } from './components/TagEditorModal';
 import { DesktopLyricBar } from './components/DesktopLyricBar';
@@ -468,6 +469,9 @@ function AideoApp() {
       } else if (keyName === (userShortcuts.mute ?? 'm')) {
         e.preventDefault();
         state.toggleMute();
+      } else if (keyName === (userShortcuts.fullscreenToggle ?? 'F11')) {
+        e.preventDefault();
+        toggleOsFullscreen();
       }
     };
     window.addEventListener('keydown', handleKeyDown);

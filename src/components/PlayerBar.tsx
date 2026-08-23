@@ -348,7 +348,7 @@ export function PlayerBar() {
                   animate={{ x: ['-100%', '100%'] }}
                   transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
                 />
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, letterSpacing: 2, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, letterSpacing: 2, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
                   Streaming Live
                 </div>
               </div>
@@ -365,7 +365,7 @@ export function PlayerBar() {
                           style={{
                             flex: 1,
                             height: `${Math.max(25, peak * 100)}%`,
-                            background: isPlayed ? 'var(--accent)' : 'rgba(255, 255, 255, 0.22)',
+                            background: isPlayed ? 'var(--accent)' : 'var(--wave-idle)',
                             borderRadius: 1,
                             transition: 'background 0.1s ease',
                           }}
@@ -374,7 +374,7 @@ export function PlayerBar() {
                     })}
                   </div>
                 ) : (
-                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(255, 255, 255, 0.08)' }} />
+                  <div style={{ position: 'absolute', inset: 0, background: 'var(--wave-idle)' }} />
                 )}
                 <div className="prog-fill" style={{ width: `${pct}%`, opacity: 0.25 }} />
               </div>
@@ -441,8 +441,14 @@ export function PlayerBar() {
               <button className="pb-btn" onClick={playNext} title="Next">
                 <SkipForward size={17} fill="currentColor" />
               </button>
+              <button className="pb-btn mini" onClick={stopTrack} title="Stop">
+                <Square size={12} fill="currentColor" />
+              </button>
               <button className={`pb-btn mini ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title="Repeat">
                 {repeat === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />}
+              </button>
+              <button className={`pb-btn mini ${autoplayEnabled ? 'active autoplay-active' : ''}`} onClick={toggleAutoplay} title={`Endless Autoplay (Radio): ${autoplayEnabled ? 'On' : 'Off'}`}>
+                <InfinityIcon size={15} />
               </button>
             </div>
             <div className="floating-seek-row">
@@ -502,8 +508,8 @@ export function PlayerBar() {
                       background: isPlayed 
                         ? 'linear-gradient(180deg, var(--accent, #8b5cf6), rgba(var(--accent-rgb), 0.7))' 
                         : isHovered 
-                        ? 'rgba(255, 255, 255, 0.4)' 
-                        : 'rgba(255, 255, 255, 0.12)',
+                        ? 'var(--wave-hover)' 
+                        : 'var(--wave-idle)',
                       boxShadow: isPlayed ? '0 0 6px rgba(var(--accent-rgb), 0.35)' : 'none'
                     }}
                   />
@@ -634,6 +640,9 @@ export function PlayerBar() {
             <button className="pb-btn mini" onClick={playNext} title="Next">
               <SkipForward size={16} fill="currentColor" />
             </button>
+            <button className="pb-btn mini" onClick={stopTrack} title="Stop">
+              <Square size={11} fill="currentColor" />
+            </button>
             <button className={`pb-btn mini ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title="Repeat">
               {repeat === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />}
             </button>
@@ -736,13 +745,16 @@ export function PlayerBar() {
 
           <div className="vinyl-progress-row">
             <span className="vinyl-amber-time">{fmt(playback.position_secs)}</span>
-            <div className="vinyl-prog-track" onClick={handleSeek}>
+            <div className="vinyl-prog-track" onClick={handleSeek} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} title="Scrub Track">
               <div className="vinyl-prog-grooves">
                 {Array.from({ length: 32 }).map((_, i) => (
                   <div key={i} className="vinyl-tick" style={{ opacity: (i / 32) * 100 <= pct ? 0.9 : 0.25 }} />
                 ))}
               </div>
               <div className="vinyl-prog-fill" style={{ width: `${pct}%` }} />
+              {hoverSeekPct !== null && (
+                <div className="vinyl-prog-hover" style={{ left: `${hoverSeekPct * 100}%` }} />
+              )}
             </div>
             <span className="vinyl-amber-time">{isLive ? 'LIVE' : fmt(duration)}</span>
           </div>
@@ -764,8 +776,8 @@ export function PlayerBar() {
               <span>EXCLUSIVE</span>
             </div>
           </div>
-          {renderVolume()}
-          {renderQuickTools()}
+          {renderVolume(true)}
+          {renderQuickTools(true)}
         </div>
       </div>
     );

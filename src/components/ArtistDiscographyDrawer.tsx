@@ -193,35 +193,35 @@ export function ArtistDiscographyDrawer({
               width: '100%',
               maxWidth: 720,
               height: '100%',
-              background: '#12121a',
-              borderLeft: '1px solid rgba(255, 255, 255, 0.1)',
+              background: 'var(--drawer-bg)',
+              borderLeft: '1px solid var(--glass-border)',
               display: 'flex',
               flexDirection: 'column',
               boxShadow: '-12px 0 40px rgba(0, 0, 0, 0.8)',
             }}
           >
             {/* Header */}
-            <div style={{ padding: '28px 32px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', position: 'relative', background: 'linear-gradient(180deg, rgba(var(--accent-rgb), 0.15) 0%, rgba(18, 18, 26, 0.95) 100%)' }}>
+            <div style={{ padding: '28px 32px', borderBottom: '1px solid var(--glass-border)', position: 'relative', background: 'linear-gradient(180deg, rgba(var(--accent-rgb), 0.15) 0%, var(--drawer-header-fade) 100%)' }}>
               <button
                 onClick={onClose}
                 style={{
                   position: 'absolute',
                   top: 24,
                   right: 24,
-                  background: 'rgba(255, 255, 255, 0.1)',
+                  background: 'var(--glass-h)',
                   border: 'none',
                   borderRadius: '50%',
                   width: 34,
                   height: 34,
-                  color: 'white',
+                  color: 'var(--text)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   transition: 'background 0.2s',
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.15)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
               >
                 <X size={18} />
               </button>
@@ -232,7 +232,7 @@ export function ArtistDiscographyDrawer({
                 </div>
                 <div>
                   <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--accent)' }}>ARTIST</span>
-                  <h2 style={{ margin: '4px 0 0 0', fontSize: 26, fontWeight: 700, color: 'white', lineHeight: 1.2 }}>{artistName}</h2>
+                  <h2 style={{ margin: '4px 0 0 0', fontSize: 26, fontWeight: 700, color: 'var(--text)', lineHeight: 1.2 }}>{artistName}</h2>
                   <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>
                     {artistAlbums.length} {artistAlbums.length === 1 ? 'Album' : 'Albums'} • {artistTracks.length} tracks • {fmt(totalDuration)}
                   </div>
@@ -264,7 +264,7 @@ export function ArtistDiscographyDrawer({
               {/* Discography Albums Section */}
               <div style={{ marginBottom: 36 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10, color: 'white' }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text)' }}>
                     <Disc size={20} color="var(--accent)" />
                     Albums & Releases
                   </h3>
@@ -279,8 +279,8 @@ export function ArtistDiscographyDrawer({
                         if (onSelectAlbum) onSelectAlbum(album.title);
                       }}
                       style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.07)',
+                        background: 'var(--glass)',
+                        border: '1px solid var(--glass-border)',
                         borderRadius: 12,
                         padding: 8,
                         cursor: 'pointer',
@@ -289,13 +289,13 @@ export function ArtistDiscographyDrawer({
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-3px)';
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                        e.currentTarget.style.background = 'var(--glass-h)';
                         e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.3)';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.07)';
+                        e.currentTarget.style.background = 'var(--glass)';
+                        e.currentTarget.style.borderColor = 'var(--glass-border)';
                       }}
                     >
                       <div style={{ width: '100%', paddingTop: '100%', position: 'relative', borderRadius: 8, overflow: 'hidden', marginBottom: 6, background: '#0e0e14' }}>
@@ -303,7 +303,7 @@ export function ArtistDiscographyDrawer({
                           <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
                         </div>
                       </div>
-                      <div style={{ fontWeight: 600, fontSize: 12, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 1 }} title={album.title}>
+                      <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 1 }} title={album.title}>
                         {album.title}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
@@ -317,7 +317,7 @@ export function ArtistDiscographyDrawer({
               {/* All Tracks Section */}
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10, color: 'white' }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text)' }}>
                     <Music size={20} color="var(--accent)" />
                     All Songs
                   </h3>
@@ -342,7 +342,7 @@ export function ArtistDiscographyDrawer({
                       >
                         <td style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>{idx + 1}</td>
                         <td>
-                          <div style={{ fontWeight: 600, color: 'white', fontSize: 14 }}>{t.title || '—'}</div>
+                          <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 14 }}>{t.title || '—'}</div>
                         </td>
                         <td style={{ color: 'var(--text-dim)', fontSize: 13 }}>{t.album || '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--text-dim)', fontSize: 13 }}>{fmt(t.duration)}</td>

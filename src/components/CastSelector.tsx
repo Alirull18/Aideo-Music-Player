@@ -105,7 +105,7 @@ export function CastSelector() {
               width: 360,
               background: 'rgba(20, 20, 30, 0.92)',
               backdropFilter: 'blur(28px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              border: '1px solid var(--glass-border)',
               borderRadius: 16,
               padding: 16,
               boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5)',
@@ -117,7 +117,7 @@ export function CastSelector() {
             }}
           >
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--glass-border)', paddingBottom: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Cast size={16} className="accent-color" />
                 <span style={{ fontSize: 14, fontWeight: 700 }}>Network Streamer</span>
@@ -222,8 +222,8 @@ export function CastSelector() {
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '8px 10px',
-                      background: isActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                      border: isActive ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(255, 255, 255, 0.05)',
+                      background: isActive ? 'rgba(16, 185, 129, 0.15)' : 'var(--glass)',
+                      border: isActive ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid var(--glass-border)',
                       borderRadius: 10,
                       cursor: isActive ? 'default' : 'pointer',
                       transition: 'all 0.2s ease',
@@ -266,8 +266,8 @@ export function CastSelector() {
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '8px 10px',
-                      background: isActive ? 'rgba(139, 92, 246, 0.15)' : 'rgba(255, 255, 255, 0.02)',
-                      border: isActive ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid rgba(255, 255, 255, 0.05)',
+                      background: isActive ? 'rgba(139, 92, 246, 0.15)' : 'var(--glass)',
+                      border: isActive ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid var(--glass-border)',
                       borderRadius: 10,
                       cursor: isActive ? 'default' : 'pointer',
                       transition: 'all 0.2s ease',
@@ -317,7 +317,7 @@ export function CastSelector() {
             {isConnectedAny && (
               <div
                 style={{
-                  borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderTop: '1px solid var(--glass-border)',
                   paddingTop: 10,
                   display: 'flex',
                   flexDirection: 'column',
@@ -360,7 +360,7 @@ export function CastSelector() {
             )}
 
             {/* Divider */}
-            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '2px 0' }} />
+            <div style={{ borderTop: '1px solid var(--glass-border)', margin: '2px 0' }} />
 
             {/* Aideo Connect Hub */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

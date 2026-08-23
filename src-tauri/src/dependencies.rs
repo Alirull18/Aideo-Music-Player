@@ -180,7 +180,8 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
                 "message": "Downloading FFmpeg Transcoder in background...",
                 "type": "info"
             }));
-            download_with_progress_and_sha256(url, &zip_dest, "ffmpeg", None, &app_handle).await?;
+            const FFMPEG_EXPECTED_SHA256: &str = "1ec2f6dd5a3a3badaacd0c40363d5123b588998dc6f9f44e59926a6b2775a955";
+            download_with_progress_and_sha256(url, &zip_dest, "ffmpeg", Some(FFMPEG_EXPECTED_SHA256), &app_handle).await?;
             
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "Extracting FFmpeg engine...",

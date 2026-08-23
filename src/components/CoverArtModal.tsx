@@ -202,12 +202,12 @@ export function CoverArtModal() {
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
             style={{
-              border: `2px dashed ${dragActive ? 'var(--accent)' : 'rgba(255, 255, 255, 0.15)'}`,
+              border: `2px dashed ${dragActive ? 'var(--accent)' : 'var(--glass-border)'}`,
               borderRadius: 12,
               padding: '24px 16px',
               textAlign: 'center',
               cursor: 'pointer',
-              background: dragActive ? 'rgba(139, 92, 246, 0.05)' : 'rgba(255, 255, 255, 0.02)',
+              background: dragActive ? 'rgba(139, 92, 246, 0.05)' : 'var(--glass)',
               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
               display: 'flex',
               flexDirection: 'column',
@@ -227,7 +227,7 @@ export function CoverArtModal() {
             ) : (
               <UploadCloud size={28} className="accent-color" />
             )}
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
               {loading ? 'Applying artwork...' : 'Drag & Drop Album Image here'}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
@@ -246,8 +246,8 @@ export function CoverArtModal() {
                 padding: '0 12px', 
                 flex: 1, 
                 fontSize: 13,
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)'
+                background: 'var(--glass)',
+                border: '1px solid var(--glass-border)'
               }}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
@@ -291,8 +291,8 @@ export function CoverArtModal() {
                     onClick={() => r.cover_url && selectOnlineCover(r.cover_url)}
                     whileHover={{ scale: 1.03 }}
                     style={{
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      background: 'var(--glass)',
+                      border: '1px solid var(--glass-border)',
                       borderRadius: 10,
                       padding: 8,
                       cursor: 'pointer',

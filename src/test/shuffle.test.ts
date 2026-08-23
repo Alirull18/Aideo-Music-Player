@@ -49,4 +49,15 @@ describe('Session-aware shuffle', () => {
     const next = pickShuffleIndex(p, -1);
     expect(next).not.toBe(0);
   });
+
+  it('selects non-deterministically with distributed picks across cold runs', () => {
+    const firstPicks = new Set<number>();
+    // Across 40 independent picks with cold unplayed tracks, we should see multiple different picks
+    for (let run = 0; run < 40; run++) {
+      const freshPaths = paths(10).map(x => `rand_${run}_${x}`);
+      const pick = pickShuffleIndex(freshPaths, -1);
+      firstPicks.add(pick);
+    }
+    expect(firstPicks.size).toBeGreaterThanOrEqual(4);
+  });
 });

@@ -51,7 +51,7 @@ export function Sidebar() {
   })));
 
   useEffect(() => {
-    if (appMode === 'local' && (view === 'aideo' || view === 'aideo_search' || view === 'loved_streams')) {
+    if (appMode === 'local' && (view === 'aideo_search' || view === 'loved_streams')) {
       setView('library');
     }
   }, [appMode, view, setView]);
@@ -163,12 +163,10 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      {appMode === 'hybrid' && (
-        <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')} title={sidebarCollapsed ? "Aideo" : undefined}>
-          <Sparkles size={18} />
-          {!sidebarCollapsed && <span>Aideo</span>}
-        </div>
-      )}
+      <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')} title={sidebarCollapsed ? "Aideo" : undefined}>
+        <Sparkles size={18} />
+        {!sidebarCollapsed && <span>Aideo</span>}
+      </div>
       {appMode === 'hybrid' && (
         <div className={`nav-item ${view === 'charts' ? 'active' : ''}`} onClick={() => setView('charts')} title={sidebarCollapsed ? "Top Charts" : undefined}>
           <BarChart3 size={18} style={{ color: '#f59e0b' }} />
@@ -367,7 +365,7 @@ export function Sidebar() {
                   placeholder="e.g. 90s Rock / Loved Jazz"
                   value={smartName}
                   onChange={e => setSmartName(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.05)', color: 'white', fontSize: 13, outline: 'none' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-h)', color: 'white', fontSize: 13, outline: 'none' }}
                   autoFocus
                 />
               </div>
@@ -408,7 +406,7 @@ export function Sidebar() {
                   placeholder="e.g. Miles / FLAC / 1"
                   value={smartValue}
                   onChange={e => setSmartValue(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.05)', color: 'white', fontSize: 13, outline: 'none' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-h)', color: 'white', fontSize: 13, outline: 'none' }}
                 />
               </div>
               <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>

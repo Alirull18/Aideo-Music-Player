@@ -19,15 +19,21 @@ Aideo Music Player is an open-source desktop audio engine engineered for audioph
 - **Linkwitz Crossfeed Delay**: Natural stereo soundstage crossfeed simulation for fatigue-free headphone listening.
 - **Equalizer APO Compatibility**: Instant 1-click export of parametric configurations for system-wide use.
 
-### 3. Synchronized Lyrics & Language Intelligence
+### 3. Synchronized Lyrics & Desktop HUD
 - **Multi-Source Synchronization**: Automated lyric fetching across LRCLIB, NetEase, and QQ Music.
+- **Word-Level Karaoke**: High-precision word-by-word real-time karaoke scrolling.
 - **Japanese Romaji Transliteration**: 1-click conversion of Japanese Kanji/Kana to Romanized pronunciation via Wanakana.
 - **Real-Time Translation**: Synchronized line-by-line lyric translations.
+- **Floating Desktop Lyrics HUD**: Transparent, click-through (`Alt + L`) lyrics bar for gaming and multitasking.
 
-### 4. Hybrid Library & Remote Control
+### 4. Hybrid Library, Wireless Casting & Customization
 - **Hybrid Streaming**: Seamless playback of local lossless audio files (FLAC, DSD, WAV) alongside YouTube Music and Tidal lossless streams.
+- **DLNA / UPnP Hi-Fi Casting**: Wireless streaming to smart TVs, AV receivers, and Wi-Fi speakers in uncompressed PCM.
+- **Built-in Tag & Art Editor**: Lossless ID3, FLAC, and MP4 tag and high-res cover art editor powered by Lofty.
+- **4 Home Layouts & 5 Player Styles**: Customizable interface featuring Classic Studio, Bento Grid, Audiophile Deck, and Retro Vinyl Turntable.
 - **Aideo Connect**: Mobile LAN remote control enabling playback control from any smartphone browser on the same Wi-Fi network.
 - **0.0% Idle Power Engine**: Smart sleeping cycles that completely halt visualizers and timers when paused.
+- **Discord Status Sync**: Real-time rich presence displaying current song, artist, and elapsed duration.
 - **Aideo Insights & Offline Wrapped**: 100% private offline listening analytics and interactive Spotify-style Wrapped slide presentation.
 
 ## Technical Specifications
@@ -35,11 +41,13 @@ Aideo Music Player is an open-source desktop audio engine engineered for audioph
 - **Frontend Architecture**: React 19, TypeScript, Framer Motion, Zustand
 - **Backend Architecture**: Rust, Tauri v2, Tokio, WASAPI, CPAL
 - **Audio Codec Engine**: Symphonia (Pure Rust)
+- **Audio Metadata & Tagging**: Lofty (Pure Rust)
 - **Database**: SQLite (rusqlite) with column-virtualized indexing
 - **Licensing**: Open Source (MIT License)
 
 ## Resources & Documentation
 - Official Website: https://alirull18.github.io/Aideo-Music-Player/
+- Product Hunt: https://www.producthunt.com/products/aideo-music-player
 - GitHub Repository: https://github.com/Alirull18/Aideo-Music-Player
 - Latest Releases: https://github.com/Alirull18/Aideo-Music-Player/releases/latest
 - Release Notes: https://github.com/Alirull18/Aideo-Music-Player/blob/main/README.md
