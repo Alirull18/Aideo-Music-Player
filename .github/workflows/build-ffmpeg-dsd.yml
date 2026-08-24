@@ -66,6 +66,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.ffmpeg_version }}
         run: |
           $ErrorActionPreference = 'Stop'

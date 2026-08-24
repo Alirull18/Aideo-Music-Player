@@ -18,6 +18,16 @@ fn get_aideo_dir() -> PathBuf {
     data_dir.join("Aideo")
 }
 
+/// Bump this whenever the FFmpeg plugin build changes (e.g. adding DSD support)
+/// so existing installs are flagged for reinstall in Settings -> Plugins.
+const FFMPEG_PLUGIN_VERSION: &str = "2";
+
+fn is_ffmpeg_plugin_up_to_date(aideo_dir: &Path) -> bool {
+    std::fs::read_to_string(aideo_dir.join("ffmpeg.version"))
+        .map(|content| content.trim() == FFMPEG_PLUGIN_VERSION)
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub fn get_dependencies_status() -> Result<DependencyStatus, String> {
     let aideo_dir = get_aideo_dir();
@@ -29,7 +39,7 @@ pub fn get_dependencies_status() -> Result<DependencyStatus, String> {
 
     Ok(DependencyStatus {
         ytdlp_installed: ytdlp_path.exists(),
-        ffmpeg_installed: ffmpeg_path.exists(),
+        ffmpeg_installed: ffmpeg_path.exists() && is_ffmpeg_plugin_up_to_date(&aideo_dir),
         ytdlp_size,
         ffmpeg_size,
     })
@@ -226,6 +236,9 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
             
             extract_res?;
 
+            std::fs::write(aideo_dir.join("ffmpeg.version"), FFMPEG_PLUGIN_VERSION)
+                .map_err(|e| format!("Failed to write FFmpeg version marker: {}", e))?;
+
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "FFmpeg Transcoder successfully installed!",
                 "type": "success"
@@ -257,6 +270,7 @@ pub fn uninstall_dependency(app_handle: tauri::AppHandle, dep_id: String) -> Res
             if path.exists() {
                 std::fs::remove_file(&path).map_err(|e| format!("Failed to delete FFmpeg: {}", e))?;
             }
+            let _ = std::fs::remove_file(aideo_dir.join("ffmpeg.version"));
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "FFmpeg Transcoder successfully uninstalled and deleted from system.",
                 "type": "success"
@@ -367,6 +381,22 @@ fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210  yt-dlp_macos
     fn test_parse_sha256sums_for_binary_missing() {
         let sums = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  yt-dlp\n";
         assert_eq!(parse_sha256sums_for_binary(sums, "yt-dlp.exe"), None);
+    }
+
+    #[test]
+    fn test_ffmpeg_plugin_version_marker() {
+        let tmp = std::env::temp_dir().join(format!("aideo_dep_marker_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+
+        assert!(!is_ffmpeg_plugin_up_to_date(&tmp));
+
+        std::fs::write(tmp.join("ffmpeg.version"), FFMPEG_PLUGIN_VERSION).unwrap();
+        assert!(is_ffmpeg_plugin_up_to_date(&tmp));
+
+        std::fs::write(tmp.join("ffmpeg.version"), "stale").unwrap();
+        assert!(!is_ffmpeg_plugin_up_to_date(&tmp));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
 
