@@ -293,7 +293,6 @@ export interface PlayerState {
   currentHistoryId: number | null;
   autoplayEnabled: boolean;
   autoplayDiscoveryLevel: 'familiarity' | 'balanced' | 'discovery';
-  autoplayAlgorithm: 'v1' | 'v2';
   autoplaySeedTrack: Track | null;
   autoplaySessionHistory: Track[];
   recentlyClearedAutoplayPaths: string[];
@@ -389,7 +388,6 @@ export interface PlayerState {
   toggleRepeat: () => void;
   toggleAutoplay: () => Promise<void>;
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => void;
-  setAutoplayAlgorithm: (algo: 'v1' | 'v2') => void;
   triggerAutoplayRadio: (track: Track, forceReset?: boolean) => Promise<void>;
   pauseTrack: () => Promise<void>;
   resumeTrack: () => Promise<void>;

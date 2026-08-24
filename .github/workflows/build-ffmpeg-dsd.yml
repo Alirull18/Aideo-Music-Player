@@ -1,0 +1,81 @@
+name: "Build FFmpeg Audio (DSD)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ffmpeg_version:
+        description: 'FFmpeg version tag (e.g. n8.0.1)'
+        required: false
+        default: 'n8.0.1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: write # required to publish the release asset consumed by dependencies.rs
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Setup MSYS2 (MinGW64)
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            zip
+            curl
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-yasm
+
+      - name: Build audio-only FFmpeg with DSD support
+        shell: msys2 {0}
+        env:
+          FFMPEG_VERSION: ${{ inputs.ffmpeg_version }}
+          CONFIGURE_FLAGS_EXTRA: >-
+            --enable-demuxer=dsf
+            --enable-demuxer=dsdiff
+            --enable-decoder=dsd_lsbf
+            --enable-decoder=dsd_msbf
+            --enable-decoder=dsd_lsbf_planar
+            --enable-decoder=dsd_msbf_planar
+            --enable-decoder=dst
+        run: |
+          git clone --depth 1 https://github.com/xihan123/FFmpeg-Audio.git
+          cd FFmpeg-Audio
+          bash scripts/build_ffmpeg_audio.sh
+
+      - name: Verify DSD support in binary
+        shell: msys2 {0}
+        run: |
+          FF="FFmpeg-Audio/install/bin/ffmpeg.exe"
+          "$FF" -hide_banner -decoders 2>/dev/null | grep -E "dsd_(lsbf|msbf)"
+          "$FF" -hide_banner -decoders 2>/dev/null | grep "[[:space:]]dst[[:space:]]"
+          echo "DSD decoders confirmed."
+
+      - name: Publish release asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.ffmpeg_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = $env:VERSION -replace '^n', ''
+          $zip = "FFmpeg-Audio/artifacts/ffmpeg-audio-only-$ver-windows-x64.zip"
+          if (-not (Test-Path $zip)) { throw "Artifact not found: $zip" }
+          if (-not (Test-Path "$zip.sha256")) { throw "Checksum not found: $zip.sha256" }
+          $tag = "ffmpeg-audio-dsd"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag $zip "$zip.sha256" `
+            --title "FFmpeg Audio Transcoder with DSD ($($env:VERSION))" `
+            --notes "Audio-only FFmpeg transcoder used by Aideo's plugin system. Same minimal footprint as the upstream audio-only build, plus DSF/DFF (DSD) demuxers and dsd_*/dst decoders."

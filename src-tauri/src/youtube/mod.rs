@@ -1227,6 +1227,143 @@ pub fn artist_matches(candidate: &str, expected: &str) -> bool {
     false
 }
 
+struct AutoplayTasteProfile<'a> {
+    top_artists: &'a [String],
+    library_artists: &'a [String],
+    discovery_level: &'a str,
+    recently_played: &'a std::collections::HashSet<String>,
+    artist_skip_stats: &'a std::collections::HashMap<String, (i64, i64)>,
+    loved_tokens: &'a std::collections::HashMap<String, u32>,
+}
+
+fn score_autoplay_candidate(profile: &AutoplayTasteProfile, title: &str, artist: &str) -> f64 {
+    let mut score = 1.0;
+    let candidate_artist_lower = artist.to_lowercase();
+
+    let is_top_artist = profile.top_artists.iter().any(|ta| {
+        let ta_lower = ta.to_lowercase();
+        candidate_artist_lower.contains(&ta_lower) || ta_lower.contains(&candidate_artist_lower)
+    });
+
+    let is_library_artist = profile.library_artists.iter().any(|la| {
+        let la_lower = la.to_lowercase();
+        candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
+    });
+
+    match profile.discovery_level {
+        "familiarity" => {
+            if is_top_artist {
+                score += 0.85;
+            } else if is_library_artist {
+                score += 0.35;
+            } else {
+                score -= 0.6;
+            }
+        }
+        "discovery" => {
+            if is_top_artist {
+                score -= 0.7;
+            } else if is_library_artist {
+                score += 0.55;
+            } else {
+                score += 0.55;
+            }
+        }
+        _ => {
+            if is_top_artist {
+                score += 0.25;
+            }
+            if is_library_artist && !is_top_artist {
+                score += 0.35;
+            }
+        }
+    }
+
+    let clean_t = clean_title(title);
+    let clean_a = candidate_artist_lower.trim().to_string();
+    let track_key = format!("{} - {}", clean_a, clean_t);
+    if profile.recently_played.contains(&track_key) {
+        score -= 0.50;
+    }
+
+    if let Some(&(total, skipped)) = profile.artist_skip_stats.get(&candidate_artist_lower) {
+        if total >= 3 {
+            let skip_ratio = skipped as f64 / total as f64;
+            if skip_ratio > 0.6 {
+                score -= 0.70 * skip_ratio;
+            } else if skip_ratio < 0.2 {
+                score += 0.25 * (1.0 - skip_ratio);
+            }
+        }
+    }
+
+    let mut token_match_count = 0.0;
+    for word in title.split_whitespace() {
+        let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        if let Some(&freq) = profile.loved_tokens.get(&clean_word) {
+            token_match_count += 0.05 * (freq as f64).min(5.0);
+        }
+    }
+    score += token_match_count.min(0.20);
+
+    score
+}
+
+struct DiscoveryTasteProfile<'a> {
+    loved_artists: &'a [String],
+    top_artists: &'a [String],
+    library_artists: &'a [String],
+    discovery_level: &'a str,
+    artist_skip_stats: &'a std::collections::HashMap<String, (i64, i64)>,
+}
+
+fn score_discovery_candidate(profile: &DiscoveryTasteProfile, base_score: f64, artist: &str) -> f64 {
+    let mut score = base_score;
+    let candidate_artist_lower = artist.to_lowercase();
+
+    let is_loved_artist = profile.loved_artists.iter().any(|la| {
+        let la_lower = la.to_lowercase();
+        candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
+    });
+    let is_top_artist = profile.top_artists.iter().any(|ta| {
+        let ta_lower = ta.to_lowercase();
+        candidate_artist_lower.contains(&ta_lower) || ta_lower.contains(&candidate_artist_lower)
+    });
+    let is_library_artist = profile.library_artists.iter().any(|la| {
+        let la_lower = la.to_lowercase();
+        candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
+    });
+
+    if is_loved_artist { score += 1.5; }
+
+    match profile.discovery_level {
+        "familiarity" => {
+            if is_top_artist { score += 1.00; }
+            else if is_library_artist { score += 0.40; }
+            else { score -= 0.90; }
+        }
+        "discovery" => {
+            if is_top_artist { score -= 1.00; }
+            else if is_library_artist { score += 0.50; }
+            else { score += 1.30; }
+        }
+        _ => {
+            if is_top_artist { score += 0.25; }
+            if is_library_artist && !is_top_artist { score += 0.35; }
+        }
+    }
+
+    if let Some(&(total, skipped)) = profile.artist_skip_stats.get(&candidate_artist_lower) {
+        if total >= 3 {
+            let skip_ratio = skipped as f64 / total as f64;
+            if skip_ratio > 0.5 { score -= 0.80 * skip_ratio; }
+            else if skip_ratio < 0.2 { score += 0.35 * (1.0 - skip_ratio); }
+        }
+    }
+
+    score
+}
+
 #[tauri::command]
 pub async fn get_youtube_autoplay_recommendations(
     video_id: String,
@@ -1635,82 +1772,19 @@ pub async fn get_youtube_autoplay_recommendations(
         tokens
     };
 
+    let taste_profile = AutoplayTasteProfile {
+        top_artists: &top_artists,
+        library_artists: &library_artists,
+        discovery_level: &discovery_level,
+        recently_played: &recently_played,
+        artist_skip_stats: &artist_skip_stats,
+        loved_tokens: &loved_tokens,
+    };
+
     let mut scored_tracks: Vec<(YoutubeTrack, f64)> = Vec::new();
 
     for track in filtered_tracks {
-        let mut score = 1.0;
-        let candidate_artist_lower = track.artist.to_lowercase();
-        
-        let is_top_artist = top_artists.iter().any(|ta| {
-            let ta_lower = ta.to_lowercase();
-            candidate_artist_lower.contains(&ta_lower) || ta_lower.contains(&candidate_artist_lower)
-        });
-        
-        let is_library_artist = library_artists.iter().any(|la| {
-            let la_lower = la.to_lowercase();
-            candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
-        });
-
-        match discovery_level.as_str() {
-            "familiarity" => {
-                if is_top_artist {
-                    score += 0.75;
-                } else if is_library_artist {
-                    score += 0.3;
-                } else {
-                    score -= 0.4;
-                }
-            }
-            "discovery" => {
-                if is_top_artist {
-                    score -= 0.5;
-                } else if is_library_artist {
-                    score += 0.55;
-                } else {
-                    score += 0.4;
-                }
-            }
-            _ => { // "balanced"
-                if is_top_artist {
-                    score += 0.25;
-                }
-                if is_library_artist && !is_top_artist {
-                    score += 0.35;
-                }
-            }
-        }
-
-        // Soft penalty for recently played tracks (instead of hard dropping)
-        let clean_t = clean_title(&track.title);
-        let clean_a = track.artist.to_lowercase().trim().to_string();
-        let track_key = format!("{} - {}", clean_a, clean_t);
-        if recently_played.contains(&track_key) {
-            score -= 0.35;
-        }
-
-        // Apply Multi-Armed Bandit (MAB) skip penalties/boosts based on database history
-        if let Some(&(total, skipped)) = artist_skip_stats.get(&candidate_artist_lower) {
-            if total >= 3 {
-                let skip_ratio = skipped as f64 / total as f64;
-                if skip_ratio > 0.6 {
-                    score -= 0.45 * skip_ratio; // High skip rate penalty
-                } else if skip_ratio < 0.2 {
-                    score += 0.25 * (1.0 - skip_ratio); // Completion rate boost
-                }
-            }
-        }
-
-        // Apply token-based TF-IDF text similarity boost
-        let mut token_match_count = 0.0;
-        let title_words: Vec<&str> = track.title.split_whitespace().collect();
-        for word in title_words {
-            let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-            if let Some(&freq) = loved_tokens.get(&clean_word) {
-                token_match_count += 0.05 * (freq as f64).min(5.0);
-            }
-        }
-        score += token_match_count.min(0.40); // Cap text similarity boost at +0.40
-
+        let score = score_autoplay_candidate(&taste_profile, &track.title, &track.artist);
         scored_tracks.push((track, score));
     }
 
@@ -3882,49 +3956,17 @@ pub async fn get_personalized_discovery_hub(
             }
         }
 
+        let hub_profile = DiscoveryTasteProfile {
+            loved_artists: &priority_artists_c,
+            top_artists: &top_artists_c,
+            library_artists: &library_artists_c,
+            discovery_level: &discovery_level_c,
+            artist_skip_stats: &skip_stats_c,
+        };
+
         let mut scored_tracks = Vec::new();
         for (track, base_score) in raw_candidates {
-            let mut score = base_score;
-            let candidate_artist_lower = track.artist.to_lowercase();
-
-            let is_loved_artist = priority_artists_c.iter().any(|la| {
-                let la_lower = la.to_lowercase();
-                candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
-            });
-            let is_top_artist = top_artists_c.iter().any(|ta| {
-                let ta_lower = ta.to_lowercase();
-                candidate_artist_lower.contains(&ta_lower) || ta_lower.contains(&candidate_artist_lower)
-            });
-            let is_library_artist = library_artists_c.iter().any(|la| {
-                let la_lower = la.to_lowercase();
-                candidate_artist_lower.contains(&la_lower) || la_lower.contains(&candidate_artist_lower)
-            });
-
-            if is_loved_artist { score += 1.5; }
-            match discovery_level_c.as_str() {
-                "familiarity" => {
-                    if is_top_artist { score += 0.75; }
-                    else if is_library_artist { score += 0.3; }
-                    else { score -= 0.4; }
-                }
-                "discovery" => {
-                    if is_top_artist { score -= 0.5; }
-                    else if is_library_artist { score += 0.4; }
-                    else { score += 0.6; }
-                }
-                _ => {
-                    if is_top_artist { score += 0.25; }
-                    if is_library_artist && !is_top_artist { score += 0.35; }
-                }
-            }
-
-            if let Some(&(total, skipped)) = skip_stats_c.get(&candidate_artist_lower) {
-                if total >= 3 {
-                    let skip_ratio = skipped as f64 / total as f64;
-                    if skip_ratio > 0.5 { score -= 0.60 * skip_ratio; }
-                    else if skip_ratio < 0.2 { score += 0.35 * (1.0 - skip_ratio); }
-                }
-            }
+            let score = score_discovery_candidate(&hub_profile, base_score, &track.artist);
             scored_tracks.push((track, score));
         }
 
@@ -4389,6 +4431,146 @@ mod tests {
         for (t, a) in &rotation {
             assert!(!gems.iter().any(|(gt, ga)| gt == t && ga == a));
         }
+    }
+
+    fn autoplay_profile<'a>(
+        top: &'a [String],
+        library: &'a [String],
+        level: &'a str,
+        recent: &'a std::collections::HashSet<String>,
+        skips: &'a std::collections::HashMap<String, (i64, i64)>,
+        tokens: &'a std::collections::HashMap<String, u32>,
+    ) -> AutoplayTasteProfile<'a> {
+        AutoplayTasteProfile {
+            top_artists: top,
+            library_artists: library,
+            discovery_level: level,
+            recently_played: recent,
+            artist_skip_stats: skips,
+            loved_tokens: tokens,
+        }
+    }
+
+    #[test]
+    fn test_autoplay_discovery_level_spread_widened() {
+        let top = vec!["Drake".to_string()];
+        let library = vec!["Radiohead".to_string()];
+        let empty: std::collections::HashSet<String> = Default::default();
+        let empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
+        let empty_tokens: std::collections::HashMap<String, u32> = Default::default();
+
+        // Unknown artist: familiarity must demote below base, discovery must promote above it
+        let p_fam = autoplay_profile(&top, &library, "familiarity", &empty, &empty_skips, &empty_tokens);
+        let p_disc = autoplay_profile(&top, &library, "discovery", &empty, &empty_skips, &empty_tokens);
+        let fam_unknown = score_autoplay_candidate(&p_fam, "Some Song", "Totally New Band");
+        let disc_unknown = score_autoplay_candidate(&p_disc, "Some Song", "Totally New Band");
+        assert!((fam_unknown - 0.4).abs() < 1e-9);   // 1.0 - 0.6
+        assert!((disc_unknown - 1.55).abs() < 1e-9); // 1.0 + 0.55
+
+        // Top artist: discovery must push below a neutral unknown's floor
+        let disc_top = score_autoplay_candidate(&p_disc, "Some Song", "Drake");
+        assert!(disc_top < 0.4, "top artist in discovery mode ({}) must sink below unknown in familiarity mode", disc_top);
+    }
+
+    #[test]
+    fn test_autoplay_recently_played_penalty_outweighs_max_token_boost() {
+        let top: Vec<String> = Vec::new();
+        let library: Vec<String> = Vec::new();
+        let mut recent = std::collections::HashSet::new();
+        recent.insert("taylor swift - love story".to_string());
+        let empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
+        let mut tokens = std::collections::HashMap::new();
+        tokens.insert("love".to_string(), 50u32);
+        tokens.insert("story".to_string(), 50u32);
+
+        let p = autoplay_profile(&top, &library, "balanced", &recent, &empty_skips, &tokens);
+
+        // Recently played track whose title maxes out the loved-token boost:
+        // clean_title strips "(Taylor's Version)", so the penalty must apply.
+        let replayed_hit = score_autoplay_candidate(&p, "Love Story (Taylor's Version)", "Taylor Swift");
+        assert!((replayed_hit - 0.7).abs() < 1e-9); // 1.0 - 0.5 + 0.20 capped
+
+        // A never-played candidate with zero token overlap must outrank it
+        let fresh = score_autoplay_candidate(&p, "Brand New Song", "Unknown Artist");
+        assert!(fresh > replayed_hit);
+    }
+
+    #[test]
+    fn test_autoplay_skip_penalty_outweighs_max_token_boost() {
+        let top: Vec<String> = Vec::new();
+        let library: Vec<String> = Vec::new();
+        let empty: std::collections::HashSet<String> = Default::default();
+        let mut skips = std::collections::HashMap::new();
+        skips.insert("bad artist".to_string(), (10i64, 10i64)); // skipped every time
+        let mut tokens = std::collections::HashMap::new();
+        tokens.insert("love".to_string(), 99u32);
+
+        let p = autoplay_profile(&top, &library, "balanced", &empty, &skips, &tokens);
+
+        let boosted = score_autoplay_candidate(&p, "love love love", "Nice Artist");
+        assert!((boosted - 1.20).abs() < 1e-9, "token boost must cap at +0.20, got {}", boosted);
+
+        let penalized = score_autoplay_candidate(&p, "love love love", "Bad Artist");
+        assert!(penalized < boosted && penalized < 0.6, "always-skipped artist must lose to any healthy candidate, got {}", penalized);
+    }
+
+    #[test]
+    fn test_discovery_hub_unknown_can_outrank_high_base_source_in_discovery_mode() {
+        let top = vec!["Famous".to_string()];
+        let empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
+        let profile = DiscoveryTasteProfile {
+            loved_artists: &[],
+            top_artists: &top,
+            library_artists: &[],
+            discovery_level: "discovery",
+            artist_skip_stats: &empty_skips,
+        };
+
+        // Genre-tag find (base 1.8, unknown artist) vs Last.fm similar-to-seed
+        // (base 3.5) pointing back at a familiar top artist.
+        let unknown_pick = score_discovery_candidate(&profile, 1.8, "Brand New Band");
+        let familiar_repeat = score_discovery_candidate(&profile, 3.5, "Famous");
+        assert!(unknown_pick > familiar_repeat,
+            "discovery mode must promote unknown candidates over high-source familiar ones ({} vs {})", unknown_pick, familiar_repeat);
+    }
+
+    #[test]
+    fn test_discovery_hub_familiarity_mode_inverts_the_order() {
+        let top = vec!["Famous".to_string()];
+        let empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
+        let profile = DiscoveryTasteProfile {
+            loved_artists: &[],
+            top_artists: &top,
+            library_artists: &[],
+            discovery_level: "familiarity",
+            artist_skip_stats: &empty_skips,
+        };
+
+        let unknown_pick = score_discovery_candidate(&profile, 1.8, "Brand New Band");
+        let familiar_repeat = score_discovery_candidate(&profile, 3.5, "Famous");
+        assert!(familiar_repeat > unknown_pick,
+            "familiarity mode must strongly favor known artists ({} vs {})", familiar_repeat, unknown_pick);
+    }
+
+    #[test]
+    fn test_discovery_hub_loved_artist_and_skip_stats_apply() {
+        let loved = vec!["Beloved".to_string()];
+        let empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
+        let mut skips = std::collections::HashMap::new();
+        skips.insert("skipped one".to_string(), (4i64, 4i64));
+        let profile = DiscoveryTasteProfile {
+            loved_artists: &loved,
+            top_artists: &[],
+            library_artists: &[],
+            discovery_level: "balanced",
+            artist_skip_stats: &skips,
+        };
+
+        let loved_boost = score_discovery_candidate(&profile, 2.0, "Beloved");
+        assert!((loved_boost - 3.5).abs() < 1e-9); // 2.0 + 1.5
+
+        let skip_hit = score_discovery_candidate(&profile, 3.0, "Skipped One");
+        assert!((skip_hit - (3.0 - 0.80)).abs() < 1e-9); // ratio 1.0 -> -0.80
     }
 }
 

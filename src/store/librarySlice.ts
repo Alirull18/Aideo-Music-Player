@@ -166,7 +166,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   })(),
   autoplayDiscoveryLevel: (localStorage.getItem('aideo_autoplay_discovery_level') as 'familiarity' | 'balanced' | 'discovery') || 'balanced',
-  autoplayAlgorithm: (localStorage.getItem('aideo_autoplay_algorithm') as 'v1' | 'v2') || 'v2',
   autoplaySeedTrack: null,
   autoplaySessionHistory: [],
   recentlyClearedAutoplayPaths: [],
@@ -1059,7 +1058,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           topArtists,
           libraryArtists,
           discoveryLevel,
-          autoplayAlgorithm: get().autoplayAlgorithm || 'v2'
         });
 
         const parseDuration = (raw: string): number => {
@@ -1220,11 +1218,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => {
     localStorage.setItem('aideo_autoplay_discovery_level', level);
     set({ autoplayDiscoveryLevel: level });
-  },
-
-  setAutoplayAlgorithm: (algo: 'v1' | 'v2') => {
-    localStorage.setItem('aideo_autoplay_algorithm', algo);
-    set({ autoplayAlgorithm: algo });
   },
 
   fetchPlaylists: async () => {

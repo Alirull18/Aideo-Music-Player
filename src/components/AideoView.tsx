@@ -857,7 +857,6 @@ export function AideoView() {
         listenbrainzRecs: lbTracks,
         appMode,
         isOnline: navigator.onLine,
-        autoplayAlgorithm: currentStore.autoplayAlgorithm || 'v2',
       });
 
       setDiscoveryData(resolved);
