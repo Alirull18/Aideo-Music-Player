@@ -237,10 +237,20 @@ export function AideoLabView() {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Treble Booster preset.', type: 'info' } }));
     }
     else if (name === 'Audiophile Hi-Res') {
+      const hiresBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
+        if (idx === 8) return { ...b, freq: 8000, gain: 1.5, band_type: 'highshelf' };
+        if (idx === 9) return { ...b, freq: 16000, gain: 2.0, band_type: 'peaking' };
+        return { ...b, gain: 0 };
+      });
+      const hiresGraphic = [0, 0, 0, 0, 0, 0, 0.5, 1.0, 1.5, 2.0];
       setDSP({
         audio_profile: 'high',
         dither: true,
-        low_spec_mode: false
+        low_spec_mode: false,
+        eq_enabled: true,
+        eq_graphic_gains: hiresGraphic,
+        eq_parametric_bands: hiresBands,
+        preamp_gain: -1.0
       });
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Audiophile Hi-Res preset.', type: 'info' } }));
     }
@@ -2084,7 +2094,7 @@ export function AideoLabView() {
                   gap: 8
                 }}>
                   <span style={{ color: 'var(--accent)', fontWeight: 700 }}>💡 Real-time Notice:</span>
-                  <span>Adjustments will apply on the next track play, or automatically within a second on seek or track skip.</span>
+                  <span>Adjustments apply instantly in real time via high-precision in-memory DSP.</span>
                 </div>
               </div>
 

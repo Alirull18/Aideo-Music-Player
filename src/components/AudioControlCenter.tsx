@@ -634,26 +634,36 @@ export function AudioControlCenter() {
               <div style={{ width: 2, height: 16, background: dsp.upsample_rate > 0 ? '#06b6d4' : 'var(--accent)', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />
 
               {/* Node 3: Resampler */}
-              <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--glass-border)', borderColor: dsp.upsample_rate > 0 ? '#06b6d4' : '' }}>
-                <div style={{ padding: 8, borderRadius: 6, background: dsp.upsample_rate > 0 ? 'rgba(6, 182, 212, 0.1)' : 'var(--glass)', color: dsp.upsample_rate > 0 ? '#06b6d4' : '#6b7280' }}>
-                  <Sparkles size={16} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>Resampler</div>
-                  <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2 }}>
-                    {dsp.upsample_rate > 0 ? 'Rubato Sinc upsampling' : 'No Resampling'}
+              {(() => {
+                const devRate = playback.dev_rate || 0;
+                const isUpsampling = dsp.upsample_rate > 0;
+                const isSharedResampling = !isUpsampling && fileRate > 0 && devRate > 0 && fileRate !== devRate;
+                const isResampling = isUpsampling || isSharedResampling;
+                const targetRate = isUpsampling ? dsp.upsample_rate : devRate;
+
+                return (
+                  <div style={{ display: 'flex', alignItems: 'start', gap: 12, padding: 12, borderRadius: 8, background: 'var(--glass)', border: '1px solid var(--glass-border)', borderColor: isResampling ? '#06b6d4' : '' }}>
+                    <div style={{ padding: 8, borderRadius: 6, background: isResampling ? 'rgba(6, 182, 212, 0.1)' : 'var(--glass)', color: isResampling ? '#06b6d4' : '#6b7280' }}>
+                      <Sparkles size={16} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: 'var(--text-dim)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5 }}>Resampler</div>
+                      <div style={{ fontSize: 13, fontWeight: 'bold', marginTop: 2 }}>
+                        {isUpsampling ? 'Rubato Sinc Upsampling' : isSharedResampling ? 'Rubato Sinc Resampling' : 'No Resampling'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+                        {isResampling ? (
+                          <span style={{ color: '#22d3ee', fontWeight: 'medium' }}>
+                            {formatHz(fileRate)} → {formatHz(targetRate)} ({isSharedResampling ? 'Shared Mixer Match' : `${dsp.resampler_interpolation || 'Sinc'} interpolation`})
+                          </span>
+                        ) : (
+                          <span style={{ opacity: 0.5, fontStyle: 'italic' }}>Direct bitstream matching sample rate</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
-                    {dsp.upsample_rate > 0 ? (
-                      <span style={{ color: '#22d3ee', fontWeight: 'medium' }}>
-                        {formatHz(fileRate)} → {formatHz(dsp.upsample_rate)} ({dsp.resampler_interpolation || 'Sinc'} interpolation)
-                      </span>
-                    ) : (
-                      <span style={{ opacity: 0.5, fontStyle: 'italic' }}>Direct bitstream matching sample rate</span>
-                    )}
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Connecting Line 3 */}
               <div style={{ width: 2, height: 16, background: '#22c55e', opacity: 0.3, marginLeft: 25, marginTop: -18, marginBottom: -18 }} />

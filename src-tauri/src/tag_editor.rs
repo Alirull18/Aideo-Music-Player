@@ -161,7 +161,7 @@ pub fn write_tags(file_path: &str, update: &AudioTagUpdate) -> Result<(), String
         return Err(format!("File not found: {}", file_path));
     }
 
-    let mut tagged_file = Probe::open(path)
+    let tagged_file = Probe::open(path)
         .map_err(|e| format!("Failed to open file: {}", e))?
         .read()
         .map_err(|e| format!("Failed to read file: {}", e))?;
@@ -169,56 +169,85 @@ pub fn write_tags(file_path: &str, update: &AudioTagUpdate) -> Result<(), String
     let tag_type = tagged_file.primary_tag_type();
     
     // Get existing tag or create a new one matching the file's primary tag format
-    let mut tag = match tagged_file.primary_tag_mut() {
-        Some(t) => t.clone(),
-        None => Tag::new(tag_type),
+    let mut tag = if let Some(t) = tagged_file.primary_tag() {
+        t.clone()
+    } else if let Some(t) = tagged_file.first_tag() {
+        t.clone()
+    } else {
+        Tag::new(tag_type)
+    };
+
+    // Helper to insert or remove text tags
+    let update_text_tag = |tag: &mut Tag, key: ItemKey, val: Option<&String>| {
+        if let Some(text) = val {
+            if text.trim().is_empty() {
+                tag.remove_key(&key);
+            } else {
+                tag.insert_text(key, text.clone());
+            }
+        }
     };
 
     // Update string fields
-    if let Some(ref title) = update.title {
-        tag.insert_text(ItemKey::TrackTitle, title.clone());
-    }
-    if let Some(ref artist) = update.artist {
-        tag.insert_text(ItemKey::TrackArtist, artist.clone());
-    }
-    if let Some(ref album) = update.album {
-        tag.insert_text(ItemKey::AlbumTitle, album.clone());
-    }
-    if let Some(ref album_artist) = update.album_artist {
-        tag.insert_text(ItemKey::AlbumArtist, album_artist.clone());
-    }
+    update_text_tag(&mut tag, ItemKey::TrackTitle, update.title.as_ref());
+    update_text_tag(&mut tag, ItemKey::TrackArtist, update.artist.as_ref());
+    update_text_tag(&mut tag, ItemKey::AlbumTitle, update.album.as_ref());
+    update_text_tag(&mut tag, ItemKey::AlbumArtist, update.album_artist.as_ref());
     if let Some(ref year) = update.year {
-        tag.insert_text(ItemKey::Year, year.clone());
-        tag.insert_text(ItemKey::RecordingDate, year.clone());
+        if year.trim().is_empty() {
+            tag.remove_key(&ItemKey::Year);
+            tag.remove_key(&ItemKey::RecordingDate);
+        } else {
+            tag.insert_text(ItemKey::Year, year.clone());
+            tag.insert_text(ItemKey::RecordingDate, year.clone());
+        }
     }
-    if let Some(ref genre) = update.genre {
-        tag.insert_text(ItemKey::Genre, genre.clone());
-    }
-    if let Some(ref comment) = update.comment {
-        tag.insert_text(ItemKey::Comment, comment.clone());
-    }
-    if let Some(ref lyrics) = update.lyrics {
-        tag.insert_text(ItemKey::Lyrics, lyrics.clone());
-    }
+    update_text_tag(&mut tag, ItemKey::Genre, update.genre.as_ref());
+    update_text_tag(&mut tag, ItemKey::Comment, update.comment.as_ref());
+    update_text_tag(&mut tag, ItemKey::Lyrics, update.lyrics.as_ref());
 
     // Update numeric fields
     if let Some(track_no) = update.track_number {
-        tag.set_track(track_no);
+        if track_no > 0 {
+            tag.set_track(track_no);
+        } else {
+            tag.remove_key(&ItemKey::TrackNumber);
+        }
     }
     if let Some(track_total) = update.track_total {
-        tag.set_track_total(track_total);
+        if track_total > 0 {
+            tag.set_track_total(track_total);
+        } else {
+            tag.remove_key(&ItemKey::TrackTotal);
+        }
     }
     if let Some(disc_no) = update.disc_number {
-        tag.set_disk(disc_no);
+        if disc_no > 0 {
+            tag.set_disk(disc_no);
+        } else {
+            tag.remove_key(&ItemKey::DiscNumber);
+        }
     }
     if let Some(disc_total) = update.disc_total {
-        tag.set_disk_total(disc_total);
+        if disc_total > 0 {
+            tag.set_disk_total(disc_total);
+        } else {
+            tag.remove_key(&ItemKey::DiscTotal);
+        }
     }
+
+    // Helper to strip existing cover pictures
+    let strip_existing_pictures = |tag: &mut Tag| {
+        tag.remove_picture_type(PictureType::CoverFront);
+        tag.remove_picture_type(PictureType::Other);
+        tag.remove_picture_type(PictureType::Illustration);
+        tag.remove_picture_type(PictureType::BandLogo);
+        tag.remove_picture_type(PictureType::PublisherLogo);
+    };
 
     // Handle Cover Art
     if update.remove_cover.unwrap_or(false) {
-        tag.remove_picture_type(PictureType::CoverFront);
-        tag.remove_picture_type(PictureType::Other);
+        strip_existing_pictures(&mut tag);
     } else if let Some(ref b64_input) = update.cover_base64 {
         if !b64_input.trim().is_empty() {
             let (mime, raw_b64) = if let Some(pos) = b64_input.find(";base64,") {
@@ -247,7 +276,7 @@ pub fn write_tags(file_path: &str, update: &AudioTagUpdate) -> Result<(), String
                     decoded_bytes,
                 );
 
-                tag.remove_picture_type(PictureType::CoverFront);
+                strip_existing_pictures(&mut tag);
                 tag.push_picture(picture);
             }
         }

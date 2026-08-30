@@ -236,15 +236,56 @@ export function TagEditorModal() {
       const qTitle = title || baseName(activeTrack.path);
       const qArtist = artist;
       const res: any = await invoke('mbz_search_recording', { title: qTitle, artist: qArtist });
-      if (res && res.title) {
-        setTitle(res.title);
-        if (res.artist) setArtist(res.artist);
-        if (res.album) setAlbum(res.album);
-        if (res.year) setYear(String(res.year));
-        if (res.track_number) setTrackNumber(String(res.track_number));
+      const rec = res?.recordings?.[0];
+      if (rec) {
+        const matchedTitle = rec.title || qTitle;
+        const matchedArtist = rec['artist-credit']?.map((a: any) => a.name || a.artist?.name || a).join(', ') || rec['artist-credit']?.[0]?.name || qArtist;
+        const matchedAlbum = rec.releases?.[0]?.title;
+        const matchedYear = rec.releases?.[0]?.date?.slice(0, 4) || rec['first-release-date']?.slice(0, 4);
+        const matchedGenre = rec.genres?.[0]?.name || rec.tags?.[0]?.name || rec.releases?.[0]?.genre;
+        const matchedTrackNum = rec.releases?.[0]?.track_number || rec.releases?.[0]?.media?.[0]?.track?.[0]?.number;
+        const matchedTrackTotal = rec.releases?.[0]?.['track-count'] || rec.releases?.[0]?.track_count;
+        const matchedDiscNum = rec.releases?.[0]?.disc_number || rec.releases?.[0]?.media?.[0]?.position;
+        const matchedDiscTotal = rec.releases?.[0]?.disc_count;
+        const coverUrl = rec.releases?.[0]?.cover_url;
+        const releaseId = rec.releases?.[0]?.id;
+
+        if (matchedTitle) setTitle(matchedTitle);
+        if (matchedArtist) setArtist(matchedArtist);
+        if (matchedAlbum) setAlbum(matchedAlbum);
+        if (matchedYear) setYear(String(matchedYear));
+        if (matchedGenre) setGenre(matchedGenre);
+        if (matchedTrackNum) setTrackNumber(String(matchedTrackNum));
+        if (matchedTrackTotal) setTrackTotal(String(matchedTrackTotal));
+        if (matchedDiscNum) setDiscNumber(String(matchedDiscNum));
+        if (matchedDiscTotal) setDiscTotal(String(matchedDiscTotal));
+
+        // If a cover URL is available from iTunes or Cover Art Archive, auto-load it
+        if (coverUrl) {
+          invoke<string>('fetch_image_as_data_url', { url: coverUrl })
+            .then((b64) => {
+              if (b64) {
+                setNewCoverBase64(b64);
+                setRemoveCover(false);
+              }
+            })
+            .catch(() => {});
+        } else if (releaseId) {
+          invoke<string>('mbz_get_cover_art', { releaseId })
+            .then(async (caaUrl) => {
+              if (caaUrl) {
+                const b64 = await invoke<string>('fetch_image_as_data_url', { url: caaUrl });
+                if (b64) {
+                  setNewCoverBase64(b64);
+                  setRemoveCover(false);
+                }
+              }
+            })
+            .catch(() => {});
+        }
 
         window.dispatchEvent(new CustomEvent('ui-toast', {
-          detail: { message: `Matched tags from MusicBrainz: "${res.title}"`, type: 'info' }
+          detail: { message: `Matched tags from MusicBrainz: "${matchedTitle}"`, type: 'info' }
         }));
       } else {
         window.dispatchEvent(new CustomEvent('ui-toast', {
@@ -285,26 +326,7 @@ export function TagEditorModal() {
     setSearchingCovers(true);
     setCoverResults([]);
     try {
-      const res: any[] = await invoke('search_lyrics_online', { query: q });
-      let results = res.filter(r => r.cover_url && r.cover_url.trim().length > 0);
-
-      if (results.length === 0) {
-        try {
-          const ytTracks: any[] = await invoke('search_youtube', { query: q });
-          if (ytTracks && ytTracks.length > 0) {
-            results = ytTracks
-              .filter(t => t.thumbnail || t.cover_url)
-              .slice(0, 8)
-              .map((t, idx) => ({
-                id: `yt-${idx}-${t.id || t.video_id}`,
-                title: t.title || q,
-                artist: t.artist || t.uploader || 'YouTube',
-                source: 'YouTube Music',
-                cover_url: t.thumbnail || t.cover_url,
-              }));
-          }
-        } catch (_) {}
-      }
+      const results: SearchCoverResult[] = await invoke('search_covers_online', { query: q });
       setCoverResults(results);
     } catch (e) {
       console.error('Search covers failed:', e);
@@ -316,23 +338,20 @@ export function TagEditorModal() {
   const selectOnlineCoverAsBase64 = async (url: string) => {
     setLoading(true);
     try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const b64 = e.target?.result as string;
-        if (b64) {
-          setNewCoverBase64(b64);
-          setRemoveCover(false);
-          setActiveTab('cover');
-          window.dispatchEvent(new CustomEvent('ui-toast', {
-            detail: { message: 'High-res online cover loaded for embedding!', type: 'success' }
-          }));
-        }
-      };
-      reader.readAsDataURL(blob);
+      const b64 = await invoke<string>('fetch_image_as_data_url', { url });
+      if (b64) {
+        setNewCoverBase64(b64);
+        setRemoveCover(false);
+        setActiveTab('cover');
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: 'High-res online cover loaded for embedding!', type: 'success' }
+        }));
+      }
     } catch (e) {
       console.error('Failed to convert online cover:', e);
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Failed to load online cover: ${e}`, type: 'error' }
+      }));
     } finally {
       setLoading(false);
     }

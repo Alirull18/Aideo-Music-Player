@@ -38,6 +38,7 @@ describe('Autoplay & Recommendation Engine', () => {
     it('should correctly identify formats as streams', () => {
       expect(isStreamTrack('some-path', 'YouTube Direct')).toBe(true);
       expect(isStreamTrack('12345', 'Tidal FLAC')).toBe(true);
+      expect(isStreamTrack('138614268', 'Qobuz FLAC')).toBe(true);
       expect(isStreamTrack('subsonic:99', 'SUBSONIC')).toBe(true);
       expect(isStreamTrack('jellyfin:10', 'JELLYFIN')).toBe(true);
       expect(isStreamTrack('radio:1', 'RADIO')).toBe(true);

@@ -185,12 +185,12 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
         }
         "ffmpeg" => {
             let zip_dest = aideo_dir.join("ffmpeg.zip");
-            let url = "https://github.com/xihan123/FFmpeg-Audio/releases/download/n8.0.1/ffmpeg-audio-only-8.0.1-windows-x64.zip";
+            let url = "https://github.com/Alirull18/Aideo-Music-Player/releases/download/ffmpeg-audio-dsd/ffmpeg-audio-only-8.0.1-windows-x64.zip";
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "Downloading FFmpeg Transcoder in background...",
                 "type": "info"
             }));
-            const FFMPEG_EXPECTED_SHA256: &str = "1ec2f6dd5a3a3badaacd0c40363d5123b588998dc6f9f44e59926a6b2775a955";
+            const FFMPEG_EXPECTED_SHA256: &str = "0bf272f23f6be7d032e0a95b463939a27ccad241d8989715d77372d4f45e1d89";
             download_with_progress_and_sha256(url, &zip_dest, "ffmpeg", Some(FFMPEG_EXPECTED_SHA256), &app_handle).await?;
             
             let _ = app_handle.emit("ui-toast", serde_json::json!({

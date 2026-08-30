@@ -121,13 +121,16 @@ function AideoApp() {
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
-    const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession } = useStore.getState();
+    const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession, checkTidalStatus } = useStore.getState();
     loadLibrary();
     fetchPlaylists();
     fetchDevices();
     initializeQueue();
     loadSubsonicPassword();
     checkSession().catch(e => console.error("checkSession error:", e));
+    // Restore Tidal session flag from backend keyring so tidalConnected is
+    // correct immediately after a webview reload, without visiting Settings.
+    checkTidalStatus();
 
     // Synchronize Windows Keep Awake status with backend on startup
     const initialKeepAwake = localStorage.getItem('aideo_keep_awake') === 'true';
@@ -140,6 +143,11 @@ function AideoApp() {
     if (typeof initialVolume === 'number') {
       invoke('set_volume', { volume: initialVolume }).catch(e => console.error("set_volume on startup error:", e));
     }
+
+    // Synchronize persisted DSP/Aideo Lab state with backend on startup so
+    // EQ, spatial, crossfeed, etc. survive app restarts
+    invoke('set_dsp_state', { dsp: useStore.getState().dsp })
+      .catch(e => console.error("set_dsp_state on startup error:", e));
 
     // Synchronize close to tray setting with backend on startup
     const initialCloseToTray = localStorage.getItem('aideo_close_to_tray') === 'true';
@@ -513,6 +521,26 @@ function AideoApp() {
       if (unlistenError) unlistenError();
     };
   }, [setPlaybackSuccess, setPlaybackError]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    let unlistenGotoSettings: (() => void) | undefined;
+
+    const setup = async () => {
+      const u1 = await listen<{ tab?: string }>('ui-goto-settings-tab', (event) => {
+        if (isCancelled) return;
+        useStore.setState({ view: 'settings', pendingSettingsTab: event.payload?.tab || 'appearance' });
+      });
+      if (isCancelled) { u1(); return; }
+      unlistenGotoSettings = u1;
+    };
+    setup();
+
+    return () => {
+      isCancelled = true;
+      if (unlistenGotoSettings) unlistenGotoSettings();
+    };
+  }, []);
 
   useEffect(() => {
     const themeMode = localStorage.getItem('aideo-theme-mode');

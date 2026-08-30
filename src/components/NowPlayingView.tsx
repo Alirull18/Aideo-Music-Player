@@ -14,7 +14,7 @@ const isRadioStream = (track: any): boolean => {
   const format = track.format || '';
   const isUrlFormat = format.toUpperCase() === 'URL';
   const isOnline = path.startsWith('http://') || path.startsWith('https://');
-  const isYTMOrTidalOrCloud = format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN' || path.includes('youtube.com') || path.includes('youtu.be') || path.includes('api.tidal.com');
+  const isYTMOrTidalOrCloud = format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'Qobuz FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN' || path.includes('youtube.com') || path.includes('youtu.be') || path.includes('api.tidal.com');
   
   return (isUrlFormat || isOnline) && !isYTMOrTidalOrCloud && (!track.duration || track.duration <= 0);
 };
@@ -475,7 +475,7 @@ export function NowPlayingView() {
                 SIGNAL PATH 🎛️
               </span>
             )}
-            {autoplayEnabled && (current?.path.startsWith('http') || current?.format === 'Tidal FLAC') && (
+            {autoplayEnabled && (current?.path.startsWith('http') || current?.format === 'Tidal FLAC' || current?.format === 'Qobuz FLAC') && (
               <span 
                 className="quality-tag autoplay-active" 
                 style={{ 

@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import { PlayerState } from './types';
+import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 
@@ -51,6 +51,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   sidebarCollapsed: safeGetStorage('aideo-sidebar-collapsed') === 'true',
   liquidBackgroundEnabled: safeGetStorage('aideo-liquid-bg') !== 'false',
   showSmartMixWidget: safeGetStorage('aideo-show-smart-mix') !== 'false',
+  qobuzExperimentalEnabled: safeGetStorage('aideo-qobuz-experimental') === 'true',
   playbackError: null,
   playbackSuccess: null,
   appMode: (safeGetStorage('aideo-app-mode') as 'local' | 'hybrid') || 'hybrid',
@@ -78,7 +79,11 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   colorScheme: (safeGetStorage('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
   albumArtFit: (safeGetStorage('aideo-album-art-fit') as 'cover' | 'contain') || 'contain',
   playerBarDesign: (safeGetStorage('aideo-playerbar-design') as any) || 'classic',
-  aideoPageDesign: (safeGetStorage('aideo-page-design') as any) || 'classic',
+  aideoPageDesign: (() => {
+    const stored = safeGetStorage('aideo-page-design') as string | null;
+    if (!stored) return 'classic' as const;
+    return LEGACY_AIDEO_PAGE_DESIGNS.includes(stored as any) ? 'classic' as const : stored;
+  })(),
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
 
   setCustomPrompt: (prompt: any) => set(s => ({
@@ -199,6 +204,12 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     const next = !get().showSmartMixWidget;
     localStorage.setItem('aideo-show-smart-mix', String(next));
     set({ showSmartMixWidget: next });
+  },
+
+  toggleQobuzExperimental: () => {
+    const next = !get().qobuzExperimentalEnabled;
+    localStorage.setItem('aideo-qobuz-experimental', String(next));
+    set({ qobuzExperimentalEnabled: next });
   },
 
   resetProMode: () => {

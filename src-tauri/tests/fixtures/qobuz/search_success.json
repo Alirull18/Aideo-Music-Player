@@ -1,0 +1,49 @@
+{
+  "query": "aerials system of a down",
+  "tracks": {
+    "limit": 25,
+    "offset": 0,
+    "total": 2,
+    "items": [
+      {
+        "id": 138614268,
+        "album_id": "u0m3k4v0rdcb",
+        "title": "Aerials",
+        "duration": 212,
+        "track_number": 11,
+        "maximum_sampling_rate": 44.1,
+        "maximum_bit_depth": 16,
+        "hires_streamable": false,
+        "streamable": true,
+        "purchasable": true,
+        "performer": { "id": 59636, "name": "System Of A Down" },
+        "artists": [{ "id": 59636, "name": "System Of A Down", "roles": ["Main"] }],
+        "album": {
+          "id": "u0m3k4v0rdcb",
+          "title": "Toxicity",
+          "image": {
+            "small": "https://static.qobuz.com/images/covers/51/51dcbx_230.jpg",
+            "large": "https://static.qobuz.com/images/covers/51/51dcbx_large.jpg"
+          }
+        }
+      },
+      {
+        "id": 138614269,
+        "title": "Aerials (Live)",
+        "duration": 240,
+        "maximum_sampling_rate": 192.0,
+        "maximum_bit_depth": 24,
+        "hires_streamable": true,
+        "streamable": true,
+        "performer": { "id": 59636, "name": "System Of A Down" },
+        "album": {
+          "id": "l1ve9kfdcb",
+          "title": "Live Anthology",
+          "image": {
+            "large": "https://static.qobuz.com/images/covers/lv/l1ve9kfdcb_large.jpg"
+          }
+        }
+      }
+    ]
+  }
+}

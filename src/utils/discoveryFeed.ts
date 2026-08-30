@@ -1,6 +1,6 @@
 import { DiscoveryHubData, YoutubeTrack } from '../store/types';
 
-export type UnifiedTabId = 'all' | 'recs' | 'recent' | 'rotation' | 'gems' | 'charts';
+export type UnifiedTabId = 'all' | 'recs' | 'recent' | 'rotation' | 'gems' | 'tidal' | 'charts';
 
 export interface UnifiedTabDef {
   id: UnifiedTabId;
@@ -59,6 +59,7 @@ export function buildMergedFeed(data: DiscoveryHubData): YoutubeTrack[] {
     data.heavy_rotation || [],
     data.forgotten_gems || [],
     data.recommendations || [],
+    data.tidal_hifi || [],
     data.global_charts || [],
   ]);
 }
@@ -68,14 +69,16 @@ export function buildUnifiedTabs(data: DiscoveryHubData): UnifiedTabDef[] {
   const recent = data.recently_played || [];
   const rotation = data.heavy_rotation || [];
   const gems = data.forgotten_gems || [];
+  const tidal = data.tidal_hifi || [];
   const charts = data.global_charts || [];
 
   return [
-    { id: 'all', label: 'All For You', count: mergeShelves([recent, rotation, gems, recs, charts]).length },
+    { id: 'all', label: 'All For You', count: mergeShelves([recent, rotation, gems, recs, tidal, charts]).length },
     { id: 'recs', label: 'Recommended', count: recs.length },
     { id: 'recent', label: 'Jump Back In', count: recent.length },
     { id: 'rotation', label: 'Heavy Rotation', count: rotation.length },
     { id: 'gems', label: 'Forgotten Gems', count: gems.length },
+    ...(tidal.length > 0 ? [{ id: 'tidal' as UnifiedTabId, label: 'Tidal HiFi', count: tidal.length }] : []),
     { id: 'charts', label: 'Global Charts', count: charts.length },
   ];
 }
@@ -93,6 +96,8 @@ export function getUnifiedTabTracks(
       return data.heavy_rotation || [];
     case 'gems':
       return data.forgotten_gems || [];
+    case 'tidal':
+      return data.tidal_hifi || [];
     case 'charts':
       return data.global_charts || [];
     case 'all':

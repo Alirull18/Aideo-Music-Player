@@ -1,12 +1,17 @@
-import { useState, useEffect, memo, useRef, useMemo } from 'react';
+﻿import { useState, useEffect, memo, useRef, useMemo } from 'react';
 import { useStore, Track } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Activity, Plus, Sliders } from 'lucide-react';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Waves } from 'lucide-react';
 import { YoutubeMix } from '../store/types';
+import './aideo/home.css';
+
+import { EditorialHome } from './aideo/EditorialHome';
+import { CommandDeckHome } from './aideo/CommandDeckHome';
+import { StageHome } from './aideo/StageHome';
+import { AideoHomeProps, SearchBarProps, HomeResumeInfo } from './aideo/HomeParts';
 
 // Format track duration
 function fmt(s: number | null) {
@@ -16,7 +21,7 @@ function fmt(s: number | null) {
 
 // Extract track base name
 function baseName(p: string | null) {
-  return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
+  return p ? (p.split(/[\\/]/).pop() ?? p) : 'â€”';
 }
 
 // Parse raw duration strings into seconds (defaulting to 180s if 0 or invalid)
@@ -82,9 +87,7 @@ const PopularTrackRow = memo(({
   resolvingTrackId, 
   downloadingIds, 
   downloadedIds, 
-  copiedId, 
   handlePlayPopularTrack, 
-  handleOpenWebBypassForPopular, 
   handleDownloadPopularTrack,
   formatNumber,
   totalTracks
@@ -95,9 +98,7 @@ const PopularTrackRow = memo(({
   resolvingTrackId: string | null;
   downloadingIds: Set<string>;
   downloadedIds: Set<string>;
-  copiedId: string | null;
   handlePlayPopularTrack: (name: string) => void;
-  handleOpenWebBypassForPopular: (name: string, provider: 'lucida' | 'squid') => void;
   handleDownloadPopularTrack: (name: string) => void;
   formatNumber: (n: any) => string;
   totalTracks: number;
@@ -199,50 +200,6 @@ const PopularTrackRow = memo(({
           )}
         </button>
 
-        {/* Lucida Web Bypass */}
-        <button
-          onClick={() => handleOpenWebBypassForPopular(track.name, 'lucida')}
-          style={{
-            background: 'var(--glass)',
-            border: '1px solid var(--glass-border)',
-            borderRadius: 8,
-            padding: '0 8px',
-            height: 32,
-            fontSize: 11,
-            fontWeight: 700,
-            color: copiedId === `${artistName}-${track.name}-lucida` ? '#10b981' : 'var(--text-dim)',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-          onMouseEnter={e => e.currentTarget.style.color = '#fff'}
-          onMouseLeave={e => e.currentTarget.style.color = copiedId === `${artistName}-${track.name}-lucida` ? '#10b981' : 'var(--text-dim)'}
-          title="Copy & search FLAC on Lucida"
-        >
-          {copiedId === `${artistName}-${track.name}-lucida` ? <Check size={12} /> : "L"}
-        </button>
-
-        {/* Squid Web Bypass */}
-        <button
-          onClick={() => handleOpenWebBypassForPopular(track.name, 'squid')}
-          style={{
-            background: 'var(--glass)',
-            border: '1px solid var(--glass-border)',
-            borderRadius: 8,
-            padding: '0 8px',
-            height: 32,
-            fontSize: 11,
-            fontWeight: 700,
-            color: copiedId === `${artistName}-${track.name}-squid` ? '#10b981' : 'var(--text-dim)',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-          onMouseEnter={e => e.currentTarget.style.color = '#fff'}
-          onMouseLeave={e => e.currentTarget.style.color = copiedId === `${artistName}-${track.name}-squid` ? '#10b981' : 'var(--text-dim)'}
-          title="Copy & search FLAC on Squid"
-        >
-          {copiedId === `${artistName}-${track.name}-squid` ? <Check size={12} /> : "S"}
-        </button>
-
         {/* Download Button */}
         {isDownloaded ? (
           <div 
@@ -306,7 +263,9 @@ const PopularTrackRow = memo(({
 });
 
 import { SimpleLRU } from '../utils/lruCache';
+import { isSupportedMusicLink, buildResolvedLinkQuery } from '../utils';
 import { buildUnifiedTabs, getUnifiedTabTracks, UnifiedTabId } from '../utils/discoveryFeed';
+import { mergeTidalIntoHub, tidalResultsToHubTracks } from '../utils/tidalHub';
 
 // Artwork caching
 const coverArtCache = new SimpleLRU<string, string | null>(300);
@@ -315,14 +274,37 @@ const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
 // Helper to get premium CSS class for recommendation source badges
 function getBadgeClass(source: string) {
   const src = source.toLowerCase();
+  if (src.includes('tidal')) return 'badge-tidal';
   if (src.includes('similar to') || src.includes('collaborative')) return 'badge-lastfm';
   if (src.includes('fans of') || src.includes('from ') || src.includes('favorites') || src.includes('favourite')) return 'badge-favorites';
   if (src.includes('listenbrainz')) return 'badge-listenbrainz';
   if (src.includes('last.fm')) return 'badge-lastfm';
   if (src.includes('youtube') || src.includes('trending') || src.includes('global') || src.includes('radio')) return 'badge-youtube';
-  if (src.includes('discovery') || src.includes('genre') || src.includes('top ') || src.includes('•') || src.includes('recently played') || src.includes('recent') || src.includes('γçó') || src.includes('gçó')) return 'badge-recent';
+  if (src.includes('discovery') || src.includes('genre') || src.includes('top ') || src.includes('â€¢') || src.includes('recently played') || src.includes('recent') || src.includes('Î³Ã§Ã³') || src.includes('gÃ§Ã³')) return 'badge-recent';
   return 'badge-default';
 }
+
+// Colored source-type indicator: one color per music source / quality tier
+function getSourceType(track: any): { color: string; label: string } {
+  const p = String(track.path || track.url || '').toLowerCase();
+  if (track.format === 'Tidal FLAC') return { color: '#22d3ee', label: 'Tidal HiFi Â· Lossless' };
+  if (track.format === 'Qobuz FLAC') {
+    const q = String(track.quality || '').toUpperCase();
+    if (q === 'HI_RES_192') return { color: '#a78bfa', label: 'Qobuz Studio Â· Hi-Res 192k' };
+    if (q === 'HI_RES') return { color: '#c4b5fd', label: 'Qobuz Studio Â· Hi-Res' };
+    return { color: '#7fb8e6', label: 'Qobuz Studio Â· Lossless' };
+  }
+  if (p.startsWith('http://') || p.startsWith('https://')) return { color: '#f87171', label: 'YouTube Stream' };
+  if (/\.(flac|wav|alac|aiff|dsd)$/.test(p)) return { color: '#c084fc', label: 'Local Hi-Res Â· Lossless' };
+  return { color: '#34d399', label: 'Local File' };
+}
+
+// Small colored outline rendered around each artwork showing its source/quality tier.
+// (Replaces the old inline SourceSquare text-adjacent tag; color meaning is
+// intentionally undocumented in the UI per design decision.)
+const coverOutlineStyle = (track: any): React.CSSProperties => ({
+  boxShadow: `0 0 0 2px ${getSourceType(track).color}`,
+});
 
 const TrackCardThumbnail = memo(({ 
   path, 
@@ -440,7 +422,20 @@ export function AideoView() {
     dismissResumePrompt,
     discoveryLayout,
     setDiscoveryLayout,
-    aideoPageDesign
+    aideoPageDesign,
+    tidalConnected,
+    tidalSearching,
+    tidalSearchResults,
+    searchTidal,
+    playTidalResult,
+    downloadTidalTrack,
+    qobuzExperimentalEnabled,
+    qobuzConnected,
+    qobuzSearching,
+    qobuzSearchResults,
+    searchQobuz,
+    playQobuzResult,
+    downloadQobuzTrack
   } = useStore(useShallow(s => ({
     tracks: s.tracks,
     playHistory: s.playHistory,
@@ -470,15 +465,28 @@ export function AideoView() {
     discoveryLayout: s.discoveryLayout,
     setDiscoveryLayout: s.setDiscoveryLayout,
     aideoPageDesign: s.aideoPageDesign,
+    tidalConnected: s.tidalConnected,
+    tidalSearching: s.tidalSearching,
+    tidalSearchResults: s.tidalSearchResults,
+    searchTidal: s.searchTidal,
+    playTidalResult: s.playTidalResult,
+    downloadTidalTrack: s.downloadTidalTrack,
+    qobuzExperimentalEnabled: s.qobuzExperimentalEnabled,
+    qobuzConnected: s.qobuzConnected,
+    qobuzSearching: s.qobuzSearching,
+    qobuzSearchResults: s.qobuzSearchResults,
+    searchQobuz: s.searchQobuz,
+    playQobuzResult: s.playQobuzResult,
+    downloadQobuzTrack: s.downloadQobuzTrack,
   })));
   const [greeting, setGreeting] = useState('Good morning');
   const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
-  const [audiophileFilter, setAudiophileFilter] = useState<'all' | 'lossless' | 'rotation' | 'recs' | 'charts'>('all');
   const isFetchingRef = useRef(false);
+  const tidalHubPoolRef = useRef<any[]>([]);
+  const tidalRefreshCountRef = useRef(0);
   const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, { percent: number; downloaded_mb: number; total_mb: number }>>({});
 
   const [activeMood, setActiveMood] = useState('Chill');
@@ -496,6 +504,9 @@ export function AideoView() {
   const [searchActive, setSearchActive] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [musicSource, setMusicSource] = useState<'youtube' | 'tidal' | 'qobuz'>('youtube');
+  const [tidalDownloads, setTidalDownloads] = useState<Record<string, number>>({});
+  const [qobuzDownloads, setQobuzDownloads] = useState<Record<string, number>>({});
   const [artistProfile, setArtistProfile] = useState<any | null>(null);
   const [artistActiveTab, setArtistActiveTab] = useState<'popular' | 'all' | 'library'>('popular');
   const [artistDiscography, setArtistDiscography] = useState<any[]>([]);
@@ -578,6 +589,12 @@ export function AideoView() {
 
   // Fetch suggestions and quick results dynamically
   useEffect(() => {
+    if (musicSource === 'tidal' || musicSource === 'qobuz') {
+      setSuggestions([]);
+      setQuickResults([]);
+      return;
+    }
+
     if (!searchQuery.trim()) {
       setSuggestions([]);
       setQuickResults([]);
@@ -599,9 +616,23 @@ export function AideoView() {
     }, 250);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery]);
+  }, [searchQuery, musicSource]);
 
-  const triggerSearch = async (q: string) => {
+  const triggerSearch = async (rawQuery: string) => {
+    let q = rawQuery;
+    if (isSupportedMusicLink(q)) {
+      try {
+        const meta = await invoke<any>('resolve_external_link', { url: q.trim() });
+        const resolvedText = buildResolvedLinkQuery(meta);
+        if (!resolvedText) throw new Error('Link resolved to empty metadata');
+        q = resolvedText;
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Resolved link to "${q}"`, type: 'info' } }));
+      } catch (err) {
+        console.warn('External link resolution failed:', err);
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Could not resolve this music link: ${err}`, type: 'error' } }));
+        return;
+      }
+    }
     setSearchQuery(q);
     setSearchFocused(false);
     setSearchActive(true);
@@ -615,6 +646,30 @@ export function AideoView() {
       localStorage.setItem('aideo_search_history', JSON.stringify(next));
       return next;
     });
+
+    if (musicSource === 'tidal') {
+      try {
+        await searchTidal(q);
+      } catch (err) {
+        console.error("Search failed:", err);
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Search failed: ${err}`, type: 'error' } }));
+      } finally {
+        setIsSearching(false);
+      }
+      return;
+    }
+
+    if (musicSource === 'qobuz') {
+      try {
+        await searchQobuz(q);
+      } catch (err) {
+        console.error("Search failed:", err);
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Search failed: ${err}`, type: 'error' } }));
+      } finally {
+        setIsSearching(false);
+      }
+      return;
+    }
 
     try {
       const isShortQuery = q.trim().split(/\s+/).length <= 3;
@@ -665,6 +720,22 @@ export function AideoView() {
 
   const handlePlayQuickTrack = async (track: any) => {
     setSearchFocused(false);
+    if (track.format === 'Tidal FLAC') {
+      try {
+        await playTidalResult(track);
+      } catch (e) {
+        console.error('Failed to play Tidal track:', e);
+      }
+      return;
+    }
+    if (track.format === 'Qobuz FLAC') {
+      try {
+        await playQobuzResult(track);
+      } catch (e) {
+        console.error('Failed to play Qobuz track:', e);
+      }
+      return;
+    }
     window.dispatchEvent(new CustomEvent('ui-toast', { 
       detail: { message: `Playing: ${track.title}...`, type: 'info' } 
     }));
@@ -710,6 +781,64 @@ export function AideoView() {
 
     return () => {
       sub.then(f => f());
+    };
+  }, []);
+
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const sub = listen<{ track_id?: string; filename?: string; percent?: number }>('tidal-download-progress', (event) => {
+      const tid = event.payload.track_id;
+      const percent = event.payload.percent ?? 0;
+      if (!tid) return;
+      setTidalDownloads(prev => ({ ...prev, [tid]: percent }));
+      if (percent >= 100) {
+        const doneTrack = useStore.getState().tidalSearchResults.find((t: Track) => t.path === tid);
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Downloaded: ${doneTrack?.title ?? event.payload.filename ?? tid}`, type: 'success' }
+        }));
+        const timer = setTimeout(() => {
+          setTidalDownloads(prev => {
+            const next = { ...prev };
+            delete next[tid];
+            return next;
+          });
+        }, 4000);
+        timers.push(timer);
+      }
+    });
+
+    return () => {
+      sub.then(f => f());
+      timers.forEach(t => clearTimeout(t));
+    };
+  }, []);
+
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const sub = listen<{ track_id?: string; filename?: string; percent?: number }>('qobuz-download-progress', (event) => {
+      const tid = event.payload.track_id;
+      const percent = event.payload.percent ?? 0;
+      if (!tid) return;
+      setQobuzDownloads(prev => ({ ...prev, [tid]: percent }));
+      if (percent >= 100) {
+        const doneTrack = useStore.getState().qobuzSearchResults.find((t: Track) => t.path === tid);
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Downloaded: ${doneTrack?.title ?? event.payload.filename ?? tid}`, type: 'success' }
+        }));
+        const timer = setTimeout(() => {
+          setQobuzDownloads(prev => {
+            const next = { ...prev };
+            delete next[tid];
+            return next;
+          });
+        }, 4000);
+        timers.push(timer);
+      }
+    });
+
+    return () => {
+      sub.then(f => f());
+      timers.forEach(t => clearTimeout(t));
     };
   }, []);
 
@@ -826,6 +955,37 @@ export function AideoView() {
           .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio' && a !== 'Web Audio Stream' && a !== 'Web Stream')
       ));
 
+      // C. Tidal HiFi picks (connected + online only; never cached, silent-omit on failure).
+      // Fired in parallel with everything below; first manual refresh reuses the session
+      // pool, repeated refreshes escalate to a fresh search.
+      const latestStore = useStore.getState();
+      const tidalEligible = !!latestStore.tidalConnected && navigator.onLine;
+      const wantFreshTidalSearch = forceRefresh
+        ? tidalRefreshCountRef.current > 0 || tidalHubPoolRef.current.length === 0
+        : tidalHubPoolRef.current.length === 0;
+
+      let tidalPromise: Promise<any[]> | null = null;
+      if (tidalEligible && wantFreshTidalSearch) {
+        const excludeSignatures = Array.from(new Set(
+          currentTracks
+            .map(t => `${(t.artist || '').trim().toLowerCase()}::${(t.title || '').trim().toLowerCase()}`)
+            .filter(s => !s.startsWith('::'))
+        ));
+        tidalPromise = (async () => {
+          const raw = await Promise.race([
+            invoke<any[]>('get_tidal_hub_recommendations', {
+              seedArtists: topArtists,
+              excludeSignatures,
+            }),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 2500)),
+          ]);
+          return Array.isArray(raw) ? tidalResultsToHubTracks(raw) : [];
+        })();
+        tidalPromise.catch(() => {});
+        if (forceRefresh) tidalRefreshCountRef.current += 1;
+        tidalHubPoolRef.current = []; // cleared until the fresh search resolves
+      }
+
       // Gather Last.fm Top Artists names
       const lastfmTopArtistsList = (currentStore.lastfmTopArtists || []).map((a: any) => a.name as string);
 
@@ -845,7 +1005,7 @@ export function AideoView() {
         });
       }
 
-      // 🚀 Invoke new high-performance parallel backend command!
+      // ðŸš€ Invoke new high-performance parallel backend command!
       const resolved = await invoke<any>('get_personalized_discovery_hub', {
         seedArtists: offlineSeedArtists,
         topArtists,
@@ -861,6 +1021,21 @@ export function AideoView() {
 
       setDiscoveryData(resolved);
       setActiveDiscoveryTab('all');
+
+      // Merge Tidal HiFi picks in once they resolve (or reuse session pool)
+      let tidalPool: any[] = tidalHubPoolRef.current;
+      if (tidalPromise) {
+        try {
+          tidalPool = await tidalPromise;
+          tidalHubPoolRef.current = tidalPool;
+        } catch {
+          tidalPool = []; // silent omit
+        }
+      }
+      if (tidalPool.length > 0) {
+        const currentHub = useStore.getState().discoveryData;
+        if (currentHub) setDiscoveryData(mergeTidalIntoHub(currentHub, tidalPool));
+      }
     } catch (err) {
       console.error('Failed to load personalized discovery recommendations:', err);
     } finally {
@@ -926,8 +1101,53 @@ export function AideoView() {
     }
   };
 
+  const handleDownloadTidalTrack = async (track: any) => {
+    const pct = tidalDownloads[track.path];
+    if (pct !== undefined && pct < 100) return;
+    try {
+      await downloadTidalTrack(track);
+    } catch {
+    }
+  };
+
+  const handleDownloadQobuzTrack = async (track: any) => {
+    const pct = qobuzDownloads[track.path];
+    if (pct !== undefined && pct < 100) return;
+    try {
+      await downloadQobuzTrack(track);
+    } catch {
+    }
+  };
+
+  // Renders the lossless-download button/progress/checkmark cell for Tidal & Qobuz rows.
+  const renderStreamDownloadCell = (track: any, onDownload: (t: any) => void, progressMap: Record<string, number>) => {
+    const pct = progressMap[track.path];
+    if (pct !== undefined && pct < 100) {
+      return (
+        <div className="discovery-download-btn downloading" title="Downloading lossless offline...">
+          <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', fontSize: 9, fontWeight: 700 }}>
+            {Math.round(pct)}%
+          </span>
+        </div>
+      );
+    }
+    if (pct >= 100) {
+      return (
+        <div className="discovery-download-btn downloaded" title="Added to Offline Library">
+          <Check size={12} />
+        </div>
+      );
+    }
+    return (
+      <button onClick={() => onDownload(track)} className="discovery-download-btn" title="Download lossless offline">
+        <Download size={12} />
+      </button>
+    );
+  };
+
   const handleTogglePreview = async (track: any) => {
-    const isCurrentTrack = playbackCurrentTrack === track.url;
+    const trackPath = track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC' ? track.path : track.url;
+    const isCurrentTrack = playbackCurrentTrack === trackPath;
     const isPlaying = isCurrentTrack && playbackStatus === 'Playing';
     const isPaused = isCurrentTrack && playbackStatus === 'Paused';
 
@@ -950,6 +1170,22 @@ export function AideoView() {
         console.error('Failed to resume track:', e);
       }
     } else {
+      if (track.format === 'Tidal FLAC') {
+        try {
+          await playTidalResult(track);
+        } catch (e) {
+          console.error('Failed to stream track preview:', e);
+        }
+        return;
+      }
+      if (track.format === 'Qobuz FLAC') {
+        try {
+          await playQobuzResult(track);
+        } catch (e) {
+          console.error('Failed to stream track preview:', e);
+        }
+        return;
+      }
       window.dispatchEvent(new CustomEvent('ui-toast', { 
         detail: { message: `Streaming preview: ${track.title}...`, type: 'info' } 
       }));
@@ -984,7 +1220,7 @@ export function AideoView() {
     }
 
     window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `✨ Loading Mix: ${mix.title}...`, type: 'info' } 
+      detail: { message: `âœ¨ Loading Mix: ${mix.title}...`, type: 'info' } 
     }));
 
     try {
@@ -1088,26 +1324,6 @@ export function AideoView() {
     } finally {
       setResolvingTrackId(null);
     }
-  };
-
-  const handleOpenWebBypassForPopular = (trackName: string, provider: 'lucida' | 'squid') => {
-    if (!artistProfile) return;
-    const searchString = `${artistProfile.name} - ${trackName}`.trim();
-    const uniqueId = `${artistProfile.name}-${trackName}-${provider}`;
-    navigator.clipboard.writeText(searchString).then(() => {
-      setCopiedId(uniqueId);
-      setTimeout(() => setCopiedId(null), 2000);
-      
-      const targetUrl = provider === 'lucida' ? 'https://lucida.to' : 'https://squid.wtf';
-      
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Copied "${searchString}"! Opening ${provider} in browser...`, type: 'success' } 
-      }));
-      
-      openUrl(targetUrl).catch(() => {
-        window.open(targetUrl, '_blank');
-      });
-    });
   };
 
   const handleDownloadPopularTrack = async (trackName: string) => {
@@ -1345,45 +1561,6 @@ export function AideoView() {
     return localArtistTracks.filter((t: any) => (t.title || '').toLowerCase().includes(q));
   }, [localArtistTracks, artistSongFilter]);
 
-  const heroTrack = useMemo(() => {
-    if (currentTrack) return currentTrack;
-    if (recapTracks.length > 0) return recapTracks[0];
-    if (tracks.length > 0) return tracks[0];
-    return null;
-  }, [currentTrack, recapTracks, tracks]);
-
-  const topRotationTracks = useMemo(() => {
-    return recapTracks.slice(0, 3);
-  }, [recapTracks]);
-
-  const audiophileTracks = useMemo(() => {
-    if (audiophileFilter === 'lossless') {
-      const filtered = tracks.filter(t => (t.path || '').toLowerCase().match(/\.(flac|wav|alac|aiff|dsd)$/i));
-      return filtered.length > 0 ? filtered.slice(0, 30) : recapTracks;
-    }
-    if (audiophileFilter === 'rotation') {
-      return recapTracks.slice(0, 30);
-    }
-    if (audiophileFilter === 'recs') {
-      return (discoveryData?.recommendations || []).slice(0, 30);
-    }
-    if (audiophileFilter === 'charts') {
-      return (discoveryData?.global_charts || []).slice(0, 30);
-    }
-    return tracks.length > 0 ? tracks.slice(0, 30) : recapTracks;
-  }, [audiophileFilter, tracks, recapTracks, discoveryData]);
-
-  const getFormatBadge = (track: any) => {
-    const p = (track.path || track.url || '').toLowerCase();
-    if (p.endsWith('.flac')) return { badge: 'FLAC 24/96', cls: 'badge-flac' };
-    if (p.endsWith('.wav')) return { badge: 'WAV 24b', cls: 'badge-hi-res' };
-    if (p.endsWith('.alac') || p.endsWith('.aiff') || p.endsWith('.dsd')) return { badge: 'HI-RES DSD', cls: 'badge-hi-res' };
-    if (p.endsWith('.mp3')) return { badge: 'MP3 320k', cls: 'badge-bitrate' };
-    if (p.endsWith('.m4a') || p.endsWith('.aac') || p.endsWith('.ogg')) return { badge: 'AAC / OGG', cls: 'badge-bitrate' };
-    if (track.url || p.startsWith('http')) return { badge: 'ONLINE STREAM', cls: 'badge-wasapi' };
-    return { badge: 'STUDIO PCM', cls: 'badge-wasapi' };
-  };
-
   const renderTrackCarousel = (tracksList: any[]) => {
     if (!tracksList || tracksList.length === 0) return null;
     const isGrid = discoveryViewMode === 'grid';
@@ -1394,14 +1571,14 @@ export function AideoView() {
         style={isGrid ? { gridTemplateColumns: `repeat(auto-fill, minmax(${discoveryCardSize}px, 1fr))` } : undefined}
       >
         {tracksList.map((track) => {
-          const isPlaying = playbackCurrentTrack === track.url && playbackStatus === 'Playing';
+          const isPlaying = playbackCurrentTrack === ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') ? track.path : track.url) && playbackStatus === 'Playing';
           if (isGrid) {
             return (
               <div 
                 key={track.id} 
                 className={`aideo-discovery-grid-card ${isPlaying ? 'is-playing' : ''}`}
               >
-                <div className="discovery-grid-cover-wrap">
+                <div className="discovery-grid-cover-wrap" style={coverOutlineStyle(track)}>
                   <TrackCardThumbnail 
                     path={track.url} 
                     coverUrl={track.cover_url} 
@@ -1437,13 +1614,15 @@ export function AideoView() {
                 </div>
 
                 <div className="discovery-grid-meta">
-                  <h4 className="discovery-grid-title" title={track.title}>{track.title}</h4>
+                  <h4 className="discovery-grid-title" title={track.title}>
+                    {track.title}
+                  </h4>
                   <p className="discovery-grid-artist" title={track.artist}>
                     <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
                   </p>
                   {track.recommendation_source && (
                     <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
-                      {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
+                      {(track.recommendation_source.includes('â€¢') || track.recommendation_source.includes('Î“Ã‡Ã³')) && (
                         <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 3 }} />
                       )}
                       {track.recommendation_source}
@@ -1454,7 +1633,11 @@ export function AideoView() {
                 <div className="discovery-grid-footer">
                   <span className="discovery-grid-dur-badge">{track.duration_raw}</span>
 
-                  {downloadedIds.has(track.id) ? (
+                  {(track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') ? renderStreamDownloadCell(
+                    track,
+                    track.format === 'Qobuz FLAC' ? handleDownloadQobuzTrack : handleDownloadTidalTrack,
+                    track.format === 'Qobuz FLAC' ? qobuzDownloads : tidalDownloads
+                  ) : downloadedIds.has(track.id) ? (
                     <div className="discovery-download-btn downloaded" title="Added to Offline Library">
                       <Check size={12} />
                     </div>
@@ -1499,7 +1682,7 @@ export function AideoView() {
                 key={track.id}
                 className={`aideo-discovery-list-item ${isPlaying ? 'is-playing' : ''}`}
               >
-                <div className="discovery-cover-wrap">
+                <div className="discovery-cover-wrap" style={coverOutlineStyle(track)}>
                   <TrackCardThumbnail 
                     path={track.url} 
                     coverUrl={track.cover_url} 
@@ -1535,13 +1718,15 @@ export function AideoView() {
                 </div>
 
                 <div className="discovery-meta">
-                  <h4 className="discovery-title" title={track.title}>{track.title}</h4>
+                  <h4 className="discovery-title" title={track.title}>
+                    {track.title}
+                  </h4>
                   <p className="discovery-artist" title={track.artist}>
                     <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
                   </p>
                   {track.recommendation_source && (
                     <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
-                      {(track.recommendation_source.includes('•') || track.recommendation_source.includes('ΓÇó')) && (
+                      {(track.recommendation_source.includes('â€¢') || track.recommendation_source.includes('Î“Ã‡Ã³')) && (
                         <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 4 }} />
                       )}
                       {track.recommendation_source}
@@ -1552,7 +1737,11 @@ export function AideoView() {
                 <div className="discovery-footer">
                   <span className="discovery-dur-badge">{track.duration_raw}</span>
 
-                  {downloadedIds.has(track.id) ? (
+                  {(track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') ? renderStreamDownloadCell(
+                    track,
+                    track.format === 'Qobuz FLAC' ? handleDownloadQobuzTrack : handleDownloadTidalTrack,
+                    track.format === 'Qobuz FLAC' ? qobuzDownloads : tidalDownloads
+                  ) : downloadedIds.has(track.id) ? (
                     <div className="discovery-download-btn downloaded" title="Added to Offline Library">
                       <Check size={12} />
                     </div>
@@ -1691,7 +1880,7 @@ export function AideoView() {
             {currentTrack.title || baseName(currentTrack.path)}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            {currentTrack.artist || 'Unknown Artist'} · paused at {fmt(resumePosition)}
+            {currentTrack.artist || 'Unknown Artist'} Â· paused at {fmt(resumePosition)}
             {currentTrack.duration ? ` of ${fmt(currentTrack.duration)}` : ''}
           </div>
         </div>
@@ -1711,410 +1900,6 @@ export function AideoView() {
           <X size={16} />
         </button>
       </motion.div>
-    );
-  };
-
-  const renderBentoHeroSection = () => {
-    return (
-      <div className="aideo-bento-grid">
-        {/* Bento Cell 1: Spotlight Master Track */}
-        {heroTrack && (
-          <div className="aideo-bento-card aideo-bento-spotlight">
-            <div className="bento-spotlight-content">
-              <div className="bento-spotlight-thumb-wrap">
-                <TrackCardThumbnail path={heroTrack.path} coverUrl={heroTrack.cover_url} />
-              </div>
-              <div className="bento-spotlight-meta">
-                <div className="bento-spotlight-tag">
-                  <Sparkles size={12} /> Spotlight Feature
-                </div>
-                <h3 className="bento-spotlight-title" title={heroTrack.title || baseName(heroTrack.path)}>
-                  {heroTrack.title || baseName(heroTrack.path)}
-                </h3>
-                <p className="bento-spotlight-artist" title={heroTrack.artist || 'Unknown Artist'}>
-                  <ArtistLink name={heroTrack.artist || 'Unknown Artist'} onClick={() => triggerSearch(heroTrack.artist || 'Unknown Artist')} />
-                  {heroTrack.duration ? ` · ${fmt(heroTrack.duration)}` : ''}
-                </p>
-                <div className="bento-spotlight-actions">
-                  <button
-                    className="bento-play-btn"
-                    onClick={() => {
-                      playTrack(heroTrack as Track);
-                    }}
-                  >
-                    <Play size={14} fill="currentColor" />
-                    Play Spotlight
-                  </button>
-                  <button
-                    className="bento-action-btn"
-                    title="Add to Play Queue"
-                    onClick={() => {
-                      addToQueue(heroTrack as Track);
-                      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added to queue: ${heroTrack.title || baseName(heroTrack.path)}`, type: 'success' } }));
-                    }}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Bento Cell 2: Interactive Mood Soundscapes */}
-        <div className="aideo-bento-card aideo-bento-moods">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
-              <Sparkles size={14} color="var(--accent)" />
-              Mood Soundscapes
-            </div>
-            <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, textTransform: 'uppercase' }}>1-Click Mix</span>
-          </div>
-          <div className="bento-mood-chips">
-            {[
-              { label: 'Chill', color: '#06b6d4', icon: <Moon size={13} color="#06b6d4" /> },
-              { label: 'Energetic', color: '#f59e0b', icon: <Flame size={13} color="#f59e0b" /> },
-              { label: 'Focus', color: '#10b981', icon: <Target size={13} color="#10b981" /> },
-              { label: 'Melancholic', color: '#a855f7', icon: <CloudRain size={13} color="#a855f7" /> },
-              { label: 'Happy', color: '#ec4899', icon: <Star size={13} color="#ec4899" /> },
-            ].map(m => (
-              <button
-                key={m.label}
-                className={`bento-mood-chip ${activeMood === m.label ? 'active' : ''}`}
-                onClick={async () => {
-                  setActiveMood(m.label);
-                  setGeneratingMix(true);
-                  try {
-                    await generateSmartMix(m.label, activeSource);
-                  } finally {
-                    setGeneratingMix(false);
-                  }
-                }}
-              >
-                {m.icon}
-                <span>{m.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Bento Cell 3: Live Library Pulse */}
-        <div className="aideo-bento-card aideo-bento-pulse">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
-              <Activity size={14} color="#10b981" />
-              Library Pulse & DSP
-            </div>
-            <span style={{ fontSize: 10, color: '#10b981', fontWeight: 700, background: 'rgba(16, 185, 129, 0.1)', padding: '2px 6px', borderRadius: 4 }}>
-              BIT-PERFECT
-            </span>
-          </div>
-
-          <div className="bento-pulse-bars">
-            {Array.from({ length: 18 }).map((_, i) => (
-              <div key={`pulse-${i}`} className="bento-pulse-bar" style={{ animationDelay: `${i * 0.08}s`, height: `${20 + ((i * 17) % 75)}%` }} />
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--glass-border)' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-              <strong style={{ color: '#fff' }}>{tracks.length}</strong> master tracks · <strong style={{ color: '#fff' }}>{totalPlays}</strong> plays
-            </div>
-            <button
-              onClick={() => setView('settings')}
-              className="btn btn-secondary"
-              style={{ fontSize: 11, padding: '4px 10px', height: 26, display: 'flex', alignItems: 'center', gap: 5 }}
-            >
-              <Sliders size={11} />
-              Audio Cockpit
-            </button>
-          </div>
-        </div>
-
-        {/* Bento Cell 4: Top Heavy Rotation Stack */}
-        <div className="aideo-bento-card aideo-bento-rotation">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text)' }}>
-              <Flame size={14} color="#f59e0b" />
-              Heavy Rotation
-            </div>
-            <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Top Played</span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {topRotationTracks.map((t, idx) => (
-              <div
-                key={t.id || t.path}
-                className="bento-rotation-item"
-                onClick={() => { playTrack(t); setView('nowplaying'); }}
-              >
-                <span style={{ fontSize: 11, fontWeight: 800, color: idx === 0 ? 'var(--accent)' : 'var(--text-dim)', width: 16 }}>
-                  #{idx + 1}
-                </span>
-                <div style={{ width: 28, height: 28, borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
-                  <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.title || baseName(t.path)}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.artist || 'Unknown Artist'}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {playCounts[t.path] > 0 && (
-                    <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Star size={9} fill="#f59e0b" /> {playCounts[t.path]}
-                    </span>
-                  )}
-                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--glass-h)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Play size={10} fill="currentColor" style={{ marginLeft: 1 }} />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderAudiophileHudSection = () => {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* Audiophile HUD Telemetry Header */}
-        <div className="aideo-audiophile-hud">
-          <div className="audiophile-hud-left">
-            <Activity size={18} color="#06b6d4" />
-            <span className="audiophile-hud-title">AIDEO // AUDIO TELEMETRY ENGINE</span>
-            <span className="audiophile-badge badge-flac">FLAC LOSSLESS</span>
-            <span className="audiophile-badge badge-wasapi">BIT-PERFECT WASAPI</span>
-            <span className="audiophile-badge badge-hi-res">24-BIT / 96KHZ</span>
-            <span className="audiophile-badge badge-bitrate">{tracks.length} MASTER TRACKS</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-dim)' }}>
-              PLAYS: <strong style={{ color: '#fff' }}>{totalPlays}</strong>
-            </span>
-            <button
-              onClick={() => fetchRecommendations(true)}
-              className="btn btn-secondary"
-              style={{ fontSize: 11, height: 28, padding: '0 10px', display: 'flex', alignItems: 'center', gap: 5 }}
-            >
-              <RefreshCw size={11} className={isRefreshingRecs ? "spin" : ""} />
-              Sync
-            </button>
-          </div>
-        </div>
-
-        {/* Filter Chips Bar */}
-        <div className="aideo-audiophile-filters">
-          {[
-            { id: 'all' as const, label: 'ALL MASTER TRACKS' },
-            { id: 'lossless' as const, label: 'LOSSLESS & FLAC' },
-            { id: 'rotation' as const, label: 'HEAVY ROTATION' },
-            { id: 'recs' as const, label: 'DISCOVERY FEED' },
-            { id: 'charts' as const, label: 'GLOBAL CHARTS' },
-          ].map(f => (
-            <button
-              key={f.id}
-              onClick={() => setAudiophileFilter(f.id)}
-              className={`audiophile-filter-btn ${audiophileFilter === f.id ? 'active' : ''}`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Audiophile Master Table */}
-        <div className="aideo-audiophile-table-wrap">
-          <table className="aideo-audiophile-table">
-            <thead>
-              <tr>
-                <th style={{ width: 40 }}>#</th>
-                <th>TRACK TITLE & ARTIST</th>
-                <th style={{ width: 140 }}>AUDIO SPEC</th>
-                <th style={{ width: 90, textAlign: 'right' }}>DURATION</th>
-                <th style={{ width: 90, textAlign: 'right' }}>PLAYS</th>
-                <th style={{ width: 100, textAlign: 'center' }}>ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audiophileTracks.map((t: any, idx) => {
-                const fmtInfo = getFormatBadge(t);
-                const trackPath = t.path || t.url || '';
-                const isPlaying = (playbackCurrentTrack === t.path || playbackCurrentTrack === t.url) && playbackStatus === 'Playing';
-                return (
-                  <tr
-                    key={t.id || t.path || idx}
-                    onClick={() => {
-                      if (t.path) playTrack(t as Track);
-                      else handleTogglePreview(t);
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <td className="audiophile-idx-col">{String(idx + 1).padStart(2, '0')}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: '#111' }}>
-                          <TrackCardThumbnail path={t.path || t.url} coverUrl={t.cover_url} />
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: isPlaying ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {t.title || baseName(trackPath)}
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                            {t.artist || 'Unknown Artist'}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`audiophile-badge ${fmtInfo.cls}`}>
-                        {fmtInfo.badge}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text-dim)' }}>
-                      {fmt(t.duration)}
-                    </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: (t.path && playCounts[t.path] > 0) ? '#f59e0b' : 'var(--text-dim)' }}>
-                      {t.path ? (playCounts[t.path] || 0) : 0}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => {
-                            if (t.path) playTrack(t as Track);
-                            else handleTogglePreview(t);
-                          }}
-                          className="btn btn-secondary"
-                          style={{ width: 28, height: 28, padding: 0, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                          title="Play Track"
-                        >
-                          {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
-                        </button>
-                        <button
-                          onClick={() => {
-                            addToQueue(t as any);
-                            window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Queued: ${t.title || baseName(trackPath)}`, type: 'success' } }));
-                          }}
-                          className="btn btn-secondary"
-                          style={{ width: 28, height: 28, padding: 0, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                          title="Add to Queue"
-                        >
-                          <Plus size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
-  const renderCinematicHeroSection = () => {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-        {/* Cinematic Ambient Hero Banner */}
-        {heroTrack && (
-          <div className="aideo-cinematic-hero">
-            <div className="cinematic-hero-scrim" />
-            <div className="cinematic-hero-body">
-              <div style={{ maxWidth: 640 }}>
-                <div className="cinematic-hero-tag">
-                  <Flame size={14} color="#fbbf24" />
-                  FEATURED SPOTLIGHT MASTER
-                </div>
-                <h1 className="cinematic-hero-title">
-                  {heroTrack.title || baseName(heroTrack.path)}
-                </h1>
-                <p className="cinematic-hero-artist">
-                  <ArtistLink name={heroTrack.artist || 'Unknown Artist'} onClick={() => triggerSearch(heroTrack.artist || 'Unknown Artist')} />
-                  {heroTrack.album ? ` · ${heroTrack.album}` : ''}
-                  {heroTrack.duration ? ` · ${fmt(heroTrack.duration)}` : ''}
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                  <button
-                    className="cinematic-hero-play-btn"
-                    onClick={() => {
-                      playTrack(heroTrack);
-                    }}
-                  >
-                    <Play size={16} fill="currentColor" />
-                    Play Master Track
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ borderRadius: 99, padding: '12px 22px', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}
-                    onClick={() => {
-                      addToQueue(heroTrack);
-                      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added to queue: ${heroTrack.title || baseName(heroTrack.path)}`, type: 'success' } }));
-                    }}
-                  >
-                    <Plus size={15} />
-                    Queue Next
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ width: 140, height: 140, borderRadius: 20, overflow: 'hidden', flexShrink: 0, boxShadow: 'var(--shadow-cover)', border: '1px solid var(--glass-border)' }}>
-                <TrackCardThumbnail path={heroTrack.path} coverUrl={heroTrack.cover_url} />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Cinematic Mood Stations */}
-        <div className="aideo-section" style={{ margin: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-            <Sparkles size={18} color="var(--accent)" />
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, letterSpacing: -0.3, color: 'var(--text)' }}>
-              Cinematic Mood Stations
-            </h3>
-          </div>
-
-          <div className="aideo-cinematic-stations">
-            {[
-              { title: 'Chill Wave', sub: 'Atmospheric Ambient & Lo-Fi', mood: 'Chill', grad: 'linear-gradient(135deg, rgba(6, 182, 212, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(6, 182, 212, 0.3)' },
-              { title: 'Hyperdrive Energy', sub: 'High-BPM Electronic & Beats', mood: 'Energetic', grad: 'linear-gradient(135deg, rgba(245, 158, 11, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(245, 158, 11, 0.3)' },
-              { title: 'Deep Zen Focus', sub: 'Binaural & Instrumental Waves', mood: 'Focus', grad: 'linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(16, 185, 129, 0.3)' },
-              { title: 'Midnight Melancholy', sub: 'Nocturnal Soul & Acoustic', mood: 'Melancholic', grad: 'linear-gradient(135deg, rgba(168, 85, 247, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(168, 85, 247, 0.3)' },
-              { title: 'Golden Euphoria', sub: 'Uplifting Pop & Summer Anthems', mood: 'Happy', grad: 'linear-gradient(135deg, rgba(236, 72, 153, 0.35) 0%, rgba(15, 23, 42, 0.9) 100%)', border: 'rgba(236, 72, 153, 0.3)' },
-            ].map(st => (
-              <div
-                key={st.title}
-                className="cinematic-station-card"
-                style={{ background: st.grad, borderColor: st.border }}
-                onClick={async () => {
-                  setActiveMood(st.mood);
-                  setGeneratingMix(true);
-                  try {
-                    await generateSmartMix(st.mood, activeSource);
-                  } finally {
-                    setGeneratingMix(false);
-                  }
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', marginBottom: 2 }}>{st.title}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{st.sub}</div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#fff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-                    <Play size={14} fill="currentColor" style={{ marginLeft: 2 }} />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
     );
   };
 
@@ -2260,6 +2045,20 @@ export function AideoView() {
                       <span className="discovery-shelf-badge">Similar To Songs You Love</span>
                     </div>
                     {renderTrackCarousel(discoveryData.recommendations.slice(0, 12))}
+                  </div>
+                )}
+
+                {/* Shelf 3.5: Tidal HiFi (lossless picks, only when connected + online) */}
+                {discoveryData.tidal_hifi && discoveryData.tidal_hifi.length > 0 && (
+                  <div className="discovery-shelf-section" style={{ marginBottom: 28 }}>
+                    <div className="discovery-shelf-header">
+                      <div className="discovery-shelf-title-wrap">
+                        <Waves size={17} color="#22d3ee" />
+                        <h3 className="discovery-shelf-title">Tidal HiFi</h3>
+                      </div>
+                      <span className="discovery-shelf-badge">Lossless Picks Â· Stream & Download</span>
+                    </div>
+                    {renderTrackCarousel(discoveryData.tidal_hifi.slice(0, 12))}
                   </div>
                 )}
 
@@ -2422,7 +2221,7 @@ export function AideoView() {
                 className="aideo-recap-item"
                 onClick={() => { playTrack(t); setView('nowplaying'); }}
               >
-                <div className="aideo-item-cover-wrap">
+                <div className="aideo-item-cover-wrap" style={coverOutlineStyle(t)}>
                   <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
                   <div className="aideo-item-play-overlay">
                     <Play size={16} fill="white" color="white" />
@@ -2472,7 +2271,7 @@ export function AideoView() {
                 className="aideo-carousel-card"
                 onClick={() => { playTrack(t); setView('nowplaying'); }}
               >
-                <div className="carousel-cover-wrap">
+                <div className="carousel-cover-wrap" style={coverOutlineStyle(t)}>
                   <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
                   <div className="carousel-play-overlay">
                     <div className="carousel-play-btn-circle">
@@ -2621,13 +2420,117 @@ export function AideoView() {
     );
   };
 
+  const aideoSearchProps: SearchBarProps = {
+    query: searchQuery,
+    onQueryChange: setSearchQuery,
+    focused: searchFocused,
+    onFocusChange: setSearchFocused,
+    suggestions,
+    quickResults,
+    history: searchHistory,
+    source: musicSource,
+    onSourceChange: setMusicSource,
+    tidalConnected,
+    qobuzEnabled: qobuzExperimentalEnabled,
+    qobuzConnected,
+    onSubmit: () => { if (searchQuery.trim()) triggerSearch(searchQuery.trim()); },
+    onPickQuery: triggerSearch,
+    onDeleteHistory: handleDeleteHistory,
+    onPlayQuickTrack: handlePlayQuickTrack,
+    isSearching,
+  };
+
+  const aideoResumeInfo: HomeResumeInfo | null = (resumePosition > 0 && currentTrack) ? {
+    title: currentTrack.title || baseName(currentTrack.path),
+    artist: currentTrack.artist || 'Unknown Artist',
+    positionLabel: `paused at ${fmt(resumePosition)}`,
+    coverUrl: (currentTrack as any).cover_url ?? null,
+    coverPath: (currentTrack as any).path ?? null,
+    accent: getSourceType(currentTrack).color,
+    onResume: () => { resumeLastSession(); setView('nowplaying'); },
+    onDismiss: dismissResumePrompt,
+  } : null;
+
+  const renderDownloadAction = (track: any) => {
+    if (track.format === 'Tidal FLAC') return renderStreamDownloadCell(track, handleDownloadTidalTrack, tidalDownloads);
+    if (track.format === 'Qobuz FLAC') return renderStreamDownloadCell(track, handleDownloadQobuzTrack, qobuzDownloads);
+    const isOnline = track.url && (track.url.startsWith('http://') || track.url.startsWith('https://'));
+    if (!isOnline) return null;
+    if (downloadedIds.has(track.id)) {
+      return <div className="discovery-download-btn downloaded" title="Added to Offline Library"><Check size={12} /></div>;
+    }
+    if (downloadingIds.has(track.id)) {
+      return <div className="discovery-download-btn downloading"><Loader2 className="spin" size={12} /></div>;
+    }
+    return (
+      <button onClick={() => handleDownloadTrack(track)} className="discovery-download-btn" title="Download offline">
+        <Download size={12} />
+      </button>
+    );
+  };
+
+  const aideoHomeProps: AideoHomeProps = {
+    greeting,
+    trackCount: tracks.length,
+    totalPlays,
+    discoveryData,
+    isLoadingRecs,
+    isRefreshingRecs,
+    onRefreshRecs: () => fetchRecommendations(true),
+    onPlayTrack: handleTogglePreview,
+    renderDownloadAction,
+    resume: aideoResumeInfo,
+    search: aideoSearchProps,
+  };
+
   return (
     <div className="aideo-home-wrap">
       {/* Background tint overlay */}
       <div className="aideo-bg-tint"></div>
 
-      {/* Premium Web Search Bar */}
+      {/* Premium Web Search Bar (classic design only; the other designs embed their own) */}
+      {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage'].includes(aideoPageDesign)) && (
       <div style={{ marginBottom: 36, maxWidth: 640, position: 'relative' }} ref={dropdownRef}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          {((['youtube', 'tidal'] as ('youtube' | 'tidal' | 'qobuz')[]).concat(qobuzExperimentalEnabled ? ['qobuz'] : [])).map(src => (
+            <button
+              key={src}
+              type="button"
+              onClick={() => {
+                setMusicSource(src);
+                if (src === 'tidal' && !tidalConnected) {
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal first in Settings > Library > Tidal.', type: 'warning' } }));
+                }
+                if (src === 'qobuz' && !qobuzConnected) {
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Qobuz first in Settings > Library > Qobuz (Experimental).', type: 'warning' } }));
+                }
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 12px',
+                borderRadius: 999,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                border: musicSource === src ? '1px solid rgba(var(--accent-rgb), 0.45)' : '1px solid var(--glass-border)',
+                background: musicSource === src ? 'rgba(var(--accent-rgb), 0.14)' : 'var(--glass)',
+                color: musicSource === src ? 'var(--dynamic-accent)' : 'var(--text-dim)',
+              }}
+            >
+              {src === 'tidal' && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: tidalConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }} />
+              )}
+              {src === 'qobuz' && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: qobuzConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }} />
+              )}
+              {src === 'youtube' ? 'YouTube' : src === 'tidal' ? 'Tidal' : 'Qobuz Î²'}
+            </button>
+          ))}
+        </div>
         <form onSubmit={handleAideoSearch} style={{ display: 'flex', gap: 12 }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
@@ -2856,12 +2759,14 @@ export function AideoView() {
                     className="dropdown-item-hover"
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
-                      <TrackCardThumbnail 
-                        path={track.url} 
-                        coverUrl={track.cover_url} 
-                        className="aideo-search-thumb" 
-                        fallbackIconSize={16} 
-                      />
+                      <div style={coverOutlineStyle(track)}>
+                        <TrackCardThumbnail 
+                          path={track.url} 
+                          coverUrl={track.cover_url} 
+                          className="aideo-search-thumb" 
+                          fallbackIconSize={16} 
+                        />
+                      </div>
                       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {track.title}
@@ -2881,6 +2786,7 @@ export function AideoView() {
           </div>
         )}
       </div>
+      )}
 
       {searchActive ? (
         <div className="aideo-search-results-view">
@@ -2915,13 +2821,107 @@ export function AideoView() {
             <h1 style={{ fontSize: 28, fontWeight: 800, color: 'var(--text)', margin: 0 }}>
               Search Results for <span style={{ color: 'var(--accent)' }}>"{searchQuery}"</span>
             </h1>
+            {musicSource === 'tidal' && (
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                whiteSpace: 'nowrap',
+                color: '#10b981',
+                background: 'rgba(16, 185, 129, 0.12)',
+                border: '1px solid rgba(16, 185, 129, 0.35)',
+                padding: '4px 10px',
+                borderRadius: 999,
+              }}>
+                Lossless / Hi-Res
+              </span>
+            )}
+            {musicSource === 'qobuz' && (
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                whiteSpace: 'nowrap',
+                color: '#7fb8e6',
+                background: 'rgba(127, 184, 230, 0.12)',
+                border: '1px solid rgba(127, 184, 230, 0.35)',
+                padding: '4px 10px',
+                borderRadius: 999,
+              }}>
+                Lossless / Hi-Res Â· Experimental
+              </span>
+            )}
           </div>
 
-          {isSearching ? (
+          {isSearching || ((musicSource === 'tidal' && tidalSearching) || (musicSource === 'qobuz' && qobuzSearching)) ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 320, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20 }}>
               <Loader2 className="spin" size={36} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-              <span style={{ fontSize: 14, fontWeight: 500 }}>Searching Web Stream...</span>
+              <span style={{ fontSize: 14, fontWeight: 500 }}>{musicSource === 'tidal' ? 'Searching Tidal...' : musicSource === 'qobuz' ? 'Searching Qobuz...' : 'Searching Web Stream...'}</span>
             </div>
+          ) : musicSource === 'tidal' ? (
+            !tidalConnected ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 260, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20, gap: 12 }}>
+                <Disc size={36} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Tidal not connected</span>
+                <span style={{ fontSize: 13 }}>Connect under Settings &gt; Library &gt; Tidal</span>
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal first in Settings > Library > Tidal.', type: 'warning' } }))}
+                  style={{
+                    background: 'var(--glass-h)',
+                    border: '1px solid var(--glass-border)',
+                    color: 'var(--text)',
+                    padding: '8px 16px',
+                    borderRadius: 12,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  How to connect
+                </button>
+              </div>
+            ) : tidalSearchResults.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {renderTrackCarousel(tidalSearchResults)}
+              </div>
+            ) : (
+              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
+                No Tidal results.
+              </div>
+            )
+          ) : musicSource === 'qobuz' ? (
+            !qobuzConnected ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 260, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 20, gap: 12 }}>
+                <Disc size={36} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Qobuz not connected</span>
+                <span style={{ fontSize: 13 }}>Enable and connect under Settings &gt; Library &gt; Qobuz (Experimental)</span>
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Qobuz first in Settings > Library > Qobuz (Experimental).', type: 'warning' } }))}
+                  style={{
+                    background: 'var(--glass-h)',
+                    border: '1px solid var(--glass-border)',
+                    color: 'var(--text)',
+                    padding: '8px 16px',
+                    borderRadius: 12,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  How to connect
+                </button>
+              </div>
+            ) : qobuzSearchResults.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {renderTrackCarousel(qobuzSearchResults)}
+              </div>
+            ) : (
+              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
+                No Qobuz results.
+              </div>
+            )
           ) : artistProfile ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
               {/* Hero Banner */}
@@ -2989,10 +2989,10 @@ export function AideoView() {
                     </h2>
                     <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--text-dim)', fontWeight: 500 }}>
                       {artistProfile.listeners && (
-                        <span>👥 {formatNumber(artistProfile.listeners)} monthly listeners</span>
+                        <span>ðŸ‘¥ {formatNumber(artistProfile.listeners)} monthly listeners</span>
                       )}
                       {artistProfile.playcount && (
-                        <span>💿 {formatNumber(artistProfile.playcount)} total plays</span>
+                        <span>ðŸ’¿ {formatNumber(artistProfile.playcount)} total plays</span>
                       )}
                     </div>
                   </div>
@@ -3253,9 +3253,7 @@ export function AideoView() {
                             resolvingTrackId={resolvingTrackId}
                             downloadingIds={downloadingIds}
                             downloadedIds={downloadedIds}
-                            copiedId={copiedId}
                             handlePlayPopularTrack={handlePlayPopularTrack}
-                            handleOpenWebBypassForPopular={handleOpenWebBypassForPopular}
                             handleDownloadPopularTrack={handleDownloadPopularTrack}
                             formatNumber={formatNumber}
                             totalTracks={filteredTopTracks.length}
@@ -3367,57 +3365,13 @@ export function AideoView() {
         </div>
       ) : (
         <>
-          {aideoPageDesign === 'bento' && (
-            <div className="aideo-bento-container">
-              {/* Greeting */}
-              <div className="aideo-greeting-header" style={{ marginBottom: 24 }}>
-                <div className="aideo-header-info">
-                  <motion.h1 initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="aideo-title">
-                    {greeting}, Listener
-                  </motion.h1>
-                  <p className="aideo-subtitle">Editorial Curation · Personalized Discovery Bento</p>
-                </div>
-                <div className="aideo-header-stats">
-                  <div className="aideo-stat-box">
-                    <span className="aideo-stat-num">{tracks.length}</span>
-                    <span className="aideo-stat-label">Tracks</span>
-                  </div>
-                  <div className="aideo-stat-box">
-                    <span className="aideo-stat-num">{totalPlays}</span>
-                    <span className="aideo-stat-label">Plays</span>
-                  </div>
-                </div>
-              </div>
+          {aideoPageDesign === 'editorial' && <EditorialHome {...aideoHomeProps} />}
 
-              {renderResumePrompt()}
-              {renderBentoHeroSection()}
-              {renderDiscoveryHubSection()}
-              {renderRecentlyPlayedSection()}
-              {showSmartMixWidget && renderSmartMixBuilderSection()}
-            </div>
-          )}
+          {aideoPageDesign === 'command' && <CommandDeckHome {...aideoHomeProps} />}
 
-          {aideoPageDesign === 'audiophile' && (
-            <div className="aideo-audiophile-container">
-              {renderAudiophileHudSection()}
-              {renderResumePrompt()}
-              {renderDiscoveryHubSection()}
-              {renderRecentlyPlayedSection()}
-              {showSmartMixWidget && renderSmartMixBuilderSection()}
-            </div>
-          )}
+          {aideoPageDesign === 'stage' && <StageHome {...aideoHomeProps} />}
 
-          {aideoPageDesign === 'cinematic' && (
-            <div className="aideo-cinematic-container">
-              {renderCinematicHeroSection()}
-              {renderResumePrompt()}
-              {renderDiscoveryHubSection()}
-              {renderRecentlyPlayedSection()}
-              {showSmartMixWidget && renderSmartMixBuilderSection()}
-            </div>
-          )}
-
-          {(aideoPageDesign === 'classic' || !['bento', 'audiophile', 'cinematic'].includes(aideoPageDesign)) && (
+          {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage'].includes(aideoPageDesign)) && (
             <>
               {/* Greeting Header */}
               <div className="aideo-greeting-header">

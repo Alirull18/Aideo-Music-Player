@@ -13,6 +13,8 @@ import {
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
   Disc, Layers, Activity, Minus, LayoutGrid
 } from 'lucide-react';
+import TidalConnectCard from './TidalConnectCard';
+import QobuzConnectCard from './QobuzConnectCard';
 
 interface PresetTheme {
   name: string;
@@ -98,6 +100,7 @@ export function SettingsView() {
     toggleSidebarLastfmVisible, toggleSidebarListenbrainzVisible,
     liquidBackgroundEnabled, toggleLiquidBackground,
     showSmartMixWidget, toggleSmartMixWidget,
+    qobuzExperimentalEnabled, toggleQobuzExperimental,
     notificationsEnabled, developerNotifications,
     toggleNotificationsEnabled, toggleDeveloperNotifications,
     subsonicUrl, subsonicUser, subsonicPass, subsonicConnected, subsonicLoading,
@@ -156,6 +159,8 @@ export function SettingsView() {
     toggleLiquidBackground: s.toggleLiquidBackground,
     showSmartMixWidget: s.showSmartMixWidget,
     toggleSmartMixWidget: s.toggleSmartMixWidget,
+    qobuzExperimentalEnabled: s.qobuzExperimentalEnabled,
+    toggleQobuzExperimental: s.toggleQobuzExperimental,
     notificationsEnabled: s.notificationsEnabled,
     developerNotifications: s.developerNotifications,
     toggleNotificationsEnabled: s.toggleNotificationsEnabled,
@@ -1069,8 +1074,8 @@ export function SettingsView() {
     {
       id: 'aideo-page-design',
       title: 'Aideo Home Page Layout & Experience',
-      description: 'Select your preferred visual architecture for the main Aideo home portal — from classic studio and editorial bento to audiophile deck and cinematic flow.',
-      keywords: 'aideo page layout design theme bento audiophile cinematic classic studio home portal appearance UI',
+      description: 'Select your preferred visual architecture for the main Aideo home portal — from classic studio and editorial feed to command deck and ambient stage.',
+      keywords: 'aideo page layout design theme editorial command stage classic studio home portal appearance UI',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
@@ -1111,37 +1116,33 @@ export function SettingsView() {
                 )
               },
               {
-                id: 'bento' as AideoPageDesign,
-                name: 'Editorial Bento',
-                badge: 'Apple / Editorial',
+                id: 'editorial' as AideoPageDesign,
+                name: 'Editorial Feed',
+                badge: 'Calm / Art-first',
                 badgeColor: '#a855f7',
                 icon: <LayoutGrid size={18} color="#c084fc" />,
-                desc: 'Modern asymmetric bento grid featuring a dynamic Hero Spotlight, interactive Mood Soundscape tiles, and real-time Library Pulse stats.',
+                desc: 'One calm centered column: quiet stats, hero web search, and art-forward recommendation shelves with a reason line under every section.',
                 visual: (
                   <div className="aideo-prev-box prev-bento">
-                    <div className="aideo-prev-bento-grid">
-                      <div className="aideo-prev-bento-hero">
-                        <div className="aideo-prev-bento-glow" />
-                        <div className="aideo-prev-line xs" />
-                      </div>
-                      <div className="aideo-prev-bento-side">
-                        <div className="aideo-prev-bento-tile purple" />
-                        <div className="aideo-prev-bento-tile cyan" />
-                      </div>
+                    <div className="aideo-prev-line title" style={{ width: '55%' }} />
+                    <div className="aideo-prev-line xs" style={{ width: '80%' }} />
+                    <div className="aideo-prev-shelf">
+                      <div className="aideo-prev-thumb sm" />
+                      <div className="aideo-prev-thumb sm" />
+                      <div className="aideo-prev-thumb sm" />
+                      <div className="aideo-prev-thumb sm" />
                     </div>
-                    <div className="aideo-prev-bento-footer">
-                      <div className="aideo-prev-bento-strip" />
-                    </div>
+                    <div className="aideo-prev-line xs" style={{ width: '65%' }} />
                   </div>
                 )
               },
               {
-                id: 'audiophile' as AideoPageDesign,
-                name: 'Audiophile Minimalist Deck',
+                id: 'command' as AideoPageDesign,
+                name: 'Command Deck',
                 badge: 'Hi-Res / Precision',
                 badgeColor: '#06b6d4',
                 icon: <Activity size={18} color="#22d3ee" />,
-                desc: 'Typography-first high-density console featuring sample rate badges (FLAC / 96kHz / 24-bit), compact recap columns, and streamlined feeds.',
+                desc: 'Audiophile two-zone console: persistent rail for search, sources and feeds on the left; a disciplined track table with reason and quality columns on the right.',
                 visual: (
                   <div className="aideo-prev-box prev-audiophile">
                     <div className="aideo-prev-audio-header">
@@ -1164,12 +1165,12 @@ export function SettingsView() {
                 )
               },
               {
-                id: 'cinematic' as AideoPageDesign,
-                name: 'Immersive Cinematic Flow',
-                badge: 'Ambient / Visual',
+                id: 'stage' as AideoPageDesign,
+                name: 'Ambient Stage',
+                badge: 'Immersive / Hero',
                 badgeColor: '#f59e0b',
                 icon: <Sparkles size={18} color="#fbbf24" />,
-                desc: 'Vivid ambient glow backdrops, expansive visual hero artwork carousels, bold mood soundscapes, and floating discovery reels.',
+                desc: 'A full-bleed color-wash hero with greeting, stats and pill search, then a discovery feed grouped by why each track was picked, plus a recently-played strip.',
                 visual: (
                   <div className="aideo-prev-box prev-cinematic">
                     <div className="aideo-prev-cine-hero">
@@ -1867,6 +1868,52 @@ export function SettingsView() {
       )
     },
     {
+      id: 'tidal-connect',
+      title: 'Tidal Streaming',
+      description: 'Connect your Tidal account with secure device-code pairing to search, stream and download lossless FLAC tracks.',
+      keywords: 'tidal streaming connect login device code lossless hifi flac disconnect',
+      tab: 'library',
+      element: (
+        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div className="settings-ctrl-title">Tidal Streaming</div>
+            <div className="settings-ctrl-desc">
+              Pair Aideo with your Tidal account to search the full catalog and download master-quality FLAC audio.
+            </div>
+          </div>
+          <TidalConnectCard />
+        </div>
+      )
+    },
+    {
+      id: 'qobuz-connect',
+      title: 'Qobuz Streaming (Experimental)',
+      description: 'Enable the experimental Qobuz integration to search and stream lossless FLAC up to 192 kHz / 24-bit with a pasted session token.',
+      keywords: 'qobuz streaming experimental connect login token lossless hifi flac studio hi-res',
+      tab: 'library',
+      element: (
+        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ flex: 1, paddingRight: 24 }}>
+                <div className="settings-ctrl-title">Enable Qobuz Streaming</div>
+                <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
+                  Experimental feature. Qobuz does not offer an official third-party sign-in API, so this integration uses your browser session token and may break if Qobuz changes their web player. Requires an active Qobuz subscription in a supported country.
+                </div>
+              </div>
+              <SlidingSwitch
+                checked={qobuzExperimentalEnabled}
+                onChange={toggleQobuzExperimental}
+              />
+            </div>
+          </div>
+          {qobuzExperimentalEnabled && (
+            <QobuzConnectCard />
+          )}
+        </div>
+      )
+    },
+    {
       id: 'lastfm-connect',
       title: 'Last.fm Audioscrobbler',
       description: 'Connect your Last.fm profile with standard secure API token authorization. Set custom scrobble duration percentage thresholds.',
@@ -2180,7 +2227,7 @@ export function SettingsView() {
                   { label: 'Rubato Resampler', value: dsp.resampler_interpolation === 'linear' ? 'Linear (Fast)' : 'Cubic (High-Res)', active: dsp.resampler_interpolation === 'cubic', premium: false },
                   { label: 'Oversampling Factor', value: `${dsp.resampler_oversampling}x precision`, active: true, premium: dsp.resampler_oversampling === 512 },
                   { label: 'Sinc Kernel Length', value: `${dsp.resampler_sinc_len} Taps`, active: true, premium: dsp.resampler_sinc_len === 256 },
-                  { label: 'FFmpeg Transcode', value: dsp.ffmpeg_transcode_quality === 'standard' ? '16-bit / 44.1k' : dsp.ffmpeg_transcode_quality === 'studio' ? '24-bit / 48.0k' : '24-bit / 96.0k', active: true, premium: dsp.ffmpeg_transcode_quality === 'hires' }
+                  { label: 'FFmpeg Transcode', value: dsp.ffmpeg_transcode_quality === 'standard' ? '16-bit / 44.1k' : dsp.ffmpeg_transcode_quality === 'studio' ? '24-bit / 48.0k' : dsp.ffmpeg_transcode_quality === 'native' ? '24-bit / Source Rate' : '24-bit / 96.0k', active: true, premium: dsp.ffmpeg_transcode_quality === 'hires' }
                 ]
               }
             ].map(profile => {
@@ -2405,7 +2452,8 @@ export function SettingsView() {
                         {[
                           { id: 'standard', label: '16b/44k' },
                           { id: 'studio', label: '24b/48k' },
-                          { id: 'hires', label: '24b/96k' }
+                          { id: 'hires', label: '24b/96k' },
+                          { id: 'native', label: '24b Native' }
                         ].map(opt => {
                           const active = dsp.ffmpeg_transcode_quality === opt.id;
                           return (

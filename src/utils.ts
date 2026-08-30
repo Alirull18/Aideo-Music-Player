@@ -27,8 +27,38 @@ export function getStreamName(url: string | null) {
   }
 }
 
+// Maps a resolved stream URL back to its source track path (e.g. Tidal track ID).
+// Persisted so queue entries keep their titles/identity across app restarts and
+// webview reloads (the backend queue keeps raw URLs, this restores the linkage).
 export const resolvedPathMap = new Map<string, string>();
 export const trackIdToStreamUrl = new Map<string, { url: string; resolvedAt: number }>();
+
+(() => {
+  try {
+    const raw = localStorage.getItem('aideo_resolved_paths');
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        arr.forEach(([url, id]) => {
+          if (url && id) resolvedPathMap.set(url, id);
+        });
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load resolvedPathMap:', e);
+  }
+})();
+
+export function rememberResolvedPath(streamUrl: string, trackPath: string) {
+  if (!streamUrl || !trackPath) return;
+  resolvedPathMap.set(streamUrl, trackPath);
+  try {
+    const entries = Array.from(resolvedPathMap.entries()).slice(-300);
+    localStorage.setItem('aideo_resolved_paths', JSON.stringify(entries));
+  } catch (e) {
+    console.error('Failed to save resolvedPathMap:', e);
+  }
+}
 
 export const onlineTrackCache = (() => {
   const map = new Map<string, any>();
@@ -114,14 +144,18 @@ export function parseStreamMetadata(url: string | null) {
     lookupUrl = resolvedPathMap.get(url)!;
   }
   
-  if (onlineTrackCache.has(lookupUrl)) {
-    const cached = onlineTrackCache.get(lookupUrl);
-    if (cached && cached.title && cached.title !== 'Web Audio Stream') {
-      return {
-        title: cached.title,
-        artist: cached.artist || 'Online Stream',
-        album: cached.album || ''
-      };
+  // Check both the raw stream URL and its resolved track path — metadata may be
+  // cached under either key depending on where it was recorded.
+  for (const key of [url, lookupUrl]) {
+    if (key && onlineTrackCache.has(key)) {
+      const cached = onlineTrackCache.get(key);
+      if (cached && cached.title && cached.title !== 'Web Audio Stream') {
+        return {
+          title: cached.title,
+          artist: cached.artist || 'Online Stream',
+          album: cached.album || ''
+        };
+      }
     }
   }
 
@@ -171,6 +205,22 @@ export function parseStreamMetadata(url: string | null) {
     artist: 'Online Stream',
     album: ''
   };
+}
+
+// Matches placeholder/degraded stream titles: empty, known placeholders, raw URLs,
+// or bare hostnames like "Lgf.audio.tidal.com" (no spaces, dot-separated, not a file extension).
+export function isGenericStreamTitle(title: string | null | undefined): boolean {
+  const t = (title || '').trim();
+  if (!t) return true;
+  if (t === 'Web Audio Stream' || t === 'Unknown Stream' || t === 'Unknown Track' || t === 'Unknown Title') return true;
+  if (t.includes('://')) return true;
+  return !t.includes(' ') && t.includes('.') && !/\.(mp3|flac|m4a|wav|ogg|aac|wma|opus|alac|aiff|ape|dsf|dff)$/i.test(t);
+}
+
+// Matches placeholder artists produced by stream fallbacks — never a real artist name.
+export function isGenericStreamArtist(artist: string | null | undefined): boolean {
+  const a = (artist || '').trim();
+  return !a || a === 'Unknown Artist' || a === 'Online Stream' || a === 'Web Stream' || a === 'YouTube Audio' || a === '—';
 }
 
 export function cleanSearchQuery(artist: string | null | undefined, title: string | null | undefined): { artist: string; title: string } {
@@ -275,8 +325,7 @@ export function cleanSearchQuery(artist: string | null | undefined, title: strin
   return { artist: cleanArtist, title: cleanTitle };
 }
 
-export function isStreamTrack(path?: string | null, format?: string | null): boolean {
-  if (!path) return false;
+export function isStreamTrack(path?: string | null, format?: string | null): boolean {  if (!path) return false;
   const fmt = (format || '').toUpperCase();
   return (
     path.startsWith('http://') ||
@@ -287,12 +336,24 @@ export function isStreamTrack(path?: string | null, format?: string | null): boo
     fmt === 'YOUTUBE DIRECT' ||
     fmt.includes('YOUTUBE') ||
     fmt.includes('TIDAL') ||
+    fmt.includes('QOBUZ') ||
     fmt === 'SUBSONIC' ||
     fmt === 'JELLYFIN' ||
     fmt === 'STREAM' ||
     fmt === 'RADIO' ||
     (/^[a-zA-Z0-9_-]{11}$/.test(path) && fmt !== 'FLAC' && fmt !== 'MP3' && fmt !== 'WAV' && fmt !== 'OGG' && fmt !== 'M4A' && fmt !== 'AAC' && fmt !== 'OPUS' && fmt !== 'DSF' && fmt !== 'DFF')
   );
+}
+
+const MUSIC_LINK_RE = /^https?:\/\/(open\.spotify\.com|spotify\.link|music\.apple\.com|(www\.)?deezer\.com)\//i;
+
+export function isSupportedMusicLink(text: string): boolean {
+  return MUSIC_LINK_RE.test(text.trim());
+}
+
+export function buildResolvedLinkQuery(meta: { title?: string; artist?: string | null } | null | undefined): string {
+  if (!meta || !meta.title) return '';
+  return [meta.title, meta.artist].filter(Boolean).join(' ').trim();
 }
 
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 const isStreamTrack = (path: string, format?: string | null) => {
-  return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
+  return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'Qobuz FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
 };
 
 const isLosslessTrack = (t: any) => {

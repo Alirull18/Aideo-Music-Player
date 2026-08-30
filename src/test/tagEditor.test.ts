@@ -136,4 +136,75 @@ describe('In-App Tag Editor Store & Actions', () => {
       }
     });
   });
+
+  it('correctly processes MusicBrainz recording payload with nested artist-credit and releases', async () => {
+    const mockMbzResponse = {
+      count: 1,
+      recordings: [
+        {
+          id: 'mbz-rec-123',
+          title: 'Hotel California',
+          'artist-credit': [{ name: 'Eagles' }],
+          'first-release-date': '1976-12-08',
+          genres: [{ name: 'Classic Rock' }],
+          releases: [
+            {
+              id: 'mbz-rel-456',
+              title: 'Hotel California (Remastered)',
+              date: '1976-12-08',
+              'track-count': 9,
+              track_number: 1,
+              disc_number: 1,
+              cover_url: 'https://coverartarchive.org/release/mbz-rel-456/front-500',
+            }
+          ]
+        }
+      ]
+    };
+
+    (invoke as any).mockImplementation((cmd: string) => {
+      if (cmd === 'mbz_search_recording') {
+        return Promise.resolve(mockMbzResponse);
+      }
+      return Promise.resolve(null);
+    });
+
+    const res = await invoke('mbz_search_recording', { title: 'Hotel California', artist: 'Eagles' });
+    expect(res).toEqual(mockMbzResponse);
+    const rec = (res as any).recordings[0];
+    expect(rec.title).toBe('Hotel California');
+    expect(rec['artist-credit'][0].name).toBe('Eagles');
+    expect(rec.releases[0].title).toBe('Hotel California (Remastered)');
+    expect(rec.releases[0].date.slice(0, 4)).toBe('1976');
+    expect(rec.releases[0].cover_url).toContain('coverartarchive.org');
+  });
+
+  it('searches online covers and downloads data url without cors', async () => {
+    const mockCovers = [
+      {
+        id: 'itunes-1',
+        title: 'Hotel California',
+        artist: 'Eagles',
+        album: 'Hotel California',
+        source: 'iTunes',
+        cover_url: 'https://is1-ssl.mzstatic.com/image/thumb/Music123/1000x1000bb.jpg'
+      }
+    ];
+
+    (invoke as any).mockImplementation((cmd: string) => {
+      if (cmd === 'search_covers_online') {
+        return Promise.resolve(mockCovers);
+      }
+      if (cmd === 'fetch_image_as_data_url') {
+        return Promise.resolve('data:image/jpeg;base64,/9j/4AAQSkZJRg==');
+      }
+      return Promise.resolve(null);
+    });
+
+    const results = await invoke('search_covers_online', { query: 'Eagles Hotel California' });
+    expect(results).toEqual(mockCovers);
+
+    const b64 = await invoke('fetch_image_as_data_url', { url: mockCovers[0].cover_url });
+    expect(b64).toBe('data:image/jpeg;base64,/9j/4AAQSkZJRg==');
+  });
 });

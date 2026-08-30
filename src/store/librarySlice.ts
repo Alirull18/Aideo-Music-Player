@@ -2,10 +2,12 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseStreamMetadata, resolvedPathMap, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack } from '../utils';
+import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
+import { notifyTidalAuthFailure } from './tidalSlice';
+import { notifyQobuzAuthFailure } from './qobuzSlice';
 
 let isTransitioning = false;
 let lastPlayedPathFromUI: string | null = null;
@@ -347,7 +349,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     if (isOnline) {
       try {
         let lookupUrl = track.path;
-        if (track.format === 'Tidal FLAC') {
+        if (track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') {
           const cachedResolved = trackIdToStreamUrl.get(track.path);
           if (cachedResolved) lookupUrl = cachedResolved.url;
         }
@@ -435,20 +437,28 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
 
       let finalPath = track.path;
-      if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
           const cachedResolved = trackIdToStreamUrl.get(track.path);
           if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
             finalPath = cachedResolved.url;
-            console.log('[Tidal] Using pre-resolved stream URL for track:', track.title);
+            console.log('[Streaming] Using pre-resolved stream URL for track:', track.title);
           } else {
-            finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+            const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
+            finalPath = await invoke<string>(resolver, { trackId: track.path });
             trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
-            resolvedPathMap.set(finalPath, track.path);
           }
+          rememberResolvedPath(finalPath, track.path);
         } catch (e) {
-          console.error('Failed to resolve Tidal stream in playTrack:', e);
+          console.error('Failed to resolve streaming URL in playTrack:', e);
+          notifyTidalAuthFailure(e);
+          notifyQobuzAuthFailure(e);
         }
+      }
+      // Persist real title/artist under the resolved URL so queue rebuilds and
+      // track transitions after a restart show the track, not the raw hostname.
+      if (finalPath !== track.path && (finalPath.startsWith('http://') || finalPath.startsWith('https://'))) {
+        setOnlineTrackCache(finalPath, track);
       }
 
       if (get().chromecast_connected) {
@@ -534,7 +544,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         }
       }
 
-      await fetchTrackMetadataAndLyrics(track, set, get, isOnline || track.format === 'Tidal FLAC');
+      await fetchTrackMetadataAndLyrics(track, set, get, isOnline || track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC');
 
     } catch (e) {
       console.error('playTrack error:', e);
@@ -701,8 +711,11 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         }, 500);
       }
 
+      await get().fetchQueue();
+      // Read the post-fetchQueue state: the old snapshot pre-dated the queue sync, so a
+      // queue that was only just repopulated looked empty here and extra backend-only
+      // entries were appended on every transition (frontend/backend index drift).
       const newState = get();
-      await newState.fetchQueue();
       if (newState.queue.length === 0 && activeTracks.length > 0) {
         if (newState.repeat === 'one' && track) {
           // Repeat One: re-queue the same track
@@ -897,8 +910,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         console.log('[Pre-Cache] Pre-resolving YouTube track:', track.title);
         invoke('pre_resolve_youtube_url', { url: track.path }).catch(() => {});
       } 
-      else if (track.format === 'Tidal FLAC') {
-        console.log('[Pre-Cache] Pre-caching Tidal track:', track.title);
+      else if (track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') {
+        const providerName = track.format === 'Qobuz FLAC' ? 'Qobuz' : 'Tidal';
+        console.log(`[Pre-Cache] Pre-caching ${providerName} track:`, track.title);
         (async () => {
           try {
             const cachedResolved = trackIdToStreamUrl.get(track.path);
@@ -906,15 +920,18 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
             if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
               finalUrl = cachedResolved.url;
             } else {
-              finalUrl = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+              const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
+              finalUrl = await invoke<string>(resolver, { trackId: track.path });
               trackIdToStreamUrl.set(track.path, { url: finalUrl, resolvedAt: Date.now() });
-              resolvedPathMap.set(finalUrl, track.path);
+              rememberResolvedPath(finalUrl, track.path);
             }
             if (finalUrl) {
               invoke('cache_cloud_track', { streamUrl: finalUrl }).catch(() => {});
             }
           } catch (e) {
-            console.error('[Pre-Cache] Failed to pre-cache Tidal track:', e);
+            console.error(`[Pre-Cache] Failed to pre-cache ${providerName} track:`, e);
+            notifyTidalAuthFailure(e);
+            notifyQobuzAuthFailure(e);
           }
         })();
       } 
@@ -975,26 +992,40 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const isCurrentTrackOnline = isStreamTrack(seedTrack.path, seedTrack.format);
     if (!isCurrentTrackOnline || !get().autoplayEnabled) return;
 
+    // Guard against degraded seed metadata (placeholder titles like "Web Audio Stream",
+    // bare hostnames like "Lgf.audio.tidal.com", placeholder artists like "Online Stream").
+    // Searching the providers with those produces random irrelevant tracks that fill the queue.
+    const artistGeneric = isGenericStreamArtist(seedTrack.artist);
+    const titleGeneric = isGenericStreamTitle(seedTrack.title);
+    if (artistGeneric && titleGeneric) {
+      console.log('[autoplay] Seed metadata is generic/degraded — skipping radio fill to avoid irrelevant recommendations.');
+      return;
+    }
+    const safeSeedArtist = artistGeneric ? 'Unknown Artist' : seedTrack.artist!;
+    const safeSeedTitle = titleGeneric ? 'Unknown Title' : seedTrack.title!;
+
     const currentReqSeq = ++autoplayReqSeq;
 
     try {
-      console.log(`[autoplay] Generating upcoming radio queue using seed: '${seedTrack.title}' by '${seedTrack.artist}'...`);
+      console.log(`[autoplay] Generating upcoming radio queue using seed: '${safeSeedTitle}' by '${safeSeedArtist}'...`);
       let recommendedTracks: Track[] = [];
       const isTidal = seedTrack.format === 'Tidal FLAC' || seedTrack.path.includes('api.tidal.com');
+      const isQobuz = seedTrack.format === 'Qobuz FLAC';
 
-      if (isTidal) {
-        const tracks = await invoke<any[]>('get_tidal_autoplay_recommendations', {
-          artist: seedTrack.artist || 'Unknown Artist',
-          title: seedTrack.title || 'Unknown Title'
+      if (isTidal || isQobuz) {
+        const command = isQobuz ? 'get_qobuz_autoplay_recommendations' : 'get_tidal_autoplay_recommendations';
+        const tracks = await invoke<any[]>(command, {
+          artist: safeSeedArtist,
+          title: safeSeedTitle
         });
         if (Array.isArray(tracks)) {
           recommendedTracks = tracks.map(t => ({
-            id: -20000 - Number(t.id || 0),
+            id: isQobuz ? -50000 - Number(t.id || 0) : -20000 - Number(t.id || 0),
             path: t.id,
             title: t.title || 'Unknown Title',
             artist: t.artist || 'Unknown Artist',
             duration: t.duration || 180,
-            format: 'Tidal FLAC',
+            format: isQobuz ? 'Qobuz FLAC' : 'Tidal FLAC',
             lyric_offset: 0,
             cover_url: t.cover_url || null,
             is_autoplay: true
@@ -1053,8 +1084,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
         const tracks = await invoke<any[]>('get_youtube_autoplay_recommendations', {
           videoId,
-          artist: seedTrack.artist || 'Unknown Artist',
-          title: seedTrack.title || 'Unknown Title',
+          artist: safeSeedArtist,
+          title: safeSeedTitle,
           topArtists,
           libraryArtists,
           discoveryLevel,
@@ -1165,23 +1196,44 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
 
-      await invoke('clear_queue');
-      if (newQueue.length > 0) {
-        const paths: string[] = [];
-        for (const t of newQueue) {
-          let p = t.path;
-          if (t.format === 'Tidal FLAC' && !t.path.startsWith('http://') && !t.path.startsWith('https://')) {
-            try {
-              p = await invoke<string>('tidal_get_stream_url', { trackId: t.path });
-              resolvedPathMap.set(p, t.path);
-            } catch (err) {
-              console.error('Failed to resolve Tidal autoplay recommended stream:', err);
-            }
+      // Resolve all stream URLs BEFORE touching the backend queue: clearing first left the
+      // backend queue empty for the whole (slow, per-track network) resolution window, during
+      // which a concurrent fetchQueue() would wipe the frontend queue state.
+      const paths: string[] = [];
+      for (const t of newQueue) {
+        let p = t.path;
+        if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !t.path.startsWith('http://') && !t.path.startsWith('https://')) {
+          try {
+            const resolver = t.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
+            p = await invoke<string>(resolver, { trackId: t.path });
+            rememberResolvedPath(p, t.path);
+          } catch (err) {
+            console.error(`Failed to resolve ${t.format} autoplay recommended stream:`, err);
+            notifyTidalAuthFailure(err);
+            notifyQobuzAuthFailure(err);
           }
-          paths.push(p);
         }
-        await invoke('add_to_queue_bulk', { paths });
+        // Keep real titles recoverable when the queue is later rebuilt from backend URLs
+        if (p.startsWith('http://') || p.startsWith('https://')) {
+          setOnlineTrackCache(p, t);
+        }
+        paths.push(p);
       }
+
+      // Discard stale rebuilds issued before a newer autoplay request started
+      if (currentReqSeq !== autoplayReqSeq) {
+        console.log('[autoplay] Stale rebuild superseded during resolution, skipping queue swap.');
+        return;
+      }
+
+      // Swap the backend queue atomically: clear + bulk add chained together so overlapping
+      // rebuilds cannot interleave their phases and append both batches (duplicate entries).
+      await chainQueueOperation(async () => {
+        await invoke('clear_queue');
+        if (paths.length > 0) {
+          await invoke('add_to_queue_bulk', { paths });
+        }
+      });
 
       // 🚀 Background Pre-caching manager for the next 2 tracks
       get().preCacheNextTracks().catch(console.error);

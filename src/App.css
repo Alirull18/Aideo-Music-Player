@@ -4635,6 +4635,12 @@ input[type=range] {
   border: 1px solid rgba(16, 185, 129, 0.18);
 }
 
+.discovery-source-badge.badge-tidal {
+  background: rgba(34, 211, 238, 0.08);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+}
+
 .discovery-source-badge.badge-default {
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-dim);
@@ -5264,6 +5270,41 @@ input[type=range] {
   background: rgba(245, 158, 11, 0.12);
   color: #fbbf24;
   border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Colored per-song source-type square (Tidal / Hi-Res / Local / YouTube) */
+.source-type-square {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2.5px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  margin-right: 6px;
+  transform: translateY(-1px);
+}
+
+.aideo-source-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+}
+
+.source-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.source-legend-chip .source-type-square {
+  margin-right: 0;
+  transform: none;
 }
 
 .aideo-audiophile-filters {

@@ -80,6 +80,31 @@ pub fn build_exclusive_rate_candidates(
 const HW_RESTART_DELAY_MS: u64 = 20;
 const MAX_START_FAILURES: u32 = 10;
 
+/// Consecutive failed exclusive attempts (negotiation failure, start failure,
+/// or runtime stream error) allowed before exclusive mode gives up for the
+/// current track and stays on the shared engine. Bounds the teardown/rebuild
+/// storm a misbehaving driver would otherwise cause.
+pub const MAX_EXCLUSIVE_FAILURES: u32 = 3;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ExclusiveRecovery {
+    /// Wait the given number of milliseconds, then try exclusive again.
+    RetryAfterMs(u64),
+    /// Stop retrying exclusive for this track; run shared until it ends.
+    StayShared,
+}
+
+/// Pure backoff policy for exclusive-stream failures. First retry is quick,
+/// later retries wait longer, and past [`MAX_EXCLUSIVE_FAILURES`] the shared
+/// engine takes over for the rest of the track.
+pub fn decide_exclusive_recovery(consecutive_failures: u32) -> ExclusiveRecovery {
+    if consecutive_failures < MAX_EXCLUSIVE_FAILURES {
+        ExclusiveRecovery::RetryAfterMs(250u64 * u64::from(consecutive_failures.max(1)))
+    } else {
+        ExclusiveRecovery::StayShared
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub fn start_exclusive_stream<F, E>(
     device_name: &str,
@@ -104,6 +129,9 @@ where
 
     let handle = thread::spawn(move || {
         let _ = initialize_mta();
+
+        // Give audiosrv a brief moment to finish tearing down any previous endpoint handle
+        std::thread::sleep(std::time::Duration::from_millis(60));
 
         // ELEVATE THREAD TO REAL-TIME PRO AUDIO PRIORITY WITH MMCSS
         let mut task_index = 0u32;
@@ -221,6 +249,7 @@ where
 
         let default_device_rate = device.get_device_format().ok().map(|f| f.get_samplespersec() as u32);
         let candidate_rates = build_exclusive_rate_candidates(sample_rate, default_device_rate, 0);
+        let negotiated_channels = channels.max(2);
 
         let test_formats = [
             (32, 32, true),  // 32-bit Float
@@ -246,7 +275,7 @@ where
                     valid_bits,
                     &sample_type,
                     cand_rate as usize,
-                    channels as usize,
+                    negotiated_channels as usize,
                     None,
                 );
 
@@ -264,9 +293,10 @@ where
                         .calculate_aligned_period_near(def_period, Some(128), &format)
                         .unwrap_or(std::cmp::max(def_period, min_period));
                     
+                    // Note: Microsoft WASAPI specifies that non-event exclusive streams (polling) require period_hns == 0.
                     let mode = if is_polling {
                         StreamMode::PollingExclusive { 
-                            period_hns: aligned_period,
+                            period_hns: 0,
                             buffer_duration_hns: 4 * aligned_period, 
                         }
                     } else {
@@ -286,7 +316,7 @@ where
                                 if let Ok(mut fresh_client) = device.get_iaudioclient() {
                                     let recovery_mode = if is_polling {
                                         StreamMode::PollingExclusive { 
-                                            period_hns: recovery_period,
+                                            period_hns: 0,
                                             buffer_duration_hns: 4 * recovery_period, 
                                         }
                                     } else {
@@ -352,7 +382,7 @@ where
         } else {
             buffer_size as usize
         };
-        let num_samples = num_frames * channels as usize;
+        let num_samples = num_frames * negotiated_channels as usize;
         let mut f32_data = vec![0.0f32; num_samples];
         
         let bytes_per_sample = bits / 8;
@@ -396,6 +426,7 @@ where
         // Resume -> start_stream() reacquires it.
         let mut hw_running = false;
         let mut start_failures = 0u32;
+        let mut poll_stall_count = 0u32;
 
         while !shutdown_clone.load(Ordering::Relaxed) {
             match decide_hw_action(
@@ -414,6 +445,7 @@ where
                     if client.start_stream().is_ok() {
                         hw_running = true;
                         start_failures = 0;
+                        poll_stall_count = 0;
                     } else {
                         start_failures += 1;
                         if start_failures >= MAX_START_FAILURES {
@@ -446,9 +478,17 @@ where
                 };
 
                 if avail_frames < num_frames as u32 {
+                    poll_stall_count += 1;
+                    if poll_stall_count >= 100 {
+                        if !shutdown_clone.load(Ordering::Relaxed) {
+                            on_error("WASAPI exclusive polling buffer stalled".to_string());
+                        }
+                        break;
+                    }
                     // Not enough space to write a full chunk yet, sleep and wait
                     continue;
                 }
+                poll_stall_count = 0;
             } else {
                 // In Event-driven mode, wait for event handle signals
                 if let Some(ref ev) = event {
@@ -654,6 +694,18 @@ mod tests {
     #[test]
     fn stays_idle_when_paused_and_already_stopped() {
         assert!(matches!(decide_hw_action(false, false), HwAction::Idle));
+    }
+
+    #[test]
+    fn exclusive_recovery_retries_with_backoff_below_failure_cap() {
+        assert_eq!(decide_exclusive_recovery(1), ExclusiveRecovery::RetryAfterMs(250));
+        assert_eq!(decide_exclusive_recovery(2), ExclusiveRecovery::RetryAfterMs(500));
+    }
+
+    #[test]
+    fn exclusive_recovery_gives_up_at_failure_cap() {
+        assert_eq!(decide_exclusive_recovery(MAX_EXCLUSIVE_FAILURES), ExclusiveRecovery::StayShared);
+        assert_eq!(decide_exclusive_recovery(MAX_EXCLUSIVE_FAILURES + 5), ExclusiveRecovery::StayShared);
     }
 
     #[test]

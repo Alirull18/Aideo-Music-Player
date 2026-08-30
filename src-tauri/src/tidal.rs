@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use base64::Engine;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Emitter, State, Manager};
 use tokio::time::{sleep, Duration};
 use futures::StreamExt;
@@ -67,7 +68,7 @@ impl TidalState {
     // Load dynamic client credentials
     pub fn load_credentials(app_handle: &AppHandle) -> TidalCredentials {
         // First try to load from keyring
-        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
+        if let Ok(entry) = open_keyring("tidal_credentials") {
             if let Ok(content) = entry.get_password() {
                 if let Ok(cred) = serde_json::from_str::<TidalCredentials>(&content) {
                     if !cred.client_id.trim().is_empty() && !cred.client_secret.trim().is_empty() {
@@ -92,8 +93,8 @@ impl TidalState {
                     if let Ok(cred) = serde_json::from_str::<TidalCredentials>(&content) {
                         if !cred.client_id.trim().is_empty() && !cred.client_secret.trim().is_empty() {
                             // Migrate to keyring
-                            if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
-                                if entry.set_password(&content).is_ok() {
+                            if let Ok(entry) = open_keyring("tidal_credentials") {
+                                if keyring_write(&entry, &content) {
                                     let _ = std::fs::remove_file(cred_file);
                                 }
                             }
@@ -130,8 +131,8 @@ impl TidalState {
             client_secret: client_secret.to_string(),
         };
         if let Ok(content) = serde_json::to_string_pretty(&cred) {
-            if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
-                let _ = entry.set_password(&content);
+            if let Ok(entry) = open_keyring("tidal_credentials") {
+                keyring_write(&entry, &content);
             }
         }
         
@@ -147,7 +148,7 @@ impl TidalState {
     // Check local session file on startup
     pub fn load_cached_session(app_handle: &AppHandle) -> Option<TidalSession> {
         // First try to load from keyring
-        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
+        if let Ok(entry) = open_keyring("tidal_session") {
             if let Ok(content) = entry.get_password() {
                 if let Ok(session) = serde_json::from_str::<TidalSession>(&content) {
                     // Cleanup old file if it exists
@@ -170,8 +171,8 @@ impl TidalState {
                 if let Ok(content) = std::fs::read_to_string(&session_file) {
                     if let Ok(session) = serde_json::from_str::<TidalSession>(&content) {
                         // Migrate to keyring
-                        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
-                            if entry.set_password(&content).is_ok() {
+                        if let Ok(entry) = open_keyring("tidal_session") {
+                            if keyring_write(&entry, &content) {
                                 let _ = std::fs::remove_file(session_file);
                             }
                         }
@@ -186,8 +187,8 @@ impl TidalState {
 
     pub fn save_session(app_handle: &AppHandle, session: &TidalSession) {
         if let Ok(content) = serde_json::to_string_pretty(session) {
-            if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
-                let _ = entry.set_password(&content);
+            if let Ok(entry) = open_keyring("tidal_session") {
+                keyring_write(&entry, &content);
             }
         }
 
@@ -201,8 +202,8 @@ impl TidalState {
     }
 
     pub fn clear_session(app_handle: &AppHandle) {
-        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_session") {
-            let _ = entry.delete_credential();
+        if let Ok(entry) = open_keyring("tidal_session") {
+            keyring_delete(&entry);
         }
 
         // Cleanup old file if it exists
@@ -225,8 +226,8 @@ pub async fn tidal_save_credentials(
     let secret_trimmed = client_secret.trim();
 
     if id_trimmed.is_empty() || secret_trimmed.is_empty() {
-        if let Ok(entry) = keyring::Entry::new("AideoMusicPlayer", "tidal_credentials") {
-            let _ = entry.delete_credential();
+        if let Ok(entry) = open_keyring("tidal_credentials") {
+            keyring_delete(&entry);
         }
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             let cred_file = app_data.join("tidal_credentials.json");
@@ -257,8 +258,81 @@ fn get_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
-async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: bool) -> Result<String, String> {
-    // Acquire async deduplication lock to serialize concurrent token refresh calls
+const FORCED_REFRESH_COOLDOWN_SECS: u64 = 120;
+static LAST_FORCED_REFRESH_SECS: AtomicU64 = AtomicU64::new(0);
+
+fn try_begin_forced_refresh() -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let last = LAST_FORCED_REFRESH_SECS.load(Ordering::Relaxed);
+    if now < last.saturating_add(FORCED_REFRESH_COOLDOWN_SECS) {
+        return false;
+    }
+    LAST_FORCED_REFRESH_SECS.store(now, Ordering::Relaxed);
+    true
+}
+
+const SUBSCRIPTION_BLOCKED_ERROR: &str = "Tidal playback unauthorized even after a fresh token. Your account likely has no active subscription for on-demand streaming, or this track is not entitled on your plan.";
+
+fn stream_quality_ladder() -> Vec<&'static str> {
+    vec!["HI_RES_LOSSLESS", "HI_RES", "LOSSLESS", "HIGH", "LOW"]
+}
+
+fn open_keyring(storage: &str) -> Result<keyring::Entry, ()> {
+    match keyring::Entry::new("AideoMusicPlayer", storage) {
+        Ok(entry) => Ok(entry),
+        Err(e) => {
+            println!("{BOLD}{RED}✘ [TIDAL ENGINE] OS keyring unavailable for '{}': {:?}. Tidal sessions will NOT persist across restarts!{RESET}", storage, e);
+            Err(())
+        }
+    }
+}
+
+pub(crate) fn open_shared_keyring(storage: &str) -> Result<keyring::Entry, ()> {
+    match keyring::Entry::new("AideoMusicPlayer", storage) {
+        Ok(entry) => Ok(entry),
+        Err(e) => {
+            println!("{BOLD}{RED}✘ OS keyring unavailable for '{}': {:?}. Sessions will NOT persist across restarts!{RESET}", storage, e);
+            Err(())
+        }
+    }
+}
+
+pub(crate) fn shared_keyring_write(entry: &keyring::Entry, content: &str) -> bool {
+    match entry.set_password(content) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("{BOLD}{RED}✘ Keyring write failed: {:?}. Session persistence is broken!{RESET}", e);
+            false
+        }
+    }
+}
+
+pub(crate) fn shared_keyring_delete(entry: &keyring::Entry) {
+    if let Err(e) = entry.delete_credential() {
+        println!("{BOLD}{YELLOW}⚠ Keyring delete failed: {:?}.{RESET}", e);
+    }
+}
+
+fn keyring_write(entry: &keyring::Entry, content: &str) -> bool {
+    match entry.set_password(content) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("{BOLD}{RED}✘ [TIDAL ENGINE] Keyring write failed: {:?}. Tidal session persistence is broken!{RESET}", e);
+            false
+        }
+    }
+}
+
+fn keyring_delete(entry: &keyring::Entry) {
+    if let Err(e) = entry.delete_credential() {
+        println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Keyring delete failed: {:?}.{RESET}", e);
+    }
+}
+
+async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: bool) -> Result<String, String> {    // Acquire async deduplication lock to serialize concurrent token refresh calls
     let _guard = state.refresh_lock.lock().await;
 
     let current_sess = crate::safe_lock(&state.session).clone();
@@ -632,7 +706,7 @@ pub async fn tidal_download(
     duration: u32,
 ) -> Result<bool, String> {
     let mut token = ensure_valid_token(&app_handle, &state, false).await?;
-    let qualities = vec!["HI_RES", "LOSSLESS", "HIGH", "LOW"];
+    let qualities = stream_quality_ladder();
     let mut playback_info = None;
     let mut last_error = "Failed to fetch any stream".to_string();
     let client = get_client();
@@ -653,7 +727,7 @@ pub async fn tidal_download(
         };
 
         if res.status().as_u16() == 401 {
-            if !token_refreshed {
+            if !token_refreshed && try_begin_forced_refresh() {
                 println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Request unauthorized (401). Forcing token refresh...{RESET}");
                 token_refreshed = true;
                 match ensure_valid_token(&app_handle, &state, true).await {
@@ -672,8 +746,11 @@ pub async fn tidal_download(
                         break;
                     }
                 }
-            } else {
-                println!("{BOLD}{RED}⚠ [TIDAL ENGINE] Request still unauthorized (401) even after token refresh. Skipping quality {}.{RESET}", q);
+            }
+            if res.status().as_u16() == 401 {
+                println!("{BOLD}{RED}✘ [TIDAL ENGINE] Still 401 with fresh/cooldown token at quality {}. Stopping quality ladder.{RESET}", q);
+                last_error = SUBSCRIPTION_BLOCKED_ERROR.to_string();
+                break;
             }
         }
 
@@ -900,7 +977,7 @@ pub async fn tidal_get_stream_url(
     track_id: String,
 ) -> Result<String, String> {
     let mut token = ensure_valid_token(&app_handle, &state, false).await?;
-    let qualities = vec!["HI_RES", "LOSSLESS", "HIGH", "LOW"];
+    let qualities = stream_quality_ladder();
     let mut playback_info = None;
     let mut last_error = "Failed to fetch any stream".to_string();
     let client = get_client();
@@ -921,7 +998,7 @@ pub async fn tidal_get_stream_url(
         };
 
         if res.status().as_u16() == 401 {
-            if !token_refreshed {
+            if !token_refreshed && try_begin_forced_refresh() {
                 println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Preview unauthorized (401). Forcing token refresh...{RESET}");
                 token_refreshed = true;
                 match ensure_valid_token(&app_handle, &state, true).await {
@@ -940,8 +1017,11 @@ pub async fn tidal_get_stream_url(
                         break;
                     }
                 }
-            } else {
-                println!("{BOLD}{RED}⚠ [TIDAL ENGINE] Preview still unauthorized (401) even after token refresh. Skipping quality {}.{RESET}", q);
+            }
+            if res.status().as_u16() == 401 {
+                println!("{BOLD}{RED}✘ [TIDAL ENGINE] Still 401 with fresh/cooldown token at quality {}. Stopping quality ladder.{RESET}", q);
+                last_error = SUBSCRIPTION_BLOCKED_ERROR.to_string();
+                break;
             }
         }
 
@@ -1075,6 +1155,124 @@ fn fuzzy_title_similarity(s1: &str, s2: &str) -> f64 {
     (2.0 * intersection as f64) / total as f64
 }
 
+/// Minimal access to any streaming-provider track result so the autoplay
+/// radio pipeline can be shared between Tidal and other providers.
+pub trait RadioCandidate {
+    fn radio_title(&self) -> &str;
+    fn radio_artist(&self) -> &str;
+    fn radio_duration(&self) -> u32;
+}
+
+impl RadioCandidate for TidalTrackResult {
+    fn radio_title(&self) -> &str { &self.title }
+    fn radio_artist(&self) -> &str { &self.artist }
+    fn radio_duration(&self) -> u32 { self.duration }
+}
+
+/// Shared autoplay radio pipeline: filters instrumental/third-party noise,
+/// drops duplicates of the seed track, caps duration, de-duplicates the
+/// candidate list itself, then interleaves same-artist and discovery picks.
+pub(crate) fn build_radio_queue<T: RadioCandidate + Clone>(
+    tracks: Vec<T>,
+    artist: &str,
+    title: &str,
+) -> Vec<T> {
+    let artist_lower = artist.to_lowercase();
+    let clean_seed_title = clean_title(title);
+
+    let mut filtered_tracks = Vec::new();
+    let mut seen_titles = std::collections::HashSet::new();
+
+    for track in tracks {
+        // 0. Instrumental/Third-Party Filter
+        if crate::youtube::is_third_party_or_instrumental(track.radio_title(), track.radio_artist()) {
+            println!("[autoplay-filter] Drop instrumental/third-party track: '{}' by '{}'", track.radio_title(), track.radio_artist());
+            continue;
+        }
+
+        // 1. Semantic Noise Filter
+        if is_semantic_noise(track.radio_title(), title) {
+            println!("[autoplay-filter] Drop semantic noise: '{}' by '{}'", track.radio_title(), track.radio_artist());
+            continue;
+        }
+
+        // 2. Precise Deduplication against Seed
+        let is_same_artist = crate::youtube::artist_matches(track.radio_artist(), artist);
+        let clean_cand = clean_title(track.radio_title());
+        let is_same_title = clean_seed_title == clean_cand && !clean_cand.is_empty();
+        let sim = fuzzy_title_similarity(track.radio_title(), title);
+
+        if (is_same_artist && (sim > 0.65 || is_same_title)) || (is_same_title && is_same_artist) {
+            println!("[autoplay-filter] Drop duplicate song: '{}' (Similarity: {:.2}%)", track.radio_title(), sim * 100.0);
+            continue;
+        }
+
+        // 3. Track Duration Filter (Drop >15 mins / 900s)
+        if track.radio_duration() > 900 {
+            println!("[autoplay-filter] Drop long-duration track: '{}' ({}s)", track.radio_title(), track.radio_duration());
+            continue;
+        }
+
+        // 4. De-duplicate clean titles inside the recommended list itself
+        if seen_titles.contains(&clean_cand) {
+            continue;
+        }
+        seen_titles.insert(clean_cand);
+
+        filtered_tracks.push(track);
+    }
+
+    // 5. Segregate same-artist vs discovery pools
+    let mut same_artist_pool = Vec::new();
+    let mut discovery_pool = Vec::new();
+
+    for track in filtered_tracks {
+        let candidate_artist_lower = track.radio_artist().to_lowercase();
+        if candidate_artist_lower.contains(&artist_lower) || artist_lower.contains(&candidate_artist_lower) {
+            same_artist_pool.push(track);
+        } else {
+            discovery_pool.push(track);
+        }
+    }
+
+    // 6. Interleave and build the final queue (limiting same-artist consecutive repetition)
+    let mut final_queue = Vec::new();
+
+    // Smooth transition: Start with 1 same-artist track if available
+    if let Some(first_same) = same_artist_pool.pop() {
+        final_queue.push(first_same);
+    }
+
+    // Interleave remaining tracks (capping same artist representation in the first few tracks)
+    let mut same_artist_count = final_queue.len();
+
+    let mut discovery_iter = discovery_pool.into_iter();
+    let mut same_artist_iter = same_artist_pool.into_iter();
+
+    while final_queue.len() < 8 {
+        let mut added = false;
+        if let Some(disc_track) = discovery_iter.next() {
+            final_queue.push(disc_track);
+            added = true;
+        }
+
+        let same_artist_limit = if discovery_iter.len() == 0 { 8 } else { 4 };
+        if final_queue.len() < 8 && same_artist_count < same_artist_limit {
+            if let Some(same_track) = same_artist_iter.next() {
+                final_queue.push(same_track);
+                same_artist_count += 1;
+                added = true;
+            }
+        }
+
+        if !added {
+            break;
+        }
+    }
+
+    final_queue
+}
+
 #[tauri::command]
 pub async fn get_tidal_autoplay_recommendations(
     state: State<'_, Arc<TidalState>>,
@@ -1099,99 +1297,7 @@ pub async fn get_tidal_autoplay_recommendations(
 
     match search_results {
         Ok(tracks) => {
-            let artist_lower = artist.to_lowercase();
-            let clean_seed_title = clean_title(&title);
-
-            let mut filtered_tracks = Vec::new();
-            let mut seen_titles = std::collections::HashSet::new();
-
-            for track in tracks {
-                // 0. Instrumental/Third-Party Filter
-                if crate::youtube::is_third_party_or_instrumental(&track.title, &track.artist) {
-                    println!("[autoplay-filter] Drop instrumental/third-party track: '{}' by '{}'", track.title, track.artist);
-                    continue;
-                }
-
-                // 1. Semantic Noise Filter
-                if is_semantic_noise(&track.title, &title) {
-                    println!("[autoplay-filter] Drop semantic noise: '{}' by '{}'", track.title, track.artist);
-                    continue;
-                }
-
-                // 2. Precise Deduplication against Seed
-                let is_same_artist = crate::youtube::artist_matches(&track.artist, &artist);
-                let clean_cand = clean_title(&track.title);
-                let is_same_title = clean_seed_title == clean_cand && !clean_cand.is_empty();
-                let sim = fuzzy_title_similarity(&track.title, &title);
-
-                if (is_same_artist && (sim > 0.65 || is_same_title)) || (is_same_title && is_same_artist) {
-                    println!("[autoplay-filter] Drop duplicate song: '{}' (Similarity: {:.2}%)", track.title, sim * 100.0);
-                    continue;
-                }
-
-                // 3. Track Duration Filter (Drop >15 mins / 900s)
-                if track.duration > 900 {
-                    println!("[autoplay-filter] Drop long-duration track: '{}' ({}s)", track.title, track.duration);
-                    continue;
-                }
-
-                // 4. De-duplicate clean titles inside the recommended list itself
-                if seen_titles.contains(&clean_cand) {
-                    continue;
-                }
-                seen_titles.insert(clean_cand);
-
-                filtered_tracks.push(track);
-            }
-
-            // 5. Segregate same-artist vs discovery pools
-            let mut same_artist_pool = Vec::new();
-            let mut discovery_pool = Vec::new();
-
-            for track in filtered_tracks {
-                let candidate_artist_lower = track.artist.to_lowercase();
-                if candidate_artist_lower.contains(&artist_lower) || artist_lower.contains(&candidate_artist_lower) {
-                    same_artist_pool.push(track);
-                } else {
-                    discovery_pool.push(track);
-                }
-            }
-
-            // 6. Interleave and build the final queue (limiting same-artist consecutive repetition)
-            let mut final_queue = Vec::new();
-            
-            // Smooth transition: Start with 1 same-artist track if available
-            if let Some(first_same) = same_artist_pool.pop() {
-                final_queue.push(first_same);
-            }
-
-            // Interleave remaining tracks (capping same artist representation in the first few tracks)
-            let mut same_artist_count = final_queue.len();
-            
-            let mut discovery_iter = discovery_pool.into_iter();
-            let mut same_artist_iter = same_artist_pool.into_iter();
-
-            while final_queue.len() < 8 {
-                let mut added = false;
-                if let Some(disc_track) = discovery_iter.next() {
-                    final_queue.push(disc_track);
-                    added = true;
-                }
-
-                let same_artist_limit = if discovery_iter.len() == 0 { 8 } else { 4 };
-                if final_queue.len() < 8 && same_artist_count < same_artist_limit {
-                    if let Some(same_track) = same_artist_iter.next() {
-                        final_queue.push(same_track);
-                        same_artist_count += 1;
-                        added = true;
-                    }
-                }
-
-                if !added {
-                    break;
-                }
-            }
-
+            let final_queue = build_radio_queue(tracks, &artist, &title);
             println!("[autoplay] Engine v2 finalized Tidal queue with {} highly matching tracks.", final_queue.len());
             Ok(final_queue)
         }
@@ -1227,6 +1333,107 @@ pub fn is_permanent_auth_failure(status: reqwest::StatusCode, error_body: Option
     false
 }
 
+// ---------- Discovery Hub: Tidal HiFi recommendations ----------
+
+const HUB_MAX_SEEDS: usize = 6;
+const HUB_MAX_TRACK_DURATION_SECS: u32 = 900;
+
+/// Signature compatible with the discovery hub's library dedupe format
+/// (`normalize_artist_name + clean_title`, see youtube/mod.rs).
+fn tidal_track_signature(artist: &str, title: &str) -> String {
+    format!(
+        "{}::{}",
+        crate::youtube::normalize_artist_name(artist),
+        clean_title(title)
+    )
+}
+
+/// Map hub seed artists to Tidal search queries. Falls back to a generic
+/// "Top Tracks" search when no usable seed exists (cold start).
+fn hub_seed_queries(seed_artists: Vec<String>) -> Vec<String> {
+    let mut queries = Vec::new();
+    for artist in seed_artists {
+        let trimmed = artist.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        queries.push(format!("{} Radio", trimmed));
+        if queries.len() >= HUB_MAX_SEEDS {
+            break;
+        }
+    }
+    if queries.is_empty() {
+        queries.push("Top Tracks".to_string());
+    }
+    queries
+}
+
+/// Filter + cross-seed dedupe of raw search candidates:
+/// drops marathon tracks (>15min), third-party/instrumental entries, tracks
+/// already known to the library or other rec sources, and duplicates found
+/// via multiple seed searches. First occurrence wins, order preserved.
+fn dedupe_hub_candidates(
+    candidates: Vec<TidalTrackResult>,
+    exclude_signatures: &std::collections::HashSet<String>,
+) -> Vec<TidalTrackResult> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for track in candidates {
+        if track.duration > HUB_MAX_TRACK_DURATION_SECS {
+            continue;
+        }
+        if crate::youtube::is_third_party_or_instrumental(&track.title, &track.artist) {
+            continue;
+        }
+        if track.title.trim().is_empty() || track.artist.trim().is_empty() {
+            continue;
+        }
+        let sig = tidal_track_signature(&track.artist, &track.title);
+        if exclude_signatures.contains(&sig) {
+            continue;
+        }
+        if !seen.insert(sig) {
+            continue;
+        }
+        out.push(track);
+    }
+    out
+}
+
+/// Discovery Hub command: resolves Tidal HiFi picks for the given seed artists.
+/// Seed failures are silently skipped so the hub renders without this section
+/// rather than erroring.
+#[tauri::command]
+pub async fn get_tidal_hub_recommendations(
+    state: State<'_, Arc<TidalState>>,
+    app_handle: AppHandle,
+    seed_artists: Vec<String>,
+    exclude_signatures: Option<Vec<String>>,
+) -> Result<Vec<TidalTrackResult>, String> {
+    let queries = hub_seed_queries(seed_artists);
+    println!("[tidal-hub] Fetching HiFi recommendations from {} search(es)", queries.len());
+
+    let searches: Vec<_> = queries
+        .iter()
+        .map(|q| tidal_search(state.clone(), app_handle.clone(), q.clone(), None))
+        .collect();
+    let results = futures::future::join_all(searches).await;
+
+    let mut candidates = Vec::new();
+    for res in results {
+        match res {
+            Ok(tracks) => candidates.extend(tracks),
+            Err(e) => println!("[tidal-hub] Skipping failed seed search: {}", e),
+        }
+    }
+
+    let exclude: std::collections::HashSet<String> =
+        exclude_signatures.unwrap_or_default().into_iter().collect();
+    let deduped = dedupe_hub_candidates(candidates, &exclude);
+    println!("[tidal-hub] Resolved {} unique HiFi recommendations", deduped.len());
+    Ok(deduped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1253,6 +1460,40 @@ mod tests {
     }
 
     #[test]
+    fn test_forced_refresh_cooldown_gate() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        LAST_FORCED_REFRESH_SECS.store(0, Ordering::Relaxed);
+        assert!(try_begin_forced_refresh(), "first-ever forced refresh must be allowed");
+
+        LAST_FORCED_REFRESH_SECS.store(now, Ordering::Relaxed);
+        assert!(!try_begin_forced_refresh(), "refresh within cooldown window must be blocked");
+
+        LAST_FORCED_REFRESH_SECS.store(now - FORCED_REFRESH_COOLDOWN_SECS - 1, Ordering::Relaxed);
+        assert!(try_begin_forced_refresh(), "refresh after cooldown expiry must be allowed");
+    }
+
+    #[test]
+    fn test_subscription_blocked_error_is_not_classified_as_session_auth_failure() {
+        let lower = SUBSCRIPTION_BLOCKED_ERROR.to_lowercase();
+        assert!(!lower.contains("not authenticated"), "must not trigger frontend auth-nudge");
+        assert!(!lower.contains("expired"), "must not trigger frontend logout flow");
+    }
+
+    #[test]
+    fn test_stream_quality_ladder_prefers_hires_lossless() {
+        let ladder = stream_quality_ladder();
+        assert_eq!(ladder.first(), Some(&"HI_RES_LOSSLESS"));
+        assert!(ladder.contains(&"HI_RES"));
+        assert!(ladder.contains(&"LOSSLESS"));
+        assert!(ladder.contains(&"HIGH"));
+        assert_eq!(ladder.last(), Some(&"LOW"));
+    }
+
+    #[test]
     fn test_tidal_refresh_status_code_classification() {
         // Permanent 401 Unauthorized -> clears session regardless of body
         assert!(is_permanent_auth_failure(reqwest::StatusCode::UNAUTHORIZED, None));
@@ -1275,6 +1516,85 @@ mod tests {
         assert!(!is_permanent_auth_failure(reqwest::StatusCode::SERVICE_UNAVAILABLE, None));
         assert!(!is_permanent_auth_failure(reqwest::StatusCode::GATEWAY_TIMEOUT, None));
         assert!(!is_permanent_auth_failure(reqwest::StatusCode::FORBIDDEN, None));
+    }
+
+    fn hub_track(id: &str, title: &str, artist: &str, duration: u32) -> TidalTrackResult {
+        TidalTrackResult {
+            id: id.to_string(),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album: "Album".to_string(),
+            duration,
+            cover_url: String::new(),
+            quality: "LOSSLESS".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_hub_seed_queries_empty_falls_back_to_top_tracks() {
+        let queries = hub_seed_queries(vec![]);
+        assert_eq!(queries, vec!["Top Tracks".to_string()]);
+    }
+
+    #[test]
+    fn test_hub_seed_queries_maps_artists_to_radio_searches() {
+        let queries = hub_seed_queries(vec!["Aurora".to_string(), "Sigur Rós".to_string()]);
+        assert_eq!(queries, vec!["Aurora Radio".to_string(), "Sigur Rós Radio".to_string()]);
+    }
+
+    #[test]
+    fn test_hub_seed_queries_caps_at_six_and_skips_blank_seeds() {
+        let seeds: Vec<String> = ["A", "B", "C", "D", "E", "F", "G", "  ", ""]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let queries = hub_seed_queries(seeds);
+        assert_eq!(queries.len(), 6);
+        assert_eq!(queries[0], "A Radio");
+        assert_eq!(queries[5], "F Radio");
+    }
+
+    #[test]
+    fn test_tidal_track_signature_matches_library_normalization() {
+        // Must mirror youtube's library signature format: normalize_artist_name + clean_title
+        let sig = tidal_track_signature("The Beatles", "Let It Be (Remastered 2009)");
+        assert_eq!(sig, format!("{}::{}", crate::youtube::normalize_artist_name("The Beatles"), clean_title("Let It Be (Remastered 2009)")));
+    }
+
+    #[test]
+    fn test_dedupe_hub_candidates_drops_cross_seed_duplicates() {
+        let candidates = vec![
+            hub_track("1", "Ocean Eyes", "Wanderer", 210),
+            hub_track("2", "Ocean Eyes", "wanderer!", 215),
+        ];
+        let out = dedupe_hub_candidates(candidates, &std::collections::HashSet::new());
+        assert_eq!(out.len(), 1, "same song found via two seed searches must collapse to one pick");
+        assert_eq!(out[0].id, "1", "first occurrence wins");
+    }
+
+    #[test]
+    fn test_dedupe_hub_candidates_excludes_library_and_other_sources() {
+        let mut exclude = std::collections::HashSet::new();
+        exclude.insert(tidal_track_signature("Wanderer", "Ocean Eyes"));
+        let candidates = vec![
+            hub_track("1", "Ocean Eyes", "Wanderer", 210),
+            hub_track("2", "Northern Lights", "Aurora", 240),
+        ];
+        let out = dedupe_hub_candidates(candidates, &exclude);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "2");
+    }
+
+    #[test]
+    fn test_dedupe_hub_candidates_filters_marathon_and_instrumental_tracks() {
+        let candidates = vec![
+            hub_track("1", "Epic Suite", "Orchestra", 901),
+            hub_track("2", "My Song (Instrumental Version)", "Cover Band", 300),
+            hub_track("3", "Real Song", "Real Artist", 400),
+        ];
+        let out = dedupe_hub_candidates(candidates, &std::collections::HashSet::new());
+        assert_eq!(out.len(), 1, ">15min and third-party/instrumental entries must be dropped");
+        assert_eq!(out[0].id, "3");
     }
 }
 

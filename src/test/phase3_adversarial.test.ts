@@ -248,6 +248,7 @@ describe('Adversarial Stress-Testing: Phase 3 UI State Synchronization & UX Poli
         { path: 'http://radio.stream/live', format: 'MP3', expectedOnline: true },
         { path: 'https://secure.radio.stream/live', format: 'AAC', expectedOnline: true },
         { path: '12345678', format: 'Tidal FLAC', expectedOnline: true },
+        { path: '138614268', format: 'Qobuz FLAC', expectedOnline: true },
         { path: 'https://youtube.com/watch?v=mock', format: 'YouTube Direct', expectedOnline: true },
         { path: 'yt_raw_id_987', format: 'YouTube Direct', expectedOnline: true },
         { path: 'C:\\Music\\Album\\01.flac', format: 'FLAC', expectedOnline: false },

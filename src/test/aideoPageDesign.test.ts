@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from '../store';
-import { AideoPageDesign } from '../store/types';
+import { AideoPageDesign, LEGACY_AIDEO_PAGE_DESIGNS } from '../store/types';
 import { safeGetStorage } from '../utils/storage';
 
 describe('Aideo Page Design & Layout Suite', () => {
@@ -15,7 +15,7 @@ describe('Aideo Page Design & Layout Suite', () => {
   });
 
   it('should switch between all 4 modern Aideo page designs', () => {
-    const designs: AideoPageDesign[] = ['classic', 'bento', 'audiophile', 'cinematic'];
+    const designs: AideoPageDesign[] = ['classic', 'editorial', 'command', 'stage'];
     const { setAideoPageDesign } = useStore.getState();
 
     designs.forEach((design) => {
@@ -28,14 +28,14 @@ describe('Aideo Page Design & Layout Suite', () => {
   it('should persist user choice across safe storage helpers', () => {
     const { setAideoPageDesign } = useStore.getState();
 
-    setAideoPageDesign('bento');
-    expect(safeGetStorage('aideo-page-design')).toBe('bento');
+    setAideoPageDesign('editorial');
+    expect(safeGetStorage('aideo-page-design')).toBe('editorial');
 
-    setAideoPageDesign('audiophile');
-    expect(safeGetStorage('aideo-page-design')).toBe('audiophile');
+    setAideoPageDesign('command');
+    expect(safeGetStorage('aideo-page-design')).toBe('command');
 
-    setAideoPageDesign('cinematic');
-    expect(safeGetStorage('aideo-page-design')).toBe('cinematic');
+    setAideoPageDesign('stage');
+    expect(safeGetStorage('aideo-page-design')).toBe('stage');
 
     setAideoPageDesign('classic');
     expect(safeGetStorage('aideo-page-design')).toBe('classic');
@@ -44,12 +44,19 @@ describe('Aideo Page Design & Layout Suite', () => {
   it('should correctly restore to classic layout on reset', () => {
     const { setAideoPageDesign } = useStore.getState();
 
-    setAideoPageDesign('cinematic');
-    expect(useStore.getState().aideoPageDesign).toBe('cinematic');
+    setAideoPageDesign('stage');
+    expect(useStore.getState().aideoPageDesign).toBe('stage');
 
     // Emulate appearance reset
     setAideoPageDesign('classic');
     expect(useStore.getState().aideoPageDesign).toBe('classic');
     expect(localStorage.getItem('aideo-page-design')).toBe('classic');
+  });
+
+  it('should expose the retired pre-redesign design ids as legacy', () => {
+    expect(LEGACY_AIDEO_PAGE_DESIGNS).toEqual(['bento', 'audiophile', 'cinematic']);
+    for (const legacy of LEGACY_AIDEO_PAGE_DESIGNS) {
+      expect(['classic', 'editorial', 'command', 'stage']).not.toContain(legacy);
+    }
   });
 });

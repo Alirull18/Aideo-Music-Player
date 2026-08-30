@@ -109,6 +109,17 @@ fn parse_replaygain_value(value: &symphonia::core::meta::Value) -> Option<f64> {
     num_part.parse::<f64>().ok()
 }
 
+/// Opus files carry `R128_TRACK_GAIN` referenced to −23 LUFS (RFC 7845) while
+/// ReplayGain 2.0 tags are referenced to −18 LUFS. Stored gains are applied
+/// uniformly at playback, so an Opus R128-sourced tag must be shifted +5 dB
+/// to be equivalent to its ReplayGain 2.0 counterpart.
+fn adjust_opus_r128_gain(gain: Option<f64>, from_r128_tag: bool, is_opus: bool) -> Option<f64> {
+    match (gain, from_r128_tag, is_opus) {
+        (Some(g), true, true) => Some(g + 5.0),
+        (g, _, _) => g,
+    }
+}
+
 fn parse_number_str(s: &str) -> Option<i32> {
     let clean = s.trim_matches('\0').trim();
     let num_part = clean.split('/').next()?.trim();
@@ -408,7 +419,7 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_dff_props;
+    use super::{adjust_opus_r128_gain, parse_dff_props};
 
     fn dff_header(sample_rate: u32, channels: u16) -> Vec<u8> {
         let mut b = Vec::new();
@@ -457,6 +468,42 @@ mod tests {
         let (rate, ch) = parse_dff_props(&[0u8; 64]);
         assert_eq!(rate, 0);
         assert_eq!(ch, 0);
+    }
+
+    #[test]
+    fn test_opus_r128_tag_gets_plus_5db_reference_correction() {
+        // RFC 7845 stores R128_TRACK_GAIN against a −23 LUFS reference while
+        // ReplayGain 2.0 tags target −18 LUFS; stored gains are applied
+        // uniformly, so an Opus R128 tag must be shifted +5 dB.
+        assert_eq!(
+            adjust_opus_r128_gain(Some(-7.2), true, true),
+            Some(-2.2)
+        );
+    }
+
+    #[test]
+    fn test_non_opus_r128_tag_is_left_untouched() {
+        // FLAC/MP3 files may legally carry R128-named tags written by tools
+        // that already use RG conventions — never shift those.
+        assert_eq!(
+            adjust_opus_r128_gain(Some(-7.2), true, false),
+            Some(-7.2)
+        );
+    }
+
+    #[test]
+    fn test_opus_replaygain_tag_is_left_untouched() {
+        // A real ReplayGain tag on an Opus file is already −18-referenced.
+        assert_eq!(
+            adjust_opus_r128_gain(Some(-3.5), false, true),
+            Some(-3.5)
+        );
+    }
+
+    #[test]
+    fn test_missing_replaygain_stays_none_after_adjustment() {
+        assert_eq!(adjust_opus_r128_gain(None, true, true), None);
+        assert_eq!(adjust_opus_r128_gain(None, false, false), None);
     }
 
     #[test]
@@ -510,6 +557,8 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
     let mut track_number = None;
     let mut disc_number = None;
     let mut replaygain_gain = None;
+    // True when replaygain_gain came from an R128-named tag (−23 LUFS ref).
+    let mut rg_from_r128 = false;
 
     if let Some(metadata) = probed.format.metadata().current() {
         for tag in metadata.tags() {
@@ -519,7 +568,10 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                 Some(symphonia::core::meta::StandardTagKey::Album) => album = Some(tag.value.to_string()),
                 Some(symphonia::core::meta::StandardTagKey::TrackNumber) => track_number = parse_number_value(&tag.value),
                 Some(symphonia::core::meta::StandardTagKey::DiscNumber) => disc_number = parse_number_value(&tag.value),
-                Some(symphonia::core::meta::StandardTagKey::ReplayGainTrackGain) => replaygain_gain = parse_replaygain_value(&tag.value),
+                Some(symphonia::core::meta::StandardTagKey::ReplayGainTrackGain) => {
+                    replaygain_gain = parse_replaygain_value(&tag.value);
+                    rg_from_r128 = false;
+                }
                 _ => {
                     let key_upper = tag.key.to_uppercase();
                     if track_number.is_none() && (key_upper == "TRACKNUMBER" || key_upper == "TRACK" || key_upper == "TRCK") {
@@ -528,6 +580,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                         disc_number = parse_number_value(&tag.value);
                     } else if replaygain_gain.is_none() && (key_upper == "REPLAYGAIN_TRACK_GAIN" || key_upper == "R128_TRACK_GAIN" || key_upper == "REPLAYGAIN_TRACK_GAIN_DB") {
                         replaygain_gain = parse_replaygain_value(&tag.value);
+                        rg_from_r128 = key_upper == "R128_TRACK_GAIN";
                     }
                 }
             }
@@ -553,6 +606,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                                 disc_number = parse_number_value(&tag.value);
                             } else if replaygain_gain.is_none() && (key_upper == "REPLAYGAIN_TRACK_GAIN" || key_upper == "R128_TRACK_GAIN" || key_upper == "REPLAYGAIN_TRACK_GAIN_DB") {
                                 replaygain_gain = parse_replaygain_value(&tag.value);
+                                rg_from_r128 = key_upper == "R128_TRACK_GAIN";
                             }
                         }
                     }
@@ -560,6 +614,9 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
             }
         }
     }
+
+    let is_opus = extension.as_deref() == Some("opus");
+    let replaygain_gain = adjust_opus_r128_gain(replaygain_gain, rg_from_r128, is_opus);
 
     let (path_disc, path_track) = extract_disc_and_track_from_path(path);
     let final_track_number = track_number.or(path_track);

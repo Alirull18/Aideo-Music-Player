@@ -2,8 +2,10 @@ import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isStreamTrack } from '../utils';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
+import { notifyTidalAuthFailure } from './tidalSlice';
+import { notifyQobuzAuthFailure } from './qobuzSlice';
 
 let isPolling = false;
 let dspThrottleTimeout: any = null;
@@ -69,46 +71,58 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     return 1.0;
   })(),
   dsp: {
-    enabled: false,
+    enabled: localStorage.getItem('aideo_dsp_enabled') === 'true',
     low_spec_mode: localStorage.getItem('aideo_low_spec') === 'true',
     audio_profile: (localStorage.getItem('aideo_audio_profile') as any) || 'normal',
     resampler_interpolation: (localStorage.getItem('aideo_resampler_interpolation') as any) || 'linear',
     resampler_sinc_len: Number(localStorage.getItem('aideo_resampler_sinc_len') || 128) as any,
     resampler_oversampling: Number(localStorage.getItem('aideo_resampler_oversampling') || 256) as any,
-    ffmpeg_transcode_quality: (localStorage.getItem('aideo_ffmpeg_transcode_quality') as any) || 'studio',
+    ffmpeg_transcode_quality: (localStorage.getItem('aideo_ffmpeg_transcode_quality') as any) || 'native',
     width: 1.0,
     upsample_rate: 0,
     dither: false,
-    exclusive_mode_timing: (localStorage.getItem('aideo_exclusive_timing') as any) || 'polling',
+    exclusive_mode_timing: (localStorage.getItem('aideo_exclusive_timing') as any) || 'event',
     preamp_gain: Number(localStorage.getItem('aideo_preamp_gain') || 0.0),
     limiter_threshold: Number(localStorage.getItem('aideo_limiter_threshold') || -0.1),
     resampler_phase_mode: (localStorage.getItem('aideo_resampler_phase_mode') as any) || 'linear',
-    eq_enabled: false,
-    eq_parametric: false,
-    eq_graphic_gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    eq_parametric_bands: [
-      { freq: 80, gain: 0, q: 0.7, band_type: 'lowshelf' },
-      { freq: 120, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 240, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 400, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 750, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 1500, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 2200, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 4000, gain: 0, q: 1.0, band_type: 'peaking' },
-      { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' },
-      { freq: 10000, gain: 0, q: 0.7, band_type: 'peaking' }
-    ],
-    crossfeed_enabled: false,
-    crossfeed_level: -6.0,
-    crossfeed_corner: 700.0,
-    spatial_enabled: false,
-    spatial_haas_delay: 7.5,
-    spatial_wet: 0.15,
+    eq_enabled: localStorage.getItem('aideo_eq_enabled') === 'true',
+    eq_parametric: localStorage.getItem('aideo_eq_parametric') !== null ? localStorage.getItem('aideo_eq_parametric') === 'true' : false,
+    eq_graphic_gains: (() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('aideo_eq_gains') || 'null');
+        if (Array.isArray(saved) && saved.length === 10 && saved.every((g: any) => typeof g === 'number')) return saved;
+      } catch {}
+      return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    })(),
+    eq_parametric_bands: (() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('aideo_eq_bands') || 'null');
+        if (Array.isArray(saved) && saved.length === 10) return saved;
+      } catch {}
+      return [
+        { freq: 80, gain: 0, q: 0.7, band_type: 'lowshelf' },
+        { freq: 120, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 240, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 400, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 750, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 1500, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 2200, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 4000, gain: 0, q: 1.0, band_type: 'peaking' },
+        { freq: 6000, gain: 0, q: 0.7, band_type: 'highshelf' },
+        { freq: 10000, gain: 0, q: 0.7, band_type: 'peaking' }
+      ];
+    })(),
+    crossfeed_enabled: localStorage.getItem('aideo_crossfeed_enabled') === 'true',
+    crossfeed_level: Number(localStorage.getItem('aideo_crossfeed_level') || -6.0),
+    crossfeed_corner: Number(localStorage.getItem('aideo_crossfeed_corner') || 700.0),
+    spatial_enabled: localStorage.getItem('aideo_spatial_enabled') === 'true',
+    spatial_haas_delay: Number(localStorage.getItem('aideo_spatial_haas_delay') || 7.5),
+    spatial_wet: Number(localStorage.getItem('aideo_spatial_wet') || 0.15),
     convolution_enabled: localStorage.getItem('aideo_convolution_enabled') === 'true',
     convolution_ir_path: localStorage.getItem('aideo_convolution_ir_path') || '',
     convolution_wet: Number(localStorage.getItem('aideo_convolution_wet') || 0.5),
-    subsonic_enabled: false,
-    night_mode_enabled: false,
+    subsonic_enabled: localStorage.getItem('aideo_subsonic_enabled') === 'true',
+    night_mode_enabled: localStorage.getItem('aideo_night_mode_enabled') === 'true',
     r128_enabled: localStorage.getItem('aideo_r128_enabled') === 'true',
     aideo_filter_enabled: localStorage.getItem('aideo_filter_enabled') === 'true',
     aideo_filter_room_size: Number(localStorage.getItem('aideo_filter_room_size') || 0.85),
@@ -120,7 +134,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     crossfade_transition_enabled: localStorage.getItem('aideo_crossfade_enabled') === 'true',
     crossfade_transition_duration: Number(localStorage.getItem('aideo_crossfade_duration') || 5.0),
     stream_engine: (localStorage.getItem('aideo_stream_engine') || 'yt-dlp') as 'yt-dlp' | 'reqwest',
-    lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false'
+    lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false',
+    track_replaygain_gain: 0.0,
+    playback_rate: 1.0
   },
   devices: [],
   currentDevice: null,
@@ -271,7 +287,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           if (!t && state.currentTrack && pathsEqual(state.currentTrack.path, targetPath)) {
             t = state.currentTrack;
           }
-          
+
           if (t) {
             get().playTrack(t);
             return;
@@ -279,6 +295,16 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
             get().playStream(targetPath);
             return;
           }
+        }
+        // Nothing to resume (e.g. playback died mid-stream): restart from the
+        // queue so the play button is never a dead end while tracks are queued.
+        if (state.queue.length > 0) {
+          await get().playFromQueue(0);
+          return;
+        }
+        // Truly nothing to resume locally — don't flip the UI to a fake "Playing".
+        if (!state.chromecast_connected && !state.upnp_connected) {
+          return;
         }
       }
       if (state.chromecast_connected) {
@@ -310,12 +336,13 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       localStorage.removeItem('aideo_resume_position');
       set({
         currentTrack: null,
-        playback: { 
-          ...get().playback, 
+        playback: {
+          ...get().playback,
           status: 'Stopped',
           current_track: null,
           last_played_track: current || get().playback.last_played_track,
-          position_secs: 0 
+          last_stop_time: Date.now(),
+          position_secs: 0
         },
         coverArt: null,
         lyrics: [],
@@ -463,7 +490,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // Anti-Race Condition: If frontend eagerly set a track but backend is still booting it up,
       // the backend will temporarily return null/Stopped. Ignore it to prevent wiping the UI.
       if (prevTrack && !newTrack && status.status === 'Stopped') {
-        return;
+        const sinceSkip = Date.now() - (get().playback.last_skip_time || 0);
+        if (sinceSkip < 2000) {
+          return;
+        }
+        // Beyond the skip window a backend Stopped+null is real (stream died / queue
+        // drained). Allow a short grace period for track-ended recovery (autoplay
+        // radio refill), then accept the stop so the UI can't freeze on a silent
+        // "Playing" track forever.
+        const detectedAt = get().playback.backend_stop_detected_at || 0;
+        if (!detectedAt) {
+          set(s => ({ playback: { ...s.playback, backend_stop_detected_at: Date.now() } }));
+          return;
+        }
+        if (Date.now() - detectedAt < 5000) {
+          return;
+        }
+      } else if (get().playback.backend_stop_detected_at) {
+        set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
       }
 
       // Strict Anti-Bounce: The frontend is the source of truth for track selections.
@@ -479,8 +523,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         return;
       }
 
-      // Initial startup sync or backend-driven recovery
-      if (!prevTrack && newTrack) {
+      // Initial startup sync or backend-driven recovery.
+      // Guard: 'stop_track' is async on the Rust side — right after clicking Stop, the
+      // backend still reports the old track here. Transitioning on it would resurrect
+      // the stopped track and re-trigger the autoplay queue rebuild (queue duplicates).
+      const sinceStop = Date.now() - (get().playback.last_stop_time || 0);
+      if (!prevTrack && newTrack && status.status === 'Playing' && sinceStop > 3000) {
         await get().handleTrackTransition(newTrack);
         return;
       }
@@ -636,6 +684,13 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
     let full = { ...get().dsp, ...newDSP } as DSPState;
 
+    // Auto-raise the master DSP switch when the user activates or tweaks any Lab control,
+    // so adjustments are audible without hunting for the A/B toggle first.
+    // An explicit `enabled` in newDSP (A/B switch, bit-perfect, exclusive, factory reset) always wins.
+    if (newDSP.enabled === undefined && isActivatingDSP && !full.enabled) {
+      full.enabled = true;
+    }
+
     // A. If the user changed the overall preset directly
     if (newDSP.audio_profile !== undefined && newDSP.audio_profile !== 'custom') {
       const preset = newDSP.audio_profile;
@@ -680,6 +735,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
 
     // Save all to localStorage
+    localStorage.setItem('aideo_dsp_enabled', String(full.enabled));
+    localStorage.setItem('aideo_eq_enabled', String(full.eq_enabled));
+    localStorage.setItem('aideo_eq_parametric', String(full.eq_parametric));
+    localStorage.setItem('aideo_eq_gains', JSON.stringify(full.eq_graphic_gains));
+    localStorage.setItem('aideo_eq_bands', JSON.stringify(full.eq_parametric_bands));
+    localStorage.setItem('aideo_crossfeed_enabled', String(full.crossfeed_enabled));
+    localStorage.setItem('aideo_crossfeed_level', String(full.crossfeed_level));
+    localStorage.setItem('aideo_crossfeed_corner', String(full.crossfeed_corner));
+    localStorage.setItem('aideo_spatial_enabled', String(full.spatial_enabled));
+    localStorage.setItem('aideo_spatial_haas_delay', String(full.spatial_haas_delay));
+    localStorage.setItem('aideo_spatial_wet', String(full.spatial_wet));
+    localStorage.setItem('aideo_subsonic_enabled', String(full.subsonic_enabled));
+    localStorage.setItem('aideo_night_mode_enabled', String(full.night_mode_enabled));
     localStorage.setItem('aideo_audio_profile', full.audio_profile);
     localStorage.setItem('aideo_resampler_interpolation', full.resampler_interpolation);
     localStorage.setItem('aideo_resampler_sinc_len', String(full.resampler_sinc_len));
@@ -731,7 +799,44 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   toggleDspAB: async () => {
     const current = get().dsp;
     const nextEnabled = !current.enabled;
-    await get().setDSP({ enabled: nextEnabled });
+    if (nextEnabled) {
+      const hasAnyActive =
+        current.eq_enabled ||
+        current.spatial_enabled ||
+        current.crossfeed_enabled ||
+        current.aideo_filter_enabled ||
+        current.saturation_enabled ||
+        current.subsonic_enabled ||
+        current.night_mode_enabled ||
+        current.convolution_enabled ||
+        (current.preamp_gain !== 0);
+
+      const isEqFlat =
+        current.eq_graphic_gains.every(g => g === 0) &&
+        (!current.eq_parametric_bands || current.eq_parametric_bands.every(b => b.gain === 0));
+
+      if (!hasAnyActive || isEqFlat) {
+        const tunedGraphic = [3.5, 2.5, 1.5, 0.5, 0.0, 0.5, 1.0, 2.0, 3.0, 3.5];
+        const tunedBands = current.eq_parametric_bands.map((band, idx) => {
+          if (idx === 0) return { ...band, freq: 80, gain: 3.5, band_type: 'lowshelf' };
+          if (idx === 1) return { ...band, freq: 120, gain: 2.5, band_type: 'peaking' };
+          if (idx === 8) return { ...band, freq: 6000, gain: 2.5, band_type: 'highshelf' };
+          if (idx === 9) return { ...band, freq: 10000, gain: 3.0, band_type: 'peaking' };
+          return { ...band, gain: 0 };
+        });
+        await get().setDSP({
+          enabled: true,
+          eq_enabled: true,
+          eq_graphic_gains: tunedGraphic,
+          eq_parametric_bands: tunedBands,
+          preamp_gain: -1.5
+        });
+      } else {
+        await get().setDSP({ enabled: true });
+      }
+    } else {
+      await get().setDSP({ enabled: false });
+    }
     window.dispatchEvent(new CustomEvent('ui-toast', {
       detail: {
         message: nextEnabled ? '⚡ A/B Mode B: Tuned DSP & AutoEQ Active' : '🎧 A/B Mode A: Direct Raw Bypass (DSP Off)',
@@ -744,7 +849,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       const res = await invoke<boolean>('toggle_exclusive_mode');
       const nextMode = typeof res === 'boolean' ? res : !get().playback.exclusive;
-      if (nextMode) await get().setDSP({ enabled: false });
       set(s => ({ playback: { ...s.playback, exclusive: nextMode } }));
     } catch (e) { console.error(e); }
   },
@@ -1018,19 +1122,23 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
 
       let finalPath = track.path;
-      if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
           const cachedResolved = trackIdToStreamUrl.get(track.path);
           if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
             finalPath = cachedResolved.url;
-            console.log('[Tidal] Using pre-resolved stream URL for track in addToQueue:', track.title);
+            console.log('[Streaming] Using pre-resolved stream URL for track in addToQueue:', track.title);
           } else {
-            finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+            const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
+            finalPath = await invoke<string>(resolver, { trackId: track.path });
             trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
-            resolvedPathMap.set(finalPath, track.path);
           }
+          rememberResolvedPath(finalPath, track.path);
+          setOnlineTrackCache(finalPath, track);
         } catch (err) {
-          console.error('Failed to resolve Tidal stream in addToQueue:', err);
+          console.error('Failed to resolve stream in addToQueue:', err);
+          notifyTidalAuthFailure(err);
+          notifyQobuzAuthFailure(err);
         }
       }
 
@@ -1054,19 +1162,23 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
 
       let finalPath = track.path;
-      if (track.format === 'Tidal FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
           const cachedResolved = trackIdToStreamUrl.get(track.path);
           if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
             finalPath = cachedResolved.url;
-            console.log('[Tidal] Using pre-resolved stream URL for track in playNextInQueue:', track.title);
+            console.log('[Streaming] Using pre-resolved stream URL for track in playNextInQueue:', track.title);
           } else {
-            finalPath = await invoke<string>('tidal_get_stream_url', { trackId: track.path });
+            const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
+            finalPath = await invoke<string>(resolver, { trackId: track.path });
             trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
-            resolvedPathMap.set(finalPath, track.path);
           }
+          rememberResolvedPath(finalPath, track.path);
+          setOnlineTrackCache(finalPath, track);
         } catch (err) {
-          console.error('Failed to resolve Tidal stream in playNextInQueue:', err);
+          console.error('Failed to resolve stream in playNextInQueue:', err);
+          notifyTidalAuthFailure(err);
+          notifyQobuzAuthFailure(err);
         }
       }
 
@@ -1115,10 +1227,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   clearQueue: async () => {
     try {
-      const currentTrack = get().currentTrack;
-      const isOnline = currentTrack ? isStreamTrack(currentTrack.path, currentTrack.format) : false;
-      const isAutoplayEnabled = get().autoplayEnabled;
-      
+      // Remember cleared autoplay tracks so a later radio refill doesn't re-add them
       const currentQueue = get().queue;
       const clearedPaths = currentQueue.map(t => t.path);
       if (clearedPaths.length > 0) {
@@ -1131,18 +1240,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await invoke('clear_queue');
       });
 
+      // Clear only — never stop the current track or rebuild the radio here.
+      // When the current track ends naturally, playNext() may start a fresh radio
+      // (excluding the paths recorded above) if autoplay is enabled.
       set({ queue: [] });
       localStorage.setItem('aideo_queue', JSON.stringify([]));
-
-      if (isAutoplayEnabled && currentTrack && isOnline) {
-        await get().stopTrack();
-        await get().triggerAutoplayRadio(currentTrack, true);
-        
-        const newQueue = get().queue;
-        if (newQueue.length > 0) {
-          await get().playFromQueue(0);
-        }
-      }
     } catch (e) { console.error(e); }
   },
 
@@ -1169,13 +1271,26 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (saved) {
         const parsed: Track[] = JSON.parse(saved);
         if (parsed.length > 0) {
-          const localTracks = parsed.filter(t => !t.path.startsWith('http://') && !t.path.startsWith('https://') && t.format !== 'Tidal FLAC');
+          const localTracks = parsed.filter(t => !t.path.startsWith('http://') && !t.path.startsWith('https://') && t.format !== 'Tidal FLAC' && t.format !== 'Qobuz FLAC');
           let validTracks = parsed;
           
           const isAutoplayEnabled = localStorage.getItem('aideo_autoplay') !== 'false';
           if (!isAutoplayEnabled) {
             validTracks = validTracks.filter(t => !t.is_autoplay);
           }
+
+          // Heal entries corrupted by earlier queue rebuilds: stream URLs that lost
+          // their metadata show a bare hostname (e.g. "Lgf.audio.tidal.com") as title.
+          // Re-derive from the persisted online track cache where possible.
+          validTracks = validTracks.map(t => {
+            if (!t.path.startsWith('http://') && !t.path.startsWith('https://')) return t;
+            if (!isGenericStreamTitle(t.title)) return t;
+            const meta = parseStreamMetadata(t.path);
+            if (meta.title && meta.title !== t.title) {
+              return { ...t, title: meta.title, artist: t.artist && t.artist !== 'Online Stream' ? t.artist : meta.artist };
+            }
+            return t;
+          });
           
           if (localTracks.length > 0) {
             const localPaths = localTracks.map(t => t.path);
@@ -1194,7 +1309,31 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           
           await invoke('clear_queue');
           if (validTracks.length > 0) {
-            const paths = validTracks.map(t => t.path);
+            // Resolve Tidal/Qobuz track IDs to stream URLs first — the backend queue
+            // stores raw paths and cannot resolve provider IDs itself.
+            const paths: string[] = [];
+            for (const t of validTracks) {
+              let p = t.path;
+              if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
+                try {
+                  const cachedResolved = trackIdToStreamUrl.get(t.path);
+                  if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+                    p = cachedResolved.url;
+                  } else {
+                    const resolver = t.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
+                    p = await invoke<string>(resolver, { trackId: t.path });
+                    trackIdToStreamUrl.set(t.path, { url: p, resolvedAt: Date.now() });
+                  }
+                  rememberResolvedPath(p, t.path);
+                  setOnlineTrackCache(p, t);
+                } catch (err) {
+                  console.error('Failed to resolve stream in initializeQueue:', err);
+                  notifyTidalAuthFailure(err);
+                  notifyQobuzAuthFailure(err);
+                }
+              }
+              paths.push(p);
+            }
             await invoke('add_to_queue_bulk', { paths });
           }
           set({ queue: validTracks });
@@ -1206,33 +1345,42 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   fetchQueue: async () => {
     try {
-      const paths: string[] = await invoke('get_queue');
-      const { tracks, queue: currentQueue } = get();
-      
-      const queueTracks = paths.map((p, idx) => {
-        // 1. Check if the track exists in local library tracks
-        const libTrack = tracks.find(t => pathsEqual(t.path, p));
-        if (libTrack) return libTrack;
+      // Read the backend queue through the same serialized chain as clear/add/remove,
+      // otherwise a concurrent clear_queue could execute AFTER this read and its
+      // result would resurrect the just-cleared items into state + localStorage.
+      const queueTracks = await chainQueueOperation(async () => {
+        const paths: string[] = await invoke('get_queue');
+        const { tracks, queue: currentQueue } = get();
 
-        // 2. Check if the track metadata already exists in the current queue state
-        const existingTrack = currentQueue.find(t => pathsEqual(t.path, p));
-        if (existingTrack) return existingTrack;
+        return paths.map((p, idx) => {
+          // 1. Check if the track exists in local library tracks
+          const libTrack = tracks.find(t => pathsEqual(t.path, p));
+          if (libTrack) return libTrack;
 
-        // 3. Fallback: Construct a high-fidelity virtual Track object for online/streaming paths
-        const isOnline = p.startsWith('http://') || p.startsWith('https://');
-        const meta = isOnline ? parseStreamMetadata(p) : { title: baseName(p), artist: 'Web Stream' };
-        const virtualTrack: Track = {
-          id: -1000 - idx, // ensure a unique negative ID to prevent conflicts with database IDs
-          path: p,
-          title: meta.title,
-          artist: meta.artist,
-          duration: null,
-          format: isOnline ? 'URL' : 'MP3/FLAC',
-          lyric_offset: 0
-        };
-        return virtualTrack;
+          // 2. Check if the track metadata already exists in the current queue state
+          const existingTrack = currentQueue.find(t => pathsEqual(t.path, p));
+          if (existingTrack) return existingTrack;
+
+          // 3. Fallback: Construct a high-fidelity virtual Track object for online/streaming paths
+          const isOnline = p.startsWith('http://') || p.startsWith('https://');
+          const cachedMeta = onlineTrackCache.get(p) || onlineTrackCache.get(resolvedPathMap.get(p) || '');
+          const meta = isOnline ? parseStreamMetadata(p) : { title: baseName(p), artist: 'Web Stream' };
+          const virtualTrack: Track = {
+            id: -1000 - idx, // ensure a unique negative ID to prevent conflicts with database IDs
+            path: p,
+            title: cachedMeta?.title || meta.title,
+            artist: cachedMeta?.artist || meta.artist,
+            duration: cachedMeta?.duration ?? null,
+            format: cachedMeta?.format || (isOnline ? 'URL' : 'MP3/FLAC'),
+            lyric_offset: 0,
+            cover_url: cachedMeta?.cover_url || null,
+            is_autoplay: cachedMeta?.is_autoplay || undefined
+          };
+          return virtualTrack;
+        });
       });
 
+      if (!queueTracks) return;
       set({ queue: queueTracks });
       localStorage.setItem('aideo_queue', JSON.stringify(queueTracks));
     } catch (e) { console.error("Failed to fetch queue:", e); }

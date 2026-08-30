@@ -59,6 +59,7 @@ export interface DiscoveryHubData {
   heavy_rotation?: YoutubeTrack[];
   forgotten_gems?: YoutubeTrack[];
   playlist_mixes?: YoutubeMix[];
+  tidal_hifi?: YoutubeTrack[];
 }
 
 export interface Playlist {
@@ -158,7 +159,7 @@ export interface DSPState {
   resampler_interpolation: 'linear' | 'cubic';
   resampler_sinc_len: 64 | 128 | 256;
   resampler_oversampling: 128 | 256 | 512;
-  ffmpeg_transcode_quality: 'standard' | 'studio' | 'hires';
+  ffmpeg_transcode_quality: 'standard' | 'studio' | 'hires' | 'native';
   width: number;
   upsample_rate: number;
   dither: boolean;
@@ -203,6 +204,8 @@ export interface DSPState {
   crossfade_transition_duration: number;
   stream_engine: 'yt-dlp' | 'reqwest';
   lookahead_prebuffer_enabled: boolean;
+  track_replaygain_gain?: number;
+  playback_rate?: number;
 }
 
 
@@ -219,8 +222,10 @@ export interface PlaybackState {
   driver_type: 'WASAPI' | 'ASIO';
   last_skip_time?: number;
   last_seek_time?: number;
+  last_stop_time?: number;
   last_played_track?: string | null;
   last_poll_time?: number;
+  backend_stop_detected_at?: number;
   file_rate?: number;
   file_ch?: number;
   file_format?: string | null;
@@ -280,6 +285,25 @@ export interface PlayerState {
   showLyricsHeader: boolean;
   scrobbleEnabled: boolean;
   lastfmSessionKey: string | null;
+  tidalConnected: boolean;
+  tidalSearching: boolean;
+  tidalSearchResults: Track[];
+  pendingSettingsTab: string | null;
+  checkTidalStatus: () => Promise<void>;
+  searchTidal: (query: string) => Promise<void>;
+  playTidalResult: (track: Track) => Promise<void>;
+  downloadTidalTrack: (track: Track) => Promise<void>;
+
+  // Qobuz Streaming (Experimental)
+  qobuzExperimentalEnabled: boolean;
+  toggleQobuzExperimental: () => void;
+  qobuzConnected: boolean;
+  qobuzSearching: boolean;
+  qobuzSearchResults: Track[];
+  checkQobuzStatus: () => Promise<void>;
+  searchQobuz: (query: string) => Promise<void>;
+  playQobuzResult: (track: Track) => Promise<void>;
+  downloadQobuzTrack: (track: Track) => Promise<void>;
   lastfmToken: string | null;
   scrobbledCurrent: boolean;
   lastScrobble: { artist: string; track: string } | null;
@@ -559,7 +583,11 @@ export interface PlayerState {
 }
 
 export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 'vinyl';
-export type AideoPageDesign = 'classic' | 'bento' | 'audiophile' | 'cinematic';
+export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage';
+
+// Design ids that existed before the 2026 home redesign. Stored values from
+// these are migrated to 'classic' on load.
+export const LEGACY_AIDEO_PAGE_DESIGNS = ['bento', 'audiophile', 'cinematic'] as const;
 
 function rgbToHsl(r: number, g: number, b: number) {
   r /= 255; g /= 255; b /= 255;

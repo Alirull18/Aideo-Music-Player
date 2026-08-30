@@ -48,6 +48,16 @@ pub static STREAM_LATENCY_MS: AtomicU32 = AtomicU32::new(0);
 pub static ACTIVE_STREAM_BUFFERED_BYTES: AtomicU64 = AtomicU64::new(0);
 pub static ACTIVE_STREAM_TOTAL_BYTES: AtomicU64 = AtomicU64::new(0);
 
+/// Consecutive WASAPI Exclusive failures for the CURRENT track (negotiation
+/// and start failures plus runtime stream errors). Reset on success, on a new
+/// track, and when the user re-toggles Exclusive Mode. Without this budget a
+/// misbehaving driver causes an unbounded teardown/rebuild storm that sounds
+/// like the song being stuck.
+pub static EXCLUSIVE_STREAM_FAILURES: AtomicU32 = AtomicU32::new(0);
+/// Ensures the "staying in Shared Mode" toast fires once per budget, not on
+/// every subsequent restart.
+pub static EXCLUSIVE_FALLBACK_NOTIFIED: AtomicBool = AtomicBool::new(false);
+
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct NetworkTelemetry {
     pub session_downloaded_bytes: u64,
@@ -74,6 +84,7 @@ fn select_output_config(
     file_ch: usize,
     is_exclusive: bool,
     is_stream: bool,
+    stream_allows_exclusive: bool,
     upsample_target: u32,
     device_display_name: &str,
 ) -> Vec<(cpal::StreamConfig, cpal::SampleFormat)> {
@@ -99,13 +110,14 @@ fn select_output_config(
     }
 
     // Priority 2: Native Bit-Perfect Match
-    if configs.is_empty() && is_exclusive && !is_stream {
+    if configs.is_empty() && is_exclusive && (!is_stream || stream_allows_exclusive) {
         if let Ok(supported) = device.supported_output_configs() {
             let supported_configs: Vec<_> = supported.collect();
+            let target_ch = file_ch.max(2);
             
             // Priority 2a: High-Res Integer (I32/I24)
             for c in &supported_configs {
-                if c.channels() as usize == file_ch
+                if (c.channels() as usize == file_ch || c.channels() as usize == target_ch)
                     && (c.sample_format() == cpal::SampleFormat::I32 || c.sample_format() == cpal::SampleFormat::I24)
                     && c.min_sample_rate() <= (file_rate as u32)
                     && c.max_sample_rate() >= (file_rate as u32)
@@ -119,7 +131,7 @@ fn select_output_config(
             // Priority 2b: I16
             if configs.is_empty() {
                 for c in &supported_configs {
-                    if c.channels() as usize == file_ch
+                    if (c.channels() as usize == file_ch || c.channels() as usize == target_ch)
                         && c.sample_format() == cpal::SampleFormat::I16
                         && c.min_sample_rate() <= (file_rate as u32)
                         && c.max_sample_rate() >= (file_rate as u32)
@@ -134,7 +146,7 @@ fn select_output_config(
             // Priority 2c: F32
             if configs.is_empty() {
                 for c in &supported_configs {
-                    if c.channels() as usize == file_ch
+                    if (c.channels() as usize == file_ch || c.channels() as usize == target_ch)
                         && c.sample_format() == cpal::SampleFormat::F32
                         && c.min_sample_rate() <= (file_rate as u32)
                         && c.max_sample_rate() >= (file_rate as u32)
@@ -1105,6 +1117,24 @@ fn detect_audio_extension(bytes: &[u8]) -> &'static str {
     }
 }
 
+fn transcode_codec_and_rate(quality: &str, is_dsd: bool) -> (&'static str, Option<&'static str>) {
+    if quality == "native" && !is_dsd {
+        return ("pcm_s24le", None);
+    }
+    let quality = if quality == "native" { "hires" } else { quality };
+    let (codec, rate) = match quality {
+        "hires" => ("pcm_s24le", if is_dsd { "176400" } else { "96000" }),
+        "studio" => ("pcm_s24le", if is_dsd { "88200" } else { "48000" }),
+        _ => ("pcm_s16le", "44100"),
+    };
+    (codec, Some(rate))
+}
+
+fn stream_allows_exclusive_mode(resolved_path: &str) -> bool {
+    let p = resolved_path.to_lowercase();
+    !(p.contains(".m3u8") || p.contains("hls_playlist") || p.contains("/hls/") || p.ends_with(".m3u8"))
+}
+
 /// 🎵 Prepare the media source and decoder
 fn prepare_decoder(
     path: &str,
@@ -1113,7 +1143,7 @@ fn prepare_decoder(
     ffmpeg_path: &str,
     current_process: &Arc<Mutex<Option<std::process::Child>>>,
     ffmpeg_transcode_quality: &str,
-    dsp_state: &DSPState,
+    _dsp_state: &DSPState,
 ) -> Result<DecoderInfo, String> {
     let mut resolved_path = path.to_string();
     
@@ -1211,12 +1241,12 @@ fn prepare_decoder(
 
                 resolved_path = temp_path.to_string_lossy().to_string();
 
-                println!("[player] Buffering first 64KB of YouTube track to ensure stable probing...");
+                println!("[player] Buffering first 512KB of YouTube track to ensure stable high-res DAC streaming...");
                 let _ = app_handle.emit("stream-buffering-start", path);
                 let start_time = std::time::Instant::now();
                 loop {
                     let file_size = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
-                    if file_size >= 64 * 1024 {
+                    if file_size >= 512 * 1024 {
                         break;
                     }
                     if start_time.elapsed().as_secs() > 20 {
@@ -1283,7 +1313,7 @@ fn prepare_decoder(
     } else {
         false
     };
-    let mut use_ffmpeg = is_stream || is_dsd || dsp_state.aideo_filter_enabled;
+    let mut use_ffmpeg = is_stream || is_dsd;
 
     if !is_stream && !is_dsd {
         // Try native Symphonia probing and decoding first for maximum quality/bit-perfect local playback
@@ -1499,28 +1529,17 @@ fn prepare_decoder(
             ]);
         }
         
-        if dsp_state.aideo_filter_enabled {
-            let delay1 = (dsp_state.aideo_filter_room_size * 50.0).round() as u32;
-            let delay2 = (dsp_state.aideo_filter_room_size * 80.0).round() as u32;
-            let lowshelf_db = dsp_state.aideo_filter_bass_thump * 0.7; // add warmth
-            let af_filter = format!(
-                "aecho=0.8:0.88:{}|{}:0.4|0.3, extrastereo=m=1.6, lowshelf=f=120:g={:.1}, equalizer=f=55:width_type=h:w=30:g={:.1}, freeverb=roomsize={:.2}:damp={:.2}:wet=0.35:dry=0.75, highshelf=f=10000:g=-5:t=1",
-                delay1, delay2, lowshelf_db, dsp_state.aideo_filter_bass_thump, dsp_state.aideo_filter_room_size, dsp_state.aideo_filter_dampening
-            );
-            args.push("-af".to_string());
-            args.push(af_filter);
-        }
-        
-        let (codec, rate) = match ffmpeg_transcode_quality {
-            "hires" => ("pcm_s24le", if is_dsd { "176400" } else { "96000" }),
-            "studio" => ("pcm_s24le", if is_dsd { "88200" } else { "48000" }),
-            _ => ("pcm_s16le", "44100"),
-        };
+        let (codec, rate) = transcode_codec_and_rate(ffmpeg_transcode_quality, is_dsd);
 
         args.extend([
             "-f".to_string(), "wav".to_string(),
             "-acodec".to_string(), codec.to_string(),
-            "-ar".to_string(), rate.to_string(),
+        ]);
+        if let Some(rate) = rate {
+            args.push("-ar".to_string());
+            args.push(rate.to_string());
+        }
+        args.extend([
             "-ac".to_string(), "2".to_string(),
             "-".to_string()
         ]);
@@ -1598,28 +1617,17 @@ fn prepare_decoder(
                 args.push(start_pos.to_string());
             }
             
-            if dsp_state.aideo_filter_enabled {
-                let delay1 = (dsp_state.aideo_filter_room_size * 50.0).round() as u32;
-                let delay2 = (dsp_state.aideo_filter_room_size * 80.0).round() as u32;
-                let lowshelf_db = dsp_state.aideo_filter_bass_thump * 0.7; // add warmth
-                let af_filter = format!(
-                    "aecho=0.8:0.88:{}|{}:0.4|0.3, extrastereo=m=1.6, lowshelf=f=120:g={:.1}, equalizer=f=55:width_type=h:w=30:g={:.1}, freeverb=roomsize={:.2}:damp={:.2}:wet=0.35:dry=0.75, highshelf=f=10000:g=-5:t=1",
-                    delay1, delay2, lowshelf_db, dsp_state.aideo_filter_bass_thump, dsp_state.aideo_filter_room_size, dsp_state.aideo_filter_dampening
-                );
-                args.push("-af".to_string());
-                args.push(af_filter);
-            }
-
-            let (codec, rate) = match ffmpeg_transcode_quality {
-                "hires" => ("pcm_s24le", "96000"),
-                "studio" => ("pcm_s24le", "48000"),
-                _ => ("pcm_s16le", "44100"),
-            };
+            let (codec, rate) = transcode_codec_and_rate(ffmpeg_transcode_quality, is_dsd);
 
             args.extend([
                 "-f".to_string(), "wav".to_string(),
                 "-acodec".to_string(), codec.to_string(),
-                "-ar".to_string(), rate.to_string(),
+            ]);
+            if let Some(rate) = rate {
+                args.push("-ar".to_string());
+                args.push(rate.to_string());
+            }
+            args.extend([
                 "-ac".to_string(), "2".to_string(),
                 "-".to_string()
             ]);
@@ -1741,7 +1749,8 @@ pub enum PlayerCommand {
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum PlaybackStatus { Stopped, Playing, Paused }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug, PartialEq, Default)]
+#[serde(default)]
 pub struct EQBand {
     pub freq: f32,
     pub gain: f32,
@@ -1750,6 +1759,7 @@ pub struct EQBand {
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+#[serde(default)]
 pub struct DSPState {
     pub enabled: bool,
     pub low_spec_mode: bool,
@@ -1815,11 +1825,11 @@ impl Default for DSPState {
             resampler_interpolation: "linear".to_string(),
             resampler_sinc_len: 128,
             resampler_oversampling: 256,
-            ffmpeg_transcode_quality: "studio".to_string(),
+            ffmpeg_transcode_quality: "native".to_string(),
             width: 1.0,
             upsample_rate: 0,
             dither: false,
-            exclusive_mode_timing: "polling".to_string(),
+            exclusive_mode_timing: "event".to_string(),
             preamp_gain: 0.0,
             limiter_threshold: -0.1,
             resampler_phase_mode: "linear".to_string(),
@@ -2197,6 +2207,13 @@ fn player_loop(
                 }
 
                 {
+                    // A different track re-arms the exclusive failure budget;
+                    // same-track rebuilds (toggle/seek/error) must NOT reset it.
+                    let prev_path = safe_lock(&current_track).clone();
+                    if prev_path.as_deref() != Some(path.as_str()) {
+                        EXCLUSIVE_STREAM_FAILURES.store(0, Ordering::SeqCst);
+                        EXCLUSIVE_FALLBACK_NOTIFIED.store(false, Ordering::SeqCst);
+                    }
                     status.store(1, Ordering::Relaxed); // 1 = Playing
                     let mut ct = safe_lock(&current_track);
                     *ct = Some(path.clone());
@@ -2235,7 +2252,6 @@ fn player_loop(
 }
 
 
-/// Soft limiter — prevents digital clipping on heavy boosts
 fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>>) {
     if let Some(mut child) = safe_lock(current_process).take() {
         let _ = child.kill();
@@ -2263,8 +2279,15 @@ pub fn abort_background_downloads() {
     }
 }
 
+/// Soft lookahead limiter — prevents digital clipping on heavy boosts.
 pub struct LookaheadLimiter {
     delay_buffers: Vec<VecDeque<f32>>,
+    // Monotonic deque of (sample_index, |sample|) per channel: front is the max
+    // of the current lookahead window, giving O(1) peak detection per frame
+    // instead of rescanning the whole window.
+    peak_windows: Vec<VecDeque<(u64, f32)>>,
+    sample_counter: u64,
+    window_len: usize,
     gain_envelope: f32, // Current gain attenuation (0.0 to 1.0)
     attack_coeff: f32,
     release_coeff: f32,
@@ -2279,7 +2302,7 @@ impl LookaheadLimiter {
             q.resize(lookahead_samples, 0.0);
             delay_buffers.push(q);
         }
-        
+
         let attack_time = lookahead_ms * 0.001;
         let release_time = 0.080f32; // 80ms release
 
@@ -2288,6 +2311,9 @@ impl LookaheadLimiter {
 
         Self {
             delay_buffers,
+            peak_windows: (0..channels).map(|_| VecDeque::new()).collect(),
+            sample_counter: 0,
+            window_len: lookahead_samples,
             gain_envelope: 1.0,
             attack_coeff,
             release_coeff,
@@ -2297,40 +2323,61 @@ impl LookaheadLimiter {
     pub fn process(&mut self, samples: &mut [f32], threshold_db: f32) {
         let threshold = 10.0f32.powf(threshold_db / 20.0);
         let chs = samples.len();
-        
+
         while self.delay_buffers.len() < chs {
             let cap = self.delay_buffers.first().map(|b| b.capacity()).unwrap_or(256);
             self.delay_buffers.push(std::collections::VecDeque::with_capacity(cap));
         }
-
-        // 1. Push input samples to delay lines
-        for ch in 0..chs {
-            self.delay_buffers[ch].push_back(samples[ch]);
+        while self.peak_windows.len() < chs {
+            self.peak_windows.push(VecDeque::new());
         }
 
-        // 2. Look ahead: detect the peak in the delay buffers
+        self.sample_counter += 1;
+        let current_idx = self.sample_counter;
+        let oldest_valid = current_idx.saturating_sub(self.window_len as u64 - 1);
+
+        // 1. Push input samples into the delay lines, maintain the sliding maxima
         let mut peak = 0.0f32;
         for ch in 0..chs {
-            for &s in self.delay_buffers[ch].iter() {
-                peak = peak.max(s.abs());
+            self.delay_buffers[ch].push_back(samples[ch]);
+
+            let v = samples[ch].abs();
+            let w = &mut self.peak_windows[ch];
+            while let Some(&(_, back_v)) = w.back() {
+                if back_v <= v {
+                    w.pop_back();
+                } else {
+                    break;
+                }
+            }
+            w.push_back((current_idx, v));
+            while let Some(&(front_idx, _)) = w.front() {
+                if front_idx < oldest_valid {
+                    w.pop_front();
+                } else {
+                    break;
+                }
+            }
+            if let Some(&(_, front_v)) = w.front() {
+                peak = peak.max(front_v);
             }
         }
 
-        // 3. Calculate target gain for this frame
+        // 2. Calculate target gain for this frame
         let target_gain = if peak > threshold {
             threshold / peak
         } else {
             1.0
         };
 
-        // 4. Smooth gain envelope (ballistics)
+        // 3. Smooth gain envelope (ballistics)
         if target_gain < self.gain_envelope {
             self.gain_envelope = self.gain_envelope * self.attack_coeff + target_gain * (1.0 - self.attack_coeff);
         } else {
             self.gain_envelope = self.gain_envelope * self.release_coeff + target_gain * (1.0 - self.release_coeff);
         }
 
-        // 5. Pop delayed samples and apply gain envelope
+        // 4. Pop delayed samples and apply gain envelope
         for ch in 0..chs {
             if let Some(delayed_sample) = self.delay_buffers[ch].pop_front() {
                 samples[ch] = delayed_sample * self.gain_envelope;
@@ -2609,6 +2656,96 @@ impl AudioNode for EqNode {
                     }
                 }
             }
+        }
+    }
+}
+
+pub struct AideoFilterNode {
+    enabled: bool,
+    bass_shelf_l: BiquadFilter,
+    bass_shelf_r: BiquadFilter,
+    room_delay_l: CircularDelayLine,
+    room_delay_r: CircularDelayLine,
+    room_size: f32,
+    bass_thump: f32,
+    dampening: f32,
+}
+
+impl AideoFilterNode {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            bass_shelf_l: BiquadFilter::new(),
+            bass_shelf_r: BiquadFilter::new(),
+            room_delay_l: CircularDelayLine::new(192000),
+            room_delay_r: CircularDelayLine::new(192000),
+            room_size: 0.85,
+            bass_thump: 6.0,
+            dampening: 0.5,
+        }
+    }
+}
+
+impl AudioNode for AideoFilterNode {
+    fn process(&mut self, samples: &mut [Vec<f32>], sample_rate: f32) {
+        if !self.enabled || samples.is_empty() {
+            return;
+        }
+
+        let channels = samples.len();
+        let len = samples[0].len();
+
+        // 1. Bass thump warmth (lowshelf filter around 90Hz)
+        if self.bass_thump.abs() > 0.05 {
+            if channels >= 1 {
+                for s in samples[0].iter_mut() {
+                    *s = self.bass_shelf_l.process(*s);
+                }
+            }
+            if channels >= 2 {
+                for s in samples[1].iter_mut() {
+                    *s = self.bass_shelf_r.process(*s);
+                }
+            }
+        }
+
+        // 2. Acoustic Room Size & Reflections with Dampening
+        if self.room_size > 0.05 && channels >= 2 {
+            let delay1_samples = ((self.room_size * 0.035 * sample_rate).round() as usize).clamp(1, 191999);
+            let delay2_samples = ((self.room_size * 0.055 * sample_rate).round() as usize).clamp(1, 191999);
+            let damp = (1.0 - self.dampening * 0.5).clamp(0.1, 1.0);
+            let reflection_mix = (self.room_size * 0.25).clamp(0.0, 0.4);
+
+            let (left, right) = samples.split_at_mut(1);
+            let l_channel = &mut left[0];
+            let r_channel = &mut right[0];
+
+            for i in 0..len {
+                let l = l_channel[i];
+                let r = r_channel[i];
+
+                self.room_delay_l.push(l);
+                self.room_delay_r.push(r);
+
+                let ref_l = self.room_delay_r.read_delayed(delay1_samples) * damp;
+                let ref_r = self.room_delay_l.read_delayed(delay2_samples) * damp;
+
+                l_channel[i] = l * (1.0 - reflection_mix * 0.5) + ref_l * reflection_mix;
+                r_channel[i] = r * (1.0 - reflection_mix * 0.5) + ref_r * reflection_mix;
+            }
+        }
+    }
+
+    fn update_params(&mut self, dsp: &DSPState, sample_rate: f32) {
+        self.enabled = dsp.enabled && dsp.aideo_filter_enabled;
+        self.room_size = dsp.aideo_filter_room_size;
+        self.bass_thump = dsp.aideo_filter_bass_thump;
+        self.dampening = dsp.aideo_filter_dampening;
+
+        if self.enabled {
+            let lowshelf_db = self.bass_thump * 0.7; // warmth boost
+            self.bass_shelf_l.set_lowshelf(sample_rate, 90.0, lowshelf_db, 0.707);
+            self.bass_shelf_r.set_lowshelf(sample_rate, 90.0, lowshelf_db, 0.707);
         }
     }
 }
@@ -3045,7 +3182,12 @@ impl AudioNode for NormalizerNode {
         }
     }
     fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
-        self.enabled = dsp.enabled && dsp.r128_enabled;
+        // Single-path loudness rule: when the track has a static ReplayGain/R128
+        // tag, PreampNode applies it exactly once and this dynamic AGC must stay
+        // out of the signal path. The AGC only engages for tracks without a tag
+        // so every track still gets normalized to target loudness.
+        let has_static_gain = dsp.track_replaygain_gain.abs() > f32::EPSILON;
+        self.enabled = dsp.enabled && dsp.r128_enabled && !has_static_gain;
     }
 }
 
@@ -3053,7 +3195,6 @@ pub struct LimiterNode {
     enabled: bool,
     limiter: LookaheadLimiter,
     threshold_db: f32,
-    final_gain: f32,
 }
 
 impl LimiterNode {
@@ -3062,7 +3203,6 @@ impl LimiterNode {
             enabled: false,
             limiter: LookaheadLimiter::new(channels, lookahead_ms, sample_rate),
             threshold_db: -0.1,
-            final_gain: 1.0,
         }
     }
 }
@@ -3077,7 +3217,7 @@ impl AudioNode for LimiterNode {
         let mut frame = vec![0.0f32; channels];
         for i in 0..len {
             for ch in 0..channels {
-                frame[ch] = samples[ch][i] * self.final_gain;
+                frame[ch] = samples[ch][i];
             }
             self.limiter.process(&mut frame, self.threshold_db);
             for ch in 0..channels {
@@ -3088,7 +3228,6 @@ impl AudioNode for LimiterNode {
     fn update_params(&mut self, dsp: &DSPState, _sample_rate: f32) {
         self.enabled = dsp.enabled;
         self.threshold_db = dsp.limiter_threshold;
-        self.final_gain = if dsp.enabled { 0.95 } else { 1.0 };
     }
 }
 
@@ -3732,12 +3871,14 @@ fn play_file(
         let d = safe_lock(&dsp_state);
         (d.upsample_rate, d.exclusive_mode_timing.clone(), d.dither)
     };
+    let stream_allows_exclusive = stream_allows_exclusive_mode(&resolved_path);
     let configs_to_try = select_output_config(
         &device,
         file_rate,
         file_ch,
         is_exclusive,
         is_stream,
+        stream_allows_exclusive,
         upsample_target,
         &device_display_name,
     );
@@ -3750,7 +3891,30 @@ fn play_file(
 
     // Determine if we should attempt EXCLUSIVE mode
     // (Only for local files and when Bit-Perfect/Upsampling is requested)
-    let request_exclusive = is_exclusive && !is_stream;
+    let exclusive_failures = EXCLUSIVE_STREAM_FAILURES.load(Ordering::SeqCst);
+    let exclusive_permitted = !is_stream || stream_allows_exclusive;
+    let request_exclusive = is_exclusive
+        && exclusive_permitted
+        && exclusive_failures < crate::wasapi_engine::MAX_EXCLUSIVE_FAILURES;
+
+    // Budget exhausted: stop hammering the driver and finish the track on the
+    // shared engine instead of looping teardown/rebuild forever.
+    if is_exclusive && exclusive_permitted && !request_exclusive
+        && !EXCLUSIVE_FALLBACK_NOTIFIED.swap(true, Ordering::SeqCst)
+    {
+        println!("[player] Exclusive Mode gave up after {} failed attempt(s) this track; staying on Shared Mode.", exclusive_failures);
+        let _ = app_handle.emit("ui-toast", serde_json::json!({
+            "message": "Exclusive Mode keeps failing on this device — staying in Shared Mode for this track.",
+            "type": "warning"
+        }));
+    } else if request_exclusive && exclusive_failures > 0 {
+        if let crate::wasapi_engine::ExclusiveRecovery::RetryAfterMs(delay_ms) =
+            crate::wasapi_engine::decide_exclusive_recovery(exclusive_failures)
+        {
+            println!("[player] Retrying WASAPI Exclusive in {} ms ({} prior failure(s))...", delay_ms, exclusive_failures);
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+    }
 
     let stream_paused = Arc::clone(&status);
     let stream_volume = Arc::clone(&volume);
@@ -3761,7 +3925,11 @@ fn play_file(
             let channels = config.channels;
             let max_ring = (rate.max(192000) as usize) * (channels as usize) * 3;
             let rb = RingBuffer::<f32>::new(max_ring);
-            let (prod, mut cons) = rb.split();
+            let (mut prod, mut cons) = rb.split();
+            
+            // Pre-fill ringbuffer with 200ms of silence to guarantee startup stability and eliminate initial click
+            let silence = vec![0.0f32; (rate.max(44100) as usize) * (channels as usize) / 5];
+            let _ = prod.push_slice(&silence);
             
             let paused_cb = Arc::clone(&stream_paused);
             let volume_cb = Arc::clone(&stream_volume);
@@ -3822,6 +3990,7 @@ fn play_file(
                     }
                 },
                 move |err| {
+                    EXCLUSIVE_STREAM_FAILURES.fetch_add(1, Ordering::SeqCst);
                     eprintln!("[player] WASAPI Exclusive stream error: {err}");
                     let _ = app_handle_cb.emit("ui-toast", serde_json::json!({
                         "message": format!("Exclusive device error: {}. Recovering...", err),
@@ -3831,6 +4000,9 @@ fn play_file(
                 }
             ) {
                 println!("[player] Successfully locked TRUE WASAPI Exclusive Mode at {}Hz ({} bits)!", negotiated_rate, bits);
+                // Clean run: re-arm the failure budget for future tracks.
+                EXCLUSIVE_STREAM_FAILURES.store(0, Ordering::SeqCst);
+                EXCLUSIVE_FALLBACK_NOTIFIED.store(false, Ordering::SeqCst);
                 let _ = app_handle.emit("playback-success", format!("WASAPI Exclusive Mode Active ({}Hz)", negotiated_rate));
                 let mut exclusive_cfg = config.clone();
                 exclusive_cfg.sample_rate = negotiated_rate;
@@ -3839,6 +4011,7 @@ fn play_file(
                 output_bits = bits as usize;
                 is_float = float;
             } else {
+                EXCLUSIVE_STREAM_FAILURES.fetch_add(1, Ordering::SeqCst);
                 println!("[player] TRUE WASAPI Exclusive Mode failed. Falling back to CPAL Shared Mode.");
                 // Keep the user's Exclusive preference ON — only this session falls
                 // back to shared mode, so the next track/rebuild retries exclusive.
@@ -4367,6 +4540,7 @@ fn play_file(
         Box::new(SaturationNode::new()),
         Box::new(PhaseResponseNode::new()),
         Box::new(EqNode::new()),
+        Box::new(AideoFilterNode::new()),
         Box::new(SubsonicNode::new()),
         Box::new(CrossfeedNode::new()),
         Box::new(SpatializerNode::new()),
@@ -4430,10 +4604,6 @@ fn play_file(
     let last_oversampling = current_dsp.resampler_oversampling;
     let last_ffmpeg_quality = current_dsp.ffmpeg_transcode_quality.clone();
     let last_exclusive_timing = current_dsp.exclusive_mode_timing.clone();
-    let last_aideo_filter_enabled = current_dsp.aideo_filter_enabled;
-    let last_aideo_filter_room_size = current_dsp.aideo_filter_room_size;
-    let last_aideo_filter_bass_thump = current_dsp.aideo_filter_bass_thump;
-    let last_aideo_filter_dampening = current_dsp.aideo_filter_dampening;
 let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
 
     // RAM BUFFER CURSOR
@@ -4538,10 +4708,6 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
             || dsp_now.resampler_oversampling != last_oversampling
             || dsp_now.ffmpeg_transcode_quality != last_ffmpeg_quality
             || dsp_now.exclusive_mode_timing != last_exclusive_timing
-            || dsp_now.aideo_filter_enabled != last_aideo_filter_enabled
-            || dsp_now.aideo_filter_room_size != last_aideo_filter_room_size
-            || dsp_now.aideo_filter_bass_thump != last_aideo_filter_bass_thump
-            || dsp_now.aideo_filter_dampening != last_aideo_filter_dampening
         {
             println!("[player] Hardware/DSP/Parameters change detected. Restarting stream...");
             let current_pos = f64::from_bits(position_secs.load(Ordering::Relaxed));
@@ -4775,27 +4941,10 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                 let mut processed = if file_rate == dev_rate {
                     chunk_planar
                 } else {
-                    // Dynamic Clock Drift Correction (Milestone 5)
-                    // In Exclusive Mode, there is only one hardware clock, so drift is impossible.
-                    // In Shared Mode, apply a 5% deadband to prevent constant micro-fluctuations from updating Rubato.
                     let rate = dsp_now.playback_rate.clamp(0.5, 2.0);
-                    let base_ratio = if is_exclusive {
-                        1.0
-                    } else {
-                        let capacity = prod.capacity() as f64;
-                        let current_fill = prod.len() as f64;
-                        let fill_ratio = current_fill / capacity;
-                        let error = 0.5 - fill_ratio; // Positive if underfilled, negative if overfilled
-                        if error.abs() > 0.05 {
-                            let adjustment = error * 0.002; // Max ±0.1% adjustment
-                            1.0 + adjustment.clamp(-0.001, 0.001)
-                        } else {
-                            1.0
-                        }
-                    };
-                    let rel_ratio = base_ratio / rate;
+                    let rel_ratio = 1.0 / rate;
 
-                    // Thread-local cache to only call set_resample_ratio_relative when ratio changes significantly
+                    // Thread-local cache to only call set_resample_ratio_relative when user changes playback speed
                     thread_local! {
                         static LAST_RATIO: std::cell::Cell<f64> = std::cell::Cell::new(1.0);
                     }
@@ -4809,7 +4958,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                     });
 
                     if changed {
-                        let _ = resampler.set_resample_ratio_relative(rel_ratio, false);
+                        let _ = resampler.set_resample_ratio_relative(rel_ratio, true);
                     }
 
                     let refs: Vec<&[f32]> = chunk_planar.iter().map(|v| v.as_slice()).collect();
@@ -4931,11 +5080,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
 
             while out_idx < n_out {
                 for ch in 0..dev_ch {
-                    let mut sample = if ch < use_ch && ch < out_planar.len() {
-                        out_planar[ch][out_idx]
-                    } else {
-                        0.0
-                    };
+                    let mut sample = mix_output_channel_sample(&out_planar, out_idx, ch, file_ch);
                     
                     // Final Gain & Dither
                     if let Some(rng) = &mut dither_rng {
@@ -4957,8 +5102,20 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
             }
 
             // Lock-free loop to wait for buffer space
+            let mut prod_stall_count = 0u32;
             while prod.remaining() < interleaved.len() && running {
                 std::thread::sleep(std::time::Duration::from_millis(5));
+
+                if status.load(Ordering::Relaxed) == 1 {
+                    prod_stall_count += 1;
+                    if prod_stall_count >= 200 {
+                        eprintln!("[player] Audio consumer stall detected. Triggering stream restart/recovery...");
+                        let _ = cmd_tx.send(PlayerCommand::RestartStream);
+                        prod_stall_count = 0;
+                    }
+                } else {
+                    prod_stall_count = 0;
+                }
 
                 // Smooth out UI timer updates while waiting for hardware to play
                 let p_len = pending[0].len() as f64;
@@ -5064,8 +5221,17 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                     Err(_) => {}
                 }
             }
+
             if running && !interleaved.is_empty() {
-                prod.push_slice(&interleaved);
+                let mut pushed = prod.push_slice(&interleaved);
+                while pushed < interleaved.len() && running {
+                    let n = prod.push_slice(&interleaved[pushed..]);
+                    if n > 0 {
+                        pushed += n;
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                }
             }
         }
 
@@ -5144,6 +5310,28 @@ fn decoded_frames(buf: &AudioBufferRef<'_>) -> usize {
     }
 }
 
+/// Pick the sample for one output channel from planar frames.
+///
+/// Mono sources are duplicated to every output channel (a mono file must not
+/// play hard-left on stereo hardware); source channels beyond the planar data
+/// (e.g. a stereo file feeding a 4-channel device) produce silence.
+fn mix_output_channel_sample(
+    planar: &[Vec<f32>],
+    frame_idx: usize,
+    out_channel: usize,
+    source_channels: usize,
+) -> f32 {
+    if planar.is_empty() || planar[0].len() <= frame_idx {
+        return 0.0;
+    }
+    let src_ch = if source_channels == 1 { 0 } else { out_channel };
+    if src_ch < planar.len() {
+        planar[src_ch][frame_idx]
+    } else {
+        0.0
+    }
+}
+
 fn measure_latency(url_str: &str) -> Option<u32> {
     use std::net::ToSocketAddrs;
     use std::time::Instant;
@@ -5168,4 +5356,49 @@ fn measure_latency(url_str: &str) -> Option<u32> {
 mod dsp_tests;
 
 mod url_cache_tests;
+
+#[cfg(test)]
+mod transcode_tests {
+    use super::{stream_allows_exclusive_mode, transcode_codec_and_rate};
+
+    #[test]
+    fn test_native_tier_preserves_source_rate_for_pcm() {
+        assert_eq!(transcode_codec_and_rate("native", false), ("pcm_s24le", None));
+    }
+
+    #[test]
+    fn test_native_tier_resamples_dsd() {
+        assert_eq!(transcode_codec_and_rate("native", true).1, Some("176400"));
+    }
+
+    #[test]
+    fn test_hires_tier_unchanged() {
+        assert_eq!(transcode_codec_and_rate("hires", false).1, Some("96000"));
+    }
+
+    #[test]
+    fn test_studio_tier_unchanged() {
+        assert_eq!(transcode_codec_and_rate("studio", true).1, Some("88200"));
+    }
+
+    #[test]
+    fn test_unknown_quality_defaults_to_standard() {
+        assert_eq!(transcode_codec_and_rate("whatever", false), ("pcm_s16le", Some("44100")));
+    }
+
+    #[test]
+    fn test_hls_streams_reject_exclusive_mode() {
+        assert!(!stream_allows_exclusive_mode("https://host/live/stream.m3u8"));
+        assert!(!stream_allows_exclusive_mode("https://host/hls_playlist?id=1"));
+        assert!(!stream_allows_exclusive_mode("https://host/hls/segment"));
+        assert!(!stream_allows_exclusive_mode("HTTPS://HOST/LIVE/STREAM.M3U8"));
+    }
+
+    #[test]
+    fn test_direct_media_urls_allow_exclusive_mode() {
+        assert!(stream_allows_exclusive_mode("https://api.tidal.com/tracks/123.flac?token=x"));
+        assert!(stream_allows_exclusive_mode("http://subsonic.local/rest/stream.view?id=5"));
+        assert!(stream_allows_exclusive_mode("C:\\Music\\album\\song.flac"));
+    }
+}
 

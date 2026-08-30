@@ -1,0 +1,5 @@
+{
+  "status": "error",
+  "code": 401,
+  "message": "Invalid X-User-Auth-Token"
+}

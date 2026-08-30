@@ -14,6 +14,7 @@ use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, P
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State, Listener, Window};
+use base64::Engine;
 
 mod artwork;
 mod db;
@@ -32,8 +33,10 @@ mod discord;
 pub mod youtube;
 pub mod wasapi_engine;
 pub mod tidal;
+pub mod qobuz;
 pub mod updater;
 pub mod cloud;
+pub mod link_resolver;
 pub mod dependencies;
 pub mod chromecast;
 pub mod sonic_analyzer;
@@ -1635,6 +1638,143 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoverSearchResult {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: Option<String>,
+    pub source: String,
+    pub cover_url: String,
+}
+
+#[tauri::command]
+async fn search_covers_online(query: String) -> Result<Vec<CoverSearchResult>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let client = get_http_client();
+    let mut results: Vec<CoverSearchResult> = Vec::new();
+    let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // 1. iTunes Albums & Songs Search (High Resolution 1000x1000)
+    let itunes_query = urlencoding::encode(q);
+    let itunes_url = format!("https://itunes.apple.com/search?term={}&entity=song&limit=10", itunes_query);
+    if let Ok(res) = client.get(&itunes_url).send().await {
+        if res.status().is_success() {
+            if let Ok(json) = res.json::<serde_json::Value>().await {
+                if let Some(items) = json["results"].as_array() {
+                    for item in items {
+                        if let Some(art_100) = item["artworkUrl100"].as_str() {
+                            let high_res_url = art_100.replace("100x100bb", "1000x1000bb");
+                            if seen_urls.insert(high_res_url.clone()) {
+                                results.push(CoverSearchResult {
+                                    id: format!("itunes-{}", item["trackId"].as_u64().unwrap_or(0)),
+                                    title: item["trackName"].as_str().unwrap_or(q).to_string(),
+                                    artist: item["artistName"].as_str().unwrap_or("").to_string(),
+                                    album: item["collectionName"].as_str().map(|s| s.to_string()),
+                                    source: "iTunes".to_string(),
+                                    cover_url: high_res_url,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. MusicBrainz & Cover Art Archive
+    let mbz_url = format!("https://musicbrainz.org/ws/2/recording?query={}&fmt=json&limit=5", itunes_query);
+    let mbz_ua = concat!("AideoMusicPlayer/", env!("CARGO_PKG_VERSION"), " ( https://github.com/Alirull18/Aideo-Music-Player )");
+    if let Ok(res) = client.get(&mbz_url).header("User-Agent", mbz_ua).send().await {
+        if res.status().is_success() {
+            if let Ok(json) = res.json::<serde_json::Value>().await {
+                if let Some(recs) = json["recordings"].as_array() {
+                    for rec in recs.iter().take(4) {
+                        if let Some(rel) = rec["releases"].as_array().and_then(|r| r.first()) {
+                            if let Some(rel_id) = rel["id"].as_str() {
+                                let caa_front = format!("https://coverartarchive.org/release/{}/front-500", rel_id);
+                                if seen_urls.insert(caa_front.clone()) {
+                                    let rec_title = rec["title"].as_str().unwrap_or(q).to_string();
+                                    let rec_artist = rec["artist-credit"].as_array()
+                                        .and_then(|a| a.first())
+                                        .and_then(|a| a["name"].as_str())
+                                        .unwrap_or("").to_string();
+                                    let rel_title = rel["title"].as_str().map(|s| s.to_string());
+                                    results.push(CoverSearchResult {
+                                        id: format!("mbz-{}", rel_id),
+                                        title: rec_title,
+                                        artist: rec_artist,
+                                        album: rel_title,
+                                        source: "MusicBrainz".to_string(),
+                                        cover_url: caa_front,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. YouTube Music InnerTube Fallback
+    if results.len() < 4 {
+        if let Ok(yt_tracks) = youtube::search_youtube(q.to_string()).await {
+            for (idx, t) in yt_tracks.into_iter().take(6).enumerate() {
+                if let Some(cover) = t.cover_url {
+                    if !cover.trim().is_empty() && seen_urls.insert(cover.clone()) {
+                        results.push(CoverSearchResult {
+                            id: format!("yt-{}-{}", idx, t.id),
+                            title: t.title,
+                            artist: t.artist,
+                            album: None,
+                            source: "YouTube Music".to_string(),
+                            cover_url: cover,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+#[tauri::command]
+async fn fetch_image_as_data_url(url: String) -> Result<String, String> {
+    if let Ok(parsed) = url::Url::parse(&url) {
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
+            return Err("Invalid image URL scheme".to_string());
+        }
+    } else {
+        return Err("Invalid image URL".to_string());
+    }
+
+    let client = get_http_client();
+    let res = client.get(&url).send().await.map_err(|e| format!("Failed to download image: {}", e))?;
+    if !res.status().is_success() {
+        return Err(format!("Image download returned status HTTP {}", res.status()));
+    }
+
+    let mime = res.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.len() > 15 * 1024 * 1024 {
+        return Err("Image exceeds 15MB size limit".to_string());
+    }
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", mime, b64))
+}
+
 #[tauri::command]
 async fn apply_online_cover(state: State<'_, AppState>, path: String, url: String) -> Result<(), String> {
     if let Ok(parsed) = url::Url::parse(&url) {
@@ -1667,14 +1807,28 @@ async fn apply_online_cover(state: State<'_, AppState>, path: String, url: Strin
     let ext = if url.to_lowercase().contains(".png") { "png" } else { "jpg" };
     let cover_path = parent.join(format!("{}.{}", stem, ext));
 
-    std::fs::write(&cover_path, bytes).map_err(|e| e.to_string())?;
+    std::fs::write(&cover_path, &bytes).map_err(|e| e.to_string())?;
+
+    // Also embed directly into audio container tags
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let mime = if ext == "png" { "image/png" } else { "image/jpeg" };
+    let data_url = format!("data:{};base64,{}", mime, b64);
+    let path_clone = path.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        tag_editor::write_tags(&path_clone, &tag_editor::AudioTagUpdate {
+            cover_base64: Some(data_url),
+            ..Default::default()
+        })
+    }).await;
+
+    artwork::invalidate_cover_cache(&path);
     Ok(())
 }
 
 #[tauri::command]
 async fn apply_local_cover(state: State<'_, AppState>, path: String, base64_data: String) -> Result<(), String> {
     use base64::Engine;
-    let clean_base64 = if let Some(pos) = base64_data.find(",") {
+    let clean_base64 = if let Some(pos) = base64_data.find(',') {
         &base64_data[pos + 1..]
     } else {
         &base64_data
@@ -1694,7 +1848,19 @@ async fn apply_local_cover(state: State<'_, AppState>, path: String, base64_data
     let ext = if base64_data.contains("image/png") { "png" } else { "jpg" };
     let cover_path = parent.join(format!("{}.{}", stem, ext));
 
-    std::fs::write(&cover_path, decoded).map_err(|e| e.to_string())?;
+    std::fs::write(&cover_path, &decoded).map_err(|e| e.to_string())?;
+
+    // Also embed directly into audio container tags
+    let path_clone = path.clone();
+    let b64_clone = base64_data.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        tag_editor::write_tags(&path_clone, &tag_editor::AudioTagUpdate {
+            cover_base64: Some(b64_clone),
+            ..Default::default()
+        })
+    }).await;
+
+    artwork::invalidate_cover_cache(&path);
     Ok(())
 }
 
@@ -1705,6 +1871,10 @@ fn toggle_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let current = player.exclusive_mode.load(Ordering::Relaxed);
     let next_mode = !current;
     player.exclusive_mode.store(next_mode, Ordering::Relaxed);
+    // A manual toggle is explicit user intent: re-arm the exclusive failure
+    // budget so a previously wedged device gets fresh retry attempts.
+    player::EXCLUSIVE_STREAM_FAILURES.store(0, Ordering::Relaxed);
+    player::EXCLUSIVE_FALLBACK_NOTIFIED.store(false, Ordering::Relaxed);
     let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
     Ok(next_mode)
 }
@@ -3141,6 +3311,8 @@ pub fn run() {
             set_audio_device,
             apply_online_cover,
             apply_local_cover,
+            search_covers_online,
+            fetch_image_as_data_url,
             update_track_metadata,
             update_track_offset,
             toggle_love_track,
@@ -3203,6 +3375,14 @@ pub fn run() {
             tidal::tidal_save_credentials,
             tidal::tidal_get_credentials,
             tidal::get_tidal_autoplay_recommendations,
+            tidal::get_tidal_hub_recommendations,
+            qobuz::qobuz_connect,
+            qobuz::qobuz_status,
+            qobuz::qobuz_logout,
+            qobuz::qobuz_search,
+            qobuz::qobuz_get_stream_url,
+            qobuz::qobuz_download,
+            qobuz::get_qobuz_autoplay_recommendations,
             updater::check_update,
             updater::download_and_install,
             toggle_keep_awake,
@@ -3225,6 +3405,7 @@ pub fn run() {
             cloud::get_all_cached_cloud_hashes,
             cloud::check_url_is_cached,
             cloud::get_url_hash,
+            link_resolver::resolve_external_link,
             get_windows_accent_color,
             clear_application_cache,
             get_cache_size_info,
@@ -3308,6 +3489,17 @@ pub fn run() {
                 *safe_lock(&tidal_state.logged_in) = true;
             }
             app.manage(tidal_state);
+
+            let qobuz_state = std::sync::Arc::new(qobuz::QobuzState {
+                session: std::sync::Mutex::new(None),
+                logged_in: std::sync::Mutex::new(false),
+                app_creds: std::sync::Mutex::new(None),
+            });
+            if let Some(sess) = qobuz::QobuzState::load_cached_session() {
+                *safe_lock(&qobuz_state.session) = Some(sess);
+                *safe_lock(&qobuz_state.logged_in) = true;
+            }
+            app.manage(qobuz_state);
 
             dependencies::spawn_background_ytdlp_updater(app.handle().clone());
             
