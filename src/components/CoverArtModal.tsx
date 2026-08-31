@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { Search, UploadCloud, RefreshCw, Image as ImageIcon } from 'lucide-react';
@@ -15,7 +16,11 @@ interface SearchResult {
 }
 
 export function CoverArtModal() {
-  const { coverArtModalTrack, setCoverArtModalTrack, applyOnlineCover } = useStore();
+  const { coverArtModalTrack, setCoverArtModalTrack, applyOnlineCover } = useStore(useShallow(s => ({
+    coverArtModalTrack: s.coverArtModalTrack,
+    setCoverArtModalTrack: s.setCoverArtModalTrack,
+    applyOnlineCover: s.applyOnlineCover,
+  })));
   
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);

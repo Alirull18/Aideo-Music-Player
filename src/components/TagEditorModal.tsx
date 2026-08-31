@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { 
@@ -34,7 +35,14 @@ export function TagEditorModal() {
     setTagEditorBatchTracks, 
     loadLibrary,
     currentTrack
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    tagEditorTrack: s.tagEditorTrack,
+    setTagEditorTrack: s.setTagEditorTrack,
+    tagEditorBatchTracks: s.tagEditorBatchTracks,
+    setTagEditorBatchTracks: s.setTagEditorBatchTracks,
+    loadLibrary: s.loadLibrary,
+    currentTrack: s.currentTrack,
+  })));
 
   const isBatchMode = tagEditorBatchTracks && tagEditorBatchTracks.length > 0;
   const activeTrack = isBatchMode ? tagEditorBatchTracks[0] : tagEditorTrack;

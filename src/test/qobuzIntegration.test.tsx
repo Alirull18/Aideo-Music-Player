@@ -224,7 +224,7 @@ describe('notifyQobuzAuthFailure', () => {
 });
 
 describe('QobuzConnectCard', () => {
-  it('should show token input and Connect button when no session exists', async () => {
+  it('should show Log In button and Advanced toggle when no session exists', async () => {
     const { default: QobuzConnectCard } = await import('../components/QobuzConnectCard');
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === 'qobuz_status') return false;
@@ -234,10 +234,27 @@ describe('QobuzConnectCard', () => {
     render(<QobuzConnectCard />);
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/paste x-user-auth-token/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /log in to qobuz/i })).toBeInTheDocument();
     });
-    expect(screen.getByRole('button', { name: /connect.*qobuz/i })).toBeInTheDocument();
     expect(screen.getByText(/not connected/i)).toBeInTheDocument();
+    expect(screen.getByText(/advanced: enter token manually/i)).toBeInTheDocument();
+  });
+
+  it('should invoke openQobuzLoginWindow when clicking Log In to Qobuz', async () => {
+    const { default: QobuzConnectCard } = await import('../components/QobuzConnectCard');
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'qobuz_status') return false;
+      if (cmd === 'qobuz_open_login_window') return undefined;
+      return null;
+    });
+
+    render(<QobuzConnectCard />);
+    const loginBtn = await screen.findByRole('button', { name: /log in to qobuz/i });
+    fireEvent.click(loginBtn);
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('qobuz_open_login_window');
+    });
   });
 
   it('should show connected state with disconnect when session exists', async () => {
@@ -255,7 +272,7 @@ describe('QobuzConnectCard', () => {
     expect(screen.getByRole('button', { name: /disconnect/i })).toBeInTheDocument();
   });
 
-  it('should submit pasted token to qobuz_connect and flip to connected', async () => {
+  it('should submit pasted token in advanced section and flip to connected', async () => {
     const { default: QobuzConnectCard } = await import('../components/QobuzConnectCard');
     vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === 'qobuz_status') return false;
@@ -268,9 +285,13 @@ describe('QobuzConnectCard', () => {
 
     render(<QobuzConnectCard />);
 
+    // Expand the advanced section
+    const toggleBtn = await screen.findByText(/advanced: enter token manually/i);
+    fireEvent.click(toggleBtn);
+
     const input = await screen.findByPlaceholderText(/paste x-user-auth-token/i);
     fireEvent.change(input, { target: { value: 'test-token-123' } });
-    fireEvent.click(screen.getByRole('button', { name: /connect.*qobuz/i }));
+    fireEvent.click(screen.getByRole('button', { name: /connect with token/i }));
 
     await waitFor(() => {
       expect(useStore.getState().qobuzConnected).toBe(true);
@@ -278,7 +299,7 @@ describe('QobuzConnectCard', () => {
     expect(await screen.findByRole('button', { name: /disconnect/i })).toBeInTheDocument();
   });
 
-  it('should surface an error toast when the backend rejects the token', async () => {
+  it('should surface an error toast when manual token connection fails', async () => {
     const { default: QobuzConnectCard } = await import('../components/QobuzConnectCard');
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === 'qobuz_status') return false;
@@ -289,9 +310,13 @@ describe('QobuzConnectCard', () => {
     render(<QobuzConnectCard />);
     const events = spyOnWindowEvents('ui-toast');
 
+    // Expand the advanced section
+    const toggleBtn = await screen.findByText(/advanced: enter token manually/i);
+    fireEvent.click(toggleBtn);
+
     const input = await screen.findByPlaceholderText(/paste x-user-auth-token/i);
     fireEvent.change(input, { target: { value: 'bad-token' } });
-    fireEvent.click(screen.getByRole('button', { name: /connect.*qobuz/i }));
+    fireEvent.click(screen.getByRole('button', { name: /connect with token/i }));
 
     await waitFor(() => {
       const toast = events.find(e => e.type === 'ui-toast' && String(e.detail?.message || '').includes('failed'));
@@ -313,7 +338,7 @@ describe('QobuzConnectCard', () => {
 
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('qobuz_logout');
-      expect(screen.getByRole('button', { name: /connect.*qobuz/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /log in to qobuz/i })).toBeInTheDocument();
     });
   });
 });

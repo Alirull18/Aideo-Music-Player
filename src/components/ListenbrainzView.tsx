@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Radio, Users, Activity, RefreshCw, Sparkles, Search, Disc, HelpCircle, ExternalLink } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -13,7 +14,15 @@ export function ListenbrainzView() {
     listenbrainzListenCount,
     fetchListenbrainzDashboard,
     setView
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    listenbrainzToken: s.listenbrainzToken,
+    listenbrainzUsername: s.listenbrainzUsername,
+    listenbrainzRecent: s.listenbrainzRecent,
+    listenbrainzRecs: s.listenbrainzRecs,
+    listenbrainzListenCount: s.listenbrainzListenCount,
+    fetchListenbrainzDashboard: s.fetchListenbrainzDashboard,
+    setView: s.setView,
+  })));
   
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'recent' | 'recs'>('recent');
