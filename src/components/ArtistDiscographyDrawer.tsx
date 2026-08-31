@@ -2,10 +2,12 @@ import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Play, Shuffle, User, Disc, Music } from 'lucide-react';
+import { X, Play, Shuffle, User, Disc, Music, Download } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { sortAlbumTracks } from '../utils/albumUtils';
 import { SimpleLRU } from '../utils/lruCache';
+import { fmt } from '../utils';
+import { shuffleArray } from '../utils/shuffle';
 
 const coverArtCache = new SimpleLRU<string, string | null>(300);
 const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
@@ -74,11 +76,6 @@ function AlbumThumbnail({ sampleTrack, title }: { sampleTrack: any; title: strin
   );
 }
 
-function fmt(s: number | null) {
-  if (!s || isNaN(s) || s < 0) return '0:00';
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-}
-
 interface ArtistDiscographyDrawerProps {
   artistName: string | null;
   allTracks: any[];
@@ -92,7 +89,8 @@ export function ArtistDiscographyDrawer({
   onClose,
   onSelectAlbum 
 }: ArtistDiscographyDrawerProps) {
-  const { playTrack } = useStore();
+  const playTrack = useStore((s) => s.playTrack);
+  const downloadBatchPlaylist = useStore((s) => s.downloadBatchPlaylist);
 
   // Filter tracks by artist
   const artistTracks = useMemo(() => {
@@ -139,13 +137,7 @@ export function ArtistDiscographyDrawer({
 
   const handlePlayArtist = async (shuffle = false) => {
     if (artistTracks.length === 0) return;
-    let trackList = [...artistTracks];
-    if (shuffle) {
-      for (let i = trackList.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [trackList[i], trackList[j]] = [trackList[j], trackList[i]];
-      }
-    }
+    const trackList = shuffle ? shuffleArray(artistTracks) : [...artistTracks];
     const firstTrack = trackList[0];
     const restTracks = trackList.slice(1);
 
@@ -162,6 +154,19 @@ export function ArtistDiscographyDrawer({
     }
 
     await playTrack(firstTrack);
+  };
+
+  const handleDownloadTracks = async (trackList: any[], albumOrName?: string) => {
+    if (!trackList || trackList.length === 0) return;
+    const items = trackList.map((t, idx) => ({
+      url: t.stream_url || t.path || t.url || '',
+      title: t.title || t.name || t.track || 'Untitled',
+      artist: t.artist || artistName || 'Unknown Artist',
+      album: t.album || albumOrName || `${artistName} Discography`,
+      cover_url: t.cover_url || null,
+      track_number: t.track_number || idx + 1,
+    }));
+    await downloadBatchPlaylist(items, albumOrName || `${artistName} Discography`);
   };
 
   return (
@@ -256,6 +261,26 @@ export function ArtistDiscographyDrawer({
                   <Shuffle size={16} />
                   Shuffle
                 </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handleDownloadTracks(artistTracks, `${artistName} Complete Discography`)}
+                  style={{ 
+                    padding: '9px 20px', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 8, 
+                    fontSize: 13, 
+                    borderRadius: 20, 
+                    fontWeight: 600,
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    color: '#10b981'
+                  }}
+                  title="Download full artist discography to local disk"
+                >
+                  <Download size={15} />
+                  Download All
+                </button>
               </div>
             </div>
 
@@ -306,8 +331,29 @@ export function ArtistDiscographyDrawer({
                       <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 1 }} title={album.title}>
                         {album.title}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                        {album.tracks.length} {album.tracks.length === 1 ? 'song' : 'songs'}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--text-dim)' }}>
+                        <span>{album.tracks.length} {album.tracks.length === 1 ? 'song' : 'songs'}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownloadTracks(album.tracks, album.title);
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-dim)',
+                            cursor: 'pointer',
+                            padding: 2,
+                            display: 'flex',
+                            alignItems: 'center',
+                            transition: 'color 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.color = '#10b981'}
+                          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+                          title={`Download ${album.title}`}
+                        >
+                          <Download size={12} />
+                        </button>
                       </div>
                     </div>
                   ))}

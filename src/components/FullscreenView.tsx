@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,10 +30,10 @@ import { Visualizer } from './Visualizer';
 import { generateWaveformPeaks } from '../utils/waveform';
 import { baseName, getStreamName } from '../utils';
 import { LyricsDisplayMode } from '../store/types';
+import { KaraokeActiveLine } from './KaraokeActiveLine';
 
 export function FullscreenView() {
   const {
-    playback,
     isMuted,
     toggleMute,
     currentTrack,
@@ -59,41 +60,51 @@ export function FullscreenView() {
     translateLyrics,
     isTranslating,
     getRomaji,
-    albumArtFit
-  } = useStore();
+    albumArtFit,
+    playbackPositionSecs,
+    playbackCurrentTrack,
+    playbackStatus,
+    playbackVolume,
+    playbackBitPerfect,
+    playbackDevRate
+  } = useStore(useShallow(s => ({
+    playbackPositionSecs: s.playback.position_secs,
+    playbackCurrentTrack: s.playback.current_track,
+    playbackStatus: s.playback.status,
+    playbackVolume: s.playback.volume,
+    playbackBitPerfect: s.playback.bit_perfect,
+    playbackDevRate: s.playback.dev_rate,
+    isMuted: s.isMuted,
+    toggleMute: s.toggleMute,
+    currentTrack: s.currentTrack,
+    coverArt: s.coverArt,
+    lyrics: s.lyrics,
+    lyricOffset: s.lyricOffset,
+    lyricStatus: s.lyricStatus,
+    lyricsDisplayMode: s.lyricsDisplayMode,
+    setLyricsDisplayMode: s.setLyricsDisplayMode,
+    accentColor: s.accentColor,
+    dsp: s.dsp,
+    currentDevice: s.currentDevice,
+    setView: s.setView,
+    seek: s.seek,
+    setVolume: s.setVolume,
+    playNext: s.playNext,
+    playPrev: s.playPrev,
+    pauseTrack: s.pauseTrack,
+    resumeTrack: s.resumeTrack,
+    liquidBackgroundEnabled: s.liquidBackgroundEnabled,
+    toggleLiquidBackground: s.toggleLiquidBackground,
+    showRomaji: s.showRomaji,
+    showTranslation: s.showTranslation,
+    translateLyrics: s.translateLyrics,
+    isTranslating: s.isTranslating,
+    getRomaji: s.getRomaji,
+    albumArtFit: s.albumArtFit,
+  })));
 
-  // Syllable word-by-word sync detection: only run 60fps rAF timer if track has word-level karaoke data and karaoke mode is active
-  const hasWordSync = useMemo(() => lyrics.some(l => l.words && l.words.length > 0), [lyrics]);
-  const isKaraokeActive = hasWordSync && lyricsDisplayMode === 'karaoke';
-  const [smoothedTime, setSmoothedTime] = useState(playback.position_secs);
-  const lastPositionRef = useRef(playback.position_secs);
-  const lastTimeRef = useRef(performance.now());
+  const effectiveCover = coverArt || currentTrack?.cover_url || defaultCover;
 
-  useEffect(() => {
-    lastPositionRef.current = playback.position_secs;
-    lastTimeRef.current = performance.now();
-    if (isKaraokeActive) {
-      setSmoothedTime(playback.position_secs);
-    }
-  }, [playback.position_secs, isKaraokeActive]);
-
-  useEffect(() => {
-    if (!isKaraokeActive || playback.status !== 'Playing') return;
-
-    let frameId: number;
-    const update = () => {
-      const now = performance.now();
-      const delta = (now - lastTimeRef.current) / 1000;
-      const interpolated = lastPositionRef.current + Math.max(0, delta);
-      setSmoothedTime(interpolated);
-      frameId = requestAnimationFrame(update);
-    };
-
-    frameId = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frameId);
-  }, [playback.status, isKaraokeActive]);
-
-  const currentTime = (isKaraokeActive ? smoothedTime : playback.position_secs) + lyricOffset / 1000;
   const trackDuration = currentTrack?.duration || 0;
 
   const [layout, setLayout] = useState<'stage' | 'zen'>(() => {
@@ -280,8 +291,8 @@ export function FullscreenView() {
       if (fmtLower.includes('dsf') || fmtLower.includes('dff') || fmtLower.includes('dsd')) {
         return `DSD NATIVE · ${currentTrack.format.toUpperCase()}`;
       }
-      if (playback.bit_perfect) {
-        const rate = playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : '';
+      if (playbackBitPerfect) {
+        const rate = playbackDevRate > 0 ? `· ${playbackDevRate / 1000}kHz` : '';
         return `BIT-PERFECT ${currentDevice?.startsWith('[ASIO]') ? 'ASIO' : 'WASAPI'} ${rate}`;
       }
       if (dsp.upsample_rate > 0) {
@@ -291,18 +302,18 @@ export function FullscreenView() {
       return upperFmt === 'YOUTUBE DIRECT' ? 'WEB STREAM' : upperFmt;
     }
     return 'STANDARD AUDIO';
-  }, [currentTrack, playback.bit_perfect, playback.dev_rate, currentDevice, dsp.upsample_rate]);
+  }, [currentTrack, playbackBitPerfect, playbackDevRate, currentDevice, dsp.upsample_rate]);
 
   // Lyrics indexing & smooth scroll
   const activeIdx = useMemo(() => {
     if (!lyrics.length) return -1;
-    const now = playback.position_secs + lyricOffset / 1000;
+    const now = playbackPositionSecs + lyricOffset / 1000;
     let idx = -1;
     for (let i = 0; i < lyrics.length; i++) {
       if (lyrics[i].time_secs <= now) idx = i; else break;
     }
     return idx;
-  }, [lyrics, playback.position_secs, lyricOffset]);
+  }, [lyrics, playbackPositionSecs, lyricOffset]);
 
   useEffect(() => {
     if (lyricsDisplayMode === 'static' || !scrollRef.current || activeIdx === -1) return;
@@ -316,7 +327,7 @@ export function FullscreenView() {
 
   // Play/Pause handler
   const handlePlayPause = () => {
-    if (playback.status === 'Playing') {
+    if (playbackStatus === 'Playing') {
       pauseTrack();
     } else {
       resumeTrack();
@@ -361,7 +372,7 @@ export function FullscreenView() {
   };
 
   // Safe track progress values
-  const progressPercent = trackDuration > 0 ? (playback.position_secs / trackDuration) * 100 : 0;
+  const progressPercent = trackDuration > 0 ? (playbackPositionSecs / trackDuration) * 100 : 0;
 
   const waveformPeaks = useMemo(() => {
     return generateWaveformPeaks(currentTrack?.path || currentTrack?.title || 'aideo-fs', 60);
@@ -429,11 +440,11 @@ export function FullscreenView() {
                   {albumArtFit === 'contain' && (
                     <div 
                       className="fullscreen-cover-ambient-bg" 
-                      style={{ backgroundImage: `url(${coverArt || defaultCover})` }} 
+                      style={{ backgroundImage: `url(${effectiveCover})` }} 
                     />
                   )}
                   <img
-                    src={coverArt || defaultCover}
+                    src={effectiveCover}
                     alt="Album Artwork"
                     className={`fullscreen-cover-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
                   />
@@ -442,10 +453,10 @@ export function FullscreenView() {
 
               <div className="fullscreen-track-meta">
                 <h1 className="fullscreen-track-title">
-                  {currentTrack?.title || (playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : baseName(playback.current_track || ''))}
+                  {currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''))}
                 </h1>
                 <p className="fullscreen-track-artist">
-                  {currentTrack?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—')}
+                  {currentTrack?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
                 </p>
 
                 {/* Telemetry Badge */}
@@ -490,33 +501,12 @@ export function FullscreenView() {
                       >
                         <div>
                           {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
-                            l.words.map((word, wordIdx) => {
-                              const nextWord = l.words![wordIdx + 1];
-                              const duration = word.duration_secs && word.duration_secs > 0
-                                ? word.duration_secs
-                                : (nextWord && nextWord.time_secs > word.time_secs ? (nextWord.time_secs - word.time_secs) : 0.8);
-                              const isStarted = currentTime >= word.time_secs;
-                              const isFinished = (word.duration_secs && word.duration_secs > 0)
-                                ? currentTime >= (word.time_secs + word.duration_secs)
-                                : (nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration));
-                              
-                              let progress = 0;
-                              if (isFinished) {
-                                progress = 100;
-                              } else if (isStarted) {
-                                progress = Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
-                              }
-
-                              return (
-                                <span 
-                                  key={wordIdx} 
-                                  className="lyric-word"
-                                  style={{ '--word-progress': `${progress}%` } as React.CSSProperties}
-                                >
-                                  {word.text}
-                                </span>
-                              );
-                            })
+                            <KaraokeActiveLine
+                              words={l.words}
+                              positionSecs={playbackPositionSecs}
+                              lyricOffset={lyricOffset}
+                              isPlaying={playbackStatus === 'Playing'}
+                            />
                           ) : (
                             l.text || '♪'
                           )}
@@ -554,16 +544,16 @@ export function FullscreenView() {
             {/* Small floating artwork in top-left */}
             <div className="fullscreen-zen-floating-art">
               <img
-                src={coverArt || defaultCover}
+                src={effectiveCover}
                 alt="Album Cover"
                 className="fullscreen-zen-art-thumb"
               />
               <div className="fullscreen-zen-art-info">
                 <span className="fullscreen-zen-art-title">
-                  {currentTrack?.title || (playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : baseName(playback.current_track || ''))}
+                  {currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''))}
                 </span>
                 <span className="fullscreen-zen-art-artist">
-                  {currentTrack?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—')}
+                  {currentTrack?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
                 </span>
               </div>
             </div>
@@ -602,33 +592,12 @@ export function FullscreenView() {
                       >
                         <div>
                           {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
-                            l.words.map((word, wordIdx) => {
-                              const nextWord = l.words![wordIdx + 1];
-                              const duration = word.duration_secs && word.duration_secs > 0
-                                ? word.duration_secs
-                                : (nextWord && nextWord.time_secs > word.time_secs ? (nextWord.time_secs - word.time_secs) : 0.8);
-                              const isStarted = currentTime >= word.time_secs;
-                              const isFinished = (word.duration_secs && word.duration_secs > 0)
-                                ? currentTime >= (word.time_secs + word.duration_secs)
-                                : (nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration));
-                              
-                              let progress = 0;
-                              if (isFinished) {
-                                progress = 100;
-                              } else if (isStarted) {
-                                progress = Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
-                              }
-
-                              return (
-                                <span 
-                                  key={wordIdx} 
-                                  className="lyric-word"
-                                  style={{ '--word-progress': `${progress}%` } as React.CSSProperties}
-                                >
-                                  {word.text}
-                                </span>
-                              );
-                            })
+                            <KaraokeActiveLine
+                              words={l.words}
+                              positionSecs={playbackPositionSecs}
+                              lyricOffset={lyricOffset}
+                              isPlaying={playbackStatus === 'Playing'}
+                            />
                           ) : (
                             l.text || '♪'
                           )}
@@ -661,7 +630,7 @@ export function FullscreenView() {
       <div className="fullscreen-hud">
         {/* Progress Bar & Durations */}
         <div className="fullscreen-hud-progress-wrap">
-          <span className="fullscreen-hud-time">{formatTime(playback.position_secs)}</span>
+          <span className="fullscreen-hud-time">{formatTime(playbackPositionSecs)}</span>
           <div style={{ flex: 1, position: 'relative', height: 24, display: 'flex', alignItems: 'center' }}>
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, pointerEvents: 'none', padding: '0 2px' }}>
               {waveformPeaks.map((peak, idx) => {
@@ -685,7 +654,7 @@ export function FullscreenView() {
               type="range"
               min={0}
               max={trackDuration || 100}
-              value={playback.position_secs}
+              value={playbackPositionSecs}
               onChange={(e) => seek(parseFloat(e.target.value))}
               className="fullscreen-hud-progress-bar"
               style={{
@@ -721,9 +690,9 @@ export function FullscreenView() {
             <button
               className="fullscreen-hud-btn fullscreen-hud-btn-play"
               onClick={handlePlayPause}
-              title={playback.status === 'Playing' ? 'Pause' : 'Play'}
+              title={playbackStatus === 'Playing' ? 'Pause' : 'Play'}
             >
-              {playback.status === 'Playing' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 4 }} />}
+              {playbackStatus === 'Playing' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 4 }} />}
             </button>
 
             <button className="fullscreen-hud-btn" onClick={playNext} title="Next Track">
@@ -794,21 +763,21 @@ export function FullscreenView() {
             {/* Volume slider */}
             <div className="fullscreen-hud-volume-wrap">
               <button className="fullscreen-hud-btn" onClick={handleMuteToggle} title="Mute/Unmute">
-                {isMuted || playback.volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                {isMuted || playbackVolume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
               </button>
               <input
                 type="range"
                 min={0}
                 max={1}
                 step={0.01}
-                value={isMuted ? 0 : playback.volume}
+                value={isMuted ? 0 : playbackVolume}
                 onChange={(e) => {
                   const vol = parseFloat(e.target.value);
                   setVolume(vol);
                 }}
                 className="fullscreen-hud-volume-slider"
                 style={{
-                  background: `linear-gradient(to right, ${accentColor} ${(isMuted ? 0 : playback.volume) * 100}%, rgba(255, 255, 255, 0.15) ${(isMuted ? 0 : playback.volume) * 100}%)`
+                  background: `linear-gradient(to right, ${accentColor} ${(isMuted ? 0 : playbackVolume) * 100}%, rgba(255, 255, 255, 0.15) ${(isMuted ? 0 : playbackVolume) * 100}%)`
                 }}
               />
             </div>

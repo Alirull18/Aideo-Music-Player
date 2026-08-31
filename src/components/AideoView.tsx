@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, memo, useRef, useMemo } from 'react';
+import { useState, useEffect, memo, useRef, useMemo } from 'react';
 import { useStore, Track } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
@@ -435,7 +435,8 @@ export function AideoView() {
     qobuzSearchResults,
     searchQobuz,
     playQobuzResult,
-    downloadQobuzTrack
+    downloadQobuzTrack,
+    downloadBatchPlaylist
   } = useStore(useShallow(s => ({
     tracks: s.tracks,
     playHistory: s.playHistory,
@@ -478,6 +479,7 @@ export function AideoView() {
     searchQobuz: s.searchQobuz,
     playQobuzResult: s.playQobuzResult,
     downloadQobuzTrack: s.downloadQobuzTrack,
+    downloadBatchPlaylist: s.downloadBatchPlaylist,
   })));
   const [greeting, setGreeting] = useState('Good morning');
   const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
@@ -1296,7 +1298,11 @@ export function AideoView() {
       const query = `${artistProfile.name} - ${trackName}`;
       const results = await invoke<any[]>('search_youtube', { query });
       if (results && results.length > 0) {
-        const match = results[0];
+        const cleanTarget = trackName.toLowerCase().replace(/[\(\[][^\)\]]+[\)\]]/g, '').trim();
+        const match = results.find((r: any) => {
+          const rTitle = (r.title || '').toLowerCase().replace(/[\(\[][^\)\]]+[\)\]]/g, '').trim();
+          return rTitle.includes(cleanTarget) || cleanTarget.includes(rTitle);
+        }) || results[0];
         const parsedSeconds = parseDuration(match.duration_raw);
         await playStream(match.url, {
           title: match.title,
@@ -1345,7 +1351,11 @@ export function AideoView() {
       const query = `${artistProfile.name} - ${trackName}`;
       const results = await invoke<any[]>('search_youtube', { query });
       if (results && results.length > 0) {
-        const match = results[0];
+        const cleanTarget = trackName.toLowerCase().replace(/[\(\[][^\)\]]+[\)\]]/g, '').trim();
+        const match = results.find((r: any) => {
+          const rTitle = (r.title || '').toLowerCase().replace(/[\(\[][^\)\]]+[\)\]]/g, '').trim();
+          return rTitle.includes(cleanTarget) || cleanTarget.includes(rTitle);
+        }) || results[0];
         window.dispatchEvent(new CustomEvent('ui-toast', { 
           detail: { message: `Downloading high-fidelity stream: ${match.title}...`, type: 'info' } 
         }));
@@ -3188,6 +3198,49 @@ export function AideoView() {
                         In Library ({localArtistTracks.length})
                       </button>
                     )}
+
+                    <button
+                      onClick={async () => {
+                        const targetTracks = artistActiveTab === 'popular' 
+                          ? (artistProfile.top_tracks || [])
+                          : (artistDiscography || []);
+                        if (!targetTracks || targetTracks.length === 0) return;
+                        const items = targetTracks.map((t: any, idx: number) => {
+                          const trackTitle = typeof t === 'string' ? t : (t?.title || t?.name || t?.track || 'Untitled');
+                          const rawArtist = typeof t?.artist === 'object' && t?.artist !== null ? (t.artist.name || artistProfile.name) : t?.artist;
+                          const trackArtist = rawArtist || artistProfile.name || 'Unknown Artist';
+                          const trackUrl = (typeof t === 'object' && t !== null) ? (t.url || t.stream_url || t.path || '') : '';
+                          return {
+                            url: trackUrl,
+                            title: trackTitle,
+                            artist: trackArtist,
+                            album: t?.album || `${artistProfile.name} ${artistActiveTab === 'popular' ? 'Hits' : 'Releases'}`,
+                            cover_url: t?.cover_url || artistHeroImage || null,
+                            track_number: t?.track_number || idx + 1,
+                            duration_raw: t?.duration_raw
+                          };
+                        });
+                        await downloadBatchPlaylist(items, `${artistProfile.name} ${artistActiveTab === 'popular' ? 'Hits' : 'Discography'}`);
+                      }}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 10,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: '1px solid rgba(16, 185, 129, 0.4)',
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        color: '#10b981',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                      title="Download full tracklist to local disk with embedded tags and cover art"
+                    >
+                      <Download size={14} />
+                      Download {artistActiveTab === 'popular' ? 'Hits' : 'All'}
+                    </button>
                   </div>
 
                   {/* Search/Filter within Artist Songs */}

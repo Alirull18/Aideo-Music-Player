@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
+import { pickShuffleIndex, markShufflePlayed, shuffleArray } from '../utils/shuffle';
 
 const paths = (n: number) => Array.from({ length: n }, (_, i) => `/music/track${i}.mp3`);
 
@@ -59,5 +59,22 @@ describe('Session-aware shuffle', () => {
       firstPicks.add(pick);
     }
     expect(firstPicks.size).toBeGreaterThanOrEqual(4);
+  });
+
+  describe('shuffleArray (Fisher-Yates)', () => {
+    it('preserves all elements and array length without mutating input', () => {
+      const original = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      const copy = [...original];
+      const shuffled = shuffleArray(original);
+
+      expect(original).toEqual(copy); // does not mutate input
+      expect(shuffled).toHaveLength(original.length);
+      expect(new Set(shuffled)).toEqual(new Set(original));
+    });
+
+    it('handles empty and single-element arrays', () => {
+      expect(shuffleArray([])).toEqual([]);
+      expect(shuffleArray([42])).toEqual([42]);
+    });
   });
 });

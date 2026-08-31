@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, VolumeX, Heart, ThumbsDown, Music, Lock, Unlock, Pin, PinOff, Tv2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -17,7 +18,6 @@ export function MiniPlayer() {
   });
 
   const {
-    playback,
     isMuted,
     toggleMute,
     currentTrack,
@@ -41,8 +41,41 @@ export function MiniPlayer() {
     desktopLyricsOpen,
     toggleDesktopLyrics,
     desktopLyricsLocked,
-    toggleDesktopLyricsLocked
-  } = useStore();
+    toggleDesktopLyricsLocked,
+    playbackPositionSecs,
+    playbackCurrentTrack,
+    playbackStatus,
+    playbackVolume
+  } = useStore(useShallow(s => ({
+    playbackPositionSecs: s.playback.position_secs,
+    playbackCurrentTrack: s.playback.current_track,
+    playbackStatus: s.playback.status,
+    playbackVolume: s.playback.volume,
+    isMuted: s.isMuted,
+    toggleMute: s.toggleMute,
+    currentTrack: s.currentTrack,
+    coverArt: s.coverArt,
+    lyrics: s.lyrics,
+    lyricOffset: s.lyricOffset,
+    showRomaji: s.showRomaji,
+    showTranslation: s.showTranslation,
+    albumArtFit: s.albumArtFit,
+    pauseTrack: s.pauseTrack,
+    resumeTrack: s.resumeTrack,
+    playNext: s.playNext,
+    playPrev: s.playPrev,
+    setVolume: s.setVolume,
+    setMiniPlayerMode: s.setMiniPlayerMode,
+    toggleLoveTrack: s.toggleLoveTrack,
+    toggleDislikeTrack: s.toggleDislikeTrack,
+    translateLyrics: s.translateLyrics,
+    getRomaji: s.getRomaji,
+    isTranslating: s.isTranslating,
+    desktopLyricsOpen: s.desktopLyricsOpen,
+    toggleDesktopLyrics: s.toggleDesktopLyrics,
+    desktopLyricsLocked: s.desktopLyricsLocked,
+    toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
+  })));
 
   const current = currentTrack;
 
@@ -114,7 +147,7 @@ export function MiniPlayer() {
 
   const activeLyric = useMemo(() => {
     if (!lyrics || !lyrics.length) return null;
-    const now = playback.position_secs + lyricOffset / 1000;
+    const now = playbackPositionSecs + lyricOffset / 1000;
     let currentLine = null;
     for (let i = 0; i < lyrics.length; i++) {
       if (lyrics[i].time_secs <= now) {
@@ -124,7 +157,7 @@ export function MiniPlayer() {
       }
     }
     return currentLine;
-  }, [lyrics, playback.position_secs, lyricOffset]);
+  }, [lyrics, playbackPositionSecs, lyricOffset]);
 
   // Determine displayed text honoring active Romaji and Translation preferences
   const displayLyricText = useMemo(() => {
@@ -202,8 +235,8 @@ export function MiniPlayer() {
         {/* Info & Controls Section */}
         <div className="mini-right-panel">
           <div className="mini-info">
-            <div className="mini-title" title={current?.title || baseName(playback.current_track)}>
-              {current?.title || baseName(playback.current_track) || 'Not Playing'}
+            <div className="mini-title" title={current?.title || baseName(playbackCurrentTrack)}>
+              {current?.title || baseName(playbackCurrentTrack) || 'Not Playing'}
             </div>
             <div className="mini-artist" title={current?.artist || 'Unknown Artist'}>
               {current?.artist || 'Unknown Artist'}
@@ -246,10 +279,10 @@ export function MiniPlayer() {
             </button>
             <button 
               className="mini-btn play-pause" 
-              onClick={playback.status === 'Playing' ? pauseTrack : resumeTrack}
-              title={playback.status === 'Playing' ? 'Pause' : 'Play'}
+              onClick={playbackStatus === 'Playing' ? pauseTrack : resumeTrack}
+              title={playbackStatus === 'Playing' ? 'Pause' : 'Play'}
             >
-              {playback.status === 'Playing' ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" style={{ marginLeft: 2 }} />}
+              {playbackStatus === 'Playing' ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" style={{ marginLeft: 2 }} />}
             </button>
             <button className="mini-btn" onClick={playNext} title="Next">
               <SkipForward size={14} fill="currentColor" />
@@ -329,10 +362,10 @@ export function MiniPlayer() {
               <button 
                 className="mini-fb-btn" 
                 onClick={toggleMute} 
-                title={isMuted || playback.volume === 0 ? "Unmute" : "Mute"}
+                title={isMuted || playbackVolume === 0 ? "Unmute" : "Mute"}
                 style={{ width: 'auto', height: 'auto', padding: 2 }}
               >
-                {isMuted || playback.volume === 0 ? (
+                {isMuted || playbackVolume === 0 ? (
                   <VolumeX size={11} color="var(--accent)" />
                 ) : (
                   <Volume2 size={11} color="var(--text-dim)" />
@@ -344,7 +377,7 @@ export function MiniPlayer() {
                 min={0} 
                 max={1} 
                 step={0.05} 
-                value={playback.volume} 
+                value={playbackVolume} 
                 onChange={e => setVolume(+e.target.value)} 
               />
             </div>

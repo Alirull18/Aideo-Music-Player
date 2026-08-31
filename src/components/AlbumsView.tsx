@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, memo } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { extractDominantColor } from '../utils/colorExtractor';
+import { fmt } from '../utils';
+import { shuffleArray } from '../utils/shuffle';
 import { ArtistDiscographyDrawer } from './ArtistDiscographyDrawer';
 import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey } from '../utils/albumUtils';
 import { SimpleLRU } from '../utils/lruCache';
@@ -91,11 +93,6 @@ function AlbumThumbnail({ sampleTrack, title }: { sampleTrack: any; title: strin
   );
 }
 
-function fmt(s: number | null) {
-  if (!s || isNaN(s) || s < 0) return '0:00';
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-}
-
 const getSavedLovedAlbums = (): string[] => {
   try {
     const raw = localStorage.getItem('aideo-loved-albums');
@@ -104,6 +101,382 @@ const getSavedLovedAlbums = (): string[] => {
     return [];
   }
 };
+
+interface AlbumCardProps {
+  album: AlbumGroup;
+  isLoved: boolean;
+  menuOpenFor: string | null;
+  setMenuOpenFor: (id: string | null) => void;
+  setSelectedAlbum: (album: AlbumGroup) => void;
+  toggleLoveAlbum: (id: string, e: React.MouseEvent) => void;
+  handlePlayAlbum: (album: AlbumGroup, shuffle?: boolean) => void;
+  handlePlayAlbumNext: (album: AlbumGroup) => void;
+  handleAddAlbumToQueue: (album: AlbumGroup) => void;
+  setPlaylistModalTracks: (tracks: any[]) => void;
+  setCoverArtModalTrack: (track: any) => void;
+  handleSonicMix: (album: AlbumGroup) => void;
+  setEditAlbumModal: (album: AlbumGroup) => void;
+  setEditTitle: (title: string) => void;
+  setEditArtist: (artist: string) => void;
+  handleDeleteAlbum: (album: AlbumGroup) => void;
+  setSelectedArtist: (artist: string) => void;
+}
+
+const AlbumCard = memo(function AlbumCard({
+  album,
+  isLoved,
+  menuOpenFor,
+  setMenuOpenFor,
+  setSelectedAlbum,
+  toggleLoveAlbum,
+  handlePlayAlbum,
+  handlePlayAlbumNext,
+  handleAddAlbumToQueue,
+  setPlaylistModalTracks,
+  setCoverArtModalTrack,
+  handleSonicMix,
+  setEditAlbumModal,
+  setEditTitle,
+  setEditArtist,
+  handleDeleteAlbum,
+  setSelectedArtist,
+}: AlbumCardProps) {
+  return (
+    <motion.div
+      whileHover={{ y: -6 }}
+      transition={{ duration: 0.2 }}
+      onClick={() => setSelectedAlbum(album)}
+      style={{
+        background: 'var(--glass)',
+        border: '1px solid var(--glass-border)',
+        borderRadius: 16,
+        padding: 14,
+        cursor: 'pointer',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
+        transition: 'border-color 0.2s, background 0.2s',
+        zIndex: menuOpenFor === album.id ? 1000 : 1,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.3)';
+        e.currentTarget.style.background = 'var(--glass-h)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'var(--glass-border)';
+        e.currentTarget.style.background = 'var(--glass)';
+      }}
+    >
+      {/* Cover Image Container */}
+      <div
+        style={{
+          width: '100%',
+          paddingTop: '100%',
+          position: 'relative',
+          borderRadius: 12,
+          overflow: 'hidden',
+          marginBottom: 12,
+          background: '#0e0e14',
+        }}
+        className="album-card-art-container"
+      >
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+          <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+        </div>
+
+        {/* Loved Heart Toggle Button on Top-Left */}
+        <button
+          onClick={(e) => toggleLoveAlbum(album.id, e)}
+          style={{
+            position: 'absolute',
+            top: 10,
+            left: 10,
+            background: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: '50%',
+            width: 28,
+            height: 28,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: isLoved ? '#ef4444' : 'var(--text-dim)',
+            cursor: 'pointer',
+            transition: 'transform 0.2s',
+          }}
+          title={isLoved ? 'Remove from Loved Albums' : 'Love Album'}
+        >
+          <Heart size={14} fill={isLoved ? '#ef4444' : 'none'} color={isLoved ? '#ef4444' : 'white'} />
+        </button>
+
+        {/* Track count badge */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            background: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 12,
+            padding: '3px 8px',
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'white',
+          }}
+        >
+          {album.tracks.length} {album.tracks.length === 1 ? 'song' : 'songs'}
+        </div>
+
+        {/* Hover Play Button Overlay */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 12,
+            right: 12,
+            display: 'flex',
+            gap: 8,
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePlayAlbum(album, false);
+            }}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              border: 'none',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 8px 20px rgba(0, 0, 0, 0.4)',
+              transition: 'transform 0.2s',
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            title="Play Album"
+          >
+            <Play size={20} fill="white" style={{ marginLeft: 2 }} />
+          </button>
+        </div>
+      </div>
+
+      {/* Album Title with Triple Dots Icon on the Far Right */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, width: '100%', marginBottom: 4 }}>
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 14,
+            color: 'var(--text)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: 1,
+          }}
+          title={album.title}
+        >
+          {album.title}
+        </div>
+
+        {/* Triple Dots Button */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpenFor(menuOpenFor === album.id ? null : album.id);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: menuOpenFor === album.id ? 'white' : 'var(--text-dim)',
+              cursor: 'pointer',
+              padding: 4,
+              borderRadius: 6,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'color 0.2s, background 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = '#fff';
+              e.currentTarget.style.background = 'var(--glass-h)';
+            }}
+            onMouseLeave={(e) => {
+              if (menuOpenFor !== album.id) {
+                e.currentTarget.style.color = 'var(--text-dim)';
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title="Album Options"
+          >
+            <MoreVertical size={16} />
+          </button>
+
+          {/* Triple Dots Context Menu Dropdown */}
+          <AnimatePresence>
+            {menuOpenFor === album.id && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '100%',
+                  zIndex: 1001,
+                  background: 'var(--toast-bg)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 12,
+                  padding: 6,
+                  minWidth: 200,
+                  boxShadow: 'var(--shadow-lg)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  transformOrigin: 'top right',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handlePlayAlbum(album, false); }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Play size={14} />
+                  Play Album
+                </div>
+
+                <div
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handlePlayAlbumNext(album); }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <ListPlus size={14} />
+                  Play Album Next
+                </div>
+
+                <div
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleAddAlbumToQueue(album); }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Plus size={14} />
+                  Add Album to Queue
+                </div>
+
+                <div
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setPlaylistModalTracks(album.tracks); }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Plus size={14} />
+                  Add to Playlist...
+                </div>
+
+                <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 4px' }} />
+
+                <div
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setCoverArtModalTrack(album.sampleTrack); }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Image size={14} />
+                  Manage Cover Art
+                </div>
+
+                <div
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleSonicMix(album); }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: '#10b981', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Activity size={14} style={{ color: '#10b981' }} />
+                  Sonic Mix
+                </div>
+
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpenFor(null);
+                    useStore.getState().setTagEditorBatchTracks(album.tracks);
+                  }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(139, 92, 246, 0.15)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Tag size={14} />
+                  Batch Edit Audio Tags
+                </div>
+
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpenFor(null);
+                    setEditAlbumModal(album);
+                    setEditTitle(album.title);
+                    setEditArtist(album.artist);
+                  }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Edit3 size={14} />
+                  Edit Album Data
+                </div>
+
+                <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 4px' }} />
+
+                <div
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleDeleteAlbum(album); }}
+                  style={{ padding: '8px 12px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <Trash2 size={14} color="#ef4444" />
+                  Delete Album
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Artist Name (Clickable to open Artist Discography) */}
+      <div
+        onClick={(e) => {
+          e.stopPropagation();
+          setSelectedArtist(album.artist);
+        }}
+        style={{
+          fontSize: 12,
+          color: 'var(--text-dim)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          cursor: 'pointer',
+          transition: 'color 0.2s',
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent)'}
+        onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
+        title={`View discography of ${album.artist}`}
+      >
+        {album.artist}
+      </div>
+    </motion.div>
+  );
+});
 
 interface AlbumsViewProps {
   tracks?: any[];
@@ -249,17 +622,84 @@ export function AlbumsView({
     }
   }, [filteredAlbums.length, onAlbumCountChange]);
 
+  // 2D Grid Virtualization
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(1000);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(800);
+
+  useEffect(() => {
+    const el = gridContainerRef.current;
+    if (!el) return;
+    let lastWidth = el.clientWidth;
+    const updateSize = () => {
+      if (el.clientWidth > 0 && Math.abs(lastWidth - el.clientWidth) >= 4) {
+        lastWidth = el.clientWidth;
+        setContainerWidth(el.clientWidth);
+      }
+    };
+    if (el.clientWidth > 0) setContainerWidth(el.clientWidth);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(updateSize);
+      ro.observe(el);
+    }
+
+    let scrollParent: HTMLElement | null = el.parentElement;
+    while (scrollParent && scrollParent !== document.body) {
+      const overflowY = window.getComputedStyle(scrollParent).overflowY;
+      if (overflowY === 'auto' || overflowY === 'scroll') break;
+      scrollParent = scrollParent.parentElement;
+    }
+    const target = scrollParent || window;
+
+    const handleScroll = () => {
+      if (target === window) {
+        setScrollTop(window.scrollY);
+        setViewportHeight(window.innerHeight);
+      } else if (scrollParent) {
+        setScrollTop(scrollParent.scrollTop);
+        setViewportHeight(scrollParent.clientHeight);
+      }
+    };
+
+    target.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+    handleScroll();
+
+    return () => {
+      if (ro) ro.disconnect();
+      target.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, []);
+
+  const columns = Math.max(1, Math.floor((containerWidth + 24) / 224));
+  const cardWidth = Math.max(160, (containerWidth - (columns - 1) * 24) / columns);
+  const estimatedRowHeight = Math.round(cardWidth + 90 + 24);
+
+  const rows = useMemo(() => {
+    const chunks: AlbumGroup[][] = [];
+    for (let i = 0; i < filteredAlbums.length; i += columns) {
+      chunks.push(filteredAlbums.slice(i, i + columns));
+    }
+    return chunks;
+  }, [filteredAlbums, columns]);
+
+  const overscan = 2;
+  const startIndex = Math.max(0, Math.floor(scrollTop / estimatedRowHeight) - overscan);
+  const endIndex = Math.min(rows.length, Math.ceil((scrollTop + viewportHeight) / estimatedRowHeight) + overscan);
+
+  const visibleRows = rows.slice(startIndex, endIndex);
+  const topSpacerHeight = startIndex * estimatedRowHeight;
+  const bottomSpacerHeight = Math.max(0, (rows.length - endIndex) * estimatedRowHeight);
+
   // Action handlers
   const handlePlayAlbum = async (album: AlbumGroup, shuffle = false) => {
     if (album.tracks.length === 0) return;
-    let trackList = sortAlbumTracks(album.tracks);
-    if (shuffle) {
-      trackList = [...trackList];
-      for (let i = trackList.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [trackList[i], trackList[j]] = [trackList[j], trackList[i]];
-      }
-    }
+    const sorted = sortAlbumTracks(album.tracks);
+    const trackList = shuffle ? shuffleArray(sorted) : sorted;
     const firstTrack = trackList[0];
     const restTracks = trackList.slice(1);
     
@@ -268,8 +708,12 @@ export function AlbumsView({
     try {
       await invoke('clear_queue');
       if (restTracks.length > 0) {
-        const paths = restTracks.map(t => t.path || t.stream_url);
-        await invoke('add_to_queue_bulk', { paths });
+        const paths = restTracks
+          .map(t => t.path || t.stream_url)
+          .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+        if (paths.length > 0) {
+          await invoke('add_to_queue_bulk', { paths });
+        }
       }
     } catch (e) {
       console.error('Failed to sync queue:', e);
@@ -286,8 +730,12 @@ export function AlbumsView({
     try {
       await invoke('clear_queue');
       if (restTracks.length > 0) {
-        const paths = restTracks.map(t => t.path || t.stream_url);
-        await invoke('add_to_queue_bulk', { paths });
+        const paths = restTracks
+          .map(t => t.path || t.stream_url)
+          .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+        if (paths.length > 0) {
+          await invoke('add_to_queue_bulk', { paths });
+        }
       }
     } catch (e) {
       console.error('Failed to sync queue:', e);
@@ -436,353 +884,55 @@ export function AlbumsView({
           </span>
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: 24,
-            paddingBottom: 40,
-          }}
-        >
-          {filteredAlbums.map((album) => {
-            const isLoved = lovedAlbumKeys.includes(album.id);
+        <div ref={gridContainerRef} style={{ width: '100%', paddingBottom: 40 }}>
+          {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} />}
+          {visibleRows.map((row, rowIdx) => {
+            const actualRowIdx = startIndex + rowIdx;
             return (
-              <motion.div
-                key={album.id}
-                whileHover={{ y: -6 }}
-                transition={{ duration: 0.2 }}
-                onClick={() => setSelectedAlbum(album)}
+              <div
+                key={`row-${actualRowIdx}`}
+                className="album-virtual-row"
                 style={{
-                  background: 'var(--glass)',
-                  border: '1px solid var(--glass-border)',
-                  borderRadius: 16,
-                  padding: 14,
-                  cursor: 'pointer',
-                  position: 'relative',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
-                  transition: 'border-color 0.2s, background 0.2s',
-                  zIndex: menuOpenFor === album.id ? 1000 : 1,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.3)';
-                  e.currentTarget.style.background = 'var(--glass-h)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--glass-border)';
-                  e.currentTarget.style.background = 'var(--glass)';
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                  gap: 24,
+                  marginBottom: 24,
                 }}
               >
-                {/* Cover Image Container */}
-                <div
-                  style={{
-                    width: '100%',
-                    paddingTop: '100%',
-                    position: 'relative',
-                    borderRadius: 12,
-                    overflow: 'hidden',
-                    marginBottom: 12,
-                    background: '#0e0e14',
-                  }}
-                  className="album-card-art-container"
-                >
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-                    <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
-                  </div>
-
-                  {/* Loved Heart Toggle Button on Top-Left */}
-                  <button
-                    onClick={(e) => toggleLoveAlbum(album.id, e)}
-                    style={{
-                      position: 'absolute',
-                      top: 10,
-                      left: 10,
-                      background: 'rgba(0, 0, 0, 0.65)',
-                      backdropFilter: 'blur(8px)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: '50%',
-                      width: 28,
-                      height: 28,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: isLoved ? '#ef4444' : 'var(--text-dim)',
-                      cursor: 'pointer',
-                      transition: 'transform 0.2s',
-                    }}
-                    title={isLoved ? 'Remove from Loved Albums' : 'Love Album'}
-                  >
-                    <Heart size={14} fill={isLoved ? '#ef4444' : 'none'} color={isLoved ? '#ef4444' : 'white'} />
-                  </button>
-
-                  {/* Track count badge */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 10,
-                      right: 10,
-                      background: 'rgba(0, 0, 0, 0.65)',
-                      backdropFilter: 'blur(8px)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: 12,
-                      padding: '3px 8px',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: 'white',
-                    }}
-                  >
-                    {album.tracks.length} {album.tracks.length === 1 ? 'song' : 'songs'}
-                  </div>
-
-                  {/* Hover Play Button Overlay */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      bottom: 12,
-                      right: 12,
-                      display: 'flex',
-                      gap: 8,
-                    }}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handlePlayAlbum(album, false);
-                      }}
-                      style={{
-                        width: 42,
-                        height: 42,
-                        borderRadius: '50%',
-                        background: 'var(--accent)',
-                        border: 'none',
-                        color: 'white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                        boxShadow: '0 8px 20px rgba(0, 0, 0, 0.4)',
-                        transition: 'transform 0.2s',
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
-                      onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                      title="Play Album"
-                    >
-                      <Play size={20} fill="white" style={{ marginLeft: 2 }} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Album Title with Triple Dots Icon on the Far Right */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, width: '100%', marginBottom: 4 }}>
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      fontSize: 14,
-                      color: 'var(--text)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      flex: 1,
-                    }}
-                    title={album.title}
-                  >
-                    {album.title}
-                  </div>
-
-                  {/* Triple Dots Button */}
-                  <div style={{ position: 'relative' }}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMenuOpenFor(menuOpenFor === album.id ? null : album.id);
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: menuOpenFor === album.id ? 'white' : 'var(--text-dim)',
-                        cursor: 'pointer',
-                        padding: 4,
-                        borderRadius: 6,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'color 0.2s, background 0.2s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.color = '#fff';
-                        e.currentTarget.style.background = 'var(--glass-h)';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (menuOpenFor !== album.id) {
-                          e.currentTarget.style.color = 'var(--text-dim)';
-                          e.currentTarget.style.background = 'transparent';
-                        }
-                      }}
-                      title="Album Options"
-                    >
-                      <MoreVertical size={16} />
-                    </button>
-
-                    {/* Triple Dots Context Menu Dropdown */}
-                    <AnimatePresence>
-                      {menuOpenFor === album.id && (
-                        <motion.div
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.95 }}
-                          style={{
-                            position: 'absolute',
-                            right: 0,
-                            top: '100%',
-                            zIndex: 1001,
-                            background: 'var(--toast-bg)',
-                            backdropFilter: 'blur(20px)',
-                            border: '1px solid var(--glass-border)',
-                            borderRadius: 12,
-                            padding: 6,
-                            minWidth: 200,
-                            boxShadow: 'var(--shadow-lg)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 2,
-                            transformOrigin: 'top right',
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handlePlayAlbum(album, false); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Play size={14} />
-                            Play Album
-                          </div>
-
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handlePlayAlbumNext(album); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <ListPlus size={14} />
-                            Play Album Next
-                          </div>
-
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleAddAlbumToQueue(album); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Plus size={14} />
-                            Add Album to Queue
-                          </div>
-
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setPlaylistModalTracks(album.tracks); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Plus size={14} />
-                            Add to Playlist...
-                          </div>
-
-                          <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 4px' }} />
-
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setCoverArtModalTrack(album.sampleTrack); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Image size={14} />
-                            Manage Cover Art
-                          </div>
-
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleSonicMix(album); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: '#10b981', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Activity size={14} style={{ color: '#10b981' }} />
-                            Sonic Mix
-                          </div>
-
-                          <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setMenuOpenFor(null);
-                              useStore.getState().setTagEditorBatchTracks(album.tracks);
-                            }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(139, 92, 246, 0.15)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Tag size={14} />
-                            Batch Edit Audio Tags
-                          </div>
-
-                          <div
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setMenuOpenFor(null);
-                              setEditAlbumModal(album);
-                              setEditTitle(album.title);
-                              setEditArtist(album.artist);
-                            }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text)', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Edit3 size={14} />
-                            Edit Album Data
-                          </div>
-
-                          <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 4px' }} />
-
-                          <div
-                            onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handleDeleteAlbum(album); }}
-                            style={{ padding: '8px 12px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Trash2 size={14} color="#ef4444" />
-                            Delete Album
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </div>
-
-                {/* Artist Name (Clickable to open Artist Discography) */}
-                <div
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedArtist(album.artist);
-                  }}
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--text-dim)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    cursor: 'pointer',
-                    transition: 'color 0.2s',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent)'}
-                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-dim)'}
-                  title={`View discography of ${album.artist}`}
-                >
-                  {album.artist}
-                </div>
-              </motion.div>
+                {row.map((album) => {
+                  const isLoved = lovedAlbumKeys.includes(album.id);
+                  return (
+                    <AlbumCard
+                      key={album.id}
+                      album={album}
+                      isLoved={isLoved}
+                      menuOpenFor={menuOpenFor}
+                      setMenuOpenFor={setMenuOpenFor}
+                      setSelectedAlbum={setSelectedAlbum}
+                      toggleLoveAlbum={toggleLoveAlbum}
+                      handlePlayAlbum={handlePlayAlbum}
+                      handlePlayAlbumNext={handlePlayAlbumNext}
+                      handleAddAlbumToQueue={handleAddAlbumToQueue}
+                      setPlaylistModalTracks={setPlaylistModalTracks}
+                      setCoverArtModalTrack={setCoverArtModalTrack}
+                      handleSonicMix={handleSonicMix}
+                      setEditAlbumModal={setEditAlbumModal}
+                      setEditTitle={setEditTitle}
+                      setEditArtist={setEditArtist}
+                      handleDeleteAlbum={handleDeleteAlbum}
+                      setSelectedArtist={setSelectedArtist}
+                    />
+                  );
+                })}
+                {/* Empty placefillers if the last row is partially filled */}
+                {row.length < columns &&
+                  Array.from({ length: columns - row.length }).map((_, i) => (
+                    <div key={`empty-${i}`} style={{ minWidth: 0 }} />
+                  ))}
+              </div>
             );
           })}
+          {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} />}
         </div>
       )}
 
