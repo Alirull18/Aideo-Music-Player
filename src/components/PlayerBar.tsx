@@ -1,27 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { 
   SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, 
   Volume2, Volume1, VolumeX, SlidersHorizontal, X, ListMusic, Activity, 
   Infinity as InfinityIcon, Maximize2, Minimize2, Heart, ThumbsDown, Tv2,
-  Disc, Sparkles
+  Disc, Sparkles, Loader2
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { CastSelector } from './CastSelector';
-import { fmt, baseName, getStreamName } from '../utils';
+import { fmt, baseName, getStreamName, isRadioStream } from '../utils';
 import { generateWaveformPeaks } from '../utils/waveform';
-
-const isRadioStream = (track: any): boolean => {
-  if (!track) return false;
-  const path = track.path || '';
-  const format = track.format || '';
-  const isUrlFormat = format.toUpperCase() === 'URL';
-  const isOnline = path.startsWith('http://') || path.startsWith('https://');
-  const isYTMOrTidalOrCloud = format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'Qobuz FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN' || path.includes('youtube.com') || path.includes('youtu.be') || path.includes('api.tidal.com');
-  
-  return (isUrlFormat || isOnline) && !isYTMOrTidalOrCloud && (!track.duration || track.duration <= 0);
-};
 
 export function PlayerBar() {
   const {
@@ -33,7 +23,43 @@ export function PlayerBar() {
     setMiniPlayerMode, desktopLyricsOpen, toggleDesktopLyrics,
     desktopLyricsLocked, toggleDesktopLyricsLocked,
     playerBarDesign
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    view: s.view,
+    playback: s.playback,
+    isMuted: s.isMuted,
+    toggleMute: s.toggleMute,
+    currentDevice: s.currentDevice,
+    coverArt: s.coverArt,
+    lyrics: s.lyrics,
+    lyricOffset: s.lyricOffset,
+    pauseTrack: s.pauseTrack,
+    resumeTrack: s.resumeTrack,
+    stopTrack: s.stopTrack,
+    setVolume: s.setVolume,
+    seek: s.seek,
+    setView: s.setView,
+    playNext: s.playNext,
+    playPrev: s.playPrev,
+    shuffle: s.shuffle,
+    toggleShuffle: s.toggleShuffle,
+    repeat: s.repeat,
+    toggleRepeat: s.toggleRepeat,
+    dsp: s.dsp,
+    currentTrack: s.currentTrack,
+    showQueue: s.showQueue,
+    toggleQueue: s.toggleQueue,
+    toggleControlCenter: s.toggleControlCenter,
+    autoplayEnabled: s.autoplayEnabled,
+    toggleAutoplay: s.toggleAutoplay,
+    toggleLoveTrack: s.toggleLoveTrack,
+    toggleDislikeTrack: s.toggleDislikeTrack,
+    setMiniPlayerMode: s.setMiniPlayerMode,
+    desktopLyricsOpen: s.desktopLyricsOpen,
+    toggleDesktopLyrics: s.toggleDesktopLyrics,
+    desktopLyricsLocked: s.desktopLyricsLocked,
+    toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
+    playerBarDesign: s.playerBarDesign,
+  })));
 
   const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
 
@@ -51,6 +77,8 @@ export function PlayerBar() {
   const duration = current?.duration ?? 0;
   const pct = duration > 0 ? (playback.position_secs / duration) * 100 : 0;
   const isPlaying = playback.status === 'Playing';
+  const isBuffering = Boolean(playback.is_buffering);
+  const effectiveCover = coverArt || current?.cover_url || defaultCover;
 
   const waveformPeaks = useMemo(() => {
     const barCount = playerBarDesign === 'waveform' ? 64 : 48;
@@ -75,7 +103,7 @@ export function PlayerBar() {
 
   const trackTitle = current?.title || (playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : baseName(playback.current_track)) || 'No Media Loaded';
   const trackArtist = current?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—');
-  const isLive = playback.current_track?.startsWith('http') && !duration;
+  const isLive = isRadioStream(current, playback.current_track, duration);
 
   // Render Quality Tag Helper
   const renderQualityTag = () => {
@@ -273,7 +301,7 @@ export function PlayerBar() {
         {/* LEFT */}
         <div className="pb-left">
           <div className="pb-thumb" onClick={() => setView('nowplaying')}>
-            <img src={coverArt || defaultCover} alt="" />
+            <img src={effectiveCover} alt="" />
             {isLive && <div className="stream-badge-mini">LIVE</div>}
           </div>
           <div className="pb-info" onClick={() => setView('nowplaying')}>
@@ -323,8 +351,8 @@ export function PlayerBar() {
             <button className="pb-btn" onClick={playPrev} title="Previous">
               <SkipBack size={20} fill="currentColor" />
             </button>
-            <button className="pb-btn play" onClick={isPlaying ? pauseTrack : resumeTrack}>
-              {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 3 }} />}
+            <button className="pb-btn play" onClick={isPlaying ? pauseTrack : resumeTrack} title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}>
+              {isBuffering ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 3 }} />}
             </button>
             <button className="pb-btn" onClick={playNext} title="Next">
               <SkipForward size={20} fill="currentColor" />
@@ -403,7 +431,7 @@ export function PlayerBar() {
           {/* LEFT: Mini Circular Artwork & Track Info */}
           <div className="floating-island-left" onClick={() => setView('nowplaying')}>
             <div className="floating-thumb-circle">
-              <img src={coverArt || defaultCover} alt="" />
+              <img src={effectiveCover} alt="" />
               {isLive && <div className="floating-live-dot" />}
             </div>
             <div className="floating-info">
@@ -434,9 +462,9 @@ export function PlayerBar() {
               <button 
                 className="floating-play-btn" 
                 onClick={isPlaying ? pauseTrack : resumeTrack}
-                title={isPlaying ? "Pause" : "Play"}
+                title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}
               >
-                {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: 2 }} />}
+                {isBuffering ? <Loader2 size={18} className="animate-spin" /> : isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: 2 }} />}
               </button>
               <button className="pb-btn" onClick={playNext} title="Next">
                 <SkipForward size={17} fill="currentColor" />
@@ -532,7 +560,7 @@ export function PlayerBar() {
           {/* Left Console */}
           <div className="waveform-deck-left" onClick={() => setView('nowplaying')}>
             <div className="pb-thumb-studio">
-              <img src={coverArt || defaultCover} alt="" />
+              <img src={effectiveCover} alt="" />
             </div>
             <div className="waveform-track-info">
               <div className="waveform-title-row">
@@ -558,8 +586,8 @@ export function PlayerBar() {
               <button className="pb-btn" onClick={playPrev} title="Previous">
                 <SkipBack size={19} fill="currentColor" />
               </button>
-              <button className="pb-btn studio-play" onClick={isPlaying ? pauseTrack : resumeTrack}>
-                {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 2 }} />}
+              <button className="pb-btn studio-play" onClick={isPlaying ? pauseTrack : resumeTrack} title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}>
+                {isBuffering ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 2 }} />}
               </button>
               <button className="pb-btn" onClick={playNext} title="Next">
                 <SkipForward size={19} fill="currentColor" />
@@ -616,7 +644,7 @@ export function PlayerBar() {
           {/* Left: Mini Cover + Single-line Info */}
           <div className="minimal-left" onClick={() => setView('nowplaying')}>
             <div className="minimal-thumb">
-              <img src={coverArt || defaultCover} alt="" />
+              <img src={effectiveCover} alt="" />
             </div>
             <div className="minimal-meta">
               <span className="minimal-title">{trackTitle}</span>
@@ -634,8 +662,8 @@ export function PlayerBar() {
             <button className="pb-btn mini" onClick={playPrev} title="Previous">
               <SkipBack size={16} fill="currentColor" />
             </button>
-            <button className="minimal-play-btn" onClick={isPlaying ? pauseTrack : resumeTrack}>
-              {isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" style={{ marginLeft: 2 }} />}
+            <button className="minimal-play-btn" onClick={isPlaying ? pauseTrack : resumeTrack} title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}>
+              {isBuffering ? <Loader2 size={15} className="animate-spin" /> : isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" style={{ marginLeft: 2 }} />}
             </button>
             <button className="pb-btn mini" onClick={playNext} title="Next">
               <SkipForward size={16} fill="currentColor" />
@@ -689,7 +717,7 @@ export function PlayerBar() {
               <div className="vinyl-groove-ring ring-2" />
               <div className="vinyl-groove-ring ring-3" />
               <div className="vinyl-center-art">
-                <img src={coverArt || defaultCover} alt="" />
+                <img src={effectiveCover} alt="" />
                 <div className="vinyl-spindle-hole" />
               </div>
             </div>
@@ -726,8 +754,8 @@ export function PlayerBar() {
             <button className="vinyl-btn" onClick={playPrev} title="Previous">
               <SkipBack size={18} fill="currentColor" />
             </button>
-            <button className="vinyl-btn play-major" onClick={isPlaying ? pauseTrack : resumeTrack}>
-              {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 2 }} />}
+            <button className="vinyl-btn play-major" onClick={isPlaying ? pauseTrack : resumeTrack} title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}>
+              {isBuffering ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 2 }} />}
             </button>
             <button className="vinyl-btn" onClick={playNext} title="Next">
               <SkipForward size={18} fill="currentColor" />
