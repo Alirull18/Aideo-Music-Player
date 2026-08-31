@@ -1,15 +1,55 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, X, Tv2, ChevronUp, ChevronDown } from 'lucide-react';
 import { fmt, baseName, cleanSearchQuery } from '../utils';
 import { LyricsDisplayMode } from '../store/types';
+import { KaraokeActiveLine } from './KaraokeActiveLine';
 
 interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; duration?: number; }
 
 export function LyricsPanel() {
-  const { currentTrack, lyrics, playback, lyricOffset, lyricStatus, lyricsDisplayMode, setLyricsDisplayMode, seek, adjustLyricOffset, setLyricOffset, saveLyrics, translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji, showTranslation, setShowTranslation, showLyricsHeader, toggleLyricsHeader, setCustomPrompt, desktopLyricsOpen, toggleDesktopLyrics, desktopLyricsLocked, toggleDesktopLyricsLocked } = useStore();
+  const {
+    currentTrack, lyrics, lyricOffset, lyricStatus, lyricsDisplayMode,
+    setLyricsDisplayMode, seek, adjustLyricOffset, setLyricOffset, saveLyrics,
+    translateLyrics, getRomaji, isTranslating, showRomaji, setShowRomaji,
+    showTranslation, setShowTranslation, showLyricsHeader, toggleLyricsHeader,
+    setCustomPrompt, desktopLyricsOpen, toggleDesktopLyrics, desktopLyricsLocked,
+    toggleDesktopLyricsLocked,
+    playbackPositionSecs,
+    playbackStatus,
+    playbackCurrentTrack
+  } = useStore(useShallow(s => ({
+    currentTrack: s.currentTrack,
+    lyrics: s.lyrics,
+    playbackPositionSecs: s.playback.position_secs,
+    playbackStatus: s.playback.status,
+    playbackCurrentTrack: s.playback.current_track,
+    lyricOffset: s.lyricOffset,
+    lyricStatus: s.lyricStatus,
+    lyricsDisplayMode: s.lyricsDisplayMode,
+    setLyricsDisplayMode: s.setLyricsDisplayMode,
+    seek: s.seek,
+    adjustLyricOffset: s.adjustLyricOffset,
+    setLyricOffset: s.setLyricOffset,
+    saveLyrics: s.saveLyrics,
+    translateLyrics: s.translateLyrics,
+    getRomaji: s.getRomaji,
+    isTranslating: s.isTranslating,
+    showRomaji: s.showRomaji,
+    setShowRomaji: s.setShowRomaji,
+    showTranslation: s.showTranslation,
+    setShowTranslation: s.setShowTranslation,
+    showLyricsHeader: s.showLyricsHeader,
+    toggleLyricsHeader: s.toggleLyricsHeader,
+    setCustomPrompt: s.setCustomPrompt,
+    desktopLyricsOpen: s.desktopLyricsOpen,
+    toggleDesktopLyrics: s.toggleDesktopLyrics,
+    desktopLyricsLocked: s.desktopLyricsLocked,
+    toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
+  })));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleTranslateClick = async () => {
@@ -58,39 +98,6 @@ export function LyricsPanel() {
     checkAndFetch();
   }, [currentTrack?.path, lyrics.length, showRomaji, showTranslation, isTranslating]);
 
-  // Syllable word-by-word sync detection: only run 60fps rAF timer if track has word-level karaoke data and karaoke mode is active
-  const hasWordSync = useMemo(() => lyrics.some(l => l.words && l.words.length > 0), [lyrics]);
-  const isKaraokeActive = hasWordSync && lyricsDisplayMode === 'karaoke';
-  const [smoothedTime, setSmoothedTime] = useState(playback.position_secs);
-  const lastPositionRef = useRef(playback.position_secs);
-  const lastTimeRef = useRef(performance.now());
-
-  useEffect(() => {
-    lastPositionRef.current = playback.position_secs;
-    lastTimeRef.current = performance.now();
-    if (isKaraokeActive) {
-      setSmoothedTime(playback.position_secs);
-    }
-  }, [playback.position_secs, isKaraokeActive]);
-
-  useEffect(() => {
-    if (!isKaraokeActive || playback.status !== 'Playing') return;
-
-    let frameId: number;
-    const update = () => {
-      const now = performance.now();
-      const delta = (now - lastTimeRef.current) / 1000;
-      const interpolated = lastPositionRef.current + Math.max(0, delta);
-      setSmoothedTime(interpolated);
-      frameId = requestAnimationFrame(update);
-    };
-
-    frameId = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frameId);
-  }, [playback.status, isKaraokeActive]);
-
-  const currentTime = (isKaraokeActive ? smoothedTime : playback.position_secs) + lyricOffset / 1000;
-
   const [userScrolling, setUserScrolling] = useState(false);
   const userScrollTimer = useRef<number | null>(null);
   const [showFinder, setShowFinder] = useState(false);
@@ -113,13 +120,13 @@ export function LyricsPanel() {
 
   const activeIdx = useMemo(() => {
     if (!lyrics.length) return -1;
-    const now = playback.position_secs + lyricOffset / 1000;
+    const now = playbackPositionSecs + lyricOffset / 1000;
     let idx = -1;
     for (let i = 0; i < lyrics.length; i++) {
       if (lyrics[i].time_secs <= now) idx = i; else break;
     }
     return idx;
-  }, [lyrics, playback.position_secs, lyricOffset]);
+  }, [lyrics, playbackPositionSecs, lyricOffset]);
 
   useEffect(() => {
     if (lyricsDisplayMode === 'static' || userScrolling || !scrollRef.current || activeIdx === -1) return;
@@ -229,15 +236,18 @@ export function LyricsPanel() {
   const pickResult = async (r: SearchResult) => {
     setSearching(true);
     try {
-      if (!playback.current_track) return;
+      if (!playbackCurrentTrack) return;
 
       let lrc = r.raw_lrc ?? '';
-      if (!lrc && r.source === 'Unison') {
+      if (!lrc && (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison')) {
         lrc = await invoke<string>('get_unison_ttml', {
           song: r.title,
           artist: r.artist || undefined,
           duration: r.duration || undefined,
         }).catch(() => '');
+      }
+      if (!lrc && r.source === 'Kugou' && r.content_id) {
+        lrc = await invoke<string>('get_kugou_krc', { id: r.content_id, accesskey: r.id }).catch(() => '');
       }
       if (!lrc && r.source === 'NetEase' && r.content_id)
         lrc = await invoke<string>('get_netease_lrc', { id: r.content_id }).catch(() => '');
@@ -245,7 +255,7 @@ export function LyricsPanel() {
         lrc = await invoke<string>('get_qqmusic_lrc', { mid: r.content_id }).catch(() => '');
 
       if (lrc) {
-        await saveLyrics(playback.current_track, lrc);
+        await saveLyrics(playbackCurrentTrack, lrc);
 
         if (currentTrack && currentTrack.duration && r.duration) {
           const diffSec = currentTrack.duration - r.duration;
@@ -476,33 +486,12 @@ export function LyricsPanel() {
               >
                 <div>
                   {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
-                    l.words.map((word, wordIdx) => {
-                      const nextWord = l.words![wordIdx + 1];
-                      const duration = word.duration_secs && word.duration_secs > 0
-                        ? word.duration_secs
-                        : (nextWord && nextWord.time_secs > word.time_secs ? (nextWord.time_secs - word.time_secs) : 0.8);
-                      const isStarted = currentTime >= word.time_secs;
-                      const isFinished = (word.duration_secs && word.duration_secs > 0)
-                        ? currentTime >= (word.time_secs + word.duration_secs)
-                        : (nextWord ? currentTime >= nextWord.time_secs : currentTime >= (word.time_secs + duration));
-                      
-                      let progress = 0;
-                      if (isFinished) {
-                        progress = 100;
-                      } else if (isStarted) {
-                        progress = Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
-                      }
-
-                      return (
-                        <span 
-                          key={wordIdx} 
-                          className="lyric-word"
-                          style={{ '--word-progress': `${progress}%` } as React.CSSProperties}
-                        >
-                          {word.text}
-                        </span>
-                      );
-                    })
+                    <KaraokeActiveLine
+                      words={l.words}
+                      positionSecs={playbackPositionSecs}
+                      lyricOffset={lyricOffset}
+                      isPlaying={playbackStatus === 'Playing'}
+                    />
                   ) : (
                     l.text || '♪'
                   )}
@@ -588,8 +577,8 @@ export function LyricsPanel() {
               <div className="modal-footer" style={{ padding: '0 24px 24px', display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
                 <button className="btn btn-secondary" style={{ width: 'auto', padding: '10px 24px' }} onClick={() => setShowEditor(false)}>Cancel</button>
                 <button className="btn btn-primary" style={{ width: 'auto', padding: '10px 32px' }} onClick={async () => {
-                  if (playback.current_track) {
-                    await saveLyrics(playback.current_track, editContent);
+                  if (playbackCurrentTrack) {
+                    await saveLyrics(playbackCurrentTrack, editContent);
                     setShowEditor(false);
                   }
                 }}>Save to File</button>

@@ -1,90 +1,69 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { 
-  Sliders, Activity, Loader2, Search, 
-  Compass, Headphones, Power, Sparkles, FolderOpen, Disc
+import {
+  Sliders,
+  Activity,
+  Headphones,
+  Sparkles,
+  FolderOpen,
+  Search,
+  RotateCcw,
+  Zap,
+  Waves,
+  Shield,
+  Check,
+  X,
+  FileAudio,
+  Trash2,
+  Save,
+  SlidersHorizontal,
 } from 'lucide-react';
+import {
+  GRAPHIC_EQ_FREQUENCIES,
+  getPeakingResponse,
+  getLowshelfResponse,
+  getHighshelfResponse,
+  snapToDetent,
+  freqToX,
+  dbToY,
+  formatFrequency,
+  parseAutoEqProfileText,
+} from '../utils/audioMath';
 
-const GRAPHIC_FREQS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+type MainLabTab = 'studio_eq' | 'spatial_acoustics';
+type EqViewMode = 'graph' | 'faders';
 
+const BRAND_FILTERS = [
+  'All',
+  'Sennheiser',
+  'Sony',
+  'Beyerdynamic',
+  'Moondrop',
+  'Audio-Technica',
+  'Apple',
+  'Hifiman',
+  'Focal',
+  'AKG',
+  'Shure',
+  'Philips',
+];
 
-// Math helpers for filter evaluation
-function getPeakingResponse(f: number, fs: number, f0: number, gainDb: number, q: number): number {
-  if (gainDb === 0) return 0;
-  const w0 = (2 * Math.PI * f0) / fs;
-  const alpha = Math.sin(w0) / (2 * q);
-  const A = Math.pow(10, gainDb / 40);
-  
-  const b0 = 1 + alpha * A;
-  const b1 = -2 * Math.cos(w0);
-  const b2 = 1 - alpha * A;
-  const a0 = 1 + alpha / A;
-  const a1 = -2 * Math.cos(w0);
-  const a2 = 1 - alpha / A;
-
-  return getBiquadMagnitudeDb(f, fs, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
-}
-
-function getLowshelfResponse(f: number, fs: number, f0: number, gainDb: number, q: number): number {
-  if (gainDb === 0) return 0;
-  const w0 = (2 * Math.PI * f0) / fs;
-  const alpha = Math.sin(w0) / (2 * q);
-  const A = Math.pow(10, gainDb / 40);
-  const sqrtA = Math.sqrt(A);
-  const cosW0 = Math.cos(w0);
-
-  const b0 = A * ((A + 1) - (A - 1) * cosW0 + 2 * sqrtA * alpha);
-  const b1 = 2 * A * ((A - 1) - (A + 1) * cosW0);
-  const b2 = A * ((A + 1) - (A - 1) * cosW0 - 2 * sqrtA * alpha);
-  const a0 = (A + 1) + (A - 1) * cosW0 + 2 * sqrtA * alpha;
-  const a1 = -2 * ((A - 1) + (A + 1) * cosW0);
-  const a2 = (A + 1) + (A - 1) * cosW0 - 2 * sqrtA * alpha;
-
-  return getBiquadMagnitudeDb(f, fs, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
-}
-
-function getHighshelfResponse(f: number, fs: number, f0: number, gainDb: number, q: number): number {
-  if (gainDb === 0) return 0;
-  const w0 = (2 * Math.PI * f0) / fs;
-  const alpha = Math.sin(w0) / (2 * q);
-  const A = Math.pow(10, gainDb / 40);
-  const sqrtA = Math.sqrt(A);
-  const cosW0 = Math.cos(w0);
-
-  const b0 = A * ((A + 1) + (A - 1) * cosW0 + 2 * sqrtA * alpha);
-  const b1 = -2 * A * ((A - 1) + (A + 1) * cosW0);
-  const b2 = A * ((A + 1) + (A - 1) * cosW0 - 2 * sqrtA * alpha);
-  const a0 = (A + 1) - (A - 1) * cosW0 + 2 * sqrtA * alpha;
-  const a1 = 2 * ((A - 1) - (A + 1) * cosW0);
-  const a2 = (A + 1) - (A - 1) * cosW0 - 2 * sqrtA * alpha;
-
-  return getBiquadMagnitudeDb(f, fs, b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
-}
-
-function getBiquadMagnitudeDb(f: number, fs: number, b0: number, b1: number, b2: number, a1: number, a2: number): number {
-  const w = (2 * Math.PI * f) / fs;
-  const cosW = Math.cos(w);
-  const cos2W = Math.cos(2 * w);
-  const sinW = Math.sin(w);
-  const sin2W = Math.sin(2 * w);
-
-  const nr = b0 + b1 * cosW + b2 * cos2W;
-  const ni = -b1 * sinW - b2 * sin2W;
-  const dr = 1 + a1 * cosW + a2 * cos2W;
-  const di = -a1 * sinW - a2 * sin2W;
-
-  const magSq = (nr * nr + ni * ni) / (dr * dr + di * di + 1e-15);
-  return 10 * Math.log10(magSq);
-}
+const EQ_QUICK_PRESETS = [
+  { name: 'Flat', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preamp: 0 },
+  { name: 'Bass Boost', gains: [4.5, 3.5, 2.0, 1.0, 0, 0, 0, 0.5, 1.0, 1.5], preamp: -2.0 },
+  { name: 'Vocal Clarity', gains: [-1.0, -0.5, 0, 1.0, 2.5, 3.0, 2.0, 1.0, 0.5, 0], preamp: -1.0 },
+  { name: 'Treble Air', gains: [0, 0, 0, 0, 0, 0.5, 1.5, 3.0, 4.0, 4.5], preamp: -1.5 },
+  { name: 'Audiophile Master', gains: [1.0, 0.5, 0, -0.5, 0, 0.5, 1.0, 1.5, 2.0, 1.5], preamp: -0.5 },
+];
 
 const getSourceStyle = (source: string) => {
   const s = source.toLowerCase();
   if (s.includes('oratory')) return { bg: 'rgba(59, 130, 246, 0.12)', border: 'rgba(59, 130, 246, 0.35)', color: '#60a5fa', label: 'oratory1990' };
-  if (s.includes('crinacle')) return { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', color: 'var(--emerald-ink)', label: 'crinacle' };
+  if (s.includes('crinacle')) return { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', color: '#34d399', label: 'crinacle' };
   if (s.includes('rtings')) return { bg: 'rgba(249, 115, 22, 0.12)', border: 'rgba(249, 115, 22, 0.35)', color: '#fb923c', label: 'Rtings' };
   if (s.includes('innerfidelity')) return { bg: 'rgba(234, 179, 8, 0.12)', border: 'rgba(234, 179, 8, 0.35)', color: '#facc15', label: 'Innerfidelity' };
   if (s.includes('raa')) return { bg: 'rgba(236, 72, 153, 0.12)', border: 'rgba(236, 72, 153, 0.35)', color: '#f472b6', label: 'RAA' };
@@ -92,33 +71,53 @@ const getSourceStyle = (source: string) => {
 };
 
 export function AideoLabView() {
-  const { 
-    dsp, setDSP, toggleDspAB, accentColor, lowSpecMode, colorScheme, playbackStatus
-  } = useStore(useShallow(s => ({
-    dsp: s.dsp,
-    setDSP: s.setDSP,
-    toggleDspAB: s.toggleDspAB,
-    accentColor: s.accentColor,
-    lowSpecMode: s.lowSpecMode,
-    colorScheme: s.colorScheme,
-    playbackStatus: s.playback.status,
-  })));
-  const [activeTab, setActiveTab] = useState<'eq' | 'spatial' | 'dynamics' | 'aideo_filter'>('eq');
-  const [systemIsLight, setSystemIsLight] = useState(() => 
-    typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: light)').matches : false
+  const {
+    dsp,
+    setDSP,
+    toggleDspAB,
+    resetProMode,
+    lowSpecMode,
+    playbackStatus,
+    playbackDevRate,
+    playbackFileRate,
+  } = useStore(
+    useShallow(s => ({
+      dsp: s.dsp,
+      setDSP: s.setDSP,
+      toggleDspAB: s.toggleDspAB,
+      resetProMode: s.resetProMode,
+      lowSpecMode: s.lowSpecMode,
+      playbackStatus: s.playback.status,
+      playbackDevRate: s.playback.dev_rate,
+      playbackFileRate: s.playback.file_rate,
+    }))
   );
 
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: light)');
-    const listener = (e: MediaQueryListEvent) => setSystemIsLight(e.matches);
-    media.addEventListener('change', listener);
-    return () => media.removeEventListener('change', listener);
-  }, []);
+  const [activeTab, setActiveTab] = useState<MainLabTab>('studio_eq');
+  const [eqViewMode, setEqViewMode] = useState<EqViewMode>('graph');
+  const [selectedBrand, setSelectedBrand] = useState('All');
+  const [dbSearchQuery, setDbSearchQuery] = useState('');
+  const [autoEqDb, setAutoEqDb] = useState<{ name: string; url: string; source: string; fullSource: string }[] | null>(null);
+  const [isFetchingDb, setIsFetchingDb] = useState(false);
+  const [autoEqError, setAutoEqError] = useState('');
+  const [activeCalibratedHeadphone, setActiveCalibratedHeadphone] = useState<string>(() => {
+    try {
+      return localStorage.getItem('aideo_active_autoeq_model') || '';
+    } catch {
+      return '';
+    }
+  });
 
-  const isLightTheme = colorScheme === 'light' || (colorScheme === 'system' && systemIsLight);
+  // Selected Node & Dragging state for Parametric EQ
+  const [selectedBand, setSelectedBand] = useState<number>(0);
+  const [activeDragNode, setActiveDragNode] = useState<number | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<number | null>(null);
+  const graphRef = useRef<SVGSVGElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const spectrumRef = useRef<number[]>(new Array(64).fill(0));
 
-  // Custom Preset States
-  const [customPresets, setCustomPresets] = useState<{ name: string; dsp: any }[]>(() => {
+  // Custom Presets
+  const [customPresets, setCustomPresets] = useState<{ name: string; dsp: typeof dsp }[]>(() => {
     try {
       const saved = localStorage.getItem('aideo_dsp_presets');
       return saved ? JSON.parse(saved) : [];
@@ -127,171 +126,14 @@ export function AideoLabView() {
     }
   });
   const [newPresetName, setNewPresetName] = useState('');
-  const [selectedPresetName, setSelectedPresetName] = useState('');
+  const [showSaveModal, setShowSaveModal] = useState(false);
 
-  const handleSavePreset = () => {
-    if (!newPresetName.trim()) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Preset name cannot be empty', type: 'warning' } }));
-      return;
-    }
-    const name = newPresetName.trim();
-    const systemNames = ['Flat', 'Bass Boost', 'Vocal Booster', 'Treble Booster', 'Audiophile Hi-Res'];
-    if (systemNames.includes(name)) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Cannot overwrite system presets', type: 'warning' } }));
-      return;
-    }
+  const sampleRate = playbackDevRate || playbackFileRate || 48000;
+  const eqGains = dsp.eq_graphic_gains || new Array(10).fill(0);
 
-    const updated = [...customPresets.filter(p => p.name !== name), { name, dsp }];
-    setCustomPresets(updated);
-    localStorage.setItem('aideo_dsp_presets', JSON.stringify(updated));
-    setSelectedPresetName(name);
-    setNewPresetName('');
-    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Preset "${name}" saved successfully!`, type: 'success' } }));
-  };
-
-  const handleDeletePreset = (name: string) => {
-    const updated = customPresets.filter(p => p.name !== name);
-    setCustomPresets(updated);
-    localStorage.setItem('aideo_dsp_presets', JSON.stringify(updated));
-    setSelectedPresetName('');
-    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Preset "${name}" deleted.`, type: 'info' } }));
-  };
-
-  const handleLoadPreset = (name: string) => {
-    setSelectedPresetName(name);
-    
-    if (name === 'Flat') {
-      const defaultBands = dsp.eq_parametric_bands.map((_: any, idx: number) => {
-        let freq = 1000;
-        if (idx === 0) freq = 31;
-        else if (idx === 1) freq = 62;
-        else if (idx === 2) freq = 125;
-        else if (idx === 3) freq = 250;
-        else if (idx === 4) freq = 500;
-        else if (idx === 5) freq = 1000;
-        else if (idx === 6) freq = 2000;
-        else if (idx === 7) freq = 4000;
-        else if (idx === 8) freq = 8000;
-        else if (idx === 9) freq = 16000;
-        return { freq, gain: 0, q: 0.7, band_type: idx === 0 ? 'lowshelf' : idx === 8 ? 'highshelf' : 'peaking' };
-      });
-      setDSP({
-        eq_enabled: false,
-        eq_parametric: true,
-        eq_graphic_gains: new Array(10).fill(0),
-        eq_parametric_bands: defaultBands,
-        preamp_gain: 0,
-        subsonic_enabled: false,
-        night_mode_enabled: false,
-        limiter_threshold: 0,
-        saturation_enabled: false
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Flat bypass preset.', type: 'info' } }));
-    } 
-    else if (name === 'Bass Boost') {
-      const bassBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
-        if (idx === 0) return { ...b, freq: 31, gain: 5.5, band_type: 'lowshelf' };
-        if (idx === 1) return { ...b, freq: 62, gain: 4.0, band_type: 'peaking' };
-        if (idx === 2) return { ...b, freq: 125, gain: 2.0, band_type: 'peaking' };
-        return { ...b, gain: 0 };
-      });
-      const bassGraphic = [6.0, 4.5, 3.0, 1.0, 0, 0, 0, 0, 0, 0];
-      setDSP({
-        eq_enabled: true,
-        eq_graphic_gains: bassGraphic,
-        eq_parametric_bands: bassBands,
-        preamp_gain: -3.5
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Bass Boost preset.', type: 'info' } }));
-    }
-    else if (name === 'Vocal Booster') {
-      const vocalBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
-        if (idx === 4) return { ...b, freq: 500, gain: 2.0, band_type: 'peaking' };
-        if (idx === 5) return { ...b, freq: 1000, gain: 3.5, band_type: 'peaking' };
-        if (idx === 6) return { ...b, freq: 2000, gain: 2.0, band_type: 'peaking' };
-        return { ...b, gain: 0 };
-      });
-      const vocalGraphic = [0, 0, 0, 0, 1.5, 3.0, 2.0, 0, 0, 0];
-      setDSP({
-        eq_enabled: true,
-        eq_graphic_gains: vocalGraphic,
-        eq_parametric_bands: vocalBands,
-        preamp_gain: -2.0
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Vocal Booster preset.', type: 'info' } }));
-    }
-    else if (name === 'Treble Booster') {
-      const trebleBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
-        if (idx === 7) return { ...b, freq: 4000, gain: 2.0, band_type: 'peaking' };
-        if (idx === 8) return { ...b, freq: 8000, gain: 4.5, band_type: 'highshelf' };
-        if (idx === 9) return { ...b, freq: 16000, gain: 5.5, band_type: 'peaking' };
-        return { ...b, gain: 0 };
-      });
-      const trebleGraphic = [0, 0, 0, 0, 0, 0, 1.5, 3.0, 4.5, 5.0];
-      setDSP({
-        eq_enabled: true,
-        eq_graphic_gains: trebleGraphic,
-        eq_parametric_bands: trebleBands,
-        preamp_gain: -3.0
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Treble Booster preset.', type: 'info' } }));
-    }
-    else if (name === 'Audiophile Hi-Res') {
-      const hiresBands = dsp.eq_parametric_bands.map((b: any, idx: number) => {
-        if (idx === 8) return { ...b, freq: 8000, gain: 1.5, band_type: 'highshelf' };
-        if (idx === 9) return { ...b, freq: 16000, gain: 2.0, band_type: 'peaking' };
-        return { ...b, gain: 0 };
-      });
-      const hiresGraphic = [0, 0, 0, 0, 0, 0, 0.5, 1.0, 1.5, 2.0];
-      setDSP({
-        audio_profile: 'high',
-        dither: true,
-        low_spec_mode: false,
-        eq_enabled: true,
-        eq_graphic_gains: hiresGraphic,
-        eq_parametric_bands: hiresBands,
-        preamp_gain: -1.0
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Loaded Audiophile Hi-Res preset.', type: 'info' } }));
-    }
-    else {
-      const custom = customPresets.find(p => p.name === name);
-      if (custom) {
-        setDSP(custom.dsp);
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Loaded preset "${name}".`, type: 'info' } }));
-      }
-    }
-  };
-  
-  // AutoEQ States
-  const [dbSearchQuery, setDbSearchQuery] = useState('');
-  const [autoEqDb, setAutoEqDb] = useState<{ name: string; url: string; source: string; fullSource: string }[] | null>(null);
-  const [isFetchingDb, setIsFetchingDb] = useState(false);
-  const [showAutoEqSearch, setShowAutoEqSearch] = useState(false);
-  const [autoEqError, setAutoEqError] = useState('');
-
-  // Local Drag States
-  const [activeDragNode, setActiveDragNode] = useState<number | null>(null);
-  const graphRef = useRef<SVGSVGElement>(null);
-  const [hoveredNode, setHoveredNode] = useState<number | null>(null);
-
-  // XY Pad States
-  const xyPadRef = useRef<HTMLDivElement>(null);
-  const [isDraggingXY, setIsDraggingXY] = useState(false);
-  const [xyPos, setXyPos] = useState({ x: 0.5, y: 0.5 }); // 0 to 1
-
-  // Waterfall Spectrum state
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const spectrumRef = useRef<number[]>(new Array(64).fill(0));
-
-  // Audio-reactive Soundstage refs
-  const pulseBassRef = useRef<HTMLDivElement>(null);
-  const pulseLRef = useRef<HTMLDivElement>(null);
-  const pulseRRef = useRef<HTMLDivElement>(null);
-
-  // FFT event listener for real-time waterfall overlay
+  // Listen for audio spectrum FFT IPC events
   useEffect(() => {
-    const unlisten = listen<number[]>('audio-spectrum', (event) => {
+    const unlisten = listen<number[]>('audio-spectrum', event => {
       spectrumRef.current = event.payload;
     });
     return () => {
@@ -299,15 +141,26 @@ export function AideoLabView() {
     };
   }, []);
 
-  // Waterfall canvas loop
+  // Keyboard shortcut [B] for A/B Compare
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault();
+        toggleDspAB();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleDspAB]);
+
+  // Waterfall canvas loop for interactive graph mode
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || activeTab !== 'eq' || lowSpecMode) return;
+    if (!canvas || activeTab !== 'studio_eq' || eqViewMode !== 'graph' || lowSpecMode) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Create an offscreen canvas for double-buffered self-copying.
-    // This avoids undefined behavior and frozen frames caused by drawing a canvas onto itself in modern WebViews (like WebView2 on Windows).
     const offscreen = document.createElement('canvas');
     offscreen.width = canvas.width;
     offscreen.height = canvas.height;
@@ -319,22 +172,15 @@ export function AideoLabView() {
       const h = canvas.height;
 
       if (offscreenCtx) {
-        // Copy current main canvas state to the offscreen canvas
         offscreenCtx.clearRect(0, 0, w, h);
         offscreenCtx.drawImage(canvas, 0, 0);
-
-        // Clear main canvas
         ctx.clearRect(0, 0, w, h);
-
-        // Draw the offscreen canvas shifted down by 1 pixel back to the main canvas
         ctx.drawImage(offscreen, 0, 1, w, h - 1);
       } else {
-        // Fallback self-copy
         ctx.drawImage(canvas, 0, 1, w, h - 1);
       }
-      
-      // Clear top row
-      ctx.fillStyle = isLightTheme ? 'rgba(243, 243, 249, 0.05)' : 'rgba(9, 9, 14, 0.05)';
+
+      ctx.fillStyle = 'rgba(9, 9, 14, 0.05)';
       ctx.fillRect(0, 0, w, 1);
 
       const bands = spectrumRef.current;
@@ -344,13 +190,11 @@ export function AideoLabView() {
           const val = bands[i];
           if (val > 0.005) {
             const x = i * step;
-            // Draw a tiny pixel with dynamic opacity reflecting frequency volume
-            ctx.fillStyle = `hsla(${(i / bands.length) * 120 + 220}, 90%, 65%, ${Math.min(val * 1.5, 0.8)})`;
+            ctx.fillStyle = `hsla(${(i / bands.length) * 120 + 210}, 85%, 60%, ${Math.min(val * 1.5, 0.8)})`;
             ctx.fillRect(x, 0, step - 0.5, 1.2);
           }
         }
       }
-
       animId = requestAnimationFrame(render);
     };
 
@@ -358,336 +202,182 @@ export function AideoLabView() {
       render();
     }
     return () => cancelAnimationFrame(animId);
-  }, [activeTab, lowSpecMode, isLightTheme, playbackStatus]);
+  }, [activeTab, eqViewMode, lowSpecMode, playbackStatus]);
 
-  // Real-time audio-reactive Soundstage arena pulse engine
-  useEffect(() => {
-    if (activeTab !== 'spatial' || lowSpecMode) return;
-    
-    let animId: number;
-    const render = () => {
-      const bands = spectrumRef.current;
-      if (bands && bands.length > 0) {
-        // Calculate bass energy (first 8 bands)
-        let bassSum = 0;
-        const bassCount = Math.min(8, bands.length);
-        for (let i = 0; i < bassCount; i++) {
-          bassSum += bands[i];
-        }
-        const bassEnergy = bassSum / bassCount;
-
-        // Calculate mid energy (bands 8 to 24)
-        let midSum = 0;
-        const midStart = Math.min(8, bands.length);
-        const midEnd = Math.min(24, bands.length);
-        const midCount = midEnd - midStart;
-        for (let i = midStart; i < midEnd; i++) {
-          midSum += bands[i];
-        }
-        const midEnergy = midCount > 0 ? midSum / midCount : 0;
-
-        // Calculate high energy (bands 24 to 64)
-        let highSum = 0;
-        const highStart = Math.min(24, bands.length);
-        const highEnd = Math.min(64, bands.length);
-        const highCount = highEnd - highStart;
-        for (let i = highStart; i < highEnd; i++) {
-          highSum += bands[i];
-        }
-        const highsEnergy = highCount > 0 ? highSum / highCount : 0;
-
-        // Smoothly adjust scale and opacity of the concentric soundwaves & speaker rings
-        if (pulseBassRef.current) {
-          const scale = 1.0 + bassEnergy * 0.75;
-          const opacity = Math.min(0.7, 0.15 + bassEnergy * 0.55);
-          pulseBassRef.current.style.transform = `scale(${scale})`;
-          pulseBassRef.current.style.opacity = `${opacity}`;
-        }
-
-        if (pulseLRef.current) {
-          const scale = 1.0 + midEnergy * 1.1;
-          const opacity = Math.min(0.85, 0.15 + midEnergy * 0.65);
-          pulseLRef.current.style.transform = `scale(${scale})`;
-          pulseLRef.current.style.opacity = `${opacity}`;
-        }
-
-        if (pulseRRef.current) {
-          const scale = 1.0 + highsEnergy * 1.3;
-          const opacity = Math.min(0.85, 0.15 + highsEnergy * 0.65);
-          pulseRRef.current.style.transform = `scale(${scale})`;
-          pulseRRef.current.style.opacity = `${opacity}`;
-        }
-      }
-
-      animId = requestAnimationFrame(render);
-    };
-
-    if (playbackStatus === 'Playing') {
-      render();
-    }
-    return () => cancelAnimationFrame(animId);
-  }, [activeTab, lowSpecMode, playbackStatus]);
-
-  // Fetch Jaakko Pasanen AutoEQ database
-  const fetchAutoEqDb = async () => {
+  // AutoEQ Database Fetcher
+  const fetchAutoEqDb = useCallback(async () => {
+    if (autoEqDb && autoEqDb.length > 0) return;
     setIsFetchingDb(true);
     setAutoEqError('');
     try {
       const response = await fetch('https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/INDEX.md');
-      if (!response.ok) throw new Error('Failed to fetch AutoEQ headphone database.');
+      if (!response.ok) throw new Error('Failed to download AutoEQ master index.');
       const text = await response.text();
-      
       const lines = text.split('\n');
-      const parsedEntries: typeof autoEqDb = [];
-      
+      const parsedEntries: { name: string; url: string; source: string; fullSource: string }[] = [];
+
       lines.forEach(line => {
-        const trimmed = line.trim();
-        const match = trimmed.match(/^\s*-\s*\[([^\]]+)\]\(([^)]+)\)\s*by\s*(.+)$/i);
+        const match = line.trim().match(/^\s*-\s*\[([^\]]+)\]\(([^)]+)\)\s*by\s*(.+)$/i);
         if (match) {
           const name = match[1];
           const relativePath = match[2].replace(/^\.\//, '');
           const rawSource = match[3];
           const contributor = rawSource.split(' on ')[0].trim();
-          
           const segments = relativePath.split('/');
           const lastSegment = segments[segments.length - 1];
           const decodedFolderName = decodeURIComponent(lastSegment);
-          
           const fileUrl = `https://raw.githubusercontent.com/jaakkopasanen/AutoEq/master/results/${relativePath}/${encodeURIComponent(decodedFolderName)}%20ParametricEQ.txt`;
-          
+
           parsedEntries.push({
             name,
             url: fileUrl,
             source: contributor,
-            fullSource: rawSource
+            fullSource: rawSource,
           });
         }
       });
       setAutoEqDb(parsedEntries);
     } catch (err: any) {
-      setAutoEqError(err.message || 'Failed to load headphone profiles.');
+      setAutoEqError(err.message || 'Failed to load headphone database.');
     } finally {
       setIsFetchingDb(false);
     }
-  };
+  }, [autoEqDb]);
 
-  const filteredDb = useMemo(() => {
+  useEffect(() => {
+    if (activeTab === 'studio_eq') {
+      fetchAutoEqDb();
+    }
+  }, [activeTab, fetchAutoEqDb]);
+
+  // Filtered AutoEQ entries
+  const filteredHeadphones = useMemo(() => {
     if (!autoEqDb) return [];
-    if (!dbSearchQuery.trim()) return autoEqDb.slice(0, 15);
-    const query = dbSearchQuery.toLowerCase().trim();
-    const parts = query.split(/\s+/);
-    
-    return autoEqDb
-      .filter(entry => {
-        const nameLower = entry.name.toLowerCase();
-        return parts.every(part => nameLower.includes(part));
-      })
-      .slice(0, 30);
-  }, [autoEqDb, dbSearchQuery]);
+    let list = autoEqDb;
+    if (selectedBrand !== 'All') {
+      const bLower = selectedBrand.toLowerCase();
+      list = list.filter(e => e.name.toLowerCase().includes(bLower));
+    }
+    if (dbSearchQuery.trim()) {
+      const q = dbSearchQuery.toLowerCase().trim();
+      const parts = q.split(/\s+/);
+      list = list.filter(e => {
+        const n = e.name.toLowerCase();
+        return parts.every(p => n.includes(p));
+      });
+    }
+    return list.slice(0, 30);
+  }, [autoEqDb, selectedBrand, dbSearchQuery]);
 
-  const handleSelectHeadphone = async (headphone: { name: string; url: string }) => {
+  // Load and apply selected headphone profile
+  const handleApplyHeadphoneProfile = async (headphone: { name: string; url: string; source: string }) => {
     setAutoEqError('');
     try {
       const response = await fetch(headphone.url);
-      if (!response.ok) throw new Error('Failed to download corrective EQ profile.');
+      if (!response.ok) throw new Error('Could not retrieve corrective EQ profile.');
       const text = await response.text();
-      applyAutoEqText(text);
-    } catch (err: any) {
-      setAutoEqError(err.message || 'Failed to download EQ profile.');
-    } finally {
-      setShowAutoEqSearch(false);
-    }
-  };
+      const { preamp, bands } = parseAutoEqProfileText(text);
 
-  const applyAutoEqText = (profileText: string) => {
-    try {
-      const lines = profileText.split('\n');
-      let preamp = 0;
-      const parsedBands: typeof dsp.eq_parametric_bands = [];
+      if (bands.length === 0) throw new Error('No parametric biquad bands detected in profile.');
 
-      lines.forEach(line => {
-        const trimmed = line.trim().toLowerCase();
-        if (!trimmed) return;
-
-        if (trimmed.includes('preamp:')) {
-          const match = trimmed.match(/preamp:\s*(-?[\d.]+)\s*db/);
-          if (match) preamp = parseFloat(match[1]);
-          return;
-        }
-
-        if (trimmed.includes('filter')) {
-          const fcMatch = trimmed.match(/fc\s+([\d.]+)\s*hz/);
-          const gainMatch = trimmed.match(/gain\s+(-?[\d.]+)\s*db/);
-          const qMatch = trimmed.match(/q\s+([\d.]+)/) || trimmed.match(/s\s+([\d.]+)/);
-          
-          let bandType = 'peaking';
-          if (trimmed.includes('lsc') || trimmed.includes('lowshelf')) {
-            bandType = 'lowshelf';
-          } else if (trimmed.includes('hsc') || trimmed.includes('highshelf')) {
-            bandType = 'highshelf';
-          }
-
-          if (fcMatch && gainMatch) {
-            parsedBands.push({
-              freq: parseFloat(fcMatch[1]),
-              gain: parseFloat(gainMatch[1]),
-              q: qMatch ? Math.max(0.1, Math.min(10.0, parseFloat(qMatch[1]))) : 1.0,
-              band_type: bandType
-            });
-          }
-        }
-      });
-
-      if (parsedBands.length === 0) throw new Error('Could not find any valid Parametric Filters.');
-
-      const bandsToApply = [...dsp.eq_parametric_bands];
+      const currentBands = [...(dsp.eq_parametric_bands || [])];
+      const newBands = [];
       for (let i = 0; i < 10; i++) {
-        if (parsedBands[i]) {
-          bandsToApply[i] = parsedBands[i];
+        if (bands[i]) {
+          newBands.push({
+            freq: bands[i].freq,
+            gain: bands[i].gain,
+            q: bands[i].q,
+            band_type: bands[i].band_type,
+          });
+        } else if (currentBands[i]) {
+          newBands.push({ ...currentBands[i], gain: 0 });
         } else {
-          bandsToApply[i] = { freq: bandsToApply[i]?.freq || 1000, gain: 0, q: 0.7, band_type: 'peaking' };
+          newBands.push({ freq: 1000, gain: 0, q: 1.0, band_type: 'peaking' as const });
         }
       }
 
-      setDSP({
+      await setDSP({
+        enabled: true,
         eq_enabled: true,
         eq_parametric: true,
-        eq_parametric_bands: bandsToApply,
-        preamp_gain: preamp
+        eq_parametric_bands: newBands,
+        preamp_gain: preamp,
       });
 
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Aideo Lab: Headphone calibration applied successfully!${preamp < 0 ? ` (Applied preamp: ${preamp}dB)` : ''}`, type: 'success' } 
-      }));
+      setActiveCalibratedHeadphone(headphone.name);
+      localStorage.setItem('aideo_active_autoeq_model', headphone.name);
+      window.dispatchEvent(
+        new CustomEvent('ui-toast', {
+          detail: {
+            message: `Applied AutoEQ calibration for ${headphone.name} (${headphone.source})`,
+            type: 'success',
+          },
+        })
+      );
     } catch (err: any) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: err.message || 'Acoustic parser error.', type: 'error' } 
-      }));
+      setAutoEqError(err.message || 'Failed to apply AutoEQ profile.');
     }
   };
 
-  // Aideo Lab - Section Reset functions
-  const resetEQ = () => {
-    const defaultBands = dsp.eq_parametric_bands.map((_, idx) => {
-      let freq = 1000;
-      if (idx === 0) freq = 31;
-      else if (idx === 1) freq = 62;
-      else if (idx === 2) freq = 125;
-      else if (idx === 3) freq = 250;
-      else if (idx === 4) freq = 500;
-      else if (idx === 5) freq = 1000;
-      else if (idx === 6) freq = 2000;
-      else if (idx === 7) freq = 4000;
-      else if (idx === 8) freq = 8000;
-      else if (idx === 9) freq = 16000;
-      return { freq, gain: 0, q: 0.7, band_type: idx === 0 ? 'lowshelf' : idx === 8 ? 'highshelf' : 'peaking' };
-    });
-    setDSP({
-      eq_enabled: false,
-      eq_parametric: true,
-      eq_graphic_gains: new Array(10).fill(0),
-      eq_parametric_bands: defaultBands
-    });
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: 'Equalizer flattened and calibration parameters reset successfully!', type: 'success' } 
-    }));
-  };
+  // Evaluate parametric response curve points
+  const points = useMemo(() => {
+    const pts: { f: number; db: number }[] = [];
+    const minF = 20;
+    const maxF = 20000;
+    const numPoints = 120;
+    const logMin = Math.log10(minF);
+    const logMax = Math.log10(maxF);
 
-  const resetSpatial = () => {
-    setDSP({
-      spatial_enabled: false,
-      spatial_haas_delay: 15.0,
-      spatial_wet: 0.5,
-      crossfeed_enabled: false,
-      crossfeed_level: -12.0
-    });
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: '3D Spatial Arena parameters restored to defaults.', type: 'success' } 
-    }));
-  };
+    for (let i = 0; i <= numPoints; i++) {
+      const logF = logMin + (i / numPoints) * (logMax - logMin);
+      const f = Math.pow(10, logF);
+      let totalDb = dsp.preamp_gain || 0;
 
-  const resetDynamics = () => {
-    setXyPos({ x: 0.5, y: 0.5 });
-    setDSP({
-      subsonic_enabled: false,
-      night_mode_enabled: false,
-      r128_enabled: false,
-      preamp_gain: 0.0,
-      limiter_threshold: -0.1,
-      resampler_phase_mode: 'linear'
-    });
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: 'Dynamics controls, preamp/limiter, and XY Space Pad centered.', type: 'success' } 
-    }));
-  };
+      if (dsp.eq_enabled) {
+        if (dsp.eq_parametric) {
+          (dsp.eq_parametric_bands || []).forEach(band => {
+            if (band.band_type === 'lowshelf') {
+              totalDb += getLowshelfResponse(f, sampleRate, band.freq, band.gain, band.q);
+            } else if (band.band_type === 'highshelf') {
+              totalDb += getHighshelfResponse(f, sampleRate, band.freq, band.gain, band.q);
+            } else {
+              totalDb += getPeakingResponse(f, sampleRate, band.freq, band.gain, band.q);
+            }
+          });
+        } else {
+          (dsp.eq_graphic_gains || []).forEach((gain, idx) => {
+            if (idx < GRAPHIC_EQ_FREQUENCIES.length) {
+              totalDb += getPeakingResponse(f, sampleRate, GRAPHIC_EQ_FREQUENCIES[idx], gain, 1.4);
+            }
+          });
+        }
+      }
+      pts.push({ f, db: totalDb });
+    }
+    return pts;
+  }, [dsp.eq_enabled, dsp.eq_parametric, dsp.eq_parametric_bands, dsp.eq_graphic_gains, dsp.preamp_gain, sampleRate]);
 
-  // Logarithmic coordinates conversions
-  const getX = (f: number, width: number) => {
-    const logMin = Math.log10(20);
-    const logMax = Math.log10(20000);
-    const logF = Math.log10(f);
-    return ((logF - logMin) / (logMax - logMin)) * width;
-  };
+  // Coordinate Helpers
+  const svgWidth = 840;
+  const svgHeight = eqViewMode === 'graph' ? 220 : 130;
 
   const getFreqFromX = (x: number, width: number) => {
-    const logMin = Math.log10(20);
-    const logMax = Math.log10(20000);
-    const logF = logMin + (x / width) * (logMax - logMin);
-    return Math.round(Math.max(20, Math.min(20000, Math.pow(10, logF))));
-  };
-
-  const getY = (db: number, height: number) => {
-    const minDb = -12;
-    const maxDb = 12;
-    const clamped = Math.max(minDb, Math.min(maxDb, db));
-    return height - ((clamped - minDb) / (maxDb - minDb)) * height;
-  };
-
-  const getGainFromY = (y: number, height: number) => {
-    const minDb = -12;
-    const maxDb = 12;
-    const ratio = 1 - (y / height);
-    const db = minDb + ratio * (maxDb - minDb);
-    return Math.round(Math.max(minDb, Math.min(maxDb, db)) * 10) / 10;
-  };
-
-  // Spline calculations
-  const curvePoints = useMemo(() => {
-    const fs = 48000;
-    const points: { f: number; db: number }[] = [];
     const minF = 20;
     const maxF = 20000;
     const logMin = Math.log10(minF);
     const logMax = Math.log10(maxF);
+    const ratio = Math.max(0, Math.min(1, x / width));
+    return Math.round(Math.pow(10, logMin + ratio * (logMax - logMin)));
+  };
 
-    for (let i = 0; i <= 150; i++) {
-      const logF = logMin + (i / 150) * (logMax - logMin);
-      const f = Math.pow(10, logF);
-      let totalDb = 0;
+  const getGainFromY = (y: number, height: number) => {
+    const ratio = Math.max(0, Math.min(1, y / height));
+    const gain = 15 - ratio * 30; // +15dB to -15dB
+    return snapToDetent(Math.round(gain * 10) / 10, 0.35, 0);
+  };
 
-      if (dsp.eq_enabled) {
-        if (dsp.eq_parametric) {
-          dsp.eq_parametric_bands.forEach((band) => {
-            if (band.band_type === 'lowshelf') {
-              totalDb += getLowshelfResponse(f, fs, band.freq, band.gain, band.q);
-            } else if (band.band_type === 'highshelf') {
-              totalDb += getHighshelfResponse(f, fs, band.freq, band.gain, band.q);
-            } else {
-              totalDb += getPeakingResponse(f, fs, band.freq, band.gain, band.q);
-            }
-          });
-        } else {
-          dsp.eq_graphic_gains.forEach((gain, index) => {
-            totalDb += getPeakingResponse(f, fs, GRAPHIC_FREQS[index], gain, 1.0);
-          });
-        }
-      }
-      points.push({ f, db: totalDb });
-    }
-    return points;
-  }, [dsp.eq_enabled, dsp.eq_parametric, dsp.eq_graphic_gains, dsp.eq_parametric_bands]);
-
-  // drag-and-drop EQ node editor
+  // Node Drag Handlers for Spline Graph
   const handleGraphMouseMove = (e: React.MouseEvent) => {
     if (activeDragNode === null || !graphRef.current) return;
     const rect = graphRef.current.getBoundingClientRect();
@@ -698,21 +388,17 @@ export function AideoLabView() {
     const newGain = getGainFromY(mouseY, rect.height);
 
     if (dsp.eq_parametric) {
-      const updatedBands = dsp.eq_parametric_bands.map((band, idx) => {
+      const updated = (dsp.eq_parametric_bands || []).map((band, idx) => {
         if (idx === activeDragNode) {
-          // Low/high-shelf freq clamps to preserve structural roles
-          let freq = newFreq;
-          if (idx === 0) freq = Math.min(150, newFreq); // low shelf
-          if (idx === 8) freq = Math.max(4000, newFreq); // high shelf
-          return { ...band, freq, gain: newGain };
+          return { ...band, freq: newFreq, gain: newGain };
         }
         return band;
       });
-      setDSP({ eq_parametric_bands: updatedBands });
+      setDSP({ eq_parametric_bands: updated, eq_enabled: true });
     } else {
-      const updatedGains = [...dsp.eq_graphic_gains];
+      const updatedGains = [...(dsp.eq_graphic_gains || [])];
       updatedGains[activeDragNode] = newGain;
-      setDSP({ eq_graphic_gains: updatedGains });
+      setDSP({ eq_graphic_gains: updatedGains, eq_enabled: true });
     }
   };
 
@@ -720,1437 +406,1809 @@ export function AideoLabView() {
     setActiveDragNode(null);
   };
 
-  // Interpolate Bilinear weights inside XY Preset Morphing Space
-  const handleXYMouseMove = (e: React.MouseEvent) => {
-    if (!isDraggingXY || !xyPadRef.current) return;
-    const rect = xyPadRef.current.getBoundingClientRect();
-    const px = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const py = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-    setXyPos({ x: px, y: py });
-
-    // Morphing algorithms:
-    const w_tl = (1 - px) * (1 - py); // Spatial / Bright
-    const w_tr = px * (1 - py);       // Warm / Compressed
-    const w_bl = (1 - px) * py;       // Deep Bass Boost
-    // w_br = px * py is Flat Reference, which maps to 0.0 offsets.
-
-    // 1. Haas expander variables
-    const spatial_haas_delay = Math.round((w_tl * 12.0) * 10) / 10;
-    const spatial_wet = Math.round((w_tl * 0.75) * 100) / 100;
-    const spatial_enabled = w_tl > 0.15;
-
-    // 2. Headphone crossfeed variables
-    const crossfeed_enabled = w_tr > 0.15;
-    const crossfeed_level = Math.round((w_tr * -4.5 + (1 - w_tr) * -12.0) * 10) / 10;
-
-    // 3. Dynamic Night-mode compressor
-    const night_mode_enabled = w_tr > 0.35;
-
-    // 4. EQ changes (Low/High-shelf parametric adjustments)
-    const updatedBands = [...dsp.eq_parametric_bands];
-    // Band 0: Low shelf bass boost
-    updatedBands[0] = { ...updatedBands[0], gain: Math.round((w_bl * 5.5 + w_tr * 2.0) * 10) / 10 };
-    // Band 8: High shelf brightness
-    updatedBands[8] = { ...updatedBands[8], gain: Math.round((w_tl * 4.5 - w_tr * 2.5) * 10) / 10 };
-
-    setDSP({
-      spatial_enabled,
-      spatial_haas_delay,
-      spatial_wet,
-      crossfeed_enabled,
-      crossfeed_level,
-      night_mode_enabled,
-      eq_parametric_bands: updatedBands
+  const handleNodeWheel = (bandIdx: number, e: React.WheelEvent) => {
+    e.preventDefault();
+    if (!dsp.eq_parametric) return;
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    const updated = (dsp.eq_parametric_bands || []).map((b, idx) => {
+      if (idx === bandIdx) {
+        const nextQ = Math.max(0.2, Math.min(10.0, Math.round((b.q + delta) * 10) / 10));
+        return { ...b, q: nextQ };
+      }
+      return b;
     });
+    setDSP({ eq_parametric_bands: updated });
   };
 
+  // Fader Gain Handlers
+  const handleFaderGainChange = (bandIndex: number, newGain: number) => {
+    const snapped = snapToDetent(newGain, 0.35, 0);
+    const updated = [...eqGains];
+    updated[bandIndex] = Math.round(snapped * 10) / 10;
+    setDSP({ eq_graphic_gains: updated, eq_enabled: true });
+  };
 
+  const handleFaderReset = (bandIndex: number) => {
+    const updated = [...eqGains];
+    updated[bandIndex] = 0;
+    setDSP({ eq_graphic_gains: updated });
+  };
 
-  const getActiveXYLabel = () => {
-    const { x, y } = xyPos;
-    if (x < 0.4 && y < 0.4) return 'Spatial & Bright';
-    if (x > 0.6 && y < 0.4) return 'Warm & Compressed';
-    if (x < 0.4 && y > 0.6) return 'Deep Bass Boost';
-    if (x > 0.6 && y > 0.6) return 'Reference Flat';
-    return 'Hybrid Dynamic Morph';
+  const applyQuickPreset = (preset: (typeof EQ_QUICK_PRESETS)[0]) => {
+    if (dsp.eq_parametric) {
+      const updatedBands = (dsp.eq_parametric_bands || []).map((b, i) => ({
+        ...b,
+        gain: preset.gains[i] !== undefined ? preset.gains[i] : b.gain,
+      }));
+      setDSP({
+        eq_enabled: true,
+        eq_parametric_bands: updatedBands,
+        preamp_gain: preset.preamp,
+      });
+    } else {
+      setDSP({
+        eq_enabled: true,
+        eq_graphic_gains: [...preset.gains],
+        preamp_gain: preset.preamp,
+      });
+    }
+  };
+
+  // Impulse Response (IR) Loader
+  const handlePickIrFile = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'Impulse Response (*.wav, *.flac)', extensions: ['wav', 'flac'] }],
+      });
+      if (selected && typeof selected === 'string') {
+        setDSP({ convolution_ir_path: selected, convolution_enabled: true });
+        window.dispatchEvent(
+          new CustomEvent('ui-toast', {
+            detail: { message: `Loaded IR file: ${selected.split(/[/\\]/).pop()}`, type: 'success' },
+          })
+        );
+      }
+    } catch (err: any) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to open IR: ${err.message}`, type: 'error' } }));
+    }
+  };
+
+  // Preset Handlers
+  const handleSavePreset = () => {
+    if (!newPresetName.trim()) return;
+    const name = newPresetName.trim();
+    const updated = [...customPresets.filter(p => p.name !== name), { name, dsp }];
+    setCustomPresets(updated);
+    localStorage.setItem('aideo_dsp_presets', JSON.stringify(updated));
+    setNewPresetName('');
+    setShowSaveModal(false);
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Saved preset "${name}"`, type: 'success' } }));
+  };
+
+  const handleDeletePreset = (name: string) => {
+    const updated = customPresets.filter(p => p.name !== name);
+    setCustomPresets(updated);
+    localStorage.setItem('aideo_dsp_presets', JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Deleted preset "${name}"`, type: 'info' } }));
+  };
+
+  const handleLoadCustomPreset = (preset: (typeof customPresets)[0]) => {
+    setDSP(preset.dsp);
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Loaded preset "${preset.name}"`, type: 'info' } }));
   };
 
   return (
-    <div className="aideo-lab-main" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: 'transparent',
-      color: 'var(--text)',
-      padding: '30px 40px calc(var(--player-h) + 40px) 40px',
-      overflowY: 'auto'
-    }}>
-      {/* Header */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text)', letterSpacing: -0.5 }}>Aideo Lab</h1>
-          <p style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>
-            Visual Acoustic Laboratory — Professional DSP Engineering & Psychoacoustics.
-          </p>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        padding: '24px 32px',
+        overflowY: 'auto',
+        background: 'var(--bg-primary, #0c0d14)',
+        color: 'var(--text)',
+      }}
+      onMouseMove={handleGraphMouseMove}
+      onMouseUp={handleGraphMouseUp}
+    >
+      {/* Master Studio Header */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          paddingBottom: 18,
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 12,
+              background: 'linear-gradient(135deg, rgba(var(--accent-rgb), 0.25), rgba(168, 85, 247, 0.2))',
+              border: '1px solid rgba(var(--accent-rgb), 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--accent)',
+            }}
+          >
+            <Activity size={24} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: -0.3 }}>
+                Aideo Acoustic Laboratory
+              </h1>
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: 1.2,
+                  padding: '2px 7px',
+                  borderRadius: 4,
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: 'var(--text-dim)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                Studio DSP Suite
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>
+              Precision Headphone AutoEQ, 10-Band Parametric Biquad Equalizer & Psychoacoustic Stage
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* Instant A/B Comparison Switch */}
-          <div
+        {/* Header Actions: Instant A/B + Reset */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {activeCalibratedHeadphone && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                borderRadius: 20,
+                background: 'rgba(16, 185, 129, 0.1)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                color: '#34d399',
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              <Headphones size={13} />
+              <span>Calibrated: {activeCalibratedHeadphone}</span>
+            </div>
+          )}
+
+          {/* Master Instant A/B Compare Toggle */}
+          <button
+            className="btn"
             onClick={toggleDspAB}
-            title="Instant A/B Audio Comparison (Press 'B' anywhere to toggle)"
+            title="Instant A/B DSP Compare (Press 'B' globally)"
             style={{
               display: 'flex',
               alignItems: 'center',
-              background: 'var(--glass-h)',
-              padding: 3,
-              borderRadius: 10,
-              border: '1px solid var(--glass-border)',
+              gap: 8,
+              padding: '7px 14px',
+              borderRadius: 8,
+              border: dsp.enabled
+                ? '1px solid rgba(16, 185, 129, 0.45)'
+                : '1px solid rgba(6, 182, 212, 0.45)',
+              background: dsp.enabled ? 'rgba(16, 185, 129, 0.12)' : 'rgba(6, 182, 212, 0.1)',
+              color: dsp.enabled ? '#34d399' : '#38bdf8',
+              fontWeight: 600,
+              fontSize: 12,
               cursor: 'pointer',
-              userSelect: 'none',
-              gap: 2
+              transition: 'all 0.15s ease',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '6px 12px',
-                borderRadius: 8,
-                fontSize: 11,
-                fontWeight: 700,
-                background: !dsp.enabled ? 'rgba(6, 182, 212, 0.2)' : 'transparent',
-                color: !dsp.enabled ? 'var(--cyan-ink)' : 'var(--text-dim)',
-                border: !dsp.enabled ? '1px solid rgba(6, 182, 212, 0.4)' : '1px solid transparent',
-                transition: 'all 0.2s',
-                boxShadow: !dsp.enabled ? '0 0 10px rgba(6, 182, 212, 0.2)' : 'none'
-              }}
-            >
-              <span>Mode A: Raw</span>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '6px 12px',
-                borderRadius: 8,
-                fontSize: 11,
-                fontWeight: 700,
-                background: dsp.enabled ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
-                color: dsp.enabled ? 'var(--emerald-ink)' : 'var(--text-dim)',
-                border: dsp.enabled ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid transparent',
-                transition: 'all 0.2s',
-                boxShadow: dsp.enabled ? '0 0 10px rgba(16, 185, 129, 0.2)' : 'none'
-              }}
-            >
-              <Sparkles size={11} />
-              <span>Mode B: DSP</span>
-            </div>
+            <Zap size={14} color={dsp.enabled ? '#34d399' : '#38bdf8'} />
+            <span>{dsp.enabled ? 'Mode B: DSP Active' : 'Mode A: Raw Direct'}</span>
             <span
               style={{
                 fontSize: 9,
                 fontWeight: 800,
-                background: 'var(--glass-h)',
-                color: 'var(--text-dim)',
+                opacity: 0.8,
+                background: 'rgba(0, 0, 0, 0.3)',
                 padding: '2px 5px',
                 borderRadius: 4,
-                marginRight: 4,
-                marginLeft: 2
+                border: '1px solid rgba(255, 255, 255, 0.1)',
               }}
             >
               B
             </span>
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            onClick={resetProMode}
+            title="Reset DSP laboratory back to flat defaults"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '7px 12px',
+              fontSize: 12,
+              borderRadius: 8,
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              color: 'var(--text-dim)',
+            }}
+          >
+            <RotateCcw size={13} />
+            <span>Reset</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Tab Navigation Bar */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          marginBottom: 18,
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        }}
+      >
+        {[
+          { id: 'studio_eq' as MainLabTab, label: 'Studio EQ & AutoEQ Calibration', icon: Sliders, badge: 'Unified Stage' },
+          { id: 'spatial_acoustics' as MainLabTab, label: 'Spatial Acoustics & DSP Rack', icon: Waves, badge: 'IR & Staging' },
+        ].map(tab => {
+          const Icon = tab.icon;
+          const isSelected = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '12px 20px',
+                background: 'none',
+                border: 'none',
+                borderBottom: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+                color: isSelected ? 'var(--text)' : 'var(--text-dim)',
+                fontWeight: isSelected ? 700 : 500,
+                fontSize: 13,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                marginBottom: -1,
+              }}
+            >
+              <Icon size={16} color={isSelected ? 'var(--accent)' : 'currentColor'} />
+              <span>{tab.label}</span>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '2px 6px',
+                  borderRadius: 10,
+                  background: isSelected ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                  color: isSelected ? 'var(--accent)' : 'var(--text-dim)',
+                }}
+              >
+                {tab.badge}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* UNIFIED WORKSPACE: Studio EQ & AutoEQ Calibration */}
+      {activeTab === 'studio_eq' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, flex: 1 }}>
+          {/* Top Equalizer Toolbar */}
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              padding: '12px 18px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+            }}
+          >
+            {/* EQ Power & View Switcher (Graph vs Faders) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              {/* Power Toggle */}
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                onClick={() => setDSP({ eq_enabled: !dsp.eq_enabled })}
+              >
+                <button
+                  style={{
+                    width: 32,
+                    height: 20,
+                    borderRadius: 10,
+                    border: 'none',
+                    background: dsp.eq_enabled ? 'var(--accent)' : 'rgba(255, 255, 255, 0.15)',
+                    position: 'relative',
+                    cursor: 'pointer',
+                    padding: 2,
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: '50%',
+                      background: '#fff',
+                      transform: dsp.eq_enabled ? 'translateX(12px)' : 'translateX(0)',
+                      transition: 'transform 0.2s',
+                    }}
+                  />
+                </button>
+                <span style={{ fontSize: 13, fontWeight: 700, color: dsp.eq_enabled ? 'var(--text)' : 'var(--text-dim)' }}>
+                  Master EQ
+                </span>
+              </div>
+
+              {/* View Switcher: Interactive Spline Graph vs Tactile Channel Faders */}
+              <div style={{ display: 'flex', gap: 3, background: 'rgba(0, 0, 0, 0.35)', padding: 3, borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <button
+                  onClick={() => setEqViewMode('graph')}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: eqViewMode === 'graph' ? 700 : 500,
+                    padding: '5px 12px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: eqViewMode === 'graph' ? 'var(--accent)' : 'transparent',
+                    color: eqViewMode === 'graph' ? '#fff' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <Activity size={13} />
+                  <span>Spline Graph</span>
+                </button>
+                <button
+                  onClick={() => setEqViewMode('faders')}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: eqViewMode === 'faders' ? 700 : 500,
+                    padding: '5px 12px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: eqViewMode === 'faders' ? 'var(--accent)' : 'transparent',
+                    color: eqViewMode === 'faders' ? '#fff' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <SlidersHorizontal size={13} />
+                  <span>Tactile Faders</span>
+                </button>
+              </div>
+
+              {/* Parametric vs Graphic mode (when in Graph view) */}
+              {eqViewMode === 'graph' && (
+                <div style={{ display: 'flex', gap: 3, background: 'rgba(0, 0, 0, 0.25)', padding: 3, borderRadius: 6 }}>
+                  <button
+                    onClick={() => setDSP({ eq_parametric: true })}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: dsp.eq_parametric ? 700 : 500,
+                      padding: '3px 8px',
+                      borderRadius: 4,
+                      border: 'none',
+                      background: dsp.eq_parametric ? 'rgba(var(--accent-rgb), 0.3)' : 'transparent',
+                      color: dsp.eq_parametric ? 'var(--accent)' : 'var(--text-dim)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    10-Band Parametric
+                  </button>
+                  <button
+                    onClick={() => setDSP({ eq_parametric: false })}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: !dsp.eq_parametric ? 700 : 500,
+                      padding: '3px 8px',
+                      borderRadius: 4,
+                      border: 'none',
+                      background: !dsp.eq_parametric ? 'rgba(var(--accent-rgb), 0.3)' : 'transparent',
+                      color: !dsp.eq_parametric ? 'var(--accent)' : 'var(--text-dim)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    10-Band Graphic
+                  </button>
+                </div>
+              )}
+
+              {/* Resampler Phase Mode */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Phase:</span>
+                {(['minimum', 'linear', 'intermediate'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setDSP({ resampler_phase_mode: mode })}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: dsp.resampler_phase_mode === mode ? 700 : 500,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      border: dsp.resampler_phase_mode === mode
+                        ? '1px solid rgba(var(--accent-rgb), 0.4)'
+                        : '1px solid rgba(255, 255, 255, 0.08)',
+                      background: dsp.resampler_phase_mode === mode
+                        ? 'rgba(var(--accent-rgb), 0.15)'
+                        : 'rgba(255, 255, 255, 0.02)',
+                      color: dsp.resampler_phase_mode === mode ? 'var(--accent)' : 'var(--text-dim)',
+                      cursor: 'pointer',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Quick Presets & Preset Manager */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {EQ_QUICK_PRESETS.map(preset => (
+                  <button
+                    key={preset.name}
+                    onClick={() => applyQuickPreset(preset)}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: '4px 8px',
+                      borderRadius: 5,
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      color: 'var(--text-dim)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+
+              {customPresets.length > 0 && (
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {customPresets.map(p => (
+                    <div
+                      key={p.name}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        background: 'rgba(255, 255, 255, 0.04)',
+                      }}
+                    >
+                      <button
+                        onClick={() => handleLoadCustomPreset(p)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text)',
+                          fontSize: 10,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                      <button
+                        onClick={() => handleDeletePreset(p.name)}
+                        title={`Delete preset "${p.name}"`}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-dim)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 1,
+                        }}
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => setShowSaveModal(true)}
+                style={{
+                  fontSize: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 8px',
+                  borderRadius: 5,
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  color: 'var(--text)',
+                  cursor: 'pointer',
+                }}
+              >
+                <Save size={11} />
+                <span>Save</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const defaultBands = (dsp.eq_parametric_bands || []).map(b => ({ ...b, gain: 0 }));
+                  setDSP({
+                    eq_graphic_gains: new Array(10).fill(0),
+                    eq_parametric_bands: defaultBands,
+                    preamp_gain: 0,
+                  });
+                }}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '4px 8px',
+                  borderRadius: 5,
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  color: 'var(--text-dim)',
+                  cursor: 'pointer',
+                }}
+              >
+                Flat All
+              </button>
+            </div>
           </div>
 
-          {/* Tab Selection */}
-          <div style={{
-            display: 'flex',
-            background: 'var(--glass)',
-            padding: 3,
-            borderRadius: 10,
-            border: '1px solid var(--glass-border)',
-            gap: 4
-          }}>
-            {[
-              { id: 'eq', label: 'EQ & Calibration', icon: Sliders },
-              { id: 'spatial', label: 'Spatial Stage', icon: Compass },
-              { id: 'dynamics', label: 'Dynamics & XY', icon: Activity },
-              { id: 'aideo_filter', label: 'Aideo Filter', icon: Sparkles }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+          {/* VIEW MODE 1: Interactive Spline Graph */}
+          {eqViewMode === 'graph' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Equalizer Spline Graph & Real-Time Waterfall Canvas */}
+              <div
+                style={{
+                  background: '#090a10',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: 12,
+                  padding: '16px',
+                  position: 'relative',
+                  overflow: 'hidden',
+                  height: svgHeight,
+                }}
+              >
+                {/* Real-time spectrum waterfall overlay canvas */}
+                <canvas
+                  ref={canvasRef}
+                  width={svgWidth}
+                  height={svgHeight}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    opacity: 0.7,
+                    pointerEvents: 'none',
+                  }}
+                />
+
+                {/* SVG Biquad Response Spline Graph */}
+                <svg
+                  ref={graphRef}
+                  viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                  preserveAspectRatio="none"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    cursor: activeDragNode !== null ? 'grabbing' : 'default',
+                  }}
+                >
+                  <defs>
+                    <linearGradient id="lab-curve-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--accent)" stopOpacity={dsp.eq_enabled ? 0.25 : 0.04} />
+                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.0} />
+                    </linearGradient>
+                    <linearGradient id="lab-curve-stroke" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#38bdf8" />
+                      <stop offset="50%" stopColor="var(--accent)" />
+                      <stop offset="100%" stopColor="#34d399" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Horizontal dB Grid Lines */}
+                  {[-12, -6, 0, 6, 12].map(db => {
+                    const y = dbToY(db, svgHeight, -15, 15);
+                    const isZero = db === 0;
+                    return (
+                      <g key={db}>
+                        <line
+                          x1={0}
+                          y1={y}
+                          x2={svgWidth}
+                          y2={y}
+                          stroke={isZero ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.05)'}
+                          strokeWidth={isZero ? 1.2 : 0.8}
+                          strokeDasharray={isZero ? undefined : '4 4'}
+                        />
+                        <text
+                          x={8}
+                          y={y - 3}
+                          fill={isZero ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.25)'}
+                          fontSize={9}
+                          fontFamily="monospace"
+                        >
+                          {db > 0 ? `+${db} dB` : `${db} dB`}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* Vertical Frequency Grid Lines */}
+                  {GRAPHIC_EQ_FREQUENCIES.map(freq => {
+                    const x = freqToX(freq, svgWidth);
+                    return (
+                      <g key={freq}>
+                        <line x1={x} y1={0} x2={x} y2={svgHeight} stroke="rgba(255, 255, 255, 0.06)" strokeWidth={0.8} />
+                        <text x={x} y={svgHeight - 6} textAnchor="middle" fill="rgba(255, 255, 255, 0.3)" fontSize={9} fontFamily="monospace">
+                          {formatFrequency(freq)}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* Area Fill */}
+                  {(() => {
+                    if (points.length === 0) return null;
+                    const pathStr = points.reduce((acc, pt, idx) => {
+                      const x = freqToX(pt.f, svgWidth);
+                      const y = dbToY(pt.db, svgHeight, -15, 15);
+                      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
+                    }, '');
+                    const zeroY = dbToY(0, svgHeight, -15, 15);
+                    const fullArea = `${pathStr} L ${svgWidth} ${zeroY} L 0 ${zeroY} Z`;
+                    return <path d={fullArea} fill="url(#lab-curve-fill)" />;
+                  })()}
+
+                  {/* Curve Stroke */}
+                  {(() => {
+                    if (points.length === 0) return null;
+                    const pathStr = points.reduce((acc, pt, idx) => {
+                      const x = freqToX(pt.f, svgWidth);
+                      const y = dbToY(pt.db, svgHeight, -15, 15);
+                      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
+                    }, '');
+                    return (
+                      <path
+                        d={pathStr}
+                        fill="none"
+                        stroke={dsp.eq_enabled ? 'url(#lab-curve-stroke)' : 'rgba(255, 255, 255, 0.3)'}
+                        strokeWidth={2.5}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    );
+                  })()}
+
+                  {/* Draggable Node Markers */}
+                  {dsp.eq_parametric
+                    ? (dsp.eq_parametric_bands || []).map((band, idx) => {
+                        const x = freqToX(band.freq, svgWidth);
+                        const y = dbToY(band.gain + (dsp.preamp_gain || 0), svgHeight, -15, 15);
+                        const isSelected = selectedBand === idx;
+                        const isHovered = hoveredNode === idx;
+
+                        return (
+                          <g
+                            key={idx}
+                            onMouseDown={e => {
+                              e.stopPropagation();
+                              setSelectedBand(idx);
+                              setActiveDragNode(idx);
+                            }}
+                            onMouseEnter={() => setHoveredNode(idx)}
+                            onMouseLeave={() => setHoveredNode(null)}
+                            onWheel={e => handleNodeWheel(idx, e)}
+                            style={{ cursor: 'grab' }}
+                          >
+                            <circle
+                              cx={x}
+                              cy={y}
+                              r={isSelected ? 14 : isHovered ? 11 : 8}
+                              fill={isSelected ? 'rgba(var(--accent-rgb), 0.25)' : 'rgba(255, 255, 255, 0.06)'}
+                              stroke={isSelected ? 'var(--accent)' : 'rgba(255, 255, 255, 0.4)'}
+                              strokeWidth={1.5}
+                            />
+                            <circle cx={x} cy={y} r={4} fill={isSelected ? 'var(--accent)' : '#fff'} />
+                            <text
+                              x={x}
+                              y={y - 12}
+                              textAnchor="middle"
+                              fill={isSelected ? 'var(--accent)' : '#fff'}
+                              fontSize={9}
+                              fontWeight="bold"
+                              fontFamily="monospace"
+                            >
+                              {idx + 1}
+                            </text>
+                          </g>
+                        );
+                      })
+                    : (dsp.eq_graphic_gains || []).map((gain, idx) => {
+                        if (idx >= GRAPHIC_EQ_FREQUENCIES.length) return null;
+                        const freq = GRAPHIC_EQ_FREQUENCIES[idx];
+                        const x = freqToX(freq, svgWidth);
+                        const y = dbToY(gain + (dsp.preamp_gain || 0), svgHeight, -15, 15);
+                        const isHovered = hoveredNode === idx;
+
+                        return (
+                          <g
+                            key={freq}
+                            onMouseDown={e => {
+                              e.stopPropagation();
+                              setSelectedBand(idx);
+                              setActiveDragNode(idx);
+                            }}
+                            onMouseEnter={() => setHoveredNode(idx)}
+                            onMouseLeave={() => setHoveredNode(null)}
+                            style={{ cursor: 'grab' }}
+                          >
+                            <circle
+                              cx={x}
+                              cy={y}
+                              r={isHovered ? 10 : 7}
+                              fill={gain !== 0 ? 'var(--accent)' : '#fff'}
+                              stroke="rgba(0, 0, 0, 0.8)"
+                              strokeWidth={1.5}
+                            />
+                          </g>
+                        );
+                      })}
+                </svg>
+              </div>
+
+              {/* Floating Band Inspector Strip */}
+              {dsp.eq_parametric && dsp.eq_parametric_bands && dsp.eq_parametric_bands[selectedBand] && (
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: 12,
+                    padding: '14px 18px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                  }}
+                >
+                  {/* Band Quick Switcher */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)' }}>
+                        Band:
+                      </span>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {dsp.eq_parametric_bands.map((_, idx) => {
+                          const isCur = selectedBand === idx;
+                          return (
+                            <button
+                              key={idx}
+                              onClick={() => setSelectedBand(idx)}
+                              style={{
+                                width: 26,
+                                height: 22,
+                                borderRadius: 4,
+                                border: isCur
+                                  ? '1px solid var(--accent)'
+                                  : '1px solid rgba(255, 255, 255, 0.08)',
+                                background: isCur ? 'rgba(var(--accent-rgb), 0.2)' : 'rgba(255, 255, 255, 0.03)',
+                                color: isCur ? 'var(--accent)' : 'var(--text-dim)',
+                                fontSize: 10,
+                                fontWeight: isCur ? 800 : 500,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {idx + 1}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                      Tip: Scroll mousewheel over any node on the graph to adjust Q factor
+                    </div>
+                  </div>
+
+                  {/* Band Parameters Inspector Strip */}
+                  {(() => {
+                    const band = dsp.eq_parametric_bands[selectedBand];
+                    const updateBand = (partial: Partial<typeof band>) => {
+                      const updated = dsp.eq_parametric_bands.map((b, idx) => {
+                        if (idx === selectedBand) return { ...b, ...partial };
+                        return b;
+                      });
+                      setDSP({ eq_parametric_bands: updated });
+                    };
+
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr', gap: 14, alignItems: 'center' }}>
+                        {/* Filter Type */}
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
+                            Topology
+                          </div>
+                          <select
+                            value={band.band_type || 'peaking'}
+                            onChange={e => updateBand({ band_type: e.target.value as any })}
+                            style={{
+                              width: '100%',
+                              padding: '6px 8px',
+                              borderRadius: 6,
+                              background: 'rgba(0, 0, 0, 0.4)',
+                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              color: 'var(--text)',
+                              fontSize: 11,
+                            }}
+                          >
+                            <option value="peaking">Peaking (Bell)</option>
+                            <option value="lowshelf">Low Shelf</option>
+                            <option value="highshelf">High Shelf</option>
+                            <option value="highpass">High Pass (12dB/oct)</option>
+                            <option value="lowpass">Low Pass (12dB/oct)</option>
+                            <option value="notch">Notch</option>
+                          </select>
+                        </div>
+
+                        {/* Frequency (Hz) */}
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
+                            <span>Frequency</span>
+                            <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{band.freq} Hz</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={20}
+                            max={20000}
+                            step={1}
+                            value={band.freq}
+                            onChange={e => updateBand({ freq: parseFloat(e.target.value) })}
+                            style={{ width: '100%', accentColor: 'var(--accent)' }}
+                          />
+                        </div>
+
+                        {/* Gain (dB) */}
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
+                            <span>Gain</span>
+                            <span
+                              onDoubleClick={() => updateBand({ gain: 0 })}
+                              style={{ fontFamily: 'monospace', color: band.gain !== 0 ? 'var(--accent)' : 'var(--text-dim)', cursor: 'pointer' }}
+                            >
+                              {band.gain > 0 ? `+${band.gain.toFixed(1)}` : band.gain.toFixed(1)} dB
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={-15}
+                            max={15}
+                            step={0.1}
+                            value={band.gain}
+                            onChange={e => updateBand({ gain: snapToDetent(parseFloat(e.target.value), 0.35, 0) })}
+                            onDoubleClick={() => updateBand({ gain: 0 })}
+                            style={{ width: '100%', accentColor: 'var(--accent)' }}
+                          />
+                        </div>
+
+                        {/* Q Factor */}
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700, marginBottom: 3 }}>
+                            <span>Q (Bandwidth)</span>
+                            <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{band.q.toFixed(2)}</span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0.2}
+                            max={10.0}
+                            step={0.05}
+                            value={band.q}
+                            onChange={e => updateBand({ q: parseFloat(e.target.value) })}
+                            style={{ width: '100%', accentColor: 'var(--accent)' }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW MODE 2: Tactile Vertical Channel Faders */}
+          {eqViewMode === 'faders' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Dynamic Transfer Curve Mini Visualizer */}
+              <div
+                style={{
+                  background: '#090a10',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: 12,
+                  padding: '12px 16px',
+                  height: svgHeight,
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
+                  <defs>
+                    <linearGradient id="fader-curve-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--accent)" stopOpacity={dsp.eq_enabled ? 0.25 : 0.04} />
+                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.0} />
+                    </linearGradient>
+                    <linearGradient id="fader-curve-stroke" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#38bdf8" />
+                      <stop offset="50%" stopColor="var(--accent)" />
+                      <stop offset="100%" stopColor="#34d399" />
+                    </linearGradient>
+                  </defs>
+
+                  {/* Horizontal 0dB Grid Line */}
+                  <line
+                    x1={0}
+                    y1={dbToY(0, svgHeight, -15, 15)}
+                    x2={svgWidth}
+                    y2={dbToY(0, svgHeight, -15, 15)}
+                    stroke="rgba(255, 255, 255, 0.2)"
+                    strokeWidth={1}
+                  />
+
+                  {/* Frequency Vertical Lines */}
+                  {GRAPHIC_EQ_FREQUENCIES.map(freq => {
+                    const x = freqToX(freq, svgWidth);
+                    return <line key={freq} x1={x} y1={0} x2={x} y2={svgHeight} stroke="rgba(255, 255, 255, 0.06)" strokeWidth={0.8} />;
+                  })}
+
+                  {/* Area Fill */}
+                  {(() => {
+                    if (points.length === 0) return null;
+                    const pathStr = points.reduce((acc, pt, idx) => {
+                      const x = freqToX(pt.f, svgWidth);
+                      const y = dbToY(pt.db, svgHeight, -15, 15);
+                      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
+                    }, '');
+                    const zeroY = dbToY(0, svgHeight, -15, 15);
+                    const fullArea = `${pathStr} L ${svgWidth} ${zeroY} L 0 ${zeroY} Z`;
+                    return <path d={fullArea} fill="url(#fader-curve-fill)" />;
+                  })()}
+
+                  {/* Curve Stroke */}
+                  {(() => {
+                    if (points.length === 0) return null;
+                    const pathStr = points.reduce((acc, pt, idx) => {
+                      const x = freqToX(pt.f, svgWidth);
+                      const y = dbToY(pt.db, svgHeight, -15, 15);
+                      return idx === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`;
+                    }, '');
+                    return (
+                      <path
+                        d={pathStr}
+                        fill="none"
+                        stroke={dsp.eq_enabled ? 'url(#fader-curve-stroke)' : 'rgba(255, 255, 255, 0.3)'}
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    );
+                  })()}
+                </svg>
+              </div>
+
+              {/* 10-Band Vertical Tactile Channel Strips */}
+              <div
+                style={{
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: 12,
+                  padding: '16px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+                    10-Band Precision Mixer Strips
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                    Double-click any fader to snap to 0 dB
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(10, 1fr)',
+                    gap: 8,
+                    alignItems: 'end',
+                    padding: '8px 0',
+                  }}
+                >
+                  {GRAPHIC_EQ_FREQUENCIES.map((freq, idx) => {
+                    const gain = eqGains[idx] || 0;
+                    const isHovered = hoveredNode === idx;
+                    const isNonZero = gain !== 0;
+
+                    return (
+                      <div
+                        key={freq}
+                        onMouseEnter={() => setHoveredNode(idx)}
+                        onMouseLeave={() => setHoveredNode(null)}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '10px 4px',
+                          borderRadius: 8,
+                          background: isHovered
+                            ? 'rgba(255, 255, 255, 0.05)'
+                            : isNonZero
+                            ? 'rgba(var(--accent-rgb), 0.04)'
+                            : 'rgba(255, 255, 255, 0.02)',
+                          border: isHovered
+                            ? '1px solid rgba(var(--accent-rgb), 0.3)'
+                            : isNonZero
+                            ? '1px solid rgba(var(--accent-rgb), 0.15)'
+                            : '1px solid rgba(255, 255, 255, 0.04)',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        {/* dB Gain Readout */}
+                        <div
+                          onDoubleClick={() => handleFaderReset(idx)}
+                          title="Double-click to reset to 0dB"
+                          style={{
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            fontWeight: isNonZero ? 700 : 500,
+                            color: isNonZero ? 'var(--accent)' : 'var(--text-dim)',
+                            padding: '2px 4px',
+                            borderRadius: 4,
+                            background: isNonZero ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent',
+                            cursor: 'pointer',
+                            minHeight: 18,
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                        >
+                          {gain > 0 ? `+${gain.toFixed(1)}` : gain.toFixed(1)}
+                        </div>
+
+                        {/* Vertical Range Slider */}
+                        <div
+                          style={{
+                            height: 110,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            position: 'relative',
+                          }}
+                          onDoubleClick={() => handleFaderReset(idx)}
+                        >
+                          {/* 0dB Notch Guide */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '50%',
+                              left: '15%',
+                              right: '15%',
+                              height: 1,
+                              background: 'rgba(255, 255, 255, 0.15)',
+                              pointerEvents: 'none',
+                            }}
+                          />
+
+                          <input
+                            type="range"
+                            min={-12}
+                            max={12}
+                            step={0.1}
+                            value={gain}
+                            onChange={e => handleFaderGainChange(idx, parseFloat(e.target.value))}
+                            style={{
+                              writingMode: 'vertical-lr',
+                              WebkitAppearance: 'slider-vertical',
+                              width: 24,
+                              height: 100,
+                              accentColor: 'var(--accent)',
+                              cursor: 'pointer',
+                              opacity: dsp.eq_enabled ? 1 : 0.45,
+                            }}
+                          />
+                        </div>
+
+                        {/* Frequency Label */}
+                        <div
+                          style={{
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            fontWeight: 600,
+                            color: isHovered ? 'var(--accent)' : 'var(--text-dim)',
+                            transition: 'color 0.15s ease',
+                          }}
+                        >
+                          {formatFrequency(freq)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ULTRA-COMPACT AUTOEQ HEADPHONE CALIBRATION DOCK (Integrated at Bottom) */}
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              padding: '16px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+            }}
+          >
+            {/* Dock Header & Search Strip */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Headphones size={16} color="var(--accent)" />
+                <span style={{ fontSize: 13, fontWeight: 700 }}>AutoEQ Headphone Calibration</span>
+                <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                  ({isFetchingDb ? 'Fetching index...' : `${filteredHeadphones.length} models ready`})
+                </span>
+              </div>
+
+              {/* Compact Search Input */}
+              <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  background: activeTab === tab.id ? 'var(--glass-h)' : 'transparent',
-                  border: 'none',
-                  color: activeTab === tab.id ? 'var(--text)' : 'var(--text-dim)',
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(0, 0, 0, 0.4)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  minWidth: 280,
+                  maxWidth: 380,
+                  flex: 1,
                 }}
               >
-                <tab.icon size={14} />
-                {tab.label}
-              </button>
-            ))}
+                <Search size={14} color="var(--text-dim)" />
+                <input
+                  type="text"
+                  placeholder="Search model (HD 600, WH-1000XM4, DT 990)..."
+                  value={dbSearchQuery}
+                  onChange={e => setDbSearchQuery(e.target.value)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    outline: 'none',
+                    color: 'var(--text)',
+                    fontSize: 12,
+                    width: '100%',
+                  }}
+                />
+                {dbSearchQuery && (
+                  <button
+                    onClick={() => setDbSearchQuery('')}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 0 }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Brand Filter Chips Strip */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {BRAND_FILTERS.map(brand => {
+                const isSelected = selectedBrand === brand;
+                return (
+                  <button
+                    key={brand}
+                    onClick={() => setSelectedBrand(brand)}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: isSelected ? 700 : 500,
+                      padding: '4px 9px',
+                      borderRadius: 5,
+                      border: isSelected
+                        ? '1px solid rgba(var(--accent-rgb), 0.5)'
+                        : '1px solid rgba(255, 255, 255, 0.06)',
+                      background: isSelected ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                      color: isSelected ? 'var(--accent)' : 'var(--text-dim)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {brand}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Error Banner */}
+            {autoEqError && (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#f87171',
+                  fontSize: 11,
+                }}
+              >
+                {autoEqError}
+              </div>
+            )}
+
+            {/* High-Density 3-Column Calibration Shelf */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: 10,
+                maxHeight: 260,
+                overflowY: 'auto',
+                paddingRight: 4,
+              }}
+            >
+              {filteredHeadphones.map(hp => {
+                const srcStyle = getSourceStyle(hp.source);
+                const isActive = activeCalibratedHeadphone === hp.name;
+
+                return (
+                  <div
+                    key={`${hp.name}-${hp.source}`}
+                    style={{
+                      background: isActive ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                      border: isActive
+                        ? '1px solid rgba(var(--accent-rgb), 0.4)'
+                        : '1px solid rgba(255, 255, 255, 0.06)',
+                      borderRadius: 8,
+                      padding: '10px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {hp.name}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                        <span
+                          style={{
+                            fontSize: 8,
+                            fontWeight: 800,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: srcStyle.bg,
+                            border: `1px solid ${srcStyle.border}`,
+                            color: srcStyle.color,
+                          }}
+                        >
+                          {srcStyle.label}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleApplyHeadphoneProfile(hp)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '5px 9px',
+                        borderRadius: 5,
+                        border: 'none',
+                        background: isActive ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
+                        color: isActive ? '#fff' : 'var(--text)',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        transition: 'background 0.15s',
+                      }}
+                    >
+                      {isActive ? <Check size={12} /> : <Zap size={12} />}
+                      <span>{isActive ? 'Calibrated' : 'Calibrate'}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </header>
+      )}
 
-      {/* Main Workspace Panels */}
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <AnimatePresence mode="wait">
-          {activeTab === 'eq' && (
-            <motion.div
-              key="eq-tab"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.2 }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 24 }}
-            >
-              {/* Spline EQ Laboratory Graph */}
-              <div className="settings-ctrl-card" style={{ padding: 24, position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <div>
-                    <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Logarithmic EQ Spline & Waterfall</h3>
-                    <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                      Click and drag handles to adjust precise frequency responses. Translucent real-time waterfall active underneath.
-                    </p>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <button
-                      onClick={resetEQ}
-                      className="settings-btn settings-btn-danger"
-                      style={{ fontSize: 11, padding: '6px 12px' }}
-                    >
-                      Reset EQ
-                    </button>
-                    <button
-                      onClick={() => setDSP({ eq_parametric: !dsp.eq_parametric })}
-                      className="settings-btn"
-                      style={{ fontSize: 11, padding: '6px 12px' }}
-                    >
-                      Use {dsp.eq_parametric ? '10-Band Graphic' : '5-Band Parametric'}
-                    </button>
-                    <button
-                      onClick={() => setDSP({ eq_enabled: !dsp.eq_enabled, enabled: !dsp.eq_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 11,
-                        padding: '6px 12px',
-                        background: dsp.eq_enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                        color: dsp.eq_enabled ? 'var(--emerald-ink)' : 'var(--red-ink)',
-                        border: 'none'
-                      }}
-                    >
-                      EQ: {dsp.eq_enabled ? 'ENABLED' : 'BYPASSED'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Graph Board */}
-                <div style={{
-                  position: 'relative',
-                  width: '100%',
-                  height: 200,
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  borderRadius: 12,
-                  border: '1px solid var(--glass-border)',
-                  overflow: 'hidden'
-                }}>
-                  {/* Waterfall Spectrogram Overlay */}
-                  <canvas
-                    ref={canvasRef}
-                    width={720}
-                    height={200}
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      width: '100%',
-                      height: '100%',
-                      pointerEvents: 'none',
-                      opacity: 0.15
-                    }}
-                  />
-
-                  {/* SVG Spline Grid */}
-                  <svg
-                    ref={graphRef}
-                    width="100%"
-                    height="100%"
-                    onMouseMove={handleGraphMouseMove}
-                    onMouseUp={handleGraphMouseUp}
-                    onMouseLeave={handleGraphMouseUp}
-                    style={{ position: 'relative', zIndex: 2, cursor: activeDragNode !== null ? 'grabbing' : 'default' }}
-                  >
-                    {/* Horizontal dB Gridlines (+12dB to -12dB) */}
-                    {[12, 6, 0, -6, -12].map((db) => {
-                      const y = getY(db, 200);
-                      return (
-                        <g key={db}>
-                          <line x1="0" y1={y} x2="100%" y2={y} stroke="var(--glass-border)" strokeDasharray="3" />
-                          <text x="6" y={y - 4} fill="var(--text-dim)" fontSize="9" fontWeight="600">{db > 0 ? `+${db}` : db}dB</text>
-                        </g>
-                      );
-                    })}
-
-                    {/* Vertical Log Frequency Gridlines */}
-                    {[20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].map((f) => {
-                      const x = `${(Math.log10(f) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20)) * 100}%`;
-                      return (
-                        <g key={f}>
-                          <line x1={x} y1="0" x2={x} y2="100%" stroke="var(--glass-border)" />
-                          <text x={x} y="194" dx="4" fill="var(--text-dim)" fontSize="8" fontWeight="600">
-                            {f >= 1000 ? `${f / 1000}kHz` : `${f}Hz`}
-                          </text>
-                        </g>
-                      );
-                    })}
-
-                    {/* EQ glowing Spline Path */}
-                    {curvePoints.length > 0 && (
-                      <path
-                        d={`M 0 ${getY(curvePoints[0].db, 200)} ${curvePoints.slice(1).map(p => `L ${getX(p.f, 720)} ${getY(p.db, 200)}`).join(' ')}`}
-                        fill="none"
-                        stroke={accentColor || 'var(--dynamic-accent, #8b5cf6)'}
-                        strokeWidth="2.5"
-                        filter="drop-shadow(0px 0px 8px rgba(139, 92, 246, 0.35))"
-                      />
-                    )}
-
-                    {/* Interactive drag nodes */}
-                    {dsp.eq_enabled && (
-                      dsp.eq_parametric ? (
-                        // 10 Parametric nodes
-                        dsp.eq_parametric_bands.map((band, idx) => {
-                          const cx = getX(band.freq, 720);
-                          const cy = getY(band.gain, 200);
-                          const isHovered = hoveredNode === idx || activeDragNode === idx;
-                          return (
-                            <g key={idx}
-                               onMouseEnter={() => setHoveredNode(idx)}
-                               onMouseLeave={() => setHoveredNode(null)}
-                               onMouseDown={() => setActiveDragNode(idx)}
-                               style={{ cursor: 'grab' }}
-                            >
-                              <circle cx={cx} cy={cy} r={isHovered ? 8 : 5}
-                                      fill={isHovered ? 'white' : (accentColor || 'var(--dynamic-accent)')}
-                                      stroke="rgba(0, 0, 0, 0.5)" strokeWidth="1.5"
-                                      filter="drop-shadow(0 0 4px rgba(0,0,0,0.5))"
-                                      style={{ transition: 'r 0.1s ease' }}
-                              />
-                              {isHovered && (
-                                <g transform={`translate(${cx + 12}, ${cy - 12})`}>
-                                  <rect width="90" height="32" rx="6" fill="rgba(9, 9, 14, 0.95)" stroke="rgba(255,255,255,0.08)" />
-                                  <text x="8" y="14" fill="white" fontSize="9" fontWeight="700">Band {idx + 1}: {band.band_type}</text>
-                                  <text x="8" y="25" fill="var(--text-dim)" fontSize="8">{Math.round(band.freq)}Hz · {band.gain}dB</text>
-                                </g>
-                              )}
-                            </g>
-                          );
-                        })
-                      ) : (
-                        // 10 Graphic nodes
-                        dsp.eq_graphic_gains.map((gain, idx) => {
-                          const cx = getX(GRAPHIC_FREQS[idx], 720);
-                          const cy = getY(gain, 200);
-                          const isHovered = hoveredNode === idx || activeDragNode === idx;
-                          return (
-                            <g key={idx}
-                               onMouseEnter={() => setHoveredNode(idx)}
-                               onMouseLeave={() => setHoveredNode(null)}
-                               onMouseDown={() => setActiveDragNode(idx)}
-                               style={{ cursor: 'grab' }}
-                            >
-                              <circle cx={cx} cy={cy} r={isHovered ? 7 : 4}
-                                      fill={isHovered ? 'white' : '#a855f7'}
-                                      stroke="rgba(0, 0, 0, 0.5)" strokeWidth="1"
-                              />
-                            </g>
-                          );
-                        })
-                      )
-                    )}
-                  </svg>
-                </div>
-              </div>
-
-              {/* DSP Preset Manager Card */}
-              <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-                  <Sliders size={15} />
-                  DSP & Equalizer Presets
-                </h4>
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <select
-                    value={selectedPresetName}
-                    onChange={(e) => handleLoadPreset(e.target.value)}
-                    style={{
-                      background: 'var(--glass)',
-                      color: 'var(--text)',
-                      border: '1px solid var(--glass-border)',
-                      borderRadius: 6,
-                      padding: '6px 12px',
-                      fontSize: 12,
-                      outline: 'none',
-                      cursor: 'pointer',
-                      minWidth: 150
-                    }}
-                  >
-                    <option value="" disabled style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Select Preset...</option>
-                    <optgroup label="System Presets" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>
-                      <option value="Flat" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Flat / Bypass</option>
-                      <option value="Bass Boost" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Bass Boost</option>
-                      <option value="Vocal Booster" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Vocal Booster</option>
-                      <option value="Treble Booster" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Treble Booster</option>
-                      <option value="Audiophile Hi-Res" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>Audiophile Hi-Res</option>
-                    </optgroup>
-                    {customPresets.length > 0 && (
-                      <optgroup label="Your Presets" style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>
-                        {customPresets.map(p => (
-                          <option key={p.name} value={p.name} style={{ background: 'var(--sidebar-bg)', color: 'var(--text)' }}>{p.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-
-                  <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', alignItems: 'center' }}>
-                    <input
-                      type="text"
-                      placeholder="Preset name..."
-                      value={newPresetName}
-                      onChange={(e) => setNewPresetName(e.target.value)}
-                      style={{
-                        background: 'var(--glass)',
-                        color: 'var(--text)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 6,
-                        padding: '6px 10px',
-                        fontSize: 12,
-                        outline: 'none',
-                        width: 150
-                      }}
-                    />
-                    <button
-                      onClick={handleSavePreset}
-                      className="settings-btn"
-                      style={{ fontSize: 11, padding: '6px 12px' }}
-                    >
-                      Save Preset
-                    </button>
-                    {customPresets.some(p => p.name === selectedPresetName) && (
-                      <button
-                        onClick={() => handleDeletePreset(selectedPresetName)}
-                        className="settings-btn settings-btn-danger"
-                        style={{ fontSize: 11, padding: '6px 12px' }}
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Headphone autoEQ calibration block */}
-              <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Headphones size={15} />
-                      Import AutoEQ Headphone Profile
-                    </h4>
-                    <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                      Query Jaakko Pasanen's master database of 4,000+ reference target headphone profiles to calibrate reference outputs.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowAutoEqSearch(!showAutoEqSearch);
-                      if (!autoEqDb && !showAutoEqSearch) fetchAutoEqDb();
-                    }}
-                    className="settings-btn"
-                    style={{ fontSize: 11 }}
-                  >
-                    {showAutoEqSearch ? 'Hide Search Panel' : 'Search Profiles'}
-                  </button>
-                </div>
-
-                {/* Autocomplete database list */}
-                <AnimatePresence>
-                  {showAutoEqSearch && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      style={{ overflow: 'hidden', marginTop: 14 }}
-                    >
-                      <div style={{ display: 'flex', gap: 10, background: 'var(--glass)', padding: 10, borderRadius: 8, border: '1px solid var(--glass-border)', marginBottom: 12 }}>
-                        <Search size={16} style={{ color: 'var(--text-dim)', alignSelf: 'center', marginLeft: 4 }} />
-                        <input
-                          type="text"
-                          placeholder="Search headphone models (e.g. Sony WH-1000XM4, HD600)..."
-                          value={dbSearchQuery}
-                          onChange={e => setDbSearchQuery(e.target.value)}
-                          style={{ flex: 1, border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 12, outline: 'none' }}
-                        />
-                        {isFetchingDb && <Loader2 size={14} className="spinning" style={{ alignSelf: 'center' }} />}
-                      </div>
-
-                      {autoEqError && <div style={{ fontSize: 11, color: '#ef4444', marginBottom: 10 }}>{autoEqError}</div>}
-
-                      <div style={{
-                        maxHeight: 180,
-                        overflowY: 'auto',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 2,
-                        background: 'rgba(0,0,0,0.1)',
-                        borderRadius: 8,
-                        padding: 4
-                      }}>
-                        {filteredDb.map((item, idx) => {
-                          const style = getSourceStyle(item.source);
-                          return (
-                            <div
-                              key={idx}
-                              onClick={() => handleSelectHeadphone(item)}
-                              style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                padding: '8px 12px',
-                                borderRadius: 6,
-                                cursor: 'pointer',
-                                transition: 'all 0.15s'
-                              }}
-                              className="aideo-carousel-card-hover"
-                            >
-                              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }}>{item.name}</span>
-                              <span style={{
-                                fontSize: 9,
-                                fontWeight: 700,
-                                padding: '2px 8px',
-                                borderRadius: 10,
-                                background: style.bg,
-                                color: style.color,
-                                border: `1px solid ${style.border}`
-                              }}>{style.label}</span>
-                            </div>
-                          );
-                        })}
-                        {filteredDb.length === 0 && !isFetchingDb && (
-                          <div style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'center', padding: 20 }}>
-                            No headphones found matching your query.
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'spatial' && (
-            <motion.div
-              key="spatial-tab"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.2 }}
-              style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24, alignItems: 'start' }}
-            >
-              {/* Left Column: 3D Soundstage Arena Vector */}
-              <div className="settings-ctrl-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
-                <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
-                  <div>
-                    <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>3D Visual Spatial Arena</h4>
-                    <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: 0 }}>
-                      Top-down view representing concentric loudspeaker shadow reflections and ear mixing.
-                    </p>
-                  </div>
-                  <button
-                    onClick={resetSpatial}
-                    className="settings-btn settings-btn-danger"
-                    style={{ fontSize: 10, padding: '6px 12px' }}
-                  >
-                    Reset Spatial
-                  </button>
-                </div>
-
-                {/* Animated vector sound stage */}
-                <div style={{
-                  position: 'relative',
-                  width: 200,
-                  height: 200,
-                  background: 'var(--glass)',
-                  borderRadius: 100,
-                  border: '1px solid var(--glass-border)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  {/* concentric speaker soundwaves */}
-                  {!dsp.low_spec_mode ? (
-                    <div
-                      ref={pulseBassRef}
-                      style={{
-                        position: 'absolute',
-                        width: '80%',
-                        height: '80%',
-                        borderRadius: '50%',
-                        border: `1.5px solid ${accentColor || '#8b5cf6'}`,
-                        opacity: 0.15,
-                        pointerEvents: 'none',
-                        transformOrigin: 'center',
-                        transition: 'transform 0.08s ease-out, opacity 0.08s ease-out'
-                      }}
-                    />
-                  ) : (
-                    dsp.spatial_enabled && (
-                      <motion.div
-                        animate={{ scale: [1, 1.45, 1], opacity: [0.35, 0, 0.35] }}
-                        transition={{ repeat: Infinity, duration: 2.2, ease: 'easeOut' }}
-                        style={{
-                          position: 'absolute',
-                          width: '80%',
-                          height: '80%',
-                          borderRadius: '50%',
-                          border: `1.5px solid ${accentColor || '#8b5cf6'}`,
-                          pointerEvents: 'none'
-                        }}
-                      />
-                    )
-                  )}
-
-                  {/* Top-down Head profile */}
-                  <div style={{
-                    width: 70,
-                    height: 70,
-                    borderRadius: '50%',
-                    background: 'var(--glass-h)',
-                    border: '1px solid var(--glass-border)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    position: 'relative'
-                  }}>
-                    {/* Ears */}
-                    <div style={{ position: 'absolute', left: -5, width: 6, height: 18, borderRadius: 3, background: 'var(--glass-h)' }} />
-                    <div style={{ position: 'absolute', right: -5, width: 6, height: 18, borderRadius: 3, background: 'var(--glass-h)' }} />
-                    {/* Nose */}
-                    <div style={{ position: 'absolute', top: -5, width: 10, height: 10, transform: 'rotate(45deg)', background: 'var(--glass-h)', borderLeft: '1px solid var(--glass-border)', borderTop: '1px solid var(--glass-border)' }} />
-                    
-                    <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.4 }}>LISTENER</span>
-                  </div>
-
-                  {/* Left speaker */}
-                  <div style={{
-                    position: 'absolute',
-                    top: 25,
-                    left: 20,
-                    textAlign: 'center',
-                    transform: 'rotate(25deg)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center'
-                  }}>
-                    {!dsp.low_spec_mode && (
-                      <div
-                        ref={pulseLRef}
-                        style={{
-                          position: 'absolute',
-                          width: 32,
-                          height: 44,
-                          borderRadius: 6,
-                          border: '1.5px solid #06b6d4',
-                          opacity: 0,
-                          pointerEvents: 'none',
-                          transformOrigin: 'center',
-                          transition: 'transform 0.06s ease-out, opacity 0.06s ease-out',
-                          boxShadow: '0 0 10px rgba(6, 182, 212, 0.25)'
-                        }}
-                      />
-                    )}
-                    <div style={{
-                      width: 24,
-                      height: 36,
-                      background: dsp.spatial_enabled ? 'rgba(6, 182, 212, 0.15)' : 'var(--glass)',
-                      border: dsp.spatial_enabled ? '1.5px solid #06b6d4' : '1px solid var(--glass-border)',
-                      borderRadius: 4,
-                      position: 'relative',
-                      zIndex: 2
-                    }} />
-                    <span style={{ fontSize: 8, opacity: 0.5, display: 'block', marginTop: 2 }}>L</span>
-                  </div>
-
-                  {/* Right speaker */}
-                  <div style={{
-                    position: 'absolute',
-                    top: 25,
-                    right: 20,
-                    textAlign: 'center',
-                    transform: 'rotate(-25deg)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center'
-                  }}>
-                    {!dsp.low_spec_mode && (
-                      <div
-                        ref={pulseRRef}
-                        style={{
-                          position: 'absolute',
-                          width: 32,
-                          height: 44,
-                          borderRadius: 6,
-                          border: '1.5px solid #06b6d4',
-                          opacity: 0,
-                          pointerEvents: 'none',
-                          transformOrigin: 'center',
-                          transition: 'transform 0.06s ease-out, opacity 0.06s ease-out',
-                          boxShadow: '0 0 10px rgba(6, 182, 212, 0.25)'
-                        }}
-                      />
-                    )}
-                    <div style={{
-                      width: 24,
-                      height: 36,
-                      background: dsp.spatial_enabled ? 'rgba(6, 182, 212, 0.15)' : 'var(--glass)',
-                      border: dsp.spatial_enabled ? '1.5px solid #06b6d4' : '1px solid var(--glass-border)',
-                      borderRadius: 4,
-                      position: 'relative',
-                      zIndex: 2
-                    }} />
-                    <span style={{ fontSize: 8, opacity: 0.5, display: 'block', marginTop: 2 }}>R</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column: Spatial sliders */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {/* Crossfeed Panel */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Linkwitz Headphone Crossfeed</h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Simulate dynamic speaker positioning in headphones.</p>
-                    </div>
-                    <button
-                      onClick={() => setDSP({ crossfeed_enabled: !dsp.crossfeed_enabled, enabled: !dsp.crossfeed_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        background: dsp.crossfeed_enabled ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
-                        color: dsp.crossfeed_enabled ? '#06b6d4' : 'var(--text-dim)'
-                      }}
-                    >
-                      {dsp.crossfeed_enabled ? 'ENABLED' : 'DISABLED'}
-                    </button>
-                  </div>
-
-                  {dsp.crossfeed_enabled && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                          <span style={{ color: 'var(--text-dim)' }}>Crossfeed Level</span>
-                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{dsp.crossfeed_level}dB</span>
-                        </div>
-                        <input
-                          type="range" min="-12" max="-3" step="0.5"
-                          value={dsp.crossfeed_level}
-                          onChange={e => setDSP({ crossfeed_level: parseFloat(e.target.value) })}
-                          style={{ width: '100%', accentColor: '#06b6d4' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Haas Spatializer Panel */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Haas Soundstage Expander</h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Width expansion using micro-second reflections.</p>
-                    </div>
-                    <button
-                      onClick={() => setDSP({ spatial_enabled: !dsp.spatial_enabled, enabled: !dsp.spatial_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        background: dsp.spatial_enabled ? 'rgba(168, 85, 247, 0.15)' : 'transparent',
-                        color: dsp.spatial_enabled ? '#a855f7' : 'var(--text-dim)'
-                      }}
-                    >
-                      {dsp.spatial_enabled ? 'ENABLED' : 'DISABLED'}
-                    </button>
-                  </div>
-
-                  {dsp.spatial_enabled && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                          <span style={{ color: 'var(--text-dim)' }}>Precedence delay (Haas)</span>
-                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{dsp.spatial_haas_delay}ms</span>
-                        </div>
-                        <input
-                          type="range" min="5" max="25" step="0.5"
-                          value={dsp.spatial_haas_delay}
-                          onChange={e => setDSP({ spatial_haas_delay: parseFloat(e.target.value) })}
-                          style={{ width: '100%', accentColor: '#a855f7' }}
-                        />
-                      </div>
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                          <span style={{ color: 'var(--text-dim)' }}>Haas expansion intensity (Wet)</span>
-                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{Math.round(dsp.spatial_wet * 100)}%</span>
-                        </div>
-                        <input
-                          type="range" min="0.0" max="1.0" step="0.05"
-                          value={dsp.spatial_wet}
-                          onChange={e => setDSP({ spatial_wet: parseFloat(e.target.value) })}
-                          style={{ width: '100%', accentColor: '#a855f7' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Impulse Response (IR) Convolution Panel */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Disc size={15} style={{ color: '#10b981' }} />
-                        Impulse Response (IR) Convolution Engine
-                      </h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Load custom room acoustics & HRTF cabinet impulse profiles (.wav).</p>
-                    </div>
-                    <button
-                      onClick={() => setDSP({ convolution_enabled: !dsp.convolution_enabled, enabled: !dsp.convolution_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        background: dsp.convolution_enabled ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-                        color: dsp.convolution_enabled ? '#10b981' : 'var(--text-dim)'
-                      }}
-                    >
-                      {dsp.convolution_enabled ? 'ENABLED' : 'DISABLED'}
-                    </button>
-                  </div>
-
-                  {dsp.convolution_enabled && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
-                          <span style={{ color: 'var(--text-dim)' }}>Active IR File</span>
-                          <span style={{ color: dsp.convolution_ir_path ? '#10b981' : 'var(--text-dim)', fontWeight: 600, fontSize: 10 }}>
-                            {dsp.convolution_ir_path ? dsp.convolution_ir_path.split(/[/\\]/).pop() : 'No File Selected'}
-                          </span>
-                        </div>
-                        <button
-                          onClick={async () => {
-                            try {
-                              const selected = await open({
-                                multiple: false,
-                                filters: [{ name: 'Audio Impulse Response', extensions: ['wav', 'flac'] }]
-                              });
-                              if (selected && typeof selected === 'string') {
-                                setDSP({ convolution_ir_path: selected });
-                              }
-                            } catch (e) {
-                              console.error('Failed to select IR file:', e);
-                            }
-                          }}
-                          className="settings-btn"
-                          style={{
-                            width: '100%',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 8,
-                            padding: '8px 14px',
-                            fontSize: 11,
-                            background: 'var(--glass-h)',
-                            border: '1px dashed var(--glass-border)',
-                            borderRadius: 6
-                          }}
-                        >
-                          <FolderOpen size={14} />
-                          {dsp.convolution_ir_path ? 'Change Impulse Response (.wav)' : 'Browse & Load IR File (.wav)'}
-                        </button>
-                      </div>
-
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                          <span style={{ color: 'var(--text-dim)' }}>Convolution Blend (Wet Mix)</span>
-                          <span style={{ color: 'var(--text)', fontWeight: 600 }}>{Math.round(dsp.convolution_wet * 100)}%</span>
-                        </div>
-                        <input
-                          type="range" min="0.0" max="1.0" step="0.05"
-                          value={dsp.convolution_wet}
-                          onChange={e => setDSP({ convolution_wet: parseFloat(e.target.value) })}
-                          style={{ width: '100%', accentColor: '#10b981' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {activeTab === 'dynamics' && (
-            <motion.div
-              key="dynamics-tab"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.2 }}
-              style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 24, alignItems: 'start' }}
-            >
-              {/* Left Column: Draggable XY Morphing space */}
-              <div className="settings-ctrl-card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-                  <div>
-                    <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Acoustic XY Space Pad</h4>
-                    <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: 0 }}>
-                      Drag the glowing node to smoothly morph between spatial curves, compressed warm dynamics, or pure flats.
-                    </p>
-                  </div>
-                  <button
-                    onClick={resetDynamics}
-                    className="settings-btn settings-btn-danger"
-                    style={{ fontSize: 10, padding: '6px 12px' }}
-                  >
-                    Reset Dynamics & XY
-                  </button>
-                </div>
-
-                {/* Pad grid */}
-                <div
-                  ref={xyPadRef}
-                  onMouseDown={() => setIsDraggingXY(true)}
-                  onMouseMove={handleXYMouseMove}
-                  onMouseUp={() => setIsDraggingXY(false)}
-                  onMouseLeave={() => setIsDraggingXY(false)}
+      {/* TAB 2: Spatial Acoustics & DSP Rack */}
+      {activeTab === 'spatial_acoustics' && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: 20,
+            flex: 1,
+          }}
+        >
+          {/* Module 1: IR Convolution Engine */}
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              padding: '18px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 14,
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <FileAudio size={16} color="var(--accent)" /> Impulse Response Convolution
+                </span>
+                <button
+                  onClick={() => setDSP({ convolution_enabled: !dsp.convolution_enabled })}
                   style={{
-                    position: 'relative',
-                    width: 220,
-                    height: 220,
-                    background: 'var(--glass)',
-                    borderRadius: 14,
-                    border: '1px solid var(--glass-border)',
-                    cursor: isDraggingXY ? 'grabbing' : 'grab',
-                    overflow: 'hidden'
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '3px 8px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: dsp.convolution_enabled ? 'var(--accent)' : 'rgba(255, 255, 255, 0.1)',
+                    color: dsp.convolution_enabled ? '#fff' : 'var(--text-dim)',
+                    cursor: 'pointer',
                   }}
                 >
-                  {/* Grid quadrants lines */}
-                  <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'var(--glass-border)' }} />
-                  <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, background: 'var(--glass-border)' }} />
-
-                  {/* Corner Labels */}
-                  <div style={{ position: 'absolute', top: 10, left: 10, fontSize: 9, color: 'var(--text-dim)', fontWeight: 700 }}>SPATIAL & BRIGHT</div>
-                  <div style={{ position: 'absolute', top: 10, right: 10, fontSize: 9, color: 'var(--text-dim)', fontWeight: 700 }}>WARM & COMPRESSED</div>
-                  <div style={{ position: 'absolute', bottom: 10, left: 10, fontSize: 9, color: 'var(--text-dim)', fontWeight: 700 }}>DEEP BASS BOOST</div>
-                  <div style={{ position: 'absolute', bottom: 10, right: 10, fontSize: 9, color: 'var(--text-dim)', fontWeight: 700 }}>PURE FLAT</div>
-
-                  {/* Glowing Cursor Node */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: `${xyPos.x * 100}%`,
-                      top: `${xyPos.y * 100}%`,
-                      transform: 'translate(-50%, -50%)',
-                      width: 20,
-                      height: 20,
-                      borderRadius: '50%',
-                      background: 'white',
-                      boxShadow: `0 0 16px ${accentColor || '#8b5cf6'}, 0 0 4px white`,
-                      border: '2px solid rgba(0,0,0,0.6)',
-                      pointerEvents: 'none',
-                      transition: isDraggingXY ? 'none' : 'all 0.15s ease'
-                    }}
-                  />
-                </div>
-
-                <div style={{
-                  marginTop: 18,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: 'var(--text)',
-                  background: 'var(--glass)',
-                  padding: '6px 14px',
-                  borderRadius: 20,
-                  border: '1px solid var(--glass-border)'
-                }}>
-                  Current: <span style={{ color: accentColor || 'var(--dynamic-accent)' }}>{getActiveXYLabel()}</span>
-                </div>
+                  {dsp.convolution_enabled ? 'ACTIVE' : 'BYPASS'}
+                </button>
               </div>
-
-              {/* Right Column: Subsonic & Dynamic parameters */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {/* Butterworth subsonic filter */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Butterworth Subsonic Filter</h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Cuts inaudible sub-18Hz rumble to save amplifier headroom.</p>
-                    </div>
-                    <button
-                      onClick={() => setDSP({ subsonic_enabled: !dsp.subsonic_enabled, enabled: !dsp.subsonic_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        background: dsp.subsonic_enabled ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-                        color: dsp.subsonic_enabled ? 'var(--emerald-ink)' : 'var(--text-dim)'
-                      }}
-                    >
-                      {dsp.subsonic_enabled ? 'ENABLED' : 'DISABLED'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Night-mode dynamic compressor */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Night Mode Dynamic Compressor</h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>High ratio compression protecting ears from volume spikes.</p>
-                    </div>
-                    <button
-                      onClick={() => setDSP({ night_mode_enabled: !dsp.night_mode_enabled, enabled: !dsp.night_mode_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        background: dsp.night_mode_enabled ? 'rgba(168, 85, 247, 0.15)' : 'transparent',
-                        color: dsp.night_mode_enabled ? '#a855f7' : 'var(--text-dim)'
-                      }}
-                    >
-                      {dsp.night_mode_enabled ? 'ENABLED' : 'DISABLED'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* EBU R128 Normalizer */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>EBU R128 Loudness Normalizer</h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Slow Automatic Gain Control to match uniform track loudness.</p>
-                    </div>
-                    <button
-                      onClick={() => setDSP({ r128_enabled: !dsp.r128_enabled, enabled: !dsp.r128_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        background: dsp.r128_enabled ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
-                        color: dsp.r128_enabled ? '#60a5fa' : 'var(--text-dim)'
-                      }}
-                    >
-                      {dsp.r128_enabled ? 'ENABLED' : 'DISABLED'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Digital Preamp & Peak Limiter Headroom */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 16 }}>Preamp & Safety Limiter</h4>
-                  
-                  {/* Preamp Gain */}
-                  <div style={{ marginBottom: 18 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Digital Preamp Gain</span>
-                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                          Attenuates signal to create digital headroom, avoiding clipping before EQ processing.
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
-                        {dsp.preamp_gain.toFixed(1)} dB
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="-12.0" max="0.0" step="0.1"
-                      value={dsp.preamp_gain}
-                      disabled={!dsp.enabled}
-                      onChange={e => setDSP({ preamp_gain: parseFloat(e.target.value) })}
-                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.enabled ? 'pointer' : 'default', opacity: dsp.enabled ? 1 : 0.5 }}
-                    />
-                  </div>
-
-                  {/* Auto-Headroom Guard */}
-                  <div style={{ marginBottom: 18, borderTop: '1px solid var(--glass-border)', paddingTop: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Auto-Headroom Guard</span>
-                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                          Automatically attenuates preamp gain based on positive EQ boosts to prevent digital clipping.
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setDSP({ auto_headroom: !dsp.auto_headroom, enabled: !dsp.auto_headroom ? true : dsp.enabled })}
-                        className="settings-btn"
-                        style={{
-                          fontSize: 10,
-                          padding: '4px 10px',
-                          background: dsp.auto_headroom ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
-                          color: dsp.auto_headroom ? 'var(--emerald-ink)' : 'var(--text-dim)'
-                        }}
-                      >
-                        {dsp.auto_headroom ? 'ENABLED' : 'DISABLED'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Limiter Threshold */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Limiter Threshold</span>
-                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                          Dynamic lookahead threshold to prevent clipping while maximizing analog output.
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
-                        {dsp.limiter_threshold.toFixed(1)} dB
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="-6.0" max="0.0" step="0.1"
-                      value={dsp.limiter_threshold}
-                      disabled={!dsp.enabled}
-                      onChange={e => setDSP({ limiter_threshold: parseFloat(e.target.value) })}
-                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.enabled ? 'pointer' : 'default', opacity: dsp.enabled ? 1 : 0.5 }}
-                    />
-                  </div>
-                </div>
-
-                {/* Resampler Phase Response Mode */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Resampler Phase Response</h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                        Controls pre/post-ringing filtering characteristics during high-resolution upsampling.
-                      </p>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', background: 'var(--glass)', padding: 3, borderRadius: 8, border: '1px solid var(--glass-border)', gap: 4 }}>
-                    {[
-                      { id: 'linear', label: 'Linear Phase', desc: 'Symmetric pre-ringing, traditional' },
-                      { id: 'minimum', label: 'Minimum Phase', desc: 'No pre-ringing, natural decay' },
-                      { id: 'intermediate', label: 'Intermediate', desc: 'Optimized hybrid balance' }
-                    ].map(opt => (
-                      <button
-                        key={opt.id}
-                        onClick={() => setDSP({ resampler_phase_mode: opt.id as any })}
-                        disabled={!dsp.enabled}
-                        title={opt.desc}
-                        style={{
-                          flex: 1,
-                          background: dsp.resampler_phase_mode === opt.id ? 'var(--glass-h)' : 'transparent',
-                          border: 'none',
-                          color: dsp.resampler_phase_mode === opt.id ? 'white' : 'var(--text-dim)',
-                          padding: '6px 8px',
-                          borderRadius: 6,
-                          fontSize: 10,
-                          fontWeight: 600,
-                          cursor: dsp.enabled ? 'pointer' : 'default',
-                          opacity: dsp.enabled ? 1 : 0.5,
-                          transition: 'all 0.15s'
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Crossfade Transitions */}
-                <div className="settings-ctrl-card" style={{ padding: 20 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <div>
-                      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Seamless Crossfade Transitions</h4>
-                      <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                        Fades out the current track while fading in the next track to eliminate gaps.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setDSP({ crossfade_transition_enabled: !dsp.crossfade_transition_enabled, enabled: !dsp.crossfade_transition_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        background: dsp.crossfade_transition_enabled ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
-                        color: dsp.crossfade_transition_enabled ? '#a78bfa' : 'var(--text-dim)'
-                      }}
-                    >
-                      {dsp.crossfade_transition_enabled ? 'ENABLED' : 'DISABLED'}
-                    </button>
-                  </div>
-
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Crossfade Duration</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
-                        {dsp.crossfade_transition_duration.toFixed(1)} seconds
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="0.0" max="10.0" step="0.5"
-                      value={dsp.crossfade_transition_duration}
-                      disabled={!dsp.crossfade_transition_enabled}
-                      onChange={e => setDSP({ crossfade_transition_duration: parseFloat(e.target.value) })}
-                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.crossfade_transition_enabled ? 'pointer' : 'default', opacity: dsp.crossfade_transition_enabled ? 1 : 0.5 }}
-                    />
-                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-                      {[
-                        { label: 'Off', val: 0, enable: false },
-                        { label: '2.5s', val: 2.5, enable: true },
-                        { label: '5.0s', val: 5.0, enable: true },
-                        { label: '8.0s', val: 8.0, enable: true },
-                      ].map(p => (
-                        <button
-                          key={p.label}
-                          onClick={() => setDSP({ crossfade_transition_enabled: p.enable, crossfade_transition_duration: p.val, enabled: p.enable ? true : dsp.enabled })}
-                          style={{
-                            flex: 1,
-                            fontSize: 10,
-                            padding: '4px 8px',
-                            borderRadius: 6,
-                            border: '1px solid var(--glass-border)',
-                            background: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'var(--accent)' : 'var(--glass)',
-                            color: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 'white' : 'var(--text)',
-                            cursor: 'pointer',
-                            fontWeight: dsp.crossfade_transition_enabled && dsp.crossfade_transition_duration === p.val ? 700 : 500,
-                            transition: 'all 0.2s'
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                Real room acoustics, studio cabinet impulses, and HRTF binaural spatial profiles.
               </div>
-            </motion.div>
-          )}
+            </div>
 
-
-          {activeTab === 'aideo_filter' && (
-            <motion.div
-              key="aideo-filter-tab"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.2 }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 24 }}
+            {/* IR File Path & Picker */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+              }}
             >
-              {/* Aideo Filter Panel */}
-              <div className="settings-ctrl-card" style={{ padding: 28, position: 'relative' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Sparkles size={18} style={{ color: 'var(--accent)' }} />
-                      Aideo Filter: Live Arena Sound Simulator
-                    </h3>
-                    <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>
-                      Calibrate acoustic parameters to simulate physical room reflections, wide line-array speakers, and deep subwoofer vibrations.
-                    </p>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <button
-                      onClick={() => {
-                        setDSP({
-                          aideo_filter_enabled: false,
-                          aideo_filter_room_size: 0.85,
-                          aideo_filter_bass_thump: 6.0,
-                          aideo_filter_dampening: 0.5
-                        });
-                        window.dispatchEvent(new CustomEvent('ui-toast', { 
-                          detail: { message: 'Aideo Filter settings restored to defaults.', type: 'success' } 
-                        }));
-                      }}
-                      className="settings-btn settings-btn-danger"
-                      style={{ fontSize: 11, padding: '6px 12px' }}
-                    >
-                      Reset Filter
-                    </button>
-                    <button
-                      onClick={() => setDSP({ aideo_filter_enabled: !dsp.aideo_filter_enabled, enabled: !dsp.aideo_filter_enabled ? true : dsp.enabled })}
-                      className="settings-btn"
-                      style={{
-                        fontSize: 11,
-                        padding: '6px 12px',
-                        background: dsp.aideo_filter_enabled ? 'rgba(139, 92, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                        color: dsp.aideo_filter_enabled ? 'var(--accent)' : 'var(--red-ink)',
-                        border: 'none',
-                        fontWeight: 700
-                      }}
-                    >
-                      Filter: {dsp.aideo_filter_enabled ? 'ACTIVE' : 'BYPASSED'}
-                    </button>
-                  </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Loaded IR File</div>
+                <div style={{ fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                  {dsp.convolution_ir_path ? dsp.convolution_ir_path.split(/[/\\]/).pop() : 'No Impulse File Selected'}
                 </div>
-
-                {/* Settings sliders */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 12 }}>
-                  {/* 1. Room Size / Arena Scale */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Arena Scale & Reflection Delay</span>
-                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                          Controls the physical size of the room and the delay times of early wall reflections.
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
-                        {Math.round((dsp.aideo_filter_room_size - 0.5) / 0.45 * 100)}% ({dsp.aideo_filter_room_size.toFixed(2)})
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="0.5" max="0.95" step="0.01"
-                      value={dsp.aideo_filter_room_size}
-                      disabled={!dsp.aideo_filter_enabled}
-                      onChange={e => setDSP({ aideo_filter_room_size: parseFloat(e.target.value) })}
-                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.aideo_filter_enabled ? 'pointer' : 'default', opacity: dsp.aideo_filter_enabled ? 1 : 0.5 }}
-                    />
-                  </div>
-
-                  {/* 2. Bass Thump / Subwoofer Intensity */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Subwoofer Intensity (Chest Thump)</span>
-                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                          Boosts sub-bass frequencies around 55Hz to simulate the chest-vibrating impact of stadium subwoofers.
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
-                        +{dsp.aideo_filter_bass_thump.toFixed(1)} dB
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="0.0" max="12.0" step="0.5"
-                      value={dsp.aideo_filter_bass_thump}
-                      disabled={!dsp.aideo_filter_enabled}
-                      onChange={e => setDSP({ aideo_filter_bass_thump: parseFloat(e.target.value) })}
-                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.aideo_filter_enabled ? 'pointer' : 'default', opacity: dsp.aideo_filter_enabled ? 1 : 0.5 }}
-                    />
-                  </div>
-
-                  {/* 3. Reverb Dampening / Crowd Density */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Acoustic Absorption & Crowd Dampening</span>
-                        <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                          Simulates how packed the stadium is. Higher values model more absorption (warmer sound, shorter decay).
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
-                        {Math.round((dsp.aideo_filter_dampening - 0.1) / 0.8 * 100)}% ({dsp.aideo_filter_dampening.toFixed(2)})
-                      </span>
-                    </div>
-                    <input
-                      type="range" min="0.1" max="0.9" step="0.01"
-                      value={dsp.aideo_filter_dampening}
-                      disabled={!dsp.aideo_filter_enabled}
-                      onChange={e => setDSP({ aideo_filter_dampening: parseFloat(e.target.value) })}
-                      style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.aideo_filter_enabled ? 'pointer' : 'default', opacity: dsp.aideo_filter_enabled ? 1 : 0.5 }}
-                    />
-                  </div>
-                </div>
-
-                {/* Real-time notice */}
-                <div style={{
-                  marginTop: 24,
-                  background: 'var(--glass)',
-                  padding: '12px 18px',
-                  borderRadius: 10,
-                  border: '1px solid var(--glass-border)',
-                  fontSize: 11,
-                  color: 'var(--text-dim)',
-                  lineHeight: 1.4,
+              </div>
+              <button
+                onClick={handlePickIrFile}
+                style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8
-                }}>
-                  <span style={{ color: 'var(--accent)', fontWeight: 700 }}>💡 Real-time Notice:</span>
-                  <span>Adjustments apply instantly in real time via high-precision in-memory DSP.</span>
+                  gap: 6,
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  color: 'var(--text)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <FolderOpen size={13} />
+                <span>Browse...</span>
+              </button>
+            </div>
+
+            {/* Wet / Dry Blend */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
+                <span>Wet / Dry Blend</span>
+                <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{Math.round((dsp.convolution_wet || 0.5) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={dsp.convolution_wet || 0.5}
+                onChange={e => setDSP({ convolution_wet: parseFloat(e.target.value) })}
+                style={{ width: '100%', accentColor: 'var(--accent)' }}
+              />
+            </div>
+          </div>
+
+          {/* Module 2: Binaural Crossfeed & Haas Expander */}
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              padding: '18px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 14,
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Headphones size={16} color="var(--accent)" /> Binaural Crossfeed & Soundstage
+                </span>
+                <button
+                  onClick={() => setDSP({ crossfeed_enabled: !dsp.crossfeed_enabled })}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '3px 8px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: dsp.crossfeed_enabled ? 'var(--accent)' : 'rgba(255, 255, 255, 0.1)',
+                    color: dsp.crossfeed_enabled ? '#fff' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {dsp.crossfeed_enabled ? 'CROSSFEED ON' : 'OFF'}
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                Simulates natural speaker angle listening on headphones and Haas precedence widening.
+              </div>
+            </div>
+
+            {/* Crossfeed Level & Haas Delay */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+                  <span>Linkwitz Crossfeed Level</span>
+                  <span style={{ fontFamily: 'monospace' }}>{(dsp.crossfeed_level || -6).toFixed(1)} dB</span>
                 </div>
+                <input
+                  type="range"
+                  min={-12}
+                  max={-3}
+                  step={0.5}
+                  value={dsp.crossfeed_level || -6}
+                  disabled={!dsp.crossfeed_enabled}
+                  onChange={e => setDSP({ crossfeed_level: parseFloat(e.target.value) })}
+                  style={{ width: '100%', accentColor: 'var(--accent)', opacity: dsp.crossfeed_enabled ? 1 : 0.4 }}
+                />
               </div>
 
-              {/* Vacuum Tube Saturation Card */}
-              <div className="settings-ctrl-card" style={{ padding: 28, marginTop: 24 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                  <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Power size={18} style={{ color: 'var(--accent)' }} />
-                      Vacuum Tube Analog Saturation
-                    </h3>
-                    <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>
-                      Simulate the warm harmonic characteristics of high-end triode vacuum tube pre-amplifiers.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setDSP({ saturation_enabled: !dsp.saturation_enabled, enabled: !dsp.saturation_enabled ? true : dsp.enabled })}
-                    className="settings-btn"
-                    style={{
-                      fontSize: 11,
-                      padding: '6px 12px',
-                      background: dsp.saturation_enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                      color: dsp.saturation_enabled ? 'var(--emerald-ink)' : 'var(--red-ink)',
-                      border: 'none',
-                      fontWeight: 700
-                    }}
-                  >
-                    Tube Simulation: {dsp.saturation_enabled ? 'ACTIVE' : 'BYPASSED'}
-                  </button>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+                  <span>Haas Precedence Delay</span>
+                  <span style={{ fontFamily: 'monospace' }}>{(dsp.spatial_haas_delay || 15).toFixed(1)} ms</span>
                 </div>
-
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <div>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Harmonic Drive & Warmth Intensity</span>
-                      <span style={{ display: 'block', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                        Increasing drive generates pleasant 2nd-order harmonics and soft-compresses peaks.
-                      </span>
-                    </div>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>
-                      {Math.round(dsp.saturation_drive * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    type="range" min="0.0" max="1.0" step="0.01"
-                    value={dsp.saturation_drive}
-                    disabled={!dsp.saturation_enabled}
-                    onChange={e => setDSP({ saturation_drive: parseFloat(e.target.value) })}
-                    style={{ width: '100%', accentColor: 'var(--accent)', cursor: dsp.saturation_enabled ? 'pointer' : 'default', opacity: dsp.saturation_enabled ? 1 : 0.5 }}
-                  />
-                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={25}
+                  step={0.5}
+                  value={dsp.spatial_haas_delay || 15}
+                  onChange={e => setDSP({ spatial_haas_delay: parseFloat(e.target.value), spatial_enabled: true })}
+                  style={{ width: '100%', accentColor: 'var(--accent)' }}
+                />
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+            </div>
+
+            {/* Soundstage Width Slider */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
+                <span>Master Soundstage Width</span>
+                <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{Math.round(dsp.width * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={2.5}
+                step={0.02}
+                value={dsp.width}
+                onChange={e => setDSP({ width: Math.round(snapToDetent(parseFloat(e.target.value), 0.06, 1.0) * 100) / 100 })}
+                onDoubleClick={() => setDSP({ width: 1.0 })}
+                style={{ width: '100%', accentColor: 'var(--accent)' }}
+              />
+            </div>
+          </div>
+
+          {/* Module 3: Analog Triode Tube Saturation */}
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              padding: '18px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 14,
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Sparkles size={16} color="#f59e0b" /> Analog Triode Tube Saturation
+                </span>
+                <button
+                  onClick={() => setDSP({ saturation_enabled: !dsp.saturation_enabled })}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '3px 8px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: dsp.saturation_enabled ? '#f59e0b' : 'rgba(255, 255, 255, 0.1)',
+                    color: dsp.saturation_enabled ? '#000' : 'var(--text-dim)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {dsp.saturation_enabled ? 'WARMTH ACTIVE' : 'OFF'}
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                Adds subtle 2nd and 3rd order even-harmonic tube warmth and smooth soft-clipping saturation.
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
+                <span>Harmonic Drive</span>
+                <span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>
+                  {Math.round((dsp.saturation_drive || 0.2) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={dsp.saturation_drive || 0.2}
+                disabled={!dsp.saturation_enabled}
+                onChange={e => setDSP({ saturation_drive: parseFloat(e.target.value) })}
+                style={{
+                  width: '100%',
+                  accentColor: '#f59e0b',
+                  opacity: dsp.saturation_enabled ? 1 : 0.4,
+                }}
+              />
+            </div>
+
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', background: 'rgba(0,0,0,0.2)', padding: '8px 12px', borderRadius: 6 }}>
+              Modeled after class-A 12AX7 vacuum tube circuitry with polynomial transfer function.
+            </div>
+          </div>
+
+          {/* Module 4: Safety Gain Staging & Dynamic Limiter */}
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.02)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: 12,
+              padding: '18px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: 14,
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Shield size={16} color="#34d399" /> Safety Gain Staging & Limiter
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
+                Inter-sample peak guard, 18Hz Butterworth subsonic DC-block, and digital headroom protection.
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {/* Preamp Trim */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+                  <span>Preamp Trim</span>
+                  <span style={{ fontFamily: 'monospace' }}>{(dsp.preamp_gain || 0) > 0 ? `+${dsp.preamp_gain}` : dsp.preamp_gain || 0} dB</span>
+                </div>
+                <input
+                  type="range"
+                  min={-12}
+                  max={6}
+                  step={0.5}
+                  value={dsp.preamp_gain || 0}
+                  onChange={e => setDSP({ preamp_gain: snapToDetent(parseFloat(e.target.value), 0.6, 0) })}
+                  onDoubleClick={() => setDSP({ preamp_gain: 0 })}
+                  style={{ width: '100%', accentColor: '#34d399' }}
+                />
+              </div>
+
+              {/* Limiter Threshold */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+                  <span>Limiter Ceiling</span>
+                  <span style={{ fontFamily: 'monospace' }}>{(dsp.limiter_threshold || 0).toFixed(1)} dB</span>
+                </div>
+                <input
+                  type="range"
+                  min={-6}
+                  max={0}
+                  step={0.5}
+                  value={dsp.limiter_threshold || 0}
+                  onChange={e => setDSP({ limiter_threshold: parseFloat(e.target.value) })}
+                  style={{ width: '100%', accentColor: '#34d399' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setDSP({ auto_headroom: !dsp.auto_headroom })}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  borderRadius: 6,
+                  border: dsp.auto_headroom
+                    ? '1px solid rgba(52, 211, 153, 0.4)'
+                    : '1px solid rgba(255, 255, 255, 0.08)',
+                  background: dsp.auto_headroom ? 'rgba(52, 211, 153, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                  color: dsp.auto_headroom ? '#34d399' : 'var(--text-dim)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Auto-Headroom {dsp.auto_headroom ? 'ON' : 'OFF'}
+              </button>
+
+              <button
+                onClick={() => setDSP({ subsonic_enabled: !dsp.subsonic_enabled })}
+                style={{
+                  flex: 1,
+                  padding: '8px',
+                  borderRadius: 6,
+                  border: dsp.subsonic_enabled
+                    ? '1px solid rgba(52, 211, 153, 0.4)'
+                    : '1px solid rgba(255, 255, 255, 0.08)',
+                  background: dsp.subsonic_enabled ? 'rgba(52, 211, 153, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                  color: dsp.subsonic_enabled ? '#34d399' : 'var(--text-dim)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                18Hz Subsonic {dsp.subsonic_enabled ? 'ON' : 'OFF'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Preset Dialog Modal */}
+      {showSaveModal && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSaveModal(false)}
+          style={{
+            backdropFilter: 'blur(16px)',
+            background: 'rgba(0,0,0,0.7)',
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <motion.div
+            className="modal-box"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: 400,
+              padding: 24,
+              background: '#161722',
+              borderRadius: 12,
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+            }}
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Save DSP Preset</h3>
+              <button onClick={() => setShowSaveModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              placeholder="Preset Name (e.g. My Studio HD600 Curve)..."
+              value={newPresetName}
+              onChange={e => setNewPresetName(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: 'rgba(0, 0, 0, 0.4)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                color: 'var(--text)',
+                fontSize: 13,
+                marginBottom: 16,
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowSaveModal(false)}
+                style={{ padding: '8px 16px', fontSize: 12 }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn"
+                onClick={handleSavePreset}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                }}
+              >
+                Save Preset
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

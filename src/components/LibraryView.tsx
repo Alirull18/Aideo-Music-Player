@@ -13,6 +13,8 @@ import { matchesSearchQuery } from '../utils/searchParser';
 import { useRef } from 'react';
 import { AlbumsView } from './AlbumsView';
 import { SimpleLRU } from '../utils/lruCache';
+import { fmt } from '../utils';
+import { shuffleArray } from '../utils/shuffle';
 
 const persistQueueState = (newQueue: any[], otherState?: Record<string, any>) => {
   useStore.setState({ queue: newQueue, ...otherState });
@@ -59,11 +61,6 @@ const cloudTrackToVirtualTrack = (ct: CloudTrack) => {
     path_hash: ct.path_hash
   };
 };
-
-function fmt(s: number | null) {
-  if (!s || isNaN(s) || s < 0) return '0:00';
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-}
 
 function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
@@ -886,6 +883,7 @@ export function LibraryView() {
   const [searchQuery, setSearchQuery] = useState(librarySearchQuery || '');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(librarySearchQuery || '');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
 
   // Sync with store-level librarySearchQuery navigation
   useEffect(() => {
@@ -1115,11 +1113,7 @@ export function LibraryView() {
     let firstTrack: any = null;
     
     if (shuffle) {
-      const shuffled = [...virtualTracks];
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
+      const shuffled = shuffleArray(virtualTracks);
       firstTrack = shuffled[0];
       tracksToQueue = shuffled.slice(1);
       persistQueueState(tracksToQueue, { shuffle: true });
@@ -1275,7 +1269,7 @@ export function LibraryView() {
     startIndex: localStartIndex,
   } = useVirtualList(filteredTracks, {
     itemHeight: 52,
-    scrollContainer: scrollRef.current,
+    scrollContainer: scrollEl,
   });
 
   const {
@@ -1285,7 +1279,7 @@ export function LibraryView() {
     startIndex: subsonicStartIndex,
   } = useVirtualList(subsonicTracks, {
     itemHeight: 52,
-    scrollContainer: scrollRef.current,
+    scrollContainer: scrollEl,
   });
 
   const {
@@ -1295,7 +1289,7 @@ export function LibraryView() {
     startIndex: jellyfinStartIndex,
   } = useVirtualList(jellyfinTracks, {
     itemHeight: 52,
-    scrollContainer: scrollRef.current,
+    scrollContainer: scrollEl,
   });
 
   const applyMatch = async () => {
@@ -1335,7 +1329,10 @@ export function LibraryView() {
 
   return (
     <div 
-      ref={scrollRef}
+      ref={(el) => {
+        scrollRef.current = el;
+        if (scrollEl !== el) setScrollEl(el);
+      }}
       className="library-wrap" 
       onClick={() => setMenuOpenFor(null)}
       onScroll={(e) => {
@@ -1559,11 +1556,7 @@ export function LibraryView() {
               onClick={() => {
                 if (isLovedStreamsView) {
                   if (sourceTracks.length === 0) return;
-                  const shuffled = [...sourceTracks];
-                  for (let i = shuffled.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-                  }
+                  const shuffled = shuffleArray(sourceTracks);
                   const firstTrack = shuffled[0];
                   const restTracks = shuffled.slice(1);
                   persistQueueState(restTracks, { shuffle: true });

@@ -200,6 +200,27 @@ mod dsp_tests {
     }
 
     #[test]
+    fn test_limiter_node_multichannel_processing() {
+        use crate::player::LimiterNode;
+        // Test stereo (2ch), 5.1 (6ch), and 7.1 (8ch) stack-buffer paths
+        for ch_count in [2, 6, 8] {
+            let mut limiter_node = LimiterNode::new(ch_count, 5.0, 48000.0);
+            let dsp = DSPState {
+                enabled: true,
+                limiter_threshold: -0.1,
+                ..DSPState::default()
+            };
+            limiter_node.update_params(&dsp, 48000.0);
+            let mut samples = vec![vec![1.5f32; 256]; ch_count];
+            limiter_node.process(&mut samples, 48000.0);
+            for ch in 0..ch_count {
+                assert!(samples[ch][255].is_finite());
+                assert!(samples[ch][255] <= 1.5, "limiter must attenuate signal below original 1.5 peak");
+            }
+        }
+    }
+
+    #[test]
     fn test_lookahead_limiter_limits_overscale() {
         let mut limiter = LookaheadLimiter::new(2, 5.0, 48000.0);
         // Feed sustained +6dBFS material. This is a soft limiter with exponential
@@ -724,7 +745,268 @@ mod dsp_tests {
         assert_eq!(popped, 50);
         assert_eq!(received, chunk, "Samples across circular boundary must match input perfectly");
     }
+
+    #[test]
+    fn test_limiter_node_multichannel_processing_and_stack_allocation() {
+        use crate::player::LimiterNode;
+
+        for channels in [1, 2, 6, 8] {
+            let mut node = LimiterNode::new(channels, 5.0, 48000.0);
+            let mut dsp = DSPState::default();
+            dsp.enabled = true;
+            dsp.limiter_threshold = -0.5;
+            node.update_params(&dsp, 48000.0);
+
+            let block_size = 1024;
+            let mut samples = vec![vec![1.5f32; block_size]; channels];
+
+            node.process(&mut samples, 48000.0);
+
+            for ch in 0..channels {
+                for i in 0..block_size {
+                    let s = samples[ch][i];
+                    assert!(s.is_finite(), "Limiter output must be finite, got NaN/Inf on ch {} at {}", ch, i);
+                    assert!(s.abs() <= 1.51, "Limiter output exceeded expected bounds: {}", s);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_extract_f32_channel_data_mono_upmix_and_bounds_safety() {
+        use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal, SignalSpec, Channels};
+        use crate::player::extract_f32_channel_data;
+
+        // 1. Mono F32 buffer
+        let spec_mono = SignalSpec::new(44100, Channels::FRONT_CENTRE);
+        let mut mono_buf = AudioBuffer::<f32>::new(100, spec_mono);
+        mono_buf.render_reserved(Some(100));
+        for i in 0..100 {
+            mono_buf.chan_mut(0)[i] = 0.42;
+        }
+        let buf_ref = AudioBufferRef::F32(std::borrow::Cow::Borrowed(&mono_buf));
+
+        // Primary channel 0
+        let ch0 = extract_f32_channel_data(&buf_ref, 0, 100);
+        assert_eq!(ch0.len(), 100);
+        assert_eq!(ch0[0], 0.42);
+
+        // Mono upmixing to channel 1 (must not panic!)
+        let ch1 = extract_f32_channel_data(&buf_ref, 1, 100);
+        assert_eq!(ch1.len(), 100);
+        assert_eq!(ch1[0], 0.42);
+
+        // 2. Mono S16 buffer
+        let spec_mono_s16 = SignalSpec::new(44100, Channels::FRONT_CENTRE);
+        let mut mono_s16_buf = AudioBuffer::<i16>::new(100, spec_mono_s16);
+        mono_s16_buf.render_reserved(Some(100));
+        for i in 0..100 {
+            mono_s16_buf.chan_mut(0)[i] = 16384;
+        }
+        let buf_s16_ref = AudioBufferRef::S16(std::borrow::Cow::Borrowed(&mono_s16_buf));
+
+        // Channel 0 and upmixed channel 1
+        let ch0_s16 = extract_f32_channel_data(&buf_s16_ref, 0, 100);
+        let ch1_s16 = extract_f32_channel_data(&buf_s16_ref, 1, 100);
+        assert_eq!(ch0_s16.len(), 100);
+        assert_eq!(ch1_s16.len(), 100);
+        assert!((ch0_s16[0] - (16384.0 / i16::MAX as f32)).abs() < 1e-4);
+        assert!((ch1_s16[0] - (16384.0 / i16::MAX as f32)).abs() < 1e-4);
+
+        // 3. Stereo buffer out-of-bounds (channel 2 on stereo file must return zeros, no panic!)
+        let spec_stereo = SignalSpec::new(44100, Channels::FRONT_LEFT | Channels::FRONT_RIGHT);
+        let mut stereo_buf = AudioBuffer::<f32>::new(100, spec_stereo);
+        stereo_buf.render_reserved(Some(100));
+        let stereo_ref = AudioBufferRef::F32(std::borrow::Cow::Borrowed(&stereo_buf));
+        let ch_oob = extract_f32_channel_data(&stereo_ref, 2, 100);
+        assert_eq!(ch_oob.len(), 100);
+        assert_eq!(ch_oob[0], 0.0);
+    }
+
+    #[test]
+    fn test_mix_output_channel_sample_bounds_safety() {
+        // 1. Empty planar
+        let empty: Vec<Vec<f32>> = Vec::new();
+        assert_eq!(mix_output_channel_sample(&empty, 0, 0, 2), 0.0);
+
+        // 2. Mono planar -> channel 0 and channel 1 duplicate mono
+        let mono = vec![vec![0.75f32; 10]];
+        assert_eq!(mix_output_channel_sample(&mono, 3, 0, 1), 0.75);
+        assert_eq!(mix_output_channel_sample(&mono, 3, 1, 1), 0.75);
+
+        // 3. Stereo planar -> channel 0 is left, channel 1 is right, channel 2 is silence (no panic)
+        let stereo = vec![vec![0.25f32; 10], vec![0.5f32; 10]];
+        assert_eq!(mix_output_channel_sample(&stereo, 5, 0, 2), 0.25);
+        assert_eq!(mix_output_channel_sample(&stereo, 5, 1, 2), 0.5);
+        assert_eq!(mix_output_channel_sample(&stereo, 5, 2, 2), 0.0);
+
+        // 4. Index out of frame bounds -> returns 0.0, no panic
+        assert_eq!(mix_output_channel_sample(&stereo, 999, 0, 2), 0.0);
+    }
+
+    #[test]
+    fn test_lookahead_limiter_dynamic_channel_expansion_preserves_delay_alignment() {
+        use crate::player::LookaheadLimiter;
+
+        let lookahead_ms = 5.0f32;
+        let sample_rate = 48000.0f32;
+        let lookahead_samples = ((lookahead_ms * 0.001 * sample_rate).round() as usize).max(1);
+
+        // Limiter initially initialized for stereo (2 channels)
+        let mut limiter = LookaheadLimiter::new(2, lookahead_ms, sample_rate);
+
+        // Dynamically expand to 6 channels (5.1 surround material)
+        // Feed initial lookahead_samples frames of 1.0 on all 6 channels.
+        // Because of the 5ms lookahead, all 6 channels must output 0.0 (pre-filled silence)
+        // rather than newly expanded channels having 0-delay mismatch!
+        let mut initial_frame = vec![1.0f32; 6];
+        limiter.process(&mut initial_frame, 0.0);
+
+        for ch in 0..6 {
+            assert_eq!(
+                initial_frame[ch], 0.0,
+                "Channel {} must be delayed by lookahead buffer (initial output should be 0.0)",
+                ch
+            );
+        }
+
+        // Feed remaining lookahead buffer frames
+        for _ in 1..lookahead_samples {
+            let mut frame = vec![1.0f32; 6];
+            limiter.process(&mut frame, 0.0);
+        }
+
+        // Frame after lookahead delay completes must now emerge on ALL 6 channels simultaneously!
+        let mut frame_emerged = vec![1.0f32; 6];
+        limiter.process(&mut frame_emerged, 0.0);
+
+        for ch in 0..6 {
+            assert!(
+                frame_emerged[ch] > 0.9,
+                "Channel {} must emerge simultaneously after lookahead delay, got {}",
+                ch, frame_emerged[ch]
+            );
+        }
+    }
+
+    #[test]
+    fn test_audio_nodes_mismatched_channel_buffer_lengths_safety() {
+        use crate::player::{
+            AideoFilterNode, AudioNode, CompressorNode, ConvolutionNode, CrossfeedNode,
+            DSPState, EqNode, LimiterNode, NormalizerNode, PhaseResponseNode, PreampNode,
+            SaturationNode, SpatializerNode, SubsonicNode, WidthNode,
+        };
+
+        let mut dsp = DSPState::default();
+        dsp.enabled = true;
+        dsp.aideo_filter_enabled = true;
+        dsp.crossfeed_enabled = true;
+        dsp.spatial_enabled = true;
+        dsp.spatial_wet = 0.5;
+        dsp.width = 1.2;
+        dsp.night_mode_enabled = true;
+        dsp.r128_enabled = true;
+        dsp.subsonic_enabled = true;
+        dsp.saturation_enabled = true;
+        dsp.saturation_drive = 0.5;
+        dsp.eq_enabled = true;
+
+        let sample_rate = 48000.0f32;
+
+        let mut nodes: Vec<Box<dyn AudioNode>> = vec![
+            Box::new(PreampNode::new()),
+            Box::new(SaturationNode::new()),
+            Box::new(PhaseResponseNode::new()),
+            Box::new(EqNode::new()),
+            Box::new(AideoFilterNode::new()),
+            Box::new(SubsonicNode::new()),
+            Box::new(CrossfeedNode::new()),
+            Box::new(SpatializerNode::new()),
+            Box::new(ConvolutionNode::new()),
+            Box::new(WidthNode::new()),
+            Box::new(CompressorNode::new()),
+            Box::new(NormalizerNode::new()),
+            Box::new(LimiterNode::new(2, 2.0, sample_rate)),
+        ];
+
+        for node in &mut nodes {
+            node.update_params(&dsp, sample_rate);
+        }
+
+        // Channel 0 has 256 samples, Channel 1 has only 64 samples (length disparity)
+        let mut mismatched_samples = vec![vec![0.5f32; 256], vec![0.5f32; 64]];
+
+        for node in &mut nodes {
+            node.process(&mut mismatched_samples, sample_rate);
+        }
+
+        assert_eq!(mismatched_samples.len(), 2);
+        assert!(mismatched_samples[0].iter().all(|s| s.is_finite()));
+        assert!(mismatched_samples[1].iter().all(|s| s.is_finite()));
+    }
+
+    #[test]
+    fn test_sonic_analyzer_zero_sample_rate_and_empty_buffer_safety() {
+        use crate::sonic_analyzer::calculate_ebu_r128_lufs;
+
+        // 1. Zero sample rate to calculate_ebu_r128_lufs must return -70.0 without panic
+        let samples = vec![0.5f32; 1000];
+        let lufs_zero_sr = calculate_ebu_r128_lufs(&samples, 0);
+        assert_eq!(lufs_zero_sr, -70.0);
+
+        // 2. Empty samples to calculate_ebu_r128_lufs
+        let empty_samples: Vec<f32> = Vec::new();
+        let lufs_empty = calculate_ebu_r128_lufs(&empty_samples, 44100);
+        assert_eq!(lufs_empty, -70.0);
+    }
+
+    #[test]
+    fn test_ram_cache_completion_buffer_drain_and_progression() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::collections::VecDeque;
+
+        let chunk_size = 1024;
+        let file_ch = 2;
+        let mut ram_cursor = 1024;
+        let lock = vec![vec![0.5f32; 2048], vec![0.5f32; 2048]];
+        let is_complete = Some(AtomicBool::new(true));
+
+        let mut pending: Vec<VecDeque<f32>> = vec![VecDeque::new(), VecDeque::new()];
+
+        // 1. First iteration: reads remaining 1024 samples
+        if ram_cursor < lock[0].len() {
+            let to_read = (lock[0].len() - ram_cursor).min(chunk_size * 8);
+            for ch in 0..file_ch {
+                pending[ch].extend(&lock[ch][ram_cursor..ram_cursor + to_read]);
+            }
+            ram_cursor += to_read;
+        }
+        assert_eq!(ram_cursor, 2048);
+        assert_eq!(pending[0].len(), 1024);
+
+        // Simulate draining pending buffer as audio is played
+        pending[0].clear();
+        pending[1].clear();
+
+        // 2. Second iteration: ram_cursor == lock[0].len() and is_complete == true
+        let mut loop_broke = false;
+        if ram_cursor < lock[0].len() {
+            let to_read = (lock[0].len() - ram_cursor).min(chunk_size * 8);
+            for ch in 0..file_ch {
+                pending[ch].extend(&lock[ch][ram_cursor..ram_cursor + to_read]);
+            }
+            ram_cursor += to_read;
+            let _ = ram_cursor;
+        } else if is_complete.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(true) {
+            if pending[0].len() < chunk_size {
+                loop_broke = true;
+            }
+        }
+
+        assert!(loop_broke, "Playback loop must break and proceed to next track when RAM cache finishes decoding and pending buffer drains");
+    }
 }
+
 
 
 

@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { Radio, Users, Activity, RefreshCw } from 'lucide-react';
 
 export function LastfmView() {
   const { 
     lastfmSessionKey, lastfmUser, lastfmRecent, lastfmTopArtists, fetchLastfmDashboard
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    lastfmSessionKey: s.lastfmSessionKey,
+    lastfmUser: s.lastfmUser,
+    lastfmRecent: s.lastfmRecent,
+    lastfmTopArtists: s.lastfmTopArtists,
+    fetchLastfmDashboard: s.fetchLastfmDashboard,
+  })));
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {

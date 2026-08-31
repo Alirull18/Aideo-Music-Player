@@ -143,18 +143,7 @@ export function buildAlbumKey(t: Partial<Track> | any): string {
     return `${albumArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`;
   }
 
-  // 3. Check directory structure for local file grouping (if in distinct folders)
-  const path = t?.path || '';
-  if (path && !path.startsWith('http://') && !path.startsWith('https://')) {
-    const lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-    if (lastSlash > 0) {
-      let folder = path.substring(0, lastSlash).toLowerCase();
-      // If folder is a CD/Disc subfolder like "CD 1" or "Disc 2", climb up to the main album folder
-      folder = folder.replace(/[\\/](?:cd|disc|disk)\s*\d+$/i, '');
-      return `folder:${folder}:::${albumTitle.toLowerCase()}`;
-    }
-  }
-
-  // 4. Default: track artist + album title
-  return `${trackArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`;
+  // 3. Extract primary artist (handling featured collaborators so tracks on the same album stay grouped)
+  const primaryArtist = trackArtist.split(/\s+(?:feat\.|ft\.|featuring|with)\s+/i)[0].trim();
+  return `${primaryArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`;
 }

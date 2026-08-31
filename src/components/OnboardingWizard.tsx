@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Sparkles, Headphones, HardDrive, Check, ArrowRight, ArrowLeft, 
@@ -16,7 +17,7 @@ export function OnboardingWizard() {
     appMode, setAppMode,
     setOnboardingCompleted, setShowOnboarding,
     dsp, setDSP,
-    playback, toggleExclusive,
+    playbackExclusive, playbackBitPerfect, toggleExclusive,
     toggleBitPerfect,
     discordEnabled, toggleDiscord,
     scrobbleEnabled, toggleScrobble,
@@ -24,15 +25,38 @@ export function OnboardingWizard() {
     scanDirs, addScanDir, removeScanDir, scanLibrary,
     accentColor,
     setView
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    appMode: s.appMode,
+    setAppMode: s.setAppMode,
+    setOnboardingCompleted: s.setOnboardingCompleted,
+    setShowOnboarding: s.setShowOnboarding,
+    dsp: s.dsp,
+    setDSP: s.setDSP,
+    playbackExclusive: s.playback.exclusive,
+    playbackBitPerfect: s.playback.bit_perfect,
+    toggleExclusive: s.toggleExclusive,
+    toggleBitPerfect: s.toggleBitPerfect,
+    discordEnabled: s.discordEnabled,
+    toggleDiscord: s.toggleDiscord,
+    scrobbleEnabled: s.scrobbleEnabled,
+    toggleScrobble: s.toggleScrobble,
+    listenbrainzEnabled: s.listenbrainzEnabled,
+    toggleListenbrainzScrobble: s.toggleListenbrainzScrobble,
+    scanDirs: s.scanDirs,
+    addScanDir: s.addScanDir,
+    removeScanDir: s.removeScanDir,
+    scanLibrary: s.scanLibrary,
+    accentColor: s.accentColor,
+    setView: s.setView,
+  })));
 
   const [step, setStep] = useState(1);
   const [selectedMode, setSelectedMode] = useState<'local' | 'hybrid'>(appMode);
   
   // Custom checklist state reflecting the active preferences chosen in onboarding
   const [options, setOptions] = useState({
-    wasapiExclusive: playback.exclusive,
-    bitPerfect: playback.bit_perfect,
+    wasapiExclusive: playbackExclusive,
+    bitPerfect: playbackBitPerfect,
     eqAutoEq: dsp.eq_enabled,
     crossfeed: dsp.crossfeed_enabled,
     subsonicFilter: dsp.subsonic_enabled,
@@ -163,10 +187,10 @@ export function OnboardingWizard() {
     setAppMode(selectedMode);
 
     // 2. Commit all configured checklist options to the store/state
-    if (playback.exclusive !== options.wasapiExclusive) {
+    if (playbackExclusive !== options.wasapiExclusive) {
       await toggleExclusive();
     }
-    if (playback.bit_perfect !== options.bitPerfect) {
+    if (playbackBitPerfect !== options.bitPerfect) {
       await toggleBitPerfect();
     }
     if (dsp.eq_enabled !== options.eqAutoEq) {

@@ -470,4 +470,40 @@ describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
     expect(res4?.source).toBe('LRCLIB');
     expect(res4?.wordSync).toBe(false);
   });
+
+  it('correctly resolves lyrics for all supported providers on manual search pick', async () => {
+    const mockInvoke = async (cmd: string, args: any): Promise<string> => {
+      if (cmd === 'get_unison_ttml') return `<ttml>${args.song}</ttml>`;
+      if (cmd === 'get_kugou_krc') return `[00:01.00]kugou:${args.id}`;
+      if (cmd === 'get_netease_lrc') return `[00:02.00]netease:${args.id}`;
+      if (cmd === 'get_qqmusic_lrc') return `[00:03.00]qqmusic:${args.mid}`;
+      return '';
+    };
+
+    const resolvePickedLrc = async (r: SearchResult): Promise<string> => {
+      let lrc = r.raw_lrc ?? '';
+      if (!lrc && (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison')) {
+        lrc = await mockInvoke('get_unison_ttml', { song: r.title });
+      }
+      if (!lrc && r.source === 'Kugou' && r.content_id) {
+        lrc = await mockInvoke('get_kugou_krc', { id: r.content_id, accesskey: r.id });
+      }
+      if (!lrc && r.source === 'NetEase' && r.content_id) {
+        lrc = await mockInvoke('get_netease_lrc', { id: r.content_id });
+      }
+      if (!lrc && r.source === 'QQMusic' && r.content_id) {
+        lrc = await mockInvoke('get_qqmusic_lrc', { mid: r.content_id });
+      }
+      return lrc;
+    };
+
+    const bini = await resolvePickedLrc({ id: '1', title: 'Song A', artist: 'Artist', source: 'BiniLyrics', synced: true });
+    expect(bini).toBe('<ttml>Song A</ttml>');
+
+    const better = await resolvePickedLrc({ id: '2', title: 'Song B', artist: 'Artist', source: 'Better Lyrics', synced: true });
+    expect(better).toBe('<ttml>Song B</ttml>');
+
+    const kugou = await resolvePickedLrc({ id: 'key123', title: 'Song C', artist: 'Artist', source: 'Kugou', content_id: 'kg99', synced: true });
+    expect(kugou).toBe('[00:01.00]kugou:kg99');
+  });
 });

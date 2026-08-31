@@ -5688,31 +5688,30 @@ input[type=range] {
 .settings-card-wrapper {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 20px;
-  padding: 32px;
+  border-radius: 16px;
+  padding: 24px;
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 36px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-  transition: border-color 0.3s, box-shadow 0.3s;
+  grid-template-columns: 260px 1fr;
+  gap: 28px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .settings-card-wrapper:hover {
   border-color: rgba(var(--accent-rgb), 0.15);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
 }
 
 .settings-row-meta {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .settings-row-title {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text);
-  letter-spacing: -0.25px;
+  letter-spacing: -0.2px;
 }
 
 .settings-row-desc {
@@ -5727,10 +5726,10 @@ input[type=range] {
 
 /* Inside Card Control Blocks */
 .settings-ctrl-card {
-  background: rgba(0, 0, 0, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.03);
-  border-radius: 16px;
-  padding: 24px;
+  background: rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 16px 20px;
 }
 
 .settings-ctrl-header-row {
@@ -5741,7 +5740,7 @@ input[type=range] {
 }
 
 .settings-ctrl-title {
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
 }

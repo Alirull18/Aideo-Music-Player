@@ -32,12 +32,7 @@ pub async fn ensure_local_stream_server(app_state: &crate::AppState) -> Option<u
     if let Some(port) = *port_lock {
         return Some(port);
     }
-    let app_state_inner = crate::AppState {
-        player: app_state.player.clone(),
-        db: app_state.db.clone(),
-        media_controls: app_state.media_controls.clone(),
-        cached_devices: app_state.cached_devices.clone(),
-    };
+    let app_state_inner = app_state.clone();
     if let Some((port, shutdown_tx)) = start_local_server(app_state_inner).await {
         *port_lock = Some(port);
         let mut shutdown_lock = LOCAL_SERVER_SHUTDOWN.lock().await;
@@ -127,12 +122,7 @@ async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver
             accept_res = listener.accept() => {
                 if let Ok((mut socket, addr)) = accept_res {
                     println!("[chromecast-http] Connection accepted from {}", addr);
-                    let app_state_clone = crate::AppState {
-                        player: app_state.player.clone(),
-                        db: app_state.db.clone(),
-                        media_controls: app_state.media_controls.clone(),
-                        cached_devices: app_state.cached_devices.clone(),
-                    };
+                    let app_state_clone = app_state.clone();
                     tokio::spawn(async move {
                         let mut buf = [0u8; 4096];
                         let mut bytes_read = 0;
@@ -373,12 +363,7 @@ pub async fn chromecast_connect(ip: String, port: u16, state: tauri::State<'_, c
     // Start local server if not already running
     let mut port_lock = LOCAL_SERVER_PORT.lock().await;
     if port_lock.is_none() {
-        let app_state_inner = crate::AppState {
-            player: state.player.clone(),
-            db: state.db.clone(),
-            media_controls: state.media_controls.clone(),
-            cached_devices: state.cached_devices.clone(),
-        };
+        let app_state_inner = state.inner().clone();
         if let Some((port, shutdown_tx)) = start_local_server(app_state_inner).await {
             *port_lock = Some(port);
             let mut shutdown_lock = LOCAL_SERVER_SHUTDOWN.lock().await;

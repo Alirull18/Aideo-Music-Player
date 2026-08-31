@@ -60,7 +60,8 @@ const formatDuration = (secs: number) => {
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function ListeningInsightsView() {
-  const { setView, playTrack } = useStore();
+  const setView = useStore((s) => s.setView);
+  const playTrack = useStore((s) => s.playTrack);
   const [range, setRange] = useState<'today' | 'last_7_days' | 'last_30_days' | 'all_time'>('last_30_days');
   const [insights, setInsights] = useState<ListeningInsightsPayload | null>(null);
   const [loading, setLoading] = useState(true);

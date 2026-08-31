@@ -16,6 +16,15 @@ export const createQobuzSlice: StateCreator<PlayerState, [], [], any> = (set, ge
     }
   },
 
+  openQobuzLoginWindow: async () => {
+    try {
+      await invoke('qobuz_open_login_window');
+    } catch (e) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to open Qobuz login: ${e}`, type: 'error' } }));
+      throw e;
+    }
+  },
+
   searchQobuz: async (query: string) => {
     set({ qobuzSearching: true });
     try {

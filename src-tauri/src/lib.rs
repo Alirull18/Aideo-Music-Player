@@ -47,6 +47,77 @@ pub mod watcher;
 pub mod tag_editor;
 pub mod upnp;
 
+// ── Crash & Panic Logging ───────────────────────────────────────────────────
+pub fn get_crash_log_path() -> std::path::PathBuf {
+    if let Some(mut data_dir) = dirs::data_dir() {
+        data_dir.push("com.alirul.music-player");
+        let _ = std::fs::create_dir_all(&data_dir);
+        data_dir.push("aideo_crash.log");
+        data_dir
+    } else {
+        std::path::PathBuf::from("aideo_crash.log")
+    }
+}
+
+pub fn write_crash_log_entry(entry: &str) {
+    use std::io::Write;
+    let paths = [
+        get_crash_log_path(),
+        std::path::PathBuf::from("aideo_crash.log"),
+    ];
+
+    for path in paths {
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(file, "{}", entry);
+            let _ = file.flush();
+        }
+    }
+}
+
+pub fn init_crash_handler() {
+    std::panic::set_hook(Box::new(|info| {
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic payload".to_string()
+        };
+
+        let location = if let Some(loc) = info.location() {
+            format!("{}:{}:{}", loc.file(), loc.line(), loc.column())
+        } else {
+            "unknown location".to_string()
+        };
+
+        let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let backtrace = std::backtrace::Backtrace::force_capture();
+
+        let time_str = match std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH) {
+            Ok(dur) => format!("{}.{:03}", dur.as_secs(), dur.subsec_millis()),
+            Err(_) => "unknown".to_string(),
+        };
+
+        let log_msg = format!(
+            "==================== PANIC CRASH EVENT ====================\n\
+            Time: {}\n\
+            Thread: {}\n\
+            Location: {}\n\
+            Message: {}\n\
+            Backtrace:\n{}\n\
+            ===========================================================",
+            time_str,
+            thread_name,
+            location,
+            payload,
+            backtrace
+        );
+
+        eprintln!("{}", log_msg);
+        write_crash_log_entry(&log_msg);
+    }));
+}
+
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
 pub fn safe_lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -71,12 +142,26 @@ pub(crate) fn get_http_client() -> &'static reqwest::Client {
     })
 }
 
+#[derive(Clone)]
 pub struct AppState {
     pub player: Arc<Mutex<player::Player>>,
     pub db: Arc<Mutex<rusqlite::Connection>>,
+    pub db_pool: Option<db::DbPool>,
     pub media_controls: Arc<Mutex<Option<MediaControls>>>,
     pub cached_devices: Arc<Mutex<Vec<String>>>,
 }
+
+
+impl AppState {
+    pub fn get_reader_conn(&self) -> Result<r2d2::PooledConnection<db::SqliteConnectionManager>, String> {
+        if let Some(pool) = &self.db_pool {
+            pool.get().map_err(|e| format!("Failed to acquire connection from pool: {}", e))
+        } else {
+            Err("Database pool not available".to_string())
+        }
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -1358,18 +1443,22 @@ fn add_track(
 #[tauri::command]
 fn delete_cached_track(stream_url: String, state: State<'_, AppState>) -> Result<(), String> {
     let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
-    let Some(data_dir) = dirs::data_dir() else {
-        return Err("Failed to resolve data directory".to_string());
-    };
-    let cache_dir = data_dir.join("Aideo").join("CloudCache");
-    let cache_path = cache_dir.join(format!("{}.cache", hash));
-    let temp_path = cache_dir.join(format!("{}.tmp", hash));
-    
-    if cache_path.exists() {
-        std::fs::remove_file(cache_path).map_err(|e| format!("Failed to delete cache file: {}", e))?;
+    if let Some(data_dir) = dirs::data_dir() {
+        let cache_dir = data_dir.join("Aideo").join("CloudCache");
+        let cache_path = cache_dir.join(format!("{}.cache", hash));
+        let temp_path = cache_dir.join(format!("{}.tmp", hash));
+        
+        if cache_path.exists() {
+            let _ = std::fs::remove_file(cache_path);
+        }
+        if temp_path.exists() {
+            let _ = std::fs::remove_file(temp_path);
+        }
     }
-    if temp_path.exists() {
-        let _ = std::fs::remove_file(temp_path);
+
+    let local_path = std::path::Path::new(&stream_url);
+    if local_path.exists() && local_path.is_file() {
+        let _ = std::fs::remove_file(local_path);
     }
 
     // Only delete from DB if loved is 0 and disliked is 0
@@ -1429,9 +1518,45 @@ fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<V
 
 #[tauri::command]
 fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    let conn = safe_lock(&state.db);
-    db::get_all_tracks(&conn).map_err(|e| e.to_string())
+    if let Ok(conn) = state.get_reader_conn() {
+        db::get_all_tracks(&conn).map_err(|e| e.to_string())
+    } else {
+        let conn = safe_lock(&state.db);
+        db::get_all_tracks(&conn).map_err(|e| e.to_string())
+    }
 }
+
+#[tauri::command]
+fn get_library_page(
+    state: State<'_, AppState>,
+    offset: u32,
+    limit: u32,
+    search: Option<String>,
+    sort_by: Option<String>,
+) -> Result<db::PaginatedTracks, String> {
+    if let Ok(conn) = state.get_reader_conn() {
+        db::get_tracks_paginated(&conn, offset, limit, search.as_deref(), sort_by.as_deref())
+            .map_err(|e| e.to_string())
+    } else {
+        let conn = safe_lock(&state.db);
+        db::get_tracks_paginated(&conn, offset, limit, search.as_deref(), sort_by.as_deref())
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn get_library_count(
+    state: State<'_, AppState>,
+    search: Option<String>,
+) -> Result<usize, String> {
+    if let Ok(conn) = state.get_reader_conn() {
+        db::get_tracks_count(&conn, search.as_deref()).map_err(|e| e.to_string())
+    } else {
+        let conn = safe_lock(&state.db);
+        db::get_tracks_count(&conn, search.as_deref()).map_err(|e| e.to_string())
+    }
+}
+
 
 pub fn verify_authorized_library_track(conn: &rusqlite::Connection, path: &str) -> Result<std::path::PathBuf, String> {
     let audio_path = std::path::Path::new(path);
@@ -1908,51 +2033,78 @@ fn get_network_telemetry() -> player::NetworkTelemetry {
 
 // ── Playback commands ─────────────────────────────────────────────────────────
 #[tauri::command]
-fn update_media_metadata(
+async fn update_media_metadata(
     title: String,
     artist: String,
     cover_url: Option<String>,
     duration: f64,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
-        controls
-            .set_metadata(MediaMetadata {
-                title: Some(&title),
-                artist: Some(&artist),
-                album: None,
-                duration: Some(std::time::Duration::from_secs_f64(duration)),
-                cover_url: cover_url.as_deref(),
-            })
-            .ok();
-    }
+    let media_controls = Arc::clone(&state.media_controls);
+    tokio::task::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+        }
+
+        if let Some(controls) = safe_lock(&media_controls).as_mut() {
+            let valid_cover = cover_url.as_deref().and_then(|url| {
+                if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://") {
+                    Some(url)
+                } else {
+                    None
+                }
+            });
+
+            controls
+                .set_metadata(MediaMetadata {
+                    title: Some(&title),
+                    artist: Some(&artist),
+                    album: None,
+                    duration: Some(std::time::Duration::from_secs_f64(duration)),
+                    cover_url: valid_cover,
+                })
+                .ok();
+        }
+    }).await.unwrap_or(());
     Ok(())
 }
 
 #[tauri::command]
-fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<(), String> {
-    let player = safe_lock(&state.player);
-    let app_handle = player.app_handle.clone();
-    let pos_f64 = f64::from_bits(player.position_secs.load(Ordering::Relaxed));
+async fn update_media_playback(playing: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let (app_handle, pos_f64) = {
+        let player = safe_lock(&state.player);
+        (player.app_handle.clone(), f64::from_bits(player.position_secs.load(Ordering::Relaxed)))
+    };
+    
     let progress = Some(MediaPosition(std::time::Duration::from_secs_f64(pos_f64)));
-    if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
-        controls
-            .set_playback(if playing {
-                MediaPlayback::Playing { progress }
-            } else {
-                MediaPlayback::Paused { progress }
-            })
-            .ok();
-    }
+    let media_controls = Arc::clone(&state.media_controls);
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(main_window) = app_handle.get_webview_window("main") {
-            if let Ok(raw) = main_window.hwnd() {
-                taskbar::update_taskbar_playback_state(raw.0, playing);
+    tokio::task::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            let _ = windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED);
+        }
+
+        if let Some(controls) = safe_lock(&media_controls).as_mut() {
+            controls
+                .set_playback(if playing {
+                    MediaPlayback::Playing { progress }
+                } else {
+                    MediaPlayback::Paused { progress }
+                })
+                .ok();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(main_window) = app_handle.get_webview_window("main") {
+                if let Ok(raw) = main_window.hwnd() {
+                    taskbar::update_taskbar_playback_state(raw.0, playing);
+                }
             }
         }
-    }
+    }).await.unwrap_or(());
 
     Ok(())
 }
@@ -2628,7 +2780,41 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
 
 #[tauri::command]
 fn log_error(msg: String) {
-    println!("[frontend-error] {}", msg);
+    eprintln!("[frontend-error] {}", msg);
+    let time_str = match std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH) {
+        Ok(dur) => format!("{}.{:03}", dur.as_secs(), dur.subsec_millis()),
+        Err(_) => "unknown".to_string(),
+    };
+    write_crash_log_entry(&format!("[{}] [FRONTEND_ERROR] {}", time_str, msg));
+}
+
+#[tauri::command]
+fn get_crash_log() -> Result<String, String> {
+    let path = get_crash_log_path();
+    if path.exists() {
+        std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    } else {
+        let local_path = std::path::PathBuf::from("aideo_crash.log");
+        if local_path.exists() {
+            std::fs::read_to_string(&local_path).map_err(|e| e.to_string())
+        } else {
+            Ok(String::from("No crash log found."))
+        }
+    }
+}
+
+#[tauri::command]
+fn get_crash_log_path_str() -> Result<String, String> {
+    Ok(get_crash_log_path().to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn clear_crash_log() -> Result<(), String> {
+    let path = get_crash_log_path();
+    let _ = std::fs::remove_file(&path);
+    let local_path = std::path::PathBuf::from("aideo_crash.log");
+    let _ = std::fs::remove_file(&local_path);
+    Ok(())
 }
 
 #[tauri::command]
@@ -2893,8 +3079,12 @@ fn get_cache_size_info() -> Result<serde_json::Value, String> {
 
     Ok(serde_json::json!({
         "bytes": total_bytes,
+        "total_bytes": total_bytes,
+        "mb": mb,
+        "total_mb": mb,
         "formatted": formatted,
         "count": file_count,
+        "file_count": file_count,
         "limit_gb": 5.0
     }))
 }
@@ -3196,6 +3386,7 @@ async fn upnp_get_status() -> Result<upnp::UpnpStatus, String> {
 }
 
 pub fn run() {
+    init_crash_handler();
     dotenvy::dotenv().ok();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -3262,6 +3453,9 @@ pub fn run() {
             get_close_to_tray,
             open_oauth_window,
             log_error,
+            get_crash_log,
+            get_crash_log_path_str,
+            clear_crash_log,
             start_dragging,
             set_window_resizable,
             move_window_by,
@@ -3269,6 +3463,8 @@ pub fn run() {
             scan_and_save,
             clean_missing_tracks,
             get_library,
+            get_library_page,
+            get_library_count,
             play_track,
             queue_next,
             pause_track,
@@ -3360,6 +3556,7 @@ pub fn run() {
             youtube::get_artist_discography,
             youtube::get_search_suggestions,
             youtube::download_track,
+            youtube::download_playlist_batch,
             youtube::get_aideo_recommendations,
             youtube::check_and_download_ytdlp,
             youtube::get_youtube_autoplay_recommendations,
@@ -3377,6 +3574,7 @@ pub fn run() {
             tidal::get_tidal_autoplay_recommendations,
             tidal::get_tidal_hub_recommendations,
             qobuz::qobuz_connect,
+            qobuz::qobuz_open_login_window,
             qobuz::qobuz_status,
             qobuz::qobuz_logout,
             qobuz::qobuz_search,
@@ -3530,11 +3728,15 @@ pub fn run() {
                 let _ = std::fs::create_dir_all(parent);
             }
             let db_path_lossy = db_path.to_string_lossy();
-            let conn = match db::init_db(&db_path_lossy) {
-                Ok(c) => c,
+            let (conn, pool) = match db::init_db(&db_path_lossy) {
+                Ok(c) => {
+                    let p = db::init_db_pool(&db_path_lossy, 8).ok();
+                    (c, p)
+                }
                 Err(e) => {
                     eprintln!("[system] SQLite initialization failed ({}). Falling back to safe in-memory database configuration.", e);
-                    db::init_db(":memory:").expect("Failed to initialize in-memory database fallback")
+                    let c = db::init_db(":memory:").expect("Failed to initialize in-memory database fallback");
+                    (c, None)
                 }
             };
 
@@ -3612,6 +3814,7 @@ pub fn run() {
             app.manage(AppState {
                 player: player_arc.clone(),
                 db: db_arc.clone(),
+                db_pool: pool.clone(),
                 media_controls: media_controls_arc.clone(),
                 cached_devices: cached_devices_arc.clone(),
             });
@@ -3619,9 +3822,11 @@ pub fn run() {
             let app_state_clone = Arc::new(AppState {
                 player: player_arc,
                 db: db_arc,
+                db_pool: pool,
                 media_controls: media_controls_arc,
                 cached_devices: cached_devices_arc,
             });
+
 
             let app_handle_for_server = app.handle().clone();
             tauri::async_runtime::spawn(async move {

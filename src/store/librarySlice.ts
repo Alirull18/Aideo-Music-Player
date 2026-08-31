@@ -136,16 +136,44 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   currentTrackIndex: -1,
   currentTrack: (() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('aideo_current_track') || 'null');
-      if (saved && (saved.title === 'Web Audio Stream' || saved.artist === 'Web Stream')) {
-        const history: any[] = JSON.parse(localStorage.getItem('aideo_play_history') || '[]');
-        const realTrack = history.slice().reverse().find(t => t && typeof t === 'object' && t.title && t.title !== 'Web Audio Stream' && t.artist !== 'Web Stream');
-        if (realTrack) {
-          localStorage.setItem('aideo_current_track', JSON.stringify(realTrack));
-          return realTrack;
+      let saved = JSON.parse(localStorage.getItem('aideo_current_track') || 'null');
+      if (saved) {
+        if (saved.title === 'Web Audio Stream' || saved.artist === 'Web Stream') {
+          const history: any[] = JSON.parse(localStorage.getItem('aideo_play_history') || '[]');
+          const realTrack = history.slice().reverse().find(t => t && typeof t === 'object' && t.title && t.title !== 'Web Audio Stream' && t.artist !== 'Web Stream');
+          if (realTrack) {
+            saved = realTrack;
+          }
         }
+
+        const isYt = saved.path && (saved.path.includes('youtube.com') || saved.path.includes('youtu.be') || saved.path.includes('googlevideo.com'));
+        if (isYt && (!saved.format || saved.format.toUpperCase() === 'URL')) {
+          saved.format = 'YouTube Direct';
+        }
+
+        if (saved.path && (saved.format === 'URL' || !saved.duration || !saved.cover_url)) {
+          const meta = parseStreamMetadata(saved.path);
+          if (meta.title && !isGenericStreamTitle(meta.title) && isGenericStreamTitle(saved.title)) {
+            saved.title = meta.title;
+          }
+          if (meta.artist && !isGenericStreamArtist(meta.artist) && (isGenericStreamArtist(saved.artist) || !saved.artist)) {
+            saved.artist = meta.artist;
+          }
+          if (!saved.duration && meta.duration) {
+            saved.duration = meta.duration;
+          }
+          if (!saved.cover_url && meta.cover_url) {
+            saved.cover_url = meta.cover_url;
+          }
+          if ((!saved.format || saved.format === 'URL') && meta.format) {
+            saved.format = meta.format;
+          }
+        }
+
+        localStorage.setItem('aideo_current_track', JSON.stringify(saved));
+        return saved;
       }
-      return saved;
+      return null;
     } catch {
       return null;
     }
@@ -623,6 +651,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   handleTrackTransition: async (path: string) => {
+    if (!path || typeof path !== 'string') return;
     if (isTransitioning) return;
     isTransitioning = true;
     try {
@@ -652,14 +681,17 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       // Construct high-fidelity virtual Track object as fallback to ensure seek bar work
       if (!track) {
         const isOnline = path.startsWith('http://') || path.startsWith('https://');
-        const meta = isOnline ? parseStreamMetadata(path) : { title: baseName(path), artist: '—', album: '' };
+        const meta = isOnline ? parseStreamMetadata(path) : { title: baseName(path), artist: '—', album: '', duration: null, format: 'MP3/FLAC', cover_url: null };
+        const isYt = path.includes('youtube.com') || path.includes('youtu.be') || path.includes('googlevideo.com');
+        const defaultFormat = isYt ? 'YouTube Direct' : (isOnline ? 'URL' : 'MP3/FLAC');
         track = {
           id: -9999,
           path,
           title: meta.title,
           artist: meta.artist,
-          duration: null,
-          format: isOnline ? 'URL' : 'MP3/FLAC',
+          duration: meta.duration ?? null,
+          format: meta.format || defaultFormat,
+          cover_url: meta.cover_url || null,
           lyric_offset: 0
         };
       }
@@ -683,6 +715,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const isOnline = path.startsWith('http://') || path.startsWith('https://');
 
       if (track && track.title && track.title !== 'Web Audio Stream') {
+        if (state.currentTrack && pathsEqual(state.currentTrack.path, track.path)) {
+          if (!track.duration && state.currentTrack.duration) track.duration = state.currentTrack.duration;
+          if (!track.cover_url && state.currentTrack.cover_url) track.cover_url = state.currentTrack.cover_url;
+          if ((!track.format || track.format === 'URL') && state.currentTrack.format && state.currentTrack.format !== 'URL') {
+            track.format = state.currentTrack.format;
+          }
+        }
         localStorage.setItem('aideo_current_track', JSON.stringify(track));
       }
 
@@ -1290,15 +1329,17 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   createSmartPlaylist: async (name: string, rules: any) => {
     try {
       const rulesJson = typeof rules === 'string' ? rules : JSON.stringify(rules);
-      await invoke('create_smart_playlist', { name, rulesJson });
+      const id = await invoke<number>('create_smart_playlist', { name, rulesJson });
       await get().fetchSmartPlaylists();
       window.dispatchEvent(new CustomEvent('ui-toast', {
         detail: { message: `Created Smart Playlist "${name}"`, type: 'success' }
       }));
+      return id;
     } catch (e: any) {
       window.dispatchEvent(new CustomEvent('ui-toast', {
         detail: { message: `Failed to create Smart Playlist: ${e}`, type: 'error' }
       }));
+      return undefined;
     }
   },
 

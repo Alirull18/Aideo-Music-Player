@@ -1,34 +1,51 @@
 import { useState, useMemo } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
 import { LiquidBackground } from './LiquidBackground';
-import { baseName, getStreamName, isStreamTrack } from '../utils';
-
-const isRadioStream = (track: any): boolean => {
-  if (!track) return false;
-  const path = track.path || '';
-  const format = track.format || '';
-  const isUrlFormat = format.toUpperCase() === 'URL';
-  const isOnline = path.startsWith('http://') || path.startsWith('https://');
-  const isYTMOrTidalOrCloud = format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'Qobuz FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN' || path.includes('youtube.com') || path.includes('youtu.be') || path.includes('api.tidal.com');
-  
-  return (isUrlFormat || isOnline) && !isYTMOrTidalOrCloud && (!track.duration || track.duration <= 0);
-};
+import { baseName, getStreamName, isStreamTrack, isRadioStream } from '../utils';
 
 export function NowPlayingView() {
   const { 
-    playback, currentDevice, coverArt, dsp, 
+    currentDevice, coverArt, dsp, 
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
     setView, toggleLoveTrack, toggleDislikeTrack, toggleControlCenter,
     albumArtFit, cachedCloudHashes, setLibrarySearchQuery,
     desktopLyricsOpen, toggleDesktopLyrics, desktopLyricsLocked, toggleDesktopLyricsLocked,
-    setMiniPlayerMode
-  } = useStore();
+    setMiniPlayerMode,
+    playbackCurrentTrack,
+    playbackBitPerfect,
+    playbackDevRate
+  } = useStore(useShallow(s => ({
+    playbackCurrentTrack: s.playback.current_track,
+    playbackBitPerfect: s.playback.bit_perfect,
+    playbackDevRate: s.playback.dev_rate,
+    currentDevice: s.currentDevice,
+    coverArt: s.coverArt,
+    dsp: s.dsp,
+    liquidBackgroundEnabled: s.liquidBackgroundEnabled,
+    toggleLiquidBackground: s.toggleLiquidBackground,
+    currentTrack: s.currentTrack,
+    autoplayEnabled: s.autoplayEnabled,
+    setView: s.setView,
+    toggleLoveTrack: s.toggleLoveTrack,
+    toggleDislikeTrack: s.toggleDislikeTrack,
+    toggleControlCenter: s.toggleControlCenter,
+    albumArtFit: s.albumArtFit,
+    cachedCloudHashes: s.cachedCloudHashes,
+    setLibrarySearchQuery: s.setLibrarySearchQuery,
+    desktopLyricsOpen: s.desktopLyricsOpen,
+    toggleDesktopLyrics: s.toggleDesktopLyrics,
+    desktopLyricsLocked: s.desktopLyricsLocked,
+    toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
+    setMiniPlayerMode: s.setMiniPlayerMode,
+  })));
   const current = currentTrack;
+  const effectiveCover = coverArt || current?.cover_url || null;
 
   const isCurrentCached = useMemo(() => {
     if (!current || !isStreamTrack(current.path, current.format)) return false;
@@ -38,7 +55,7 @@ export function NowPlayingView() {
 
   const [showLyrics, setShowLyrics] = useState(true);
 
-  if (!playback.current_track) {
+  if (!playbackCurrentTrack) {
     return (
       <div className="nowplaying">
         <div className="np-empty" style={{ gridColumn: '1/3' }}>
@@ -54,8 +71,8 @@ export function NowPlayingView() {
     <div className="nowplaying" style={{ gridTemplateColumns: showLyrics ? '1fr 1fr' : '1fr' }}>
       {/* Dynamic Liquid Art Backdrop / Static Blurred Cover Art */}
       <LiquidBackground />
-      {coverArt && (!liquidBackgroundEnabled || dsp.low_spec_mode) && (
-        <div className="np-bg" style={{ backgroundImage: `url(${coverArt})` }} />
+      {effectiveCover && (!liquidBackgroundEnabled || dsp.low_spec_mode) && (
+        <div className="np-bg" style={{ backgroundImage: `url(${effectiveCover})` }} />
       )}
 
       {/* Art + Meta — fixed left column */}
@@ -259,15 +276,15 @@ export function NowPlayingView() {
           </button>
         </div>
 
-        <div className={`np-art-wrap${coverArt ? ' has-art' : ''} ${albumArtFit === 'contain' ? 'contain-mode' : ''}`}>
+        <div className={`np-art-wrap${effectiveCover ? ' has-art' : ''} ${albumArtFit === 'contain' ? 'contain-mode' : ''}`}>
           {albumArtFit === 'contain' && (
             <div 
               className="np-art-ambient-bg" 
-              style={{ backgroundImage: `url(${coverArt || defaultCover})` }} 
+              style={{ backgroundImage: `url(${effectiveCover || defaultCover})` }} 
             />
           )}
           <img 
-            src={coverArt || defaultCover} 
+            src={effectiveCover || defaultCover} 
             alt="cover" 
             className={`np-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`} 
           />
@@ -287,7 +304,7 @@ export function NowPlayingView() {
               whiteSpace: 'nowrap',
               maxWidth: '100%'
             }}>
-              {current?.title || (playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : baseName(playback.current_track))}
+              {current?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack))}
             </span>
             {current && !isRadioStream(current) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -422,10 +439,10 @@ export function NowPlayingView() {
                 <CheckCircle2 size={10} /> OFFLINE CACHED
               </span>
             )}
-            {playback.current_track?.startsWith('http') && !current?.duration && (
+            {isRadioStream(current, playbackCurrentTrack, current?.duration) && (
               <span className="live-badge" style={{ flexShrink: 0 }}>LIVE</span>
             )}
-            {playback.bit_perfect && (
+            {playbackBitPerfect && (
               <span 
                 className="bit-badge" 
                 onClick={() => toggleControlCenter()}
@@ -437,10 +454,10 @@ export function NowPlayingView() {
                 }}
                 title="View Audio Signal Path"
               >
-                {currentDevice?.startsWith('[ASIO]') ? 'ASIO BIT-PERFECT' : 'BIT-PERFECT'} {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''} 🎛️
+                {currentDevice?.startsWith('[ASIO]') ? 'ASIO BIT-PERFECT' : 'BIT-PERFECT'} {playbackDevRate > 0 ? `· ${playbackDevRate / 1000}kHz` : ''} 🎛️
               </span>
             )}
-            {dsp.upsample_rate > 0 && !playback.bit_perfect && (
+            {dsp.upsample_rate > 0 && !playbackBitPerfect && (
               <span 
                 className="bit-badge" 
                 onClick={() => toggleControlCenter()}
@@ -455,7 +472,7 @@ export function NowPlayingView() {
                 HI-RES · {dsp.upsample_rate / 1000}kHz 🎛️
               </span>
             )}
-            {!playback.bit_perfect && dsp.upsample_rate <= 0 && (
+            {!playbackBitPerfect && dsp.upsample_rate <= 0 && (
               <span 
                 className="bit-badge" 
                 onClick={() => toggleControlCenter()}
@@ -481,8 +498,8 @@ export function NowPlayingView() {
                 style={{ 
                   flexShrink: 0, 
                   fontSize: 10, 
-                  padding: '3px 8px',
-                  fontWeight: 800,
+                  padding: '3px 8px', 
+                  fontWeight: 800, 
                   letterSpacing: 0.5
                 }}
               >
@@ -500,16 +517,16 @@ export function NowPlayingView() {
             textDecoration: 'underline'
           }}
             onClick={() => {
-              if (!playback.current_track) return;
-              const isWebStream = playback.current_track.startsWith('http://') || playback.current_track.startsWith('https://');
+              if (!playbackCurrentTrack) return;
+              const isWebStream = playbackCurrentTrack.startsWith('http://') || playbackCurrentTrack.startsWith('https://');
               if (isWebStream) {
-                openUrl(playback.current_track);
+                openUrl(playbackCurrentTrack);
               } else if (current?.artist) {
                 setLibrarySearchQuery(current.artist);
                 setView('library');
               }
             }}>
-            {current?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—')}
+            {current?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
           </div>
         </div>
         <div style={{ height: 60, width: '100%', flexShrink: 0, marginTop: 8 }}>

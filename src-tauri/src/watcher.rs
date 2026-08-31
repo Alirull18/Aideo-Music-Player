@@ -68,6 +68,7 @@ fn debouncer_loop(
     let debounce_duration = Duration::from_secs(2);
     let mut last_event_time: Option<Instant> = None;
     let mut pending_change = false;
+    let mut pending_paths: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
 
     loop {
         match event_rx.recv_timeout(Duration::from_millis(500)) {
@@ -77,8 +78,9 @@ fn debouncer_loop(
                     event.kind,
                     EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
                 ) {
-                    let is_audio = event.paths.iter().any(|p| {
-                        p.extension()
+                    let mut audio_event = false;
+                    for p in &event.paths {
+                        let is_audio = p.extension()
                             .and_then(|e| e.to_str())
                             .map(|ext| {
                                 matches!(
@@ -97,10 +99,15 @@ fn debouncer_loop(
                                         | "dff"
                                 )
                             })
-                            .unwrap_or(false)
-                    });
+                            .unwrap_or(false);
 
-                    if is_audio {
+                        if is_audio {
+                            pending_paths.insert(p.clone());
+                            audio_event = true;
+                        }
+                    }
+
+                    if audio_event {
                         last_event_time = Some(Instant::now());
                         pending_change = true;
                     }
@@ -114,8 +121,9 @@ fn debouncer_loop(
                             pending_change = false;
                             last_event_time = None;
 
+                            let paths_to_process: Vec<_> = pending_paths.drain().collect();
                             // Perform incremental rescan and emit event
-                            rescan_and_notify(&app_handle, &watched_dirs);
+                            incremental_or_full_rescan(&app_handle, &watched_dirs, &paths_to_process);
                         }
                     }
                 }
@@ -127,18 +135,38 @@ fn debouncer_loop(
     }
 }
 
-fn rescan_and_notify(app_handle: &AppHandle, watched_dirs: &[String]) {
-    println!("[watcher] FS change detected. Running debounced rescan on {:?}...", watched_dirs);
-    let mut all_tracks = Vec::new();
-    for dir in watched_dirs {
-        let mut tracks = crate::scanner::scan_directory(dir, app_handle);
-        all_tracks.append(&mut tracks);
+fn incremental_or_full_rescan(
+    app_handle: &AppHandle,
+    _watched_dirs: &[String],
+    changed_paths: &[std::path::PathBuf],
+) {
+    if changed_paths.is_empty() {
+        return;
     }
 
-    if !all_tracks.is_empty() {
-        if let Some(state) = app_handle.try_state::<AppState>() {
-            let mut conn = crate::safe_lock(&state.db);
-            let _ = crate::db::save_tracks(&mut conn, &mut all_tracks);
+    println!(
+        "[watcher] FS change detected. Incrementally processing {} file(s)...",
+        changed_paths.len()
+    );
+
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        let mut conn = crate::safe_lock(&state.db);
+        let mut updated_tracks = Vec::new();
+
+        for path in changed_paths {
+            if path.exists() && path.is_file() {
+                if let Some(track) = crate::scanner::extract_metadata(path) {
+                    updated_tracks.push(track);
+                }
+            } else {
+                // File was deleted or moved
+                let path_str = path.to_string_lossy();
+                let _ = crate::db::delete_track(&mut conn, &path_str);
+            }
+        }
+
+        if !updated_tracks.is_empty() {
+            let _ = crate::db::save_tracks(&mut conn, &mut updated_tracks);
         }
     }
 

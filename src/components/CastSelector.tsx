@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { Cast, Loader2, Wifi, WifiOff, X, Radio, Tv } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -21,7 +22,22 @@ export function CastSelector() {
     discoverUpnpDevices,
     connectUpnpDevice,
     disconnectUpnpDevice,
-  } = useStore();
+  } = useStore(useShallow(s => ({
+    chromecast_devices: s.chromecast_devices,
+    chromecast_active_device: s.chromecast_active_device,
+    chromecast_scanning: s.chromecast_scanning,
+    chromecast_connected: s.chromecast_connected,
+    discoverCastDevices: s.discoverCastDevices,
+    connectCastDevice: s.connectCastDevice,
+    disconnectCastDevice: s.disconnectCastDevice,
+    upnp_devices: s.upnp_devices,
+    upnp_active_device: s.upnp_active_device,
+    upnp_scanning: s.upnp_scanning,
+    upnp_connected: s.upnp_connected,
+    discoverUpnpDevices: s.discoverUpnpDevices,
+    connectUpnpDevice: s.connectUpnpDevice,
+    disconnectUpnpDevice: s.disconnectUpnpDevice,
+  })));
 
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);

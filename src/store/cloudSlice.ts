@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import { PlayerState } from './types';
+import { PlayerState, BatchDownloadItem } from './types';
 import { invoke } from '@tauri-apps/api/core';
 
 export const createCloudSlice: StateCreator<PlayerState, [], [], any> = (set) => {
@@ -100,6 +100,57 @@ export const createCloudSlice: StateCreator<PlayerState, [], [], any> = (set) =>
         jellyfinUrl: '',
         jellyfinConnected: false,
       });
+    },
+
+    batchDownloadProgress: null,
+
+    downloadBatchPlaylist: async (items: BatchDownloadItem[], playlistName?: string) => {
+      if (!items || items.length === 0) return 0;
+      try {
+        set({
+          batchDownloadProgress: {
+            completed: 0,
+            total: items.length,
+            current_title: items[0]?.title || '',
+            percent: 0,
+            is_done: false,
+            error: null,
+          }
+        });
+
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Started downloading ${items.length} tracks to local disk...`, type: 'info' }
+        }));
+
+        const count = await invoke<number>('download_playlist_batch', {
+          items,
+          quality: 'high',
+          playlistName: playlistName || 'Downloaded Playlist'
+        });
+
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Successfully downloaded and tagged ${count}/${items.length} tracks!`, type: 'success' }
+        }));
+
+        // Refresh library in store
+        try {
+          const freshTracks = await invoke<any[]>('get_library');
+          if (freshTracks && Array.isArray(freshTracks)) {
+            set({ tracks: freshTracks });
+          }
+        } catch (_) {}
+
+        return count;
+      } catch (err: any) {
+        console.error('Batch download failed:', err);
+        set(s => ({
+          batchDownloadProgress: s.batchDownloadProgress ? { ...s.batchDownloadProgress, is_done: true, error: String(err) } : null
+        }));
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Batch download error: ${err}`, type: 'error' }
+        }));
+        return 0;
+      }
     },
   };
 };

@@ -154,5 +154,35 @@ describe('Albums View Edge Cases & Crash Prevention (What-If Study Cases)', () =
     const ostAlbum = results.find(a => a.title === 'Cyberpunk OST');
     expect(ostAlbum?.tracks.length).toBe(2);
   });
+
+  it('Isolates different artists in the SAME directory with identical or empty album names', () => {
+    const flatFolderTracks: any[] = [
+      { id: 1, path: 'C:/Music/Downloads/track1.mp3', title: 'Shape of You', artist: 'Ed Sheeran', album: 'Singles' },
+      { id: 2, path: 'C:/Music/Downloads/track2.mp3', title: 'Anti-Hero', artist: 'Taylor Swift', album: 'Singles' },
+      { id: 3, path: 'C:/Music/Downloads/track3.mp3', title: 'Yellow', artist: 'Coldplay', album: 'Singles' },
+      { id: 4, path: 'C:/Music/Downloads/track4.mp3', title: 'Random Song 1', artist: 'Artist A', album: '' },
+      { id: 5, path: 'C:/Music/Downloads/track5.mp3', title: 'Random Song 2', artist: 'Artist B', album: null },
+    ];
+
+    const keys = flatFolderTracks.map(t => buildAlbumKey(t));
+    const uniqueKeys = new Set(keys);
+    
+    // Each distinct artist must get their own unique album key even in the same folder
+    expect(uniqueKeys.size).toBe(5);
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(keys[1]).not.toBe(keys[2]);
+    expect(keys[3]).not.toBe(keys[4]);
+  });
+
+  it('Groups multi-disc tracks by the same artist across CD subfolders into one album', () => {
+    const multiDiscTracks: any[] = [
+      { id: 1, path: 'C:/Music/Pink Floyd/The Wall/CD 1/01 In the Flesh.flac', title: 'In the Flesh?', artist: 'Pink Floyd', album: 'The Wall', disc_number: 1 },
+      { id: 2, path: 'C:/Music/Pink Floyd/The Wall/CD 2/01 Hey You.flac', title: 'Hey You', artist: 'Pink Floyd', album: 'The Wall', disc_number: 2 },
+    ];
+
+    const key1 = buildAlbumKey(multiDiscTracks[0]);
+    const key2 = buildAlbumKey(multiDiscTracks[1]);
+    expect(key1).toBe(key2);
+  });
 });
 

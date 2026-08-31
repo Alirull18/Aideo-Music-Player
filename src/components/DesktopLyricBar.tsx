@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -22,6 +22,7 @@ import {
 import { baseName } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { LyricLine, Track, LyricsDisplayMode } from '../store/types';
+import { KaraokeActiveLine } from './KaraokeActiveLine';
 
 export function DesktopLyricBar() {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -61,64 +62,91 @@ export function DesktopLyricBar() {
     };
   }, []);
 
-  // ── 1. Real-time Backend Querying & State Polling ──────────────────────────
+  // ── 1. Extrapolated Clock & State Sync ─────────────────────────────────────
+  const basePosRef = useRef<number>(0);
+  const lastTimestampRef = useRef<number>(performance.now());
+
+  // Clock extrapolation timer (client-side only, zero IPC cost)
+  useEffect(() => {
+    if (playbackStatus !== 'Playing') return;
+    const timer = setInterval(() => {
+      const elapsed = (performance.now() - lastTimestampRef.current) / 1000;
+      setPositionSecs(basePosRef.current + elapsed);
+    }, 100);
+    return () => clearInterval(timer);
+  }, [playbackStatus]);
+
   useEffect(() => {
     let active = true;
     let lastTrackPath: string | null = null;
 
+    const applyStatus = async (status: any) => {
+      if (!active || !status) return;
+      setPlaybackStatus(status.status);
+      basePosRef.current = status.position_secs || 0;
+      lastTimestampRef.current = performance.now();
+      setPositionSecs(status.position_secs || 0);
+
+      if (status.current_track && status.current_track !== lastTrackPath) {
+        lastTrackPath = status.current_track;
+        try {
+          const track: any = await invoke('get_track_by_path', { path: status.current_track });
+          if (active && track) {
+            setCurrentTrack(track);
+            setLyricOffset(track.lyric_offset || 0);
+          }
+        } catch (_) {
+          if (active) {
+            setCurrentTrack({
+              id: 0,
+              path: status.current_track,
+              title: baseName(status.current_track),
+              artist: 'Unknown Artist',
+              album: 'Unknown Album',
+              duration: 0,
+              format: 'FLAC',
+              loved: 0,
+              disliked: 0,
+              lyric_offset: 0,
+            });
+          }
+        }
+
+        try {
+          const lrc: any = await invoke('get_lyrics', { path: status.current_track });
+          if (active && Array.isArray(lrc)) {
+            setLyrics(lrc);
+          }
+        } catch (_) {}
+      } else if (!status.current_track) {
+        lastTrackPath = null;
+        setCurrentTrack(null);
+        setLyrics([]);
+      }
+    };
+
     const poll = async () => {
       try {
         const status: any = await invoke('get_playback_status');
-        if (!active || !status) return;
-
-        setPlaybackStatus(status.status);
-        setPositionSecs(status.position_secs || 0);
-
-        if (status.current_track && status.current_track !== lastTrackPath) {
-          lastTrackPath = status.current_track;
-          try {
-            const track: any = await invoke('get_track_by_path', { path: status.current_track });
-            if (active && track) {
-              setCurrentTrack(track);
-              setLyricOffset(track.lyric_offset || 0);
-            }
-          } catch (_) {
-            if (active) {
-              setCurrentTrack({
-                id: 0,
-                path: status.current_track,
-                title: baseName(status.current_track),
-                artist: 'Unknown Artist',
-                album: 'Unknown Album',
-                duration: 0,
-                format: 'FLAC',
-                loved: 0,
-                disliked: 0,
-                lyric_offset: 0,
-              });
-            }
-          }
-
-          try {
-            const lrc: any = await invoke('get_lyrics', { path: status.current_track });
-            if (active && Array.isArray(lrc)) {
-              setLyrics(lrc);
-            }
-          } catch (_) {}
-        } else if (!status.current_track) {
-          lastTrackPath = null;
-          setCurrentTrack(null);
-          setLyrics([]);
-        }
+        await applyStatus(status);
       } catch (_) {}
     };
 
-    const interval = setInterval(poll, 150);
+    // Heartbeat poll every 2 seconds
+    const interval = setInterval(poll, 2000);
     poll();
+
+    // Event-driven state updates
+    const unlistenState = listen<any>('playback-state-changed', (event) => {
+      if (active && event.payload) {
+        applyStatus(event.payload);
+      }
+    });
 
     return () => {
       active = false;
       clearInterval(interval);
+      unlistenState.then(u => u());
     };
   }, []);
 
@@ -130,6 +158,8 @@ export function DesktopLyricBar() {
       if (data.currentTrack) setCurrentTrack(data.currentTrack);
       if (data.playback) {
         setPlaybackStatus(data.playback.status);
+        basePosRef.current = data.playback.position_secs || 0;
+        lastTimestampRef.current = performance.now();
         setPositionSecs(data.playback.position_secs || 0);
       }
       if (data.lyrics) setLyrics(data.lyrics);
@@ -165,48 +195,16 @@ export function DesktopLyricBar() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isLocked]);
 
-  // ── 4. Sub-frame Syllable Interpolation ─────────────────────────────────────
-  const hasWordSync = useMemo(() => lyrics.some(l => l.words && l.words.length > 0), [lyrics]);
-  const isKaraokeActive = hasWordSync && lyricsDisplayMode === 'karaoke';
-  const [smoothedTime, setSmoothedTime] = useState(positionSecs);
-  const lastPositionRef = useRef(positionSecs);
-  const lastTimeRef = useRef(performance.now());
-
-  useEffect(() => {
-    lastPositionRef.current = positionSecs;
-    lastTimeRef.current = performance.now();
-    if (isKaraokeActive) {
-      setSmoothedTime(positionSecs);
-    }
-  }, [positionSecs, isKaraokeActive]);
-
-  useEffect(() => {
-    if (!isKaraokeActive || playbackStatus !== 'Playing') return;
-
-    let frameId: number;
-    const update = () => {
-      const now = performance.now();
-      const delta = (now - lastTimeRef.current) / 1000;
-      const interpolated = lastPositionRef.current + Math.max(0, delta);
-      setSmoothedTime(interpolated);
-      frameId = requestAnimationFrame(update);
-    };
-
-    frameId = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frameId);
-  }, [playbackStatus, isKaraokeActive]);
-
-  const currentTime = (isKaraokeActive ? smoothedTime : positionSecs) + lyricOffset / 1000;
-
   // Active lyric calculation
   const activeIdx = useMemo(() => {
     if (!lyrics.length) return -1;
+    const now = positionSecs + lyricOffset / 1000;
     let idx = -1;
     for (let i = 0; i < lyrics.length; i++) {
-      if (lyrics[i].time_secs <= currentTime) idx = i; else break;
+      if (lyrics[i].time_secs <= now) idx = i; else break;
     }
     return idx;
-  }, [lyrics, currentTime]);
+  }, [lyrics, positionSecs, lyricOffset]);
 
   const currentLine = activeIdx >= 0 ? lyrics[activeIdx] : null;
   const nextLine = (activeIdx >= 0 && activeIdx + 1 < lyrics.length) ? lyrics[activeIdx + 1] : null;
@@ -451,36 +449,13 @@ export function DesktopLyricBar() {
           }}>
             {/* Word-by-word karaoke syllable rendering if available */}
             {lyricsDisplayMode === 'karaoke' && currentLine.words && currentLine.words.length > 0 ? (
-              currentLine.words.map((w, idx) => {
-                const nextWord = currentLine.words![idx + 1];
-                const duration = w.duration_secs && w.duration_secs > 0
-                  ? w.duration_secs
-                  : (nextWord && nextWord.time_secs > w.time_secs ? (nextWord.time_secs - w.time_secs) : 0.8);
-                const isStarted = currentTime >= w.time_secs;
-                const isFinished = (w.duration_secs && w.duration_secs > 0)
-                  ? currentTime >= (w.time_secs + w.duration_secs)
-                  : (nextWord ? currentTime >= nextWord.time_secs : currentTime >= (w.time_secs + duration));
-                
-                let progress = 0;
-                if (isFinished) {
-                  progress = 100;
-                } else if (isStarted) {
-                  progress = Math.min(100, Math.max(0, ((currentTime - w.time_secs) / duration) * 100));
-                }
-
-                return (
-                  <span
-                    key={idx}
-                    className="desktop-lyric-word"
-                    style={{
-                      '--word-progress': `${progress}%`,
-                      '--desktop-accent': accentColor,
-                    } as React.CSSProperties}
-                  >
-                    {w.text}
-                  </span>
-                );
-              })
+              <KaraokeActiveLine
+                words={currentLine.words}
+                positionSecs={positionSecs}
+                lyricOffset={lyricOffset}
+                isPlaying={playbackStatus === 'Playing'}
+                className="desktop-lyric-word"
+              />
             ) : (
               <span style={{ color: 'white' }}>{currentLine.text}</span>
             )}

@@ -1,7 +1,58 @@
 import { StateCreator } from 'zustand';
-import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS } from './types';
+import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
+
+export const DEFAULT_SIDEBAR_NAV_ITEMS: SidebarNavItemConfig[] = [
+  { id: 'aideo', label: 'Aideo', visible: true },
+  { id: 'charts', label: 'Top Charts', visible: true, requiresHybrid: true },
+  { id: 'library', label: 'Library', visible: true },
+  { id: 'nowplaying', label: 'Now Playing', visible: true },
+  { id: 'loved_streams', label: 'Loved Streams', visible: true, requiresHybrid: true },
+  { id: 'downloaded', label: 'Downloaded', visible: true },
+  { id: 'aideo_lab', label: 'Aideo Lab', visible: true },
+  { id: 'insights', label: 'Aideo Insights', visible: true },
+  { id: 'lastfm', label: 'Last.fm Stats', visible: true, requiresAuth: 'lastfm' },
+  { id: 'listenbrainz', label: 'ListenBrainz', visible: true, requiresAuth: 'listenbrainz' },
+];
+
+const getSavedSidebarNavItems = (): SidebarNavItemConfig[] => {
+  const raw = safeGetStorage('aideo-sidebar-nav-items');
+  const legacyLastfm = safeGetStorage('aideo-sidebar-lastfm') !== 'false';
+  const legacyListenbrainz = safeGetStorage('aideo-sidebar-listenbrainz') !== 'false';
+
+  if (raw) {
+    try {
+      const parsed: SidebarNavItemConfig[] = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const result: SidebarNavItemConfig[] = [];
+        const seenIds = new Set<string>();
+
+        for (const item of parsed) {
+          const defaultItem = DEFAULT_SIDEBAR_NAV_ITEMS.find(d => d.id === item.id);
+          if (defaultItem) {
+            result.push({
+              ...defaultItem,
+              visible: typeof item.visible === 'boolean' ? item.visible : defaultItem.visible,
+            });
+            seenIds.add(item.id);
+          }
+        }
+        for (const defaultItem of DEFAULT_SIDEBAR_NAV_ITEMS) {
+          if (!seenIds.has(defaultItem.id)) {
+            result.push({ ...defaultItem });
+          }
+        }
+        return result;
+      }
+    } catch (_) {}
+  }
+  return DEFAULT_SIDEBAR_NAV_ITEMS.map(i => {
+    if (i.id === 'lastfm') return { ...i, visible: legacyLastfm };
+    if (i.id === 'listenbrainz') return { ...i, visible: legacyListenbrainz };
+    return { ...i };
+  });
+};
 
 let sleepTimerInterval: any = null;
 
@@ -46,6 +97,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showProMode: false,
   showControlCenter: false,
   showSettings: false,
+  sidebarNavItems: getSavedSidebarNavItems(),
   sidebarLastfmVisible: safeGetStorage('aideo-sidebar-lastfm') !== 'false',
   sidebarListenbrainzVisible: safeGetStorage('aideo-sidebar-listenbrainz') !== 'false',
   sidebarCollapsed: safeGetStorage('aideo-sidebar-collapsed') === 'true',
@@ -176,21 +228,90 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   toggleControlCenter: () => set(s => ({ showControlCenter: !s.showControlCenter })),
 
+  setSidebarNavItems: (items: SidebarNavItemConfig[]) => {
+    safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(items));
+    set({ sidebarNavItems: items });
+  },
+
+  toggleSidebarNavItemVisibility: (id: SidebarNavItemId) => {
+    const current = get().sidebarNavItems;
+    const target = current.find(i => i.id === id);
+    if (!target) return;
+
+    // Safety guard: Ensure at least one item remains visible
+    if (target.visible) {
+      const currentlyVisible = current.filter(i => i.visible);
+      if (currentlyVisible.length <= 1) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: { message: 'At least one sidebar navigation item must remain visible.', type: 'warning' }
+          }));
+        }
+        return;
+      }
+    }
+
+    const updated = current.map(item =>
+      item.id === id ? { ...item, visible: !item.visible } : item
+    );
+    safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(updated));
+
+    if (id === 'lastfm') {
+      const nextVal = !target.visible;
+      safeSetStorage('aideo-sidebar-lastfm', String(nextVal));
+      set({ sidebarLastfmVisible: nextVal, sidebarNavItems: updated });
+    } else if (id === 'listenbrainz') {
+      const nextVal = !target.visible;
+      safeSetStorage('aideo-sidebar-listenbrainz', String(nextVal));
+      set({ sidebarListenbrainzVisible: nextVal, sidebarNavItems: updated });
+    } else {
+      set({ sidebarNavItems: updated });
+    }
+  },
+
+  moveSidebarNavItem: (index: number, direction: 'up' | 'down') => {
+    const current = [...get().sidebarNavItems];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= current.length) return;
+
+    const [moved] = current.splice(index, 1);
+    current.splice(targetIndex, 0, moved);
+
+    safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(current));
+    set({ sidebarNavItems: current });
+  },
+
+  resetSidebarNavItems: () => {
+    const defaults = DEFAULT_SIDEBAR_NAV_ITEMS.map(i => ({ ...i }));
+    safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(defaults));
+    safeSetStorage('aideo-sidebar-lastfm', 'true');
+    safeSetStorage('aideo-sidebar-listenbrainz', 'true');
+    set({
+      sidebarNavItems: defaults,
+      sidebarLastfmVisible: true,
+      sidebarListenbrainzVisible: true
+    });
+  },
+
   toggleSidebarLastfmVisible: () => {
     const next = !get().sidebarLastfmVisible;
-    localStorage.setItem('aideo-sidebar-lastfm', String(next));
-    set({ sidebarLastfmVisible: next });
+    safeSetStorage('aideo-sidebar-lastfm', String(next));
+    const items = get().sidebarNavItems.map(i => i.id === 'lastfm' ? { ...i, visible: next } : i);
+    safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(items));
+    set({ sidebarLastfmVisible: next, sidebarNavItems: items });
   },
 
   toggleSidebarListenbrainzVisible: () => {
     const next = !get().sidebarListenbrainzVisible;
-    localStorage.setItem('aideo-sidebar-listenbrainz', String(next));
-    set({ sidebarListenbrainzVisible: next });
+    safeSetStorage('aideo-sidebar-listenbrainz', String(next));
+    const items = get().sidebarNavItems.map(i => i.id === 'listenbrainz' ? { ...i, visible: next } : i);
+    safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(items));
+    set({ sidebarListenbrainzVisible: next, sidebarNavItems: items });
   },
 
   toggleSidebarCollapsed: () => {
     const next = !get().sidebarCollapsed;
-    localStorage.setItem('aideo-sidebar-collapsed', String(next));
+    safeSetStorage('aideo-sidebar-collapsed', String(next));
     set({ sidebarCollapsed: next });
   },
 
@@ -242,7 +363,13 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
       spatial_wet: 0.15,
       subsonic_enabled: false,
       night_mode_enabled: false,
-      r128_enabled: false
+      r128_enabled: false,
+      convolution_enabled: false,
+      convolution_ir_path: '',
+      convolution_wet: 0.5,
+      aideo_filter_enabled: false,
+      aideo_filter_room_size: 0.85,
+      aideo_filter_bass_thump: 6.0
     });
   },
 

@@ -4,13 +4,14 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Radio, Check, Download, X } from 'lucide-react';
+import { Radio, Download, X } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import './App.css';
 
 import { Sidebar } from './components/Sidebar';
 import { LibraryView } from './components/LibraryView';
 import { NowPlayingView } from './components/NowPlayingView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const AideoView = lazy(() => import('./components/AideoView').then(m => ({ default: m.AideoView })));
 const LastfmView = lazy(() => import('./components/LastfmView').then(m => ({ default: m.LastfmView })));
@@ -21,6 +22,7 @@ const FullscreenView = lazy(() => import('./components/FullscreenView').then(m =
 const ListeningInsightsView = lazy(() => import('./components/ListeningInsightsView').then(m => ({ default: m.ListeningInsightsView })));
 const AlbumsView = lazy(() => import('./components/AlbumsView').then(m => ({ default: m.AlbumsView })));
 const ChartsView = lazy(() => import('./components/ChartsView').then(m => ({ default: m.ChartsView })));
+const DownloadedView = lazy(() => import('./components/DownloadedView').then(m => ({ default: m.DownloadedView })));
 
 import { PlayerBar } from './components/PlayerBar';
 import { AudioControlCenter } from './components/AudioControlCenter';
@@ -63,11 +65,9 @@ function AideoApp() {
     lastScrobble, 
     fetchPlaylists, 
     playbackError, 
-    playbackSuccess, 
     customPrompt, 
     setCustomPrompt, 
     setPlaybackError, 
-    setPlaybackSuccess, 
     lowSpecMode,
     onboardingCompleted,
     showOnboarding,
@@ -87,11 +87,9 @@ function AideoApp() {
     lastScrobble: s.lastScrobble,
     fetchPlaylists: s.fetchPlaylists,
     playbackError: s.playbackError,
-    playbackSuccess: s.playbackSuccess,
     customPrompt: s.customPrompt,
     setCustomPrompt: s.setCustomPrompt,
     setPlaybackError: s.setPlaybackError,
-    setPlaybackSuccess: s.setPlaybackSuccess,
     lowSpecMode: s.lowSpecMode,
     onboardingCompleted: s.onboardingCompleted,
     showOnboarding: s.showOnboarding,
@@ -269,19 +267,22 @@ function AideoApp() {
       intervalId = setInterval(pollStatus, ms);
     };
 
-    // Initial polling frequency based on page visibility state
-    startPolling(document.visibilityState === 'visible' ? 200 : 2000);
+    // Heartbeat polling (fallback safety check every 2 seconds instead of aggressive 200ms hammering)
+    startPolling(2000);
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        startPolling(200);
-      } else {
-        startPolling(2000);
-      }
+      startPolling(document.visibilityState === 'visible' ? 2000 : 5000);
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const setupListeners = async () => {
+      const uStateChanged = await listen('playback-state-changed', (event: any) => {
+        if (isCancelled) return;
+        useStore.getState().handlePlaybackStateChanged(event.payload);
+      });
+      if (isCancelled) { uStateChanged(); return; }
+      cleanups.push(uStateChanged);
+
       const uEnded = await listen('track-ended', () => {
         if (isCancelled) return;
         useStore.getState().playNext();
@@ -360,6 +361,50 @@ function AideoApp() {
       });
       if (isCancelled) { uDesktopLockStatus(); return; }
       cleanups.push(uDesktopLockStatus);
+
+      const uBufferingStart = await listen('stream-buffering-start', () => {
+        if (isCancelled) return;
+        useStore.setState((s) => ({
+          playback: { ...s.playback, is_buffering: true }
+        }));
+      });
+      if (isCancelled) { uBufferingStart(); return; }
+      cleanups.push(uBufferingStart);
+
+      const uBufferingEnd = await listen('stream-buffering-end', () => {
+        if (isCancelled) return;
+        useStore.setState((s) => ({
+          playback: { ...s.playback, is_buffering: false }
+        }));
+      });
+      if (isCancelled) { uBufferingEnd(); return; }
+      cleanups.push(uBufferingEnd);
+
+      const uBatchProgress = await listen('download_batch_progress', (event: any) => {
+        if (isCancelled) return;
+        const payload = event.payload;
+        useStore.setState({ batchDownloadProgress: payload });
+
+        if (payload?.error) {
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: {
+              message: payload.error,
+              type: 'error',
+              duration: 6000,
+            }
+          }));
+        } else if (payload && !payload.is_done && payload.current_title && payload.current_title !== 'Completed') {
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: {
+              message: `Downloading (${payload.completed + 1}/${payload.total}): ${payload.current_title}`,
+              type: 'info',
+              duration: 3000,
+            }
+          }));
+        }
+      });
+      if (isCancelled) { uBatchProgress(); return; }
+      cleanups.push(uBatchProgress);
 
       // Window Size, Position & State Restoration and Tracking
       if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
@@ -493,34 +538,6 @@ function AideoApp() {
     };
   }, []);
 
-  useEffect(() => {
-    let isCancelled = false;
-    let unlistenSuccess: (() => void) | undefined;
-    let unlistenError: (() => void) | undefined;
-
-    const setup = async () => {
-      const u1 = await listen<string>('playback-success', (event) => {
-        if (isCancelled) return;
-        setPlaybackSuccess(event.payload);
-      });
-      if (isCancelled) { u1(); return; }
-      unlistenSuccess = u1;
-
-      const u2 = await listen<string>('playback-error', (event) => {
-        if (isCancelled) return;
-        setPlaybackError(event.payload);
-      });
-      if (isCancelled) { u2(); return; }
-      unlistenError = u2;
-    };
-    setup();
-
-    return () => {
-      isCancelled = true;
-      if (unlistenSuccess) unlistenSuccess();
-      if (unlistenError) unlistenError();
-    };
-  }, [setPlaybackSuccess, setPlaybackError]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -603,10 +620,14 @@ function AideoApp() {
       <main className="app-main">
         {/* Keep the core heavy AideoView and LibraryView mounted to ensure buttery-smooth instant transitions */}
         <div style={{ display: view === 'aideo' ? 'block' : 'none', height: '100%', width: '100%' }}>
-          <AideoView />
+          <ErrorBoundary name="Aideo Discovery">
+            <AideoView />
+          </ErrorBoundary>
         </div>
         <div style={{ display: (view === 'library' || view === 'loved_streams') ? 'block' : 'none', height: '100%', width: '100%' }}>
-          <LibraryView />
+          <ErrorBoundary name="Music Library">
+            <LibraryView />
+          </ErrorBoundary>
         </div>
 
         <AnimatePresence mode="wait">
@@ -618,14 +639,18 @@ function AideoApp() {
                   <span>Loading Albums...</span>
                 </div>
               }>
-                <AlbumsView />
+                <ErrorBoundary name="Albums View">
+                  <AlbumsView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
           {view === 'nowplaying' && (
             <motion.div key="np" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <NowPlayingView />
+              <ErrorBoundary name="Now Playing">
+                <NowPlayingView />
+              </ErrorBoundary>
             </motion.div>
           )}
           {view === 'lastfm' && (
@@ -636,7 +661,9 @@ function AideoApp() {
                   <span>Loading Last.fm...</span>
                 </div>
               }>
-                <LastfmView />
+                <ErrorBoundary name="Last.fm">
+                  <LastfmView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
@@ -648,7 +675,9 @@ function AideoApp() {
                   <span>Loading ListenBrainz...</span>
                 </div>
               }>
-                <ListenbrainzView />
+                <ErrorBoundary name="ListenBrainz">
+                  <ListenbrainzView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
@@ -661,7 +690,9 @@ function AideoApp() {
                   <span>Loading Aideo Lab...</span>
                 </div>
               }>
-                <AideoLabView />
+                <ErrorBoundary name="Aideo Lab">
+                  <AideoLabView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
@@ -674,7 +705,9 @@ function AideoApp() {
                   <span>Loading Settings...</span>
                 </div>
               }>
-                <SettingsView />
+                <ErrorBoundary name="Settings">
+                  <SettingsView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
@@ -687,7 +720,9 @@ function AideoApp() {
                   <span>Loading Insights...</span>
                 </div>
               }>
-                <ListeningInsightsView />
+                <ErrorBoundary name="Insights">
+                  <ListeningInsightsView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
@@ -700,7 +735,24 @@ function AideoApp() {
                   <span>Loading Top Charts...</span>
                 </div>
               }>
-                <ChartsView />
+                <ErrorBoundary name="Charts">
+                  <ChartsView />
+                </ErrorBoundary>
+              </Suspense>
+            </motion.div>
+          )}
+
+          {view === 'downloaded' && (
+            <motion.div key="downloaded" style={{ height: '100%', overflow: 'hidden' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
+                  <span>Loading Offline Tracks...</span>
+                </div>
+              }>
+                <ErrorBoundary name="Downloaded Tracks">
+                  <DownloadedView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
@@ -713,7 +765,9 @@ function AideoApp() {
                   <span>Loading Fullscreen...</span>
                 </div>
               }>
-                <FullscreenView />
+                <ErrorBoundary name="Fullscreen">
+                  <FullscreenView />
+                </ErrorBoundary>
               </Suspense>
             </motion.div>
           )}
@@ -737,38 +791,6 @@ function AideoApp() {
           </motion.div>
         )}
 
-        {playbackSuccess && (
-          <motion.div
-            key="playback-success"
-            initial={{ opacity: 0, x: 50 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 50 }}
-            style={{
-              position: 'fixed',
-              bottom: 100,
-              right: 24,
-              width: 320,
-              background: 'rgba(21, 128, 61, 0.95)',
-              backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(34, 197, 94, 0.3)',
-              borderRadius: 12,
-              padding: 16,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-              zIndex: 9999,
-            }}
-          >
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              <div style={{ background: '#22c55e', borderRadius: '50%', padding: 4, display: 'flex' }}>
-                <Check size={14} color="white" />
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 2 }}>Streaming Success</div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.8)', fontWeight: 600, marginBottom: 2 }}>STATION CONNECTED</div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', lineHeight: 1.4, opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{playbackSuccess}</div>
-              </div>
-            </div>
-          </motion.div>
-        )}
 
         {updateInfo && (
           <motion.div
@@ -955,8 +977,16 @@ export default function App() {
   }
 
   if (isDesktopLyricsWindow || isDesktopLyricsInitial) {
-    return <DesktopLyricBar />;
+    return (
+      <ErrorBoundary name="Desktop Lyrics">
+        <DesktopLyricBar />
+      </ErrorBoundary>
+    );
   }
 
-  return <AideoApp />;
+  return (
+    <ErrorBoundary name="Aideo Music Player">
+      <AideoApp />
+    </ErrorBoundary>
+  );
 }

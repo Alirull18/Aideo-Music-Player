@@ -11,7 +11,8 @@ import {
   Settings, Library, Radio, FolderSearch, RefreshCw, DownloadCloud, 
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
-  Disc, Layers, Activity, Minus, LayoutGrid
+  Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3,
+  Headphones, Heart, ArrowUp, ArrowDown, RotateCcw
 } from 'lucide-react';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
@@ -98,6 +99,7 @@ export function SettingsView() {
     validateAndSetListenbrainzToken, setListenbrainzToken, toggleListenbrainzScrobble,
     sidebarLastfmVisible, sidebarListenbrainzVisible,
     toggleSidebarLastfmVisible, toggleSidebarListenbrainzVisible,
+    sidebarNavItems, toggleSidebarNavItemVisibility, moveSidebarNavItem, resetSidebarNavItems,
     liquidBackgroundEnabled, toggleLiquidBackground,
     showSmartMixWidget, toggleSmartMixWidget,
     qobuzExperimentalEnabled, toggleQobuzExperimental,
@@ -155,6 +157,10 @@ export function SettingsView() {
     sidebarListenbrainzVisible: s.sidebarListenbrainzVisible,
     toggleSidebarLastfmVisible: s.toggleSidebarLastfmVisible,
     toggleSidebarListenbrainzVisible: s.toggleSidebarListenbrainzVisible,
+    sidebarNavItems: s.sidebarNavItems || [],
+    toggleSidebarNavItemVisibility: s.toggleSidebarNavItemVisibility,
+    moveSidebarNavItem: s.moveSidebarNavItem,
+    resetSidebarNavItems: s.resetSidebarNavItems,
     liquidBackgroundEnabled: s.liquidBackgroundEnabled,
     toggleLiquidBackground: s.toggleLiquidBackground,
     showSmartMixWidget: s.showSmartMixWidget,
@@ -543,17 +549,16 @@ export function SettingsView() {
   const settingsItems = [
     {
       id: 'theme',
-      title: 'Appearance Accent Theme',
-      description: 'Choose between dynamic accent colors extracted from song cover art or select from curated static HSL presets (Forest, Ocean, Mocha, etc.).',
+      title: 'Appearance Theme & Accent',
+      description: 'Select dynamic colors extracted from album art, OS system accent, or custom presets.',
       keywords: 'theme appearance style layout accent color green blue black white forest ocean mocha pink frappé custom palette colorpicker',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
           <div className="settings-ctrl-header-row">
-            <div>
-              <div className="settings-ctrl-title">Accent Styling Mode</div>
-              <div className="settings-ctrl-desc">Dynamic extraction from album cover art vs premium static colors.</div>
-            </div>
+            <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5 }}>
+              Mode
+            </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button 
                 className={`btn ${themeMode === 'dynamic' ? 'btn-primary' : 'btn-secondary'}`}
@@ -579,9 +584,9 @@ export function SettingsView() {
             </div>
           </div>
 
-          <div style={{ marginTop: 20 }}>
+          <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, marginBottom: 12 }}>
-              Curated Theme Presets
+              Presets
             </div>
             <div className="settings-theme-grid">
               {/* Dynamic / System chip */}
@@ -593,8 +598,8 @@ export function SettingsView() {
                   <Sparkles size={12} color="white" />
                 </div>
                 <div className="settings-chip-info">
-                  <div className="settings-chip-name">System Dynamic</div>
-                  <div className="settings-chip-desc">Flowing song accents</div>
+                  <div className="settings-chip-name">Album Dynamic</div>
+                  <div className="settings-chip-desc">Extracted from cover art</div>
                 </div>
               </div>
 
@@ -608,7 +613,7 @@ export function SettingsView() {
                 </div>
                 <div className="settings-chip-info">
                   <div className="settings-chip-name">Windows Accent</div>
-                  <div className="settings-chip-desc">Sync with OS Color</div>
+                  <div className="settings-chip-desc">Sync with OS color</div>
                 </div>
               </div>
 
@@ -643,7 +648,7 @@ export function SettingsView() {
                     <div className="settings-chip-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       Custom Color
                     </div>
-                    <div className="settings-chip-desc">Hex Palette Choice</div>
+                    <div className="settings-chip-desc">Hex color picker</div>
                   </div>
                   <input 
                     type="color" 
@@ -661,17 +666,14 @@ export function SettingsView() {
     },
     {
       id: 'dark-light-mode',
-      title: 'Dark / Light / System Mode',
-      description: 'Switch the player theme between the default glassmorphic dark mode, a clean light mode, or synchronize it with your operating system color scheme preferences.',
+      title: 'Color Scheme Mode',
+      description: 'Switch between Dark mode, Light mode, or follow your OS system preference.',
       keywords: 'dark light system theme toggle mode appearance white black transparent glass',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
           <div className="settings-ctrl-header-row">
-            <div>
-              <div className="settings-ctrl-title">Interface Theme Mode</div>
-              <div className="settings-ctrl-desc">Choose dark theme, light theme, or automatic OS matching.</div>
-            </div>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Theme Mode</span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button 
                 className={`btn ${colorScheme === 'dark' ? 'btn-primary' : 'btn-secondary'}`}
@@ -702,13 +704,13 @@ export function SettingsView() {
     {
       id: 'global-hotkeys-config',
       title: 'Global Hotkeys (System-Wide)',
-      description: 'Bind system-wide shortcuts that control playback even when Aideo is minimized to the tray or not focused.',
+      description: 'Control playback from anywhere in Windows, even when Aideo is minimized in the system tray.',
       keywords: 'global hotkey shortcut system wide minimized tray background play pause next prev control',
       tab: 'shortcuts',
       element: (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--glass-border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-            These work anywhere in Windows. Press Record, then a key combination with at least one modifier (Ctrl / Alt / Shift). Press Backspace while recording to clear a binding.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4 }}>
+            Press Record, then enter key combination with a modifier (Ctrl / Alt / Shift). Press Backspace while recording to clear.
           </div>
           {[
             { id: 'playPause', label: 'Play / Pause' },
@@ -733,7 +735,7 @@ export function SettingsView() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{action.label}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                    Works globally, even when Aideo is in the tray.
+                    Global shortcut
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -767,12 +769,12 @@ export function SettingsView() {
     },
     {
       id: 'keyboard-shortcuts-config',
-      title: 'Keyboard Shortcuts Remapper',
-      description: 'Remap custom keys to control player operations like Play/Pause, Next Track, Previous Track, Volume Up, and Volume Down.',
+      title: 'In-App Keyboard Shortcuts',
+      description: 'Customize keyboard shortcuts for player operations when the application window is focused.',
       keywords: 'keyboard shortcuts hotkeys customization bind keys control play pause next prev volume',
       tab: 'shortcuts',
       element: (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
             { id: 'playPause', label: 'Play / Pause' },
             { id: 'next', label: 'Next Track' },
@@ -800,7 +802,7 @@ export function SettingsView() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{action.label}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                    Trigger action when you press the key.
+                    Trigger action when pressed
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -834,67 +836,165 @@ export function SettingsView() {
     },
     {
       id: 'sidebar-visibility',
-      title: 'Sidebar Layout Configuration',
-      description: 'Choose which scrobbling services or pages are displayed in the main sidebar. Main features like Library, Aideo, Search, and Now Playing are locked for persistent navigation.',
-      keywords: 'sidebar menu visible toggle hide show lastfm stats listenbrainz clean layout configuration optimize layout settings',
+      title: 'Sidebar Navigation Items',
+      description: 'Customize visibility and reorder navigation items in the left sidebar.',
+      keywords: 'sidebar menu visible toggle hide show reorder order navigation customize lastfm stats listenbrainz clean layout configuration optimize layout settings',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
-          <div className="settings-ctrl-title">Sidebar Visibility Toggles</div>
-          <div className="settings-ctrl-desc" style={{ marginBottom: 20 }}>
-            Optimize your workspace by hiding optional panels. Essential core features are excluded and remain permanently visible.
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Core Locked Features Info (Excluded) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, background: 'var(--glass)', padding: '12px 16px', borderRadius: 10, border: '1px solid var(--glass-border)', marginBottom: 6 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                <strong style={{ color: 'var(--text)', display: 'block', marginBottom: 4 }}>Locked Core Views:</strong>
-                Library, Aideo, Aideo Search, Now Playing
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontStyle: 'italic' }}>
-                Always visible for core system navigation.
-              </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--glass)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--glass-border)', flexWrap: 'wrap', gap: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)', flex: 1, minWidth: 200 }}>
+                Customize which items appear in the sidebar and reorder them with the arrow buttons. At least one navigation item must remain active.
+              </span>
+              <button
+                className="btn-glass"
+                onClick={resetSidebarNavItems}
+                style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, cursor: 'pointer' }}
+                title="Reset sidebar navigation items to default order and visibility"
+              >
+                <RotateCcw size={12} />
+                <span>Reset to Default</span>
+              </button>
             </div>
 
-            {/* Last.fm Visibility Switch */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px' }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Last.fm Stats Tab</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show/hide your Last.fm statistics dashboard in the sidebar.</div>
-              </div>
-              <SlidingSwitch 
-                checked={sidebarLastfmVisible} 
-                onChange={toggleSidebarLastfmVisible} 
-              />
-            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              {sidebarNavItems.map((item, index) => {
+                let icon = <Sparkles size={16} />;
+                let subtitle = '';
+                if (item.id === 'aideo') {
+                  icon = <Sparkles size={16} />;
+                  subtitle = 'AI Music Companion & Discovery';
+                } else if (item.id === 'charts') {
+                  icon = <BarChart3 size={16} style={{ color: '#f59e0b' }} />;
+                  subtitle = 'Global Top Streaming Charts (Hybrid mode)';
+                } else if (item.id === 'library') {
+                  icon = <Library size={16} />;
+                  subtitle = 'All Tracks & Local Library';
+                } else if (item.id === 'nowplaying') {
+                  icon = <Headphones size={16} />;
+                  subtitle = 'Now Playing Fullscreen / Player View';
+                } else if (item.id === 'loved_streams') {
+                  icon = <Heart size={16} />;
+                  subtitle = 'Loved Online Streams & Radios (Hybrid mode)';
+                } else if (item.id === 'downloaded') {
+                  icon = <DownloadCloud size={16} />;
+                  subtitle = 'Offline Cached & Downloaded Songs';
+                } else if (item.id === 'aideo_lab') {
+                  icon = <Activity size={16} />;
+                  subtitle = 'Studio DSP, Equalizer & Audio Lab';
+                } else if (item.id === 'insights') {
+                  icon = <BarChart3 size={16} />;
+                  subtitle = 'Personal Listening Analytics & Insights';
+                } else if (item.id === 'lastfm') {
+                  icon = <Radio size={16} />;
+                  subtitle = 'Last.fm Scrobble Stats & Profile';
+                } else if (item.id === 'listenbrainz') {
+                  icon = <Radio size={16} style={{ color: 'rgba(235, 116, 59, 0.95)' }} />;
+                  subtitle = 'ListenBrainz Open Feed & Scrobbling';
+                }
 
-            {/* ListenBrainz Visibility Switch */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid var(--glass-border)' }}>
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>ListenBrainz Tab</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show/hide your ListenBrainz scrobbling feed and recommendations.</div>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <SlidingSwitch 
-                  checked={sidebarListenbrainzVisible} 
-                  onChange={toggleSidebarListenbrainzVisible} 
-                />
-              </div>
+                const isFirst = index === 0;
+                const isLast = index === sidebarNavItems.length - 1;
+                const visibleCount = sidebarNavItems.filter(i => i.visible).length;
+                const disableToggle = item.visible && visibleCount <= 1;
+
+                return (
+                  <div
+                    key={item.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '8px 12px',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      borderRadius: 8,
+                      border: '1px solid var(--glass-border)',
+                      opacity: item.visible ? 1 : 0.6,
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                      <div style={{ color: item.visible ? 'var(--text)' : 'var(--text-dim)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                        {icon}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{item.label}</span>
+                          {item.requiresHybrid && (
+                            <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontWeight: 600, textTransform: 'uppercase' }}>Hybrid</span>
+                          )}
+                          {item.requiresAuth && (
+                            <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: 'rgba(139, 92, 246, 0.15)', color: '#8b5cf6', fontWeight: 600, textTransform: 'uppercase' }}>Service</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {subtitle}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                      <div style={{ display: 'flex', gap: 2 }}>
+                        <button
+                          className="icon-btn"
+                          disabled={isFirst}
+                          onClick={() => moveSidebarNavItem(index, 'up')}
+                          style={{
+                            background: 'transparent',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4,
+                            padding: 4,
+                            color: isFirst ? 'var(--text-dim)' : 'var(--text)',
+                            cursor: isFirst ? 'not-allowed' : 'pointer',
+                            opacity: isFirst ? 0.3 : 1
+                          }}
+                          title="Move up"
+                        >
+                          <ArrowUp size={13} />
+                        </button>
+                        <button
+                          className="icon-btn"
+                          disabled={isLast}
+                          onClick={() => moveSidebarNavItem(index, 'down')}
+                          style={{
+                            background: 'transparent',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4,
+                            padding: 4,
+                            color: isLast ? 'var(--text-dim)' : 'var(--text)',
+                            cursor: isLast ? 'not-allowed' : 'pointer',
+                            opacity: isLast ? 0.3 : 1
+                          }}
+                          title="Move down"
+                        >
+                          <ArrowDown size={13} />
+                        </button>
+                      </div>
+                      <SlidingSwitch
+                        checked={item.visible}
+                        onChange={() => {
+                          if (!disableToggle) {
+                            toggleSidebarNavItemVisibility(item.id);
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Smart Mix Builder Visibility Switch */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px', borderTop: '1px solid var(--glass-border)' }}>
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Smart Mix Builder</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show or hide the smart playlist builder card in the Aideo tab.</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 4px', borderTop: '1px solid var(--glass-border)', marginTop: 6 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Smart Mix Builder Card</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Display smart mix generator card on home portal</div>
               </div>
-              <div style={{ marginTop: 8 }}>
-                <SlidingSwitch 
-                  checked={showSmartMixWidget} 
-                  onChange={toggleSmartMixWidget} 
-                />
-              </div>
+              <SlidingSwitch 
+                checked={showSmartMixWidget} 
+                onChange={toggleSmartMixWidget} 
+              />
             </div>
           </div>
         </div>
@@ -902,24 +1002,19 @@ export function SettingsView() {
     },
     {
       id: 'system-notifications',
-      title: 'System UI Notifications',
-      description: 'Enable or disable all visual overlay toast notifications across the application, or customize them between clean consumer alerts and raw technical developer diagnostics.',
+      title: 'Toast Notifications',
+      description: 'Configure overlay toast alerts and developer diagnostic messaging.',
       keywords: 'notifications toast popups alert messages appearance UI settings mute enable disable developer diagnostics debug error logs system level',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
-          <div className="settings-ctrl-title">Application Notifications Center</div>
-          <div className="settings-ctrl-desc" style={{ marginBottom: 20 }}>
-            Manage the behavior of real-time overlay notifications, alerts, and system-wide diagnostic messaging.
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {/* Notifications Enabled Toggle */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 2px' }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>System Overlay Toasts</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                  Show real-time toast alerts for actions, uploads, updates, and errors.
+                  Show real-time notifications for actions, playback events, and errors
                 </div>
               </div>
               <SlidingSwitch 
@@ -934,20 +1029,20 @@ export function SettingsView() {
                 display: 'flex', 
                 justifyContent: 'space-between', 
                 alignItems: 'center', 
-                padding: '8px 4px', 
+                padding: '6px 2px', 
                 borderTop: '1px solid var(--glass-border)',
                 opacity: notificationsEnabled ? 1 : 0.5,
                 transition: 'opacity 0.2s',
                 pointerEvents: notificationsEnabled ? 'auto' : 'none'
               }}
             >
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 6 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Developer Diagnostics Mode</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                  Prepend active file domains, internal function context, and raw telemetry to error messages.
+                  Include internal error context and telemetry in error alerts
                 </div>
               </div>
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginTop: 6 }}>
                 <SlidingSwitch 
                   checked={developerNotifications} 
                   onChange={toggleDeveloperNotifications} 
@@ -960,76 +1055,62 @@ export function SettingsView() {
     },
     {
       id: 'liquid-backdrop',
-      title: 'Interactive Liquid Art Backdrop',
-      description: 'Enable or disable a highly immersive, audio-reactive liquid backdrop in the background of Now Playing. Morphing colors shift harmonically based on active cover art, and pulse dynamically with music tempo and frequencies.',
+      title: 'Audio-Reactive Liquid Backdrop',
+      description: 'Render animated fluid gradient waves behind Now Playing synced to cover art colors and audio tempo (disabled in Low-Spec Mode).',
       keywords: 'liquid backdrop background dynamic webgl dynamic waves audio reactive animated visualizer settings option layout appearance',
       tab: 'appearance',
       element: (
-        <div className="settings-ctrl-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ flex: 1, paddingRight: 24 }}>
-              <div className="settings-ctrl-title">Dynamic Liquid Art Backdrop</div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                Renders custom organic morphing fluid waves in the background of the player. Synchronized in real-time with the track's audio spectrum frequencies and cover art colors. Bypassed automatically in Low-Spec Mode.
-              </div>
-            </div>
-            <SlidingSwitch 
-              checked={liquidBackgroundEnabled} 
-              onChange={toggleLiquidBackground} 
-            />
-          </div>
+        <div className="settings-ctrl-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Dynamic Fluid Waves</span>
+          <SlidingSwitch 
+            checked={liquidBackgroundEnabled} 
+            onChange={toggleLiquidBackground} 
+          />
         </div>
       )
     },
     {
       id: 'album-art-fit',
-      title: 'Album Art Aspect Ratio Handling',
-      description: 'Choose whether non-square artwork (singles, Japanese Obi covers, rectangular art) is displayed in full aspect fit with blurred ambient padding, or cropped to fill the square.',
+      title: 'Album Artwork Fit',
+      description: 'Choose how non-square covers are presented (contain with ambient background blur vs. crop to fill).',
       keywords: 'album art artwork aspect ratio fit cover contain blur ambient padding obi singles rectangular appearance',
       tab: 'appearance',
       element: (
-        <div className="settings-ctrl-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ flex: 1, paddingRight: 24 }}>
-              <div className="settings-ctrl-title">Album Artwork Aspect Fit</div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                <strong>Aspect Fit (Contain with Ambient Blur)</strong> displays non-square covers completely without cropping and renders a smooth blurred ambient backdrop. <strong>Aspect Fill (Cover)</strong> crops the artwork to fill the entire square container.
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 6, background: 'var(--glass-h)', padding: 4, borderRadius: 10 }}>
-              <button
-                onClick={() => setAlbumArtFit('contain')}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  background: albumArtFit === 'contain' ? 'var(--accent, #8b5cf6)' : 'transparent',
-                  color: albumArtFit === 'contain' ? 'white' : 'var(--text-dim)',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                Aspect Fit (Blur)
-              </button>
-              <button
-                onClick={() => setAlbumArtFit('cover')}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  background: albumArtFit === 'cover' ? 'var(--accent, #8b5cf6)' : 'transparent',
-                  color: albumArtFit === 'cover' ? 'white' : 'var(--text-dim)',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                Aspect Fill (Cover)
-              </button>
-            </div>
+        <div className="settings-ctrl-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Fitting Mode</span>
+          <div style={{ display: 'flex', gap: 6, background: 'var(--glass-h)', padding: 4, borderRadius: 10 }}>
+            <button
+              onClick={() => setAlbumArtFit('contain')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 8,
+                border: 'none',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: albumArtFit === 'contain' ? 'var(--accent, #8b5cf6)' : 'transparent',
+                color: albumArtFit === 'contain' ? 'white' : 'var(--text-dim)',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              Aspect Fit (Blur)
+            </button>
+            <button
+              onClick={() => setAlbumArtFit('cover')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 8,
+                border: 'none',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: albumArtFit === 'cover' ? 'var(--accent, #8b5cf6)' : 'transparent',
+                color: albumArtFit === 'cover' ? 'white' : 'var(--text-dim)',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              Aspect Fill (Crop)
+            </button>
           </div>
         </div>
       )
@@ -1037,53 +1118,41 @@ export function SettingsView() {
     {
       id: 'discovery-layout',
       title: 'Discovery Hub Layout',
-      description: 'Choose how the Discovery Hub organizes and presents your recommendations, recaps, and dynamic smart mixes.',
+      description: 'Choose how recommendations and smart mixes are organized in the Discovery Hub view.',
       keywords: 'discovery hub layout shelves unified multi-shelf feed mix playlists recommendations appearance UI',
       tab: 'appearance',
       element: (
-        <div className="settings-ctrl-card">
-          <div className="settings-ctrl-header-row">
-            <div>
-              <div className="settings-ctrl-title">Discovery Hub Architecture</div>
-              <div className="settings-ctrl-desc">
-                Organize your personalized music discovery into multi-category shelves or a single unified feed.
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button 
-                className={`btn ${discoveryLayout === 'shelves' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: 11, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
-                onClick={() => setDiscoveryLayout('shelves')}
-              >
-                <Layers size={13} />
-                Multi-Shelf
-              </button>
-              <button 
-                className={`btn ${discoveryLayout === 'unified' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: 11, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
-                onClick={() => setDiscoveryLayout('unified')}
-              >
-                <LayoutGrid size={13} />
-                Unified Feed
-              </button>
-            </div>
+        <div className="settings-ctrl-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Feed Style</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button 
+              className={`btn ${discoveryLayout === 'shelves' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ fontSize: 11, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={() => setDiscoveryLayout('shelves')}
+            >
+              <Layers size={13} />
+              Multi-Shelf
+            </button>
+            <button 
+              className={`btn ${discoveryLayout === 'unified' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ fontSize: 11, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={() => setDiscoveryLayout('unified')}
+            >
+              <LayoutGrid size={13} />
+              Unified Feed
+            </button>
           </div>
         </div>
       )
     },
     {
       id: 'aideo-page-design',
-      title: 'Aideo Home Page Layout & Experience',
-      description: 'Select your preferred visual architecture for the main Aideo home portal — from classic studio and editorial feed to command deck and ambient stage.',
+      title: 'Home Page Layout',
+      description: 'Select your visual layout for the main Aideo home screen.',
       keywords: 'aideo page layout design theme editorial command stage classic studio home portal appearance UI',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
-          <div className="settings-ctrl-title">Aideo Home Page Design Engine</div>
-          <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
-            Customize your primary music portal layout with 4 bespoke visual architectures designed for discovery, deep listening, and effortless curation.
-          </div>
-
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
             {[
               {
@@ -1270,17 +1339,12 @@ export function SettingsView() {
     },
     {
       id: 'playerbar-design',
-      title: 'Player Bar Style & Layout',
-      description: 'Choose your preferred bottom playback bar layout from popular modern music players, floating capsules, and audiophile deck styles.',
+      title: 'Player Bar Style',
+      description: 'Select the bottom playback bar layout: Classic, Floating Pill, Waveform, Minimal, or Vinyl.',
       keywords: 'player bar playbar layout style design floating island waveform minimal vinyl deck classic spotify apple music tidal roon modern appearance',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
-          <div className="settings-ctrl-title">Player Bar Theme & Layout Engine</div>
-          <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
-            Select a custom playback console tailored for your workflow — from modern floating capsules to full-deck waveform audiophile scrubbers.
-          </div>
-
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
             {[
               {
@@ -1470,40 +1534,33 @@ export function SettingsView() {
     },
     {
       id: 'playerbar-transparency',
-      title: 'Player Bar Glassmorphic Transparency',
-      description: 'Make the bottom player bar translucent with a frosted glass backdrop-blur effect.',
+      title: 'Player Bar Transparency',
+      description: 'Render the bottom playback bar with a translucent frosted glass background.',
       keywords: 'player bar playbar transparent transparency glass glassmorphism frosted acrylic blur backdrop appearance UI',
       tab: 'appearance',
       element: (
-        <div className="settings-ctrl-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ flex: 1, paddingRight: 24 }}>
-              <div className="settings-ctrl-title">Transparent Glass Playbar</div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                Render the bottom playback bar with a glassmorphic translucent background and backdrop blur, allowing dynamic liquid art, full artwork backdrops, and ambient light to shine through.
-              </div>
-            </div>
-            <SlidingSwitch 
-              checked={playerBarTransparent} 
-              onChange={togglePlayerBarTransparent} 
-            />
-          </div>
+        <div className="settings-ctrl-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Translucent Glass Playbar</span>
+          <SlidingSwitch 
+            checked={playerBarTransparent} 
+            onChange={togglePlayerBarTransparent} 
+          />
         </div>
       )
     },
     {
       id: 'typography',
-      title: 'Global Typography (Fonts)',
-      description: 'Set custom user interface font family across Aideo. Dynamically downloads from Google Fonts.',
+      title: 'Typography & Text Scaling',
+      description: 'Choose your interface font family and global text scaling percentage.',
       keywords: 'font text typography size scaling scale outfit inter roboto montserrat jetbrains playfair design appearance UI',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
           <div className="settings-two-col-row">
             <div style={{ flex: 1 }}>
-              <div className="settings-ctrl-title">Interface Font Family</div>
-              <div className="settings-ctrl-desc">Choose a Google Font to update all labels and lists.</div>
-              <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Font Family</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>Select primary interface typeface</div>
+              <div>
                 <select 
                   className="settings-select"
                   value={selectedFont}
@@ -1517,13 +1574,13 @@ export function SettingsView() {
             </div>
             
             <div style={{ flex: 1 }}>
-              <div className="settings-ctrl-title">Typography Scaling</div>
-              <div className="settings-ctrl-desc">Scale size from compact 80% to readable 120%.</div>
-              <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Scale Size</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>Adjust UI text scaling percentage</div>
+              <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 11, fontWeight: 600 }}>
-                  <span style={{ color: 'var(--text-dim)' }}>Compact</span>
+                  <span style={{ color: 'var(--text-dim)' }}>Compact (80%)</span>
                   <span style={{ color: 'var(--accent)' }}>{fontScale}%</span>
-                  <span style={{ color: 'var(--text-dim)' }}>Readable</span>
+                  <span style={{ color: 'var(--text-dim)' }}>Readable (120%)</span>
                 </div>
                 <input 
                   type="range"
@@ -1540,17 +1597,12 @@ export function SettingsView() {
     },
     {
       id: 'library-folders',
-      title: 'Offline Music Library Folders',
-      description: 'Define multiple absolute paths or folders containing offline MP3, FLAC, M4A, or WAV files. Sync instantly to database.',
+      title: 'Local Music Directories',
+      description: 'Folders monitored and indexed for local audio playback and tag metadata.',
       keywords: 'library folder folders directory path track music add remove scan scanDirs sync database sync status loader',
       tab: 'library',
       element: (
         <div className="settings-ctrl-card">
-          <div className="settings-ctrl-title">Tracked Audio Folders</div>
-          <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
-            Aideo scans these directories recursively, indexing tags and cached artwork inside the SQLite engine.
-          </div>
-
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
             {scanDirs.map(dir => (
               <div key={dir} className="settings-folder-item">
@@ -1589,34 +1641,29 @@ export function SettingsView() {
     },
     {
       id: 'disliked-songs',
-      title: 'Disliked Tracks Manager',
-      description: 'Manage and reset tracks you have disliked to restore them to autoplay recommendations and the Discovery Hub.',
+      title: 'Disliked Tracks',
+      description: 'Tracks marked as disliked are hidden from autoplay recommendations, radio seeds, and Discovery shelves.',
       keywords: 'dislike disliked hate hated clear reset remove recommendations discovery',
       tab: 'library',
       element: (
         <div className="settings-ctrl-card">
-          <div className="settings-ctrl-title">Disliked Tracks</div>
-          <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
-            Tracks marked as disliked are hidden from autoplay recommendations, radio seeds, and Discovery Hub shelves.
-          </div>
-          
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Clear all disliked tracks to restore them to recommendations:</span>
             <button 
               className="btn btn-secondary" 
               onClick={resetDislikedTracks}
               style={{ 
-                flex: 1, 
                 display: 'flex', 
                 alignItems: 'center', 
-                justifyContent: 'center', 
                 gap: 6, 
-                padding: '10px 16px',
+                padding: '8px 16px',
                 border: '1px solid rgba(244, 63, 94, 0.2)',
                 background: 'rgba(244, 63, 94, 0.05)',
-                color: '#f43f5e'
+                color: '#f43f5e',
+                fontSize: 12
               }}
             >
-              <Trash2 size={14} /> Reset All Disliked Tracks
+              <Trash2 size={13} /> Reset Disliked List
             </button>
           </div>
         </div>
@@ -1625,18 +1672,12 @@ export function SettingsView() {
 
     {
       id: 'cloud-connections',
-      title: 'Cloud Servers & Private Connections',
-      description: 'Connect self-hosted personal music libraries (Subsonic/Navidrome or Jellyfin) directly to Aideo Search for dynamic lossless streaming.',
+      title: 'Self-Hosted Cloud Servers',
+      description: 'Connect Subsonic, Navidrome, or Jellyfin servers to search and stream your personal music library.',
       keywords: 'cloud subsonic navidrome jellyfin self-hosted stream api private credentials server connection integration music host remote',
       tab: 'library',
       element: (
-        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div>
-            <div className="settings-ctrl-title">Cloud Servers & Private Connections</div>
-            <div className="settings-ctrl-desc">
-              Link your private media servers to stream your personal high-fidelity library directly. Dynamically merges with search feeds.
-            </div>
-          </div>
+        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
             {/* Subsonic / Navidrome Console */}
@@ -1869,18 +1910,12 @@ export function SettingsView() {
     },
     {
       id: 'tidal-connect',
-      title: 'Tidal Streaming',
-      description: 'Connect your Tidal account with secure device-code pairing to search, stream and download lossless FLAC tracks.',
+      title: 'Tidal Hi-Res Streaming',
+      description: 'Connect your Tidal account via device-code pairing for lossless FLAC streaming and library import.',
       keywords: 'tidal streaming connect login device code lossless hifi flac disconnect',
-      tab: 'library',
+      tab: 'plugins',
       element: (
-        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div>
-            <div className="settings-ctrl-title">Tidal Streaming</div>
-            <div className="settings-ctrl-desc">
-              Pair Aideo with your Tidal account to search the full catalog and download master-quality FLAC audio.
-            </div>
-          </div>
+        <div className="settings-ctrl-card">
           <TidalConnectCard />
         </div>
       )
@@ -1888,24 +1923,22 @@ export function SettingsView() {
     {
       id: 'qobuz-connect',
       title: 'Qobuz Streaming (Experimental)',
-      description: 'Enable the experimental Qobuz integration to search and stream lossless FLAC up to 192 kHz / 24-bit with a pasted session token.',
+      description: 'Connect Qobuz account via browser session token for studio-quality lossless streaming up to 192 kHz / 24-bit.',
       keywords: 'qobuz streaming experimental connect login token lossless hifi flac studio hi-res',
-      tab: 'library',
+      tab: 'plugins',
       element: (
-        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ flex: 1, paddingRight: 24 }}>
-                <div className="settings-ctrl-title">Enable Qobuz Streaming</div>
-                <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                  Experimental feature. Qobuz does not offer an official third-party sign-in API, so this integration uses your browser session token and may break if Qobuz changes their web player. Requires an active Qobuz subscription in a supported country.
-                </div>
+        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Enable Qobuz Integration</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Experimental web session bridge. Requires active Qobuz subscription.
               </div>
-              <SlidingSwitch
-                checked={qobuzExperimentalEnabled}
-                onChange={toggleQobuzExperimental}
-              />
             </div>
+            <SlidingSwitch
+              checked={qobuzExperimentalEnabled}
+              onChange={toggleQobuzExperimental}
+            />
           </div>
           {qobuzExperimentalEnabled && (
             <QobuzConnectCard />
@@ -1916,7 +1949,7 @@ export function SettingsView() {
     {
       id: 'lastfm-connect',
       title: 'Last.fm Audioscrobbler',
-      description: 'Connect your Last.fm profile with standard secure API token authorization. Set custom scrobble duration percentage thresholds.',
+      description: 'Connect your Last.fm profile to scrobble tracks and sync playback history.',
       keywords: 'last.fm lastfm scrobbler scrobbling connect stats threshold token disconnect sessions browser integration api key',
       tab: 'scrobbling',
       element: (
@@ -1928,7 +1961,7 @@ export function SettingsView() {
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>Last.fm Integration</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Synchronize listening counts, hearts, and histories.</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Synchronize listening counts, hearts, and histories</div>
               </div>
             </div>
 
@@ -2042,8 +2075,8 @@ export function SettingsView() {
     },
     {
       id: 'listenbrainz-connect',
-      title: 'ListenBrainz Scrobbler & Stats',
-      description: 'Connect your ListenBrainz profile to scrobble tracks automatically and receive personalized recommendations based on collaborative-filtering.',
+      title: 'ListenBrainz Scrobbler',
+      description: 'Submit listens and playback statistics to the open-source MetaBrainz catalog.',
       keywords: 'listenbrainz listen brainz scrobbler scrobbling connect stats threshold token disconnect sessions integration token user token validate',
       tab: 'scrobbling',
       element: (
@@ -2055,7 +2088,7 @@ export function SettingsView() {
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>ListenBrainz Integration</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Submit your listens to an open, non-profit community catalog.</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Submit your listens to an open, non-profit community catalog</div>
               </div>
             </div>
 
@@ -2167,49 +2200,42 @@ export function SettingsView() {
     },
     {
       id: 'audio-profile',
-      title: 'Audio Engine Quality Tier',
-      description: 'Configure your global audio output profile based on your processor capability and audio equipment.',
+      title: 'Audio Quality & DSP Profile',
+      description: 'Select a DSP profile based on your processor capability and listening equipment.',
       keywords: 'audio quality profile tier resampler buffer latency dither battery cpu high res performance sync',
       tab: 'audio',
       element: (
         <div className="settings-ctrl-card" style={{ padding: 20 }}>
-          <div style={{ marginBottom: 20 }}>
-            <div className="settings-ctrl-title">Audio Pipeline Performance & Quality Profiles</div>
-            <div className="settings-ctrl-desc">
-              Tailor Aideo's real-time DSP pipeline, resampler kernel, buffer latency, and visualizer resolution using simple presets or individual customizable variables.
-            </div>
-          </div>
-
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
               {
                 id: 'low',
-                name: 'Low Quality Preset',
-                desc: 'Optimized for battery savings, older processors, or high-latency bluetooth devices.',
+                name: 'Low Power',
+                desc: 'Optimized for battery savings, older processors, or Bluetooth audio.',
                 icon: <Laptop size={20} />,
                 bullets: [
-                  { label: 'Rubato Resampler', value: 'Linear (Cheap)', active: false, premium: false },
+                  { label: 'Rubato Resampler', value: 'Linear (Fast)', active: false, premium: false },
                   { label: 'Oversampling Factor', value: '128x precision', active: false, premium: false },
-                  { label: 'Sinc Kernel Length', value: '64 Taps (Low Latency)', active: false, premium: false },
+                  { label: 'Sinc Kernel Length', value: '64 Taps', active: false, premium: false },
                   { label: 'FFmpeg Transcode', value: '16-bit / 44.1kHz', active: false, premium: false }
                 ]
               },
               {
                 id: 'normal',
-                name: 'Normal Preset',
-                desc: 'Perfect balance of extreme audio fidelity and standard CPU/battery performance.',
+                name: 'Balanced',
+                desc: 'Optimal balance of audio fidelity and standard CPU efficiency.',
                 icon: <Volume2 size={20} />,
                 bullets: [
                   { label: 'Rubato Resampler', value: 'Cubic (Balanced)', active: true, premium: false },
                   { label: 'Oversampling Factor', value: '256x precision', active: true, premium: false },
-                  { label: 'Sinc Kernel Length', value: '128 Taps (Balanced)', active: true, premium: false },
+                  { label: 'Sinc Kernel Length', value: '128 Taps', active: true, premium: false },
                   { label: 'FFmpeg Transcode', value: '24-bit / 48.0kHz', active: true, premium: false }
                 ]
               },
               {
                 id: 'high',
-                name: 'High Preset',
-                desc: 'Bit-perfect, zero-compromise audio delivery with absolute math precision.',
+                name: 'Studio Reference',
+                desc: 'Bit-perfect fidelity with high-resolution 256-tap sinc kernel.',
                 icon: <Zap size={20} />,
                 bullets: [
                   { label: 'Rubato Resampler', value: 'Cubic (High-Res)', active: true, premium: true },
@@ -2220,8 +2246,8 @@ export function SettingsView() {
               },
               {
                 id: 'custom',
-                name: 'Custom Profile',
-                desc: 'Create a bespoke sound configuration by customizing individual variables below.',
+                name: 'Custom',
+                desc: 'Customized DSP parameters configured in the advanced panel below.',
                 icon: <Settings size={20} />,
                 bullets: [
                   { label: 'Rubato Resampler', value: dsp.resampler_interpolation === 'linear' ? 'Linear (Fast)' : 'Cubic (High-Res)', active: dsp.resampler_interpolation === 'cubic', premium: false },
@@ -2511,8 +2537,8 @@ export function SettingsView() {
     },
     {
       id: 'audio-hardware',
-      title: 'Soundcard Output & Hardware Mode',
-      description: 'Select ASIO/WASAPI device drivers, exclusive sound card access, upsampling rates, and TPDF dithering options.',
+      title: 'Audio Output Device & Hardware Mode',
+      description: 'Select audio output devices, WASAPI Exclusive mode, loudness normalization, and hardware upsampling.',
       keywords: 'audio device exclusive bit-perfect bypass dac driver hardware sound output asio wasapi dither tpdf resampler frequency rate latency soundstage spatial crossfeed',
       tab: 'audio',
       element: (
@@ -2521,13 +2547,40 @@ export function SettingsView() {
             {/* Device Selector */}
             <div style={{ flex: 1.2, borderRight: '1px solid var(--glass-border)', paddingRight: 24 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div className="settings-ctrl-title">Playback Output Device</div>
-                <button 
-                  onClick={() => fetchDevices()} 
-                  style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700, textTransform: 'uppercase' }}
-                >
-                  <RefreshCw size={10} /> Refresh Devices
-                </button>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Playback Output Device</div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <button
+                    onClick={() => {
+                      const diag = {
+                        currentDevice: currentDevice || 'Default',
+                        exclusive: playbackExclusive,
+                        exclusiveTiming: dsp.exclusive_mode_timing,
+                        bitPerfect: playbackBitPerfect,
+                        audioProfile: dsp.audio_profile,
+                        upsampleRate: dsp.upsample_rate,
+                        dither: dsp.dither,
+                        r128: dsp.r128_enabled,
+                        resampler: dsp.resampler_interpolation,
+                        oversampling: dsp.resampler_oversampling,
+                        sincLen: dsp.resampler_sinc_len,
+                        transcodeQuality: dsp.ffmpeg_transcode_quality
+                      };
+                      navigator.clipboard.writeText(JSON.stringify(diag, null, 2));
+                      window.dispatchEvent(new CustomEvent('ui-toast', {
+                        detail: { message: 'Audio diagnostics copied to clipboard!', type: 'success' }
+                      }));
+                    }}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}
+                  >
+                    <Copy size={10} /> Copy Diagnostics
+                  </button>
+                  <button 
+                    onClick={() => fetchDevices()} 
+                    style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700, textTransform: 'uppercase' }}
+                  >
+                    <RefreshCw size={10} /> Refresh Devices
+                  </button>
+                </div>
               </div>
 
               <div className="device-selector" style={{ position: 'relative', marginBottom: 20 }}>
@@ -2747,17 +2800,17 @@ export function SettingsView() {
     },
     {
       id: 'audio-crossfade',
-      title: 'DJ Audio Crossfade & Gapless Transitions',
-      description: 'Blend smoothly between queued songs with customizable 0 to 10 second crossfade transitions, eliminating silence pauses between tracks.',
+      title: 'Audio Crossfade & Transitions',
+      description: 'Blend smoothly between queued tracks with customizable transition durations.',
       keywords: 'audio crossfade transition gapless blend dj fade smooth duration seconds fadeout fadein queue',
       tab: 'audio',
       element: (
         <div className="settings-ctrl-card">
           <div className="settings-ctrl-header-row">
             <div>
-              <div className="settings-ctrl-title">DJ-Style Audio Crossfade</div>
-              <div className="settings-ctrl-desc">
-                Smoothly mix the tail of the current song with the intro of the next track in queue.
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Gapless & Crossfade Transition</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Mix outgoing audio tail with incoming track intro
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2836,8 +2889,8 @@ export function SettingsView() {
     },
     {
       id: 'system-behavior',
-      title: 'System Sleep & Discord rich presence',
-      description: 'Toggle system sleep prevention during playback, and show active track status directly on Discord rich profiles.',
+      title: 'System Sleep & Discord RPC',
+      description: 'Prevent PC sleep during active playback and broadcast now playing status to Discord profile.',
       keywords: 'system sleep behavior discord rich presence profiles listening music toggles prevent sleep keep awake',
       tab: 'system',
       element: (
@@ -2846,8 +2899,8 @@ export function SettingsView() {
             <div style={{ flex: 1, borderRight: '1px solid var(--glass-border)', paddingRight: 24 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div className="settings-ctrl-title">Prevent System Hibernation</div>
-                  <div className="settings-ctrl-desc">Keep Windows PC fully awake and active during background playback.</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Prevent System Sleep</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Keep Windows awake during active music playback</div>
                 </div>
                 <SlidingSwitch 
                   checked={keepAwake} 
@@ -2859,8 +2912,8 @@ export function SettingsView() {
             <div style={{ flex: 1, paddingLeft: 24 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div className="settings-ctrl-title">Discord Rich Presence (RPC)</div>
-                  <div className="settings-ctrl-desc">Broadcasting your listening cover art, title, and timeline status on Discord profile badges.</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Discord Rich Presence</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Display current song title, artist, and art on Discord</div>
                 </div>
                 <SlidingSwitch 
                   checked={discordEnabled} 
@@ -2874,8 +2927,8 @@ export function SettingsView() {
     },
     {
       id: 'stream-engine-settings',
-      title: 'Web Stream Engine & Pre-Buffering',
-      description: 'Configure the default streaming engine and look-ahead gapless background caching.',
+      title: 'Stream Downloader & Pre-Buffering',
+      description: 'Select your web stream engine and configure look-ahead gapless background caching.',
       keywords: 'stream engine youtube direct web stream yt-dlp reqwest fallback pre-buffer cache look-ahead seamless gapless',
       tab: 'system',
       element: (
@@ -2885,16 +2938,16 @@ export function SettingsView() {
             <div style={{ flex: 1, borderRight: '1px solid var(--glass-border)', paddingRight: 24 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div>
-                  <div className="settings-ctrl-title">Default Streaming Engine</div>
-                  <div className="settings-ctrl-desc">
-                    Choose the download method for Web Streams. yt-dlp offers fast unthrottled downloading, while Direct HTTP is lightweight.
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Streaming Engine</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    yt-dlp for reliable downloads, Direct HTTP for lightweight streaming
                   </div>
                 </div>
               </div>
               <div style={{ display: 'flex', background: 'var(--glass)', padding: 3, borderRadius: 8, border: '1px solid var(--glass-border)', gap: 4 }}>
                 {[
-                  { id: 'yt-dlp', label: 'Web Downloader (yt-dlp)', desc: 'Fast, unthrottled downloads' },
-                  { id: 'reqwest', label: 'Direct HTTP (reqwest)', desc: 'Lightweight direct audio streaming' }
+                  { id: 'yt-dlp', label: 'yt-dlp', desc: 'Fast, unthrottled downloads' },
+                  { id: 'reqwest', label: 'Direct HTTP', desc: 'Lightweight direct audio streaming' }
                 ].map(opt => (
                   <button
                     key={opt.id}
@@ -2923,9 +2976,9 @@ export function SettingsView() {
             <div style={{ flex: 1, paddingLeft: 24 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div className="settings-ctrl-title">Look-Ahead Gapless Pre-Buffering</div>
-                  <div className="settings-ctrl-desc">
-                    Seamlessly resolves and pre-downloads the next tracks in your queue while the current track is playing.
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Gapless Pre-Buffering</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    Pre-download upcoming queue tracks for seamless playback
                   </div>
                 </div>
                 <SlidingSwitch 
@@ -2940,27 +2993,27 @@ export function SettingsView() {
     },
     {
       id: 'aideo-connect',
-      title: 'Aideo Connect Remote Control',
-      description: 'Control your playback from any phone, tablet, or web browser on your local network.',
+      title: 'Aideo Connect (Remote Control)',
+      description: 'Control playback from your phone or browser on the local Wi-Fi network.',
       keywords: 'aideo connect remote control host web server phone tablet qr code web interface browser link network',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 250 }}>
-              <div className="settings-ctrl-title">Aideo Connect Hub</div>
-              <div className="settings-ctrl-desc" style={{ marginBottom: 16 }}>
-                Open this URL on your phone or scan the QR code to remotely play, pause, skip, seek, and adjust volume in real-time.
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Web Remote URL</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
+                Open this URL or scan the QR code to control playback from another device on your network:
               </div>
               {remoteUrl ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <a 
                     href={remoteUrl} 
                     target="_blank" 
                     rel="noreferrer"
                     style={{ 
                       color: 'var(--accent)', 
-                      fontSize: 15, 
+                      fontSize: 14, 
                       fontWeight: 600, 
                       textDecoration: 'underline',
                       wordBreak: 'break-all'
@@ -2968,12 +3021,9 @@ export function SettingsView() {
                   >
                     {remoteUrl}
                   </a>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                    Make sure your remote device is connected to the same Wi-Fi network.
-                  </div>
                 </div>
               ) : (
-                <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>
+                <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>
                   Starting Aideo Connect Server...
                 </div>
               )}
@@ -2982,8 +3032,8 @@ export function SettingsView() {
             {remoteUrl && (
               <div style={{ 
                 background: 'white', 
-                padding: 12, 
-                borderRadius: 16, 
+                padding: 10, 
+                borderRadius: 12, 
                 boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
                 display: 'flex',
                 alignItems: 'center',
@@ -2991,9 +3041,9 @@ export function SettingsView() {
                 border: '1px solid var(--glass-border)'
               }}>
                 <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(remoteUrl)}`} 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(remoteUrl)}`} 
                   alt="Aideo Connect QR Code"
-                  style={{ width: 140, height: 140, display: 'block' }}
+                  style={{ width: 120, height: 120, display: 'block' }}
                 />
               </div>
             )}
@@ -3003,17 +3053,17 @@ export function SettingsView() {
     },
     {
       id: 'cloud-autoplay-behavior',
-      title: 'Cloud Streams Autoplay Behavior',
-      description: 'Configure whether cloud or online streams (Subsonic/Jellyfin/Web Stream) should auto-play local library music when the cloud queue finishes.',
+      title: 'Cloud Queue Autoplay',
+      description: 'Continue playback with local library tracks when a remote cloud queue ends.',
       keywords: 'cloud stream autoplay local library subsonic navidrome jellyfin connection end stop transition webstream',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ flex: 1, paddingRight: 24 }}>
-              <div className="settings-ctrl-title">Autoplay Local Tracks after Cloud Stream</div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                If enabled, Aideo will seamlessly transition and autoplay your local library files once a Subsonic, Jellyfin, or online preview list finishes. If disabled, playback will cleanly stop at the end of the cloud queue.
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Autoplay Local Tracks after Cloud Stream</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Transition to local library files when a Subsonic, Jellyfin, or stream list completes
               </div>
             </div>
             <SlidingSwitch 
@@ -3033,37 +3083,30 @@ export function SettingsView() {
     },
     {
       id: 'autoplay-discovery-level',
-      title: 'Autoplay & Discovery Taste Profile',
-      description: 'Fine-tune how closely recommended stream tracks match your mainstream J-Pop/K-Pop/Pop offline library taste.',
+      title: 'Discovery & Radio Familiarity',
+      description: 'Adjust how closely recommendations adhere to your existing library vs. new artist discovery.',
       keywords: 'autoplay discovery level taste profile familiarity balanced J-Pop K-Pop Pop mainstream settings',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
-          <div style={{ marginBottom: 16 }}>
-            <div className="settings-ctrl-title">Discovery & Radio Taste Level</div>
-            <div className="settings-ctrl-desc">
-              Select how adventurous Aideo\'s Autoplay Radio and Discovery Hub should be when curating stream previews.
-            </div>
-          </div>
-          
           <div style={{ display: 'flex', gap: 10, background: 'rgba(0,0,0,0.12)', padding: 6, borderRadius: 12, border: '1px solid var(--glass-border)' }}>
             {[
               { 
                 id: 'familiarity', 
                 label: 'Familiarity-Heavy', 
-                desc: 'Plays songs by artists you already love in your library. Safe and comfortable.',
+                desc: 'Focus on artists already in your local library',
                 color: 'var(--accent)'
               },
               { 
                 id: 'balanced', 
                 label: 'Balanced Mix', 
-                desc: 'Premium blend of favorite local artists and fresh, highly related mainstream suggestions.',
+                desc: 'Blend of favorite library artists and related recommendations',
                 color: 'var(--accent)'
               },
               { 
                 id: 'discovery', 
                 label: 'Discovery-Heavy', 
-                desc: 'Actively pushes J-Pop/K-Pop/Pop gems you have never listened to before.',
+                desc: 'Prioritize new tracks and unplayed recommendations',
                 color: 'var(--accent)'
               }
             ].map(level => {
@@ -3110,24 +3153,24 @@ export function SettingsView() {
     },
     {
       id: 'performance-calibration',
-      title: 'Performance & Device Calibration',
-      description: 'Optimize Aideo for older, low-specification, or battery-sensitive hardware.',
+      title: 'Low-Spec Hardware Mode',
+      description: 'Reduce animation and DSP overhead for older processors and battery saving.',
       keywords: 'performance calibration low-spec low spec lag latency frame battery gpu cpu animations backdrop filter blur canvas shadow',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ flex: 1, paddingRight: 24 }}>
-              <div className="settings-ctrl-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>Low-Spec Hardware Mode</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Hardware Throttling Optimization</span>
                 {lowSpecMode && (
                   <span style={{ fontSize: 9, background: 'var(--accent)', color: 'white', padding: '2px 6px', borderRadius: 10, fontWeight: 700 }}>
                     ACTIVE
                   </span>
                 )}
               </div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                Suspends background audio FFT analysis threads, disables heavy real-time canvas shadow calculations, bypasses CSS backdrop-filter blurs, and forces Framer Motion layout vectors to resolve instantly. Perfect for conserving battery and reducing CPU/GPU overhead.
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Disables liquid visualizers, backdrop blur filters, and background FFT analysis to conserve CPU/GPU
               </div>
             </div>
             <SlidingSwitch 
@@ -3140,25 +3183,25 @@ export function SettingsView() {
     },
     {
       id: 'system-dependencies',
-      title: 'System Extensions & Dependencies Manager',
-      description: 'Manage optional external helper libraries to extend Aideo features or reclaim system space.',
+      title: 'External Dependencies',
+      description: 'Manage optional helper binaries (yt-dlp, FFmpeg) for web streams and audio transcoding.',
       keywords: 'system extensions dependencies manager ytdlp ffmpeg install uninstall delete space clean plugins tool',
       tab: 'plugins',
       element: <DependencyManagerPanel />
     },
     {
       id: 'app-onboarding-setup',
-      title: 'App Setup & Onboarding Wizard',
-      description: 'Launch the premium configuration walkthrough to adjust your core application mode (Local Only vs. Hybrid Explorer) and toggle multiple audio and integration preferences in a single spot.',
+      title: 'Setup Wizard',
+      description: 'Relaunch the initial configuration wizard for quick library and audio setup.',
       keywords: 'setup onboarding wizard reconfigure run config walkthrough local hybrid preferences calibration debug',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ flex: 1, paddingRight: 24 }}>
-              <div className="settings-ctrl-title">App Setup Wizard Walkthrough</div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                Run the glowing glassmorphic calibration walkthrough at any time. Tweak your offline directory libraries, exclusive audio drivers, and online statistics integrations on the fly.
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Relaunch Onboarding</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Step through folder selection, soundcard configuration, and scrobbling setup
               </div>
             </div>
             <button
@@ -3167,17 +3210,10 @@ export function SettingsView() {
                 setOnboardingCompleted(false);
                 window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Launching Setup Onboarding Wizard...', type: 'info' } }));
               }}
-              className="settings-btn"
+              className="btn btn-secondary"
               style={{
                 fontSize: 11,
-                padding: '8px 16px',
-                background: 'rgba(var(--accent-rgb), 0.15)',
-                color: 'var(--dynamic-accent, #8b5cf6)',
-                fontWeight: 700,
-                border: '1px solid rgba(var(--accent-rgb), 0.25)',
-                borderRadius: 8,
-                cursor: 'pointer',
-                transition: 'all 0.2s'
+                padding: '8px 16px'
               }}
             >
               Launch Setup Wizard
@@ -3189,17 +3225,17 @@ export function SettingsView() {
 
     {
       id: 'window-close-behavior',
-      title: 'Window Close & System Tray Integration',
-      description: 'Choose whether clicking the window close button minimizes Aideo to the system tray or exits the application.',
+      title: 'Close Button Action',
+      description: 'Choose whether closing the window minimizes to the system tray or exits.',
       keywords: 'tray system minimize close window background taskbar trayicon exit',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ flex: 1, paddingRight: 24 }}>
-              <div className="settings-ctrl-title">Minimize to System Tray on Close</div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                When enabled, clicking the window close (X) button will hide the window to the system tray so your music continues playing in the background. Re-launching Aideo or clicking the icon will restore the window.
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Minimize to System Tray on Close</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Keep music playing in the background when clicking the window close button
               </div>
             </div>
             <SlidingSwitch 
@@ -3224,32 +3260,21 @@ export function SettingsView() {
     },
     {
       id: 'cache-management',
-      title: 'Cache and Storage Management',
-      description: 'Clear temporary files, cached streaming audio files, and temporary url lookup parameters to reclaim local disk storage.',
+      title: 'Storage & Cache Cleanup',
+      description: 'Manage local streaming cache and temporary file storage limits.',
       keywords: 'cache clear clean delete temp storage cloud cache cloudcache youtube ytdlp temporary disk space usage size',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 20 }}>
             <div style={{ flex: '1 1 500px', minWidth: 300 }}>
-              <div className="settings-ctrl-title">Cache & Temp Storage Cleanup</div>
-              <div className="settings-ctrl-desc" style={{ marginTop: 4 }}>
-                Aideo stores four types of caches locally:
-                <ul style={{ margin: '8px 0 0 16px', padding: 0, listStyleType: 'disc', color: 'var(--text-dim)', fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <li><strong>Cloud Audio Stream Cache:</strong> Local copies of streamed Subsonic, Jellyfin, Web Stream, and Tidal tracks saved for offline access.</li>
-                  <li><strong>Web stream decoder temporary cache:</strong> Temporary files created during background URL extractions.</li>
-                  <li><strong>Temporary Decrypted Audio:</strong> Piped stream buffers in the system temp directory.</li>
-                  <li><strong>In-Memory URL Resolves:</strong> Cached Web Stream URLs to avoid rate limits.</li>
-                </ul>
-              </div>
-
               {/* Cache Size Limit Slider */}
-              <div style={{ marginTop: 20, background: 'var(--glass)', padding: '14px 18px', borderRadius: 10, border: '1px solid var(--glass-border)' }}>
+              <div style={{ background: 'var(--glass)', padding: '14px 18px', borderRadius: 10, border: '1px solid var(--glass-border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <div>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', display: 'block' }}>Smart Cache Limit Slider</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', display: 'block' }}>Local Stream Cache Limit</span>
                     <span style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2, display: 'block' }}>
-                      Current Storage Usage: <strong style={{ color: cacheInfo.bytes > cacheSizeLimit * 1024 * 1024 * 1024 ? '#f87171' : '#4ade80' }}>{cacheInfo.formatted}</strong> ({cacheInfo.count} files)
+                      Current usage: <strong style={{ color: cacheInfo.bytes > cacheSizeLimit * 1024 * 1024 * 1024 ? '#f87171' : '#4ade80' }}>{cacheInfo.formatted}</strong> ({cacheInfo.count} files)
                     </span>
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--accent)' }}>{cacheSizeLimit.toFixed(1)} GB limit</span>
@@ -3274,9 +3299,6 @@ export function SettingsView() {
                   <span>8.0 GB</span>
                   <span>10.0 GB</span>
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.3, opacity: 0.8 }}>
-                  Automatically prunes the least recently used / oldest stream caches when total usage exceeds your selected limit.
-                </div>
               </div>
             </div>
             
@@ -3289,14 +3311,10 @@ export function SettingsView() {
                     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to open cache folder: ${e}`, type: 'error' } }));
                   }
                 }}
-                className="settings-btn"
+                className="btn btn-secondary"
                 style={{
                   fontSize: 11,
-                  padding: '8px 16px',
-                  fontWeight: 700,
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
+                  padding: '8px 16px'
                 }}
               >
                 Open Cache Folder
@@ -3310,14 +3328,12 @@ export function SettingsView() {
                     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to clear cache: ${e}`, type: 'error' } }));
                   }
                 }}
-                className="settings-btn settings-btn-danger"
+                className="btn btn-secondary"
                 style={{
                   fontSize: 11,
                   padding: '8px 16px',
-                  fontWeight: 700,
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
+                  color: '#f43f5e',
+                  borderColor: 'rgba(244, 63, 94, 0.3)'
                 }}
               >
                 Clear Cache
@@ -3330,8 +3346,8 @@ export function SettingsView() {
 
     {
       id: 'auto-updater',
-      title: 'App Auto-Updater Updates',
-      description: 'Silent and manual release checks to query Aideo binaries directly from official GitHub repositories.',
+      title: 'Application Updates',
+      description: 'Check for and install updates from GitHub releases.',
       keywords: 'updater check update manual automatic github releases install progress downloads versions status logs error',
       tab: 'updates',
       element: (
@@ -3339,12 +3355,12 @@ export function SettingsView() {
           <div className="settings-update-card" style={{ background: 'transparent', border: 'none', padding: 0 }}>
             <div className="settings-update-flex">
               <div className="settings-update-text">
-                <div className="settings-ctrl-title">GitHub Release Auto-Updater</div>
-                <div className="settings-ctrl-desc">Verify your currently running copy and trigger standard delta patches immediately.</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>GitHub Release Updates</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Check if a newer version of Aideo is available</div>
               </div>
               <button
                 className="btn btn-primary"
-                style={{ padding: '10px 20px', fontSize: 12, width: 'auto' }}
+                style={{ padding: '8px 16px', fontSize: 11, width: 'auto' }}
                 disabled={updateChecking}
                 onClick={async () => {
                   setUpdateChecking(true);
@@ -3364,7 +3380,7 @@ export function SettingsView() {
                   }
                 }}
               >
-                {updateChecking ? 'Checking API...' : 'Check for Updates'}
+                {updateChecking ? 'Checking...' : 'Check for Updates'}
               </button>
             </div>
             {updateStatus && (
@@ -3378,8 +3394,8 @@ export function SettingsView() {
     },
     {
       id: 'user-authentication',
-      title: 'Account Authentication',
-      description: 'Register a new account or log in to sync your loved streams, playlists, stats, and settings across all devices.',
+      title: 'Account & Cloud Sync',
+      description: 'Log in to synchronize favorite streams, playlists, and preferences across devices.',
       keywords: 'login signup register account auth authenticate sync cloud user profiles email session credentials',
       tab: 'account',
       element: <AccountAuthPanel />
@@ -3408,10 +3424,10 @@ export function SettingsView() {
       {/* Header */}
       <div className="settings-view-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Settings size={26} className="settings-gear-icon" />
+          <Settings size={24} className="settings-gear-icon" />
           <h1 className="settings-main-title">Settings</h1>
         </div>
-        <p className="settings-main-subtitle">Fine-tune your local audio hardware, library directories, and premium visual interfaces.</p>
+        <p className="settings-main-subtitle">Manage playback behavior, audio hardware, appearance, and integrations.</p>
       </div>
 
       {/* Interactive Search Bar */}
@@ -3419,7 +3435,7 @@ export function SettingsView() {
         <Search size={18} className="settings-search-icon" />
         <input 
           type="text" 
-          placeholder="Search for themes, WASAPI hardware drivers, library sync options..." 
+          placeholder="Search settings, hardware drivers, shortcuts..." 
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="settings-search-input"
@@ -3525,25 +3541,18 @@ export function SettingsView() {
             </div>
           )}
 
-          {!searchQuery.trim() && activeTab !== 'updates' && activeTab !== 'plugins' && (
+          {!searchQuery.trim() && activeTab !== 'updates' && activeTab !== 'plugins' && activeTab !== 'account' && (
             <div style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              background: 'var(--glass)',
-              border: '1px solid var(--glass-border)',
-              padding: '14px 20px',
-              borderRadius: 12,
-              marginBottom: 10
+              padding: '4px 2px 12px 2px',
+              borderBottom: '1px solid var(--glass-border)',
+              marginBottom: 4
             }}>
-              <div>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  {activeTab} calibration panel
-                </span>
-                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                  Fine-tune or restore all parameters in this settings category.
-                </span>
-              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', textTransform: 'capitalize' }}>
+                {activeTab} Settings
+              </span>
               <button
                 onClick={() => {
                   if (activeTab === 'appearance') resetAppearance();
@@ -3553,10 +3562,10 @@ export function SettingsView() {
                   else if (activeTab === 'system') resetSystem();
                   else if (activeTab === 'shortcuts') resetShortcuts();
                 }}
-                className="settings-btn settings-btn-danger"
-                style={{ fontSize: 11, padding: '8px 16px' }}
+                className="btn btn-secondary"
+                style={{ fontSize: 11, padding: '4px 12px', color: 'var(--text-dim)' }}
               >
-                Reset Section to Defaults
+                Reset {activeTab} to Defaults
               </button>
             </div>
           )}
@@ -3771,7 +3780,17 @@ function DependencyManagerPanel() {
 }
 
 function AccountAuthPanel() {
-  const { user, signIn, signUp, signOut, syncToCloud, syncFromCloud, signInWithOAuth, syncing, authLoading } = useStore();
+  const { user, signIn, signUp, signOut, syncToCloud, syncFromCloud, signInWithOAuth, syncing, authLoading } = useStore(useShallow(s => ({
+    user: s.user,
+    signIn: s.signIn,
+    signUp: s.signUp,
+    signOut: s.signOut,
+    syncToCloud: s.syncToCloud,
+    syncFromCloud: s.syncFromCloud,
+    signInWithOAuth: s.signInWithOAuth,
+    syncing: s.syncing,
+    authLoading: s.authLoading,
+  })));
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

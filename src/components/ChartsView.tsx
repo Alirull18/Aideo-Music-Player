@@ -22,7 +22,8 @@ function parseDuration(raw: string | null | undefined): number {
 }
 
 export function ChartsView() {
-  const { playStream, addToQueue } = useStore();
+  const playStream = useStore((s) => s.playStream);
+  const addToQueue = useStore((s) => s.addToQueue);
 
   const [selectedGenre, setSelectedGenre] = useState<string>('global');
   const [selectedCountry, setSelectedCountry] = useState<string>('global');
