@@ -109,7 +109,26 @@ pub async fn get_artist_top_tracks(artist: &str) -> Result<Vec<Value>, String> {
     let mut tracks = Vec::new();
     if let Some(top_tracks) = json.get("toptracks").and_then(|tt| tt.get("track")).and_then(|t| t.as_array()) {
         for t in top_tracks {
-            tracks.push(t.clone());
+            let name = t.get("name").and_then(|n| n.as_str()).unwrap_or("Untitled Track");
+            let artist_name = t.get("artist")
+                .and_then(|a| {
+                    if let Some(s) = a.as_str() {
+                        Some(s.to_string())
+                    } else if let Some(n) = a.get("name").and_then(|n| n.as_str()) {
+                        Some(n.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| artist.to_string());
+            
+            let mut normalized = t.clone();
+            if let Some(obj) = normalized.as_object_mut() {
+                obj.insert("title".to_string(), serde_json::json!(name));
+                obj.insert("name".to_string(), serde_json::json!(name));
+                obj.insert("artist".to_string(), serde_json::json!(artist_name));
+            }
+            tracks.push(normalized);
         }
     }
     
