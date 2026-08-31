@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3, Download, Upload, Wand2, X } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3, Download, DownloadCloud, Upload, Wand2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
+import { SmartPlaylistBuilderModal } from './SmartPlaylistBuilderModal';
 
 export function Sidebar() {
   const { 
@@ -19,14 +20,12 @@ export function Sidebar() {
     setPlaybackError,
     lastfmSessionKey,
     listenbrainzToken,
-    sidebarLastfmVisible,
-    sidebarListenbrainzVisible,
     appMode,
     sidebarCollapsed,
     toggleSidebarCollapsed,
     smartPlaylists,
-    createSmartPlaylist,
-    deleteSmartPlaylist
+    deleteSmartPlaylist,
+    sidebarNavItems
   } = useStore(useShallow(s => ({
     view: s.view,
     setView: s.setView,
@@ -40,18 +39,16 @@ export function Sidebar() {
     setPlaybackError: s.setPlaybackError,
     lastfmSessionKey: s.lastfmSessionKey,
     listenbrainzToken: s.listenbrainzToken,
-    sidebarLastfmVisible: s.sidebarLastfmVisible,
-    sidebarListenbrainzVisible: s.sidebarListenbrainzVisible,
     appMode: s.appMode,
     sidebarCollapsed: s.sidebarCollapsed,
     toggleSidebarCollapsed: s.toggleSidebarCollapsed,
     smartPlaylists: s.smartPlaylists || [],
-    createSmartPlaylist: s.createSmartPlaylist,
     deleteSmartPlaylist: s.deleteSmartPlaylist,
+    sidebarNavItems: s.sidebarNavItems || [],
   })));
 
   useEffect(() => {
-    if (appMode === 'local' && (view === 'aideo_search' || view === 'loved_streams')) {
+    if (appMode === 'local' && view === 'loved_streams') {
       setView('library');
     }
   }, [appMode, view, setView]);
@@ -121,10 +118,6 @@ export function Sidebar() {
   };
 
   const [showSmartModal, setShowSmartModal] = useState(false);
-  const [smartName, setSmartName] = useState('');
-  const [smartField, setSmartField] = useState('artist');
-  const [smartOperator, setSmartOperator] = useState('contains');
-  const [smartValue, setSmartValue] = useState('');
 
   const handleExecuteSmart = async (sp: any) => {
     try {
@@ -134,19 +127,6 @@ export function Sidebar() {
     } catch (e: any) {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Execution failed: ${e}`, type: 'error' } }));
     }
-  };
-
-  const handleCreateSmart = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!smartName.trim() || !smartValue.trim()) return;
-    const rules = {
-      match_all: true,
-      rules: [{ field: smartField, operator: smartOperator, value: smartValue.trim() }]
-    };
-    await createSmartPlaylist(smartName.trim(), rules);
-    setShowSmartModal(false);
-    setSmartName('');
-    setSmartValue('');
   };
 
   return (
@@ -162,53 +142,82 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* Navigation */}
-      <div className={`nav-item ${view === 'aideo' ? 'active' : ''}`} onClick={() => setView('aideo')} title={sidebarCollapsed ? "Aideo" : undefined}>
-        <Sparkles size={18} />
-        {!sidebarCollapsed && <span>Aideo</span>}
-      </div>
-      {appMode === 'hybrid' && (
-        <div className={`nav-item ${view === 'charts' ? 'active' : ''}`} onClick={() => setView('charts')} title={sidebarCollapsed ? "Top Charts" : undefined}>
-          <BarChart3 size={18} style={{ color: '#f59e0b' }} />
-          {!sidebarCollapsed && <span>Top Charts</span>}
-        </div>
-      )}
+      {/* Dynamic Navigation */}
+      {sidebarNavItems.map((item) => {
+        if (!item.visible) return null;
+        if (item.requiresHybrid && appMode === 'local') return null;
+        if (item.id === 'lastfm' && !lastfmSessionKey) return null;
+        if (item.id === 'listenbrainz' && !listenbrainzToken) return null;
 
+        let icon = <Sparkles size={18} />;
+        let isActive = false;
+        let onClick = () => {};
 
-      <div className={`nav-item ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView('aideo_lab')} title={sidebarCollapsed ? "Aideo Lab" : undefined}>
-        <Activity size={18} />
-        {!sidebarCollapsed && <span>Aideo Lab</span>}
-      </div>
-      <div className={`nav-item ${view === 'library' && !currentPlaylist ? 'active' : ''}`} onClick={goLibrary} title={sidebarCollapsed ? "Library" : undefined}>
-        <Library size={18} />
-        {!sidebarCollapsed && <span>Library</span>}
-      </div>
-      {appMode === 'hybrid' && (
-        <div className={`nav-item ${view === 'loved_streams' ? 'active' : ''}`} onClick={() => { useStore.setState({ currentPlaylist: null }); loadLibrary(); setView('loved_streams'); }} title={sidebarCollapsed ? "Loved Streams" : undefined}>
-          <Heart size={18} />
-          {!sidebarCollapsed && <span>Loved Streams</span>}
-        </div>
-      )}
-      <div className={`nav-item ${view === 'nowplaying' ? 'active' : ''}`} onClick={() => setView('nowplaying')} title={sidebarCollapsed ? "Now Playing" : undefined}>
-        <Headphones size={18} />
-        {!sidebarCollapsed && <span>Now Playing</span>}
-      </div>
-      <div className={`nav-item ${view === 'insights' ? 'active' : ''}`} onClick={() => setView('insights')} title={sidebarCollapsed ? "Aideo Insights" : undefined}>
-        <BarChart3 size={18} />
-        {!sidebarCollapsed && <span>Aideo Insights</span>}
-      </div>
-      {lastfmSessionKey && sidebarLastfmVisible && (
-        <div className={`nav-item ${view === 'lastfm' ? 'active' : ''}`} onClick={() => setView('lastfm')} title={sidebarCollapsed ? "Last.fm Stats" : undefined}>
-          <Radio size={18} />
-          {!sidebarCollapsed && <span>Last.fm Stats</span>}
-        </div>
-      )}
-      {listenbrainzToken && sidebarListenbrainzVisible && (
-        <div className={`nav-item ${view === 'listenbrainz' ? 'active' : ''}`} onClick={() => setView('listenbrainz')} title={sidebarCollapsed ? "ListenBrainz" : undefined}>
-          <Radio size={18} style={{ color: 'rgba(235, 116, 59, 0.95)' }} />
-          {!sidebarCollapsed && <span>ListenBrainz</span>}
-        </div>
-      )}
+        switch (item.id) {
+          case 'aideo':
+            icon = <Sparkles size={18} />;
+            isActive = view === 'aideo';
+            onClick = () => setView('aideo');
+            break;
+          case 'charts':
+            icon = <BarChart3 size={18} style={{ color: '#f59e0b' }} />;
+            isActive = view === 'charts';
+            onClick = () => setView('charts');
+            break;
+          case 'library':
+            icon = <Library size={18} />;
+            isActive = view === 'library' && !currentPlaylist;
+            onClick = goLibrary;
+            break;
+          case 'nowplaying':
+            icon = <Headphones size={18} />;
+            isActive = view === 'nowplaying';
+            onClick = () => setView('nowplaying');
+            break;
+          case 'loved_streams':
+            icon = <Heart size={18} />;
+            isActive = view === 'loved_streams';
+            onClick = () => { useStore.setState({ currentPlaylist: null }); loadLibrary(); setView('loved_streams'); };
+            break;
+          case 'downloaded':
+            icon = <DownloadCloud size={18} />;
+            isActive = view === 'downloaded';
+            onClick = () => setView('downloaded');
+            break;
+          case 'aideo_lab':
+            icon = <Activity size={18} />;
+            isActive = view === 'aideo_lab';
+            onClick = () => setView('aideo_lab');
+            break;
+          case 'insights':
+            icon = <BarChart3 size={18} />;
+            isActive = view === 'insights';
+            onClick = () => setView('insights');
+            break;
+          case 'lastfm':
+            icon = <Radio size={18} />;
+            isActive = view === 'lastfm';
+            onClick = () => setView('lastfm');
+            break;
+          case 'listenbrainz':
+            icon = <Radio size={18} style={{ color: 'rgba(235, 116, 59, 0.95)' }} />;
+            isActive = view === 'listenbrainz';
+            onClick = () => setView('listenbrainz');
+            break;
+        }
+
+        return (
+          <div
+            key={item.id}
+            className={`nav-item ${isActive ? 'active' : ''}`}
+            onClick={onClick}
+            title={sidebarCollapsed ? item.label : undefined}
+          >
+            {icon}
+            {!sidebarCollapsed && <span>{item.label}</span>}
+          </div>
+        );
+      })}
 
       {/* Playlists */}
       {!sidebarCollapsed && (
@@ -348,75 +357,10 @@ export function Sidebar() {
       </div>
 
       {/* Smart Playlist Modal */}
-      {showSmartModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: 420, padding: 24, borderRadius: 16, background: '#121218', border: '1px solid var(--glass-border)', boxShadow: '0 20px 40px rgba(0,0,0,0.5)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 700, color: 'white' }}>
-                <Wand2 size={18} color="var(--accent)" /> New Smart Playlist
-              </div>
-              <button onClick={() => setShowSmartModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}><X size={18} /></button>
-            </div>
-            <form onSubmit={handleCreateSmart} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', display: 'block', marginBottom: 4 }}>PLAYLIST NAME</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 90s Rock / Loved Jazz"
-                  value={smartName}
-                  onChange={e => setSmartName(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-h)', color: 'white', fontSize: 13, outline: 'none' }}
-                  autoFocus
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', display: 'block', marginBottom: 4 }}>FIELD</label>
-                  <select
-                    value={smartField}
-                    onChange={e => setSmartField(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: '#1a1a24', color: 'white', fontSize: 12 }}
-                  >
-                    <option value="artist">Artist</option>
-                    <option value="title">Title</option>
-                    <option value="album">Album</option>
-                    <option value="format">Format</option>
-                    <option value="loved">Loved (1 or 0)</option>
-                    <option value="bpm">BPM</option>
-                  </select>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', display: 'block', marginBottom: 4 }}>CONDITION</label>
-                  <select
-                    value={smartOperator}
-                    onChange={e => setSmartOperator(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: '#1a1a24', color: 'white', fontSize: 12 }}
-                  >
-                    <option value="contains">Contains</option>
-                    <option value="equals">Equals</option>
-                    <option value="greater_than">Greater than</option>
-                    <option value="less_than">Less than</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', display: 'block', marginBottom: 4 }}>VALUE</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Miles / FLAC / 1"
-                  value={smartValue}
-                  onChange={e => setSmartValue(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--glass-border)', background: 'var(--glass-h)', color: 'white', fontSize: 13, outline: 'none' }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowSmartModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Create Rule</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <SmartPlaylistBuilderModal
+        isOpen={showSmartModal}
+        onClose={() => setShowSmartModal(false)}
+      />
     </aside>
   );
 }

@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
+import { toast } from '../utils/toast';
 import { notifyTidalAuthFailure } from './tidalSlice';
 import { notifyQobuzAuthFailure } from './qobuzSlice';
 
@@ -57,7 +58,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     exclusive: false,
     bit_perfect: false,
     dev_rate: 0,
-    driver_type: 'WASAPI'
+    driver_type: 'WASAPI',
+    is_buffering: false,
   },
   isMuted: false,
   mutedPrevVolume: (() => {
@@ -255,6 +257,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   pauseTrack: async () => {
     try {
+      const currentStatus = get().playback.status;
+      if (currentStatus === 'Paused' || currentStatus === 'Stopped') return;
+
       // Persist resume position before pausing so the next launch can continue where left off
       const pos = get().playback.position_secs;
       const path = get().playback.current_track;
@@ -277,22 +282,33 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   resumeTrack: async () => {
     try {
       const state = get();
+      if (state.playback.status === 'Playing') return;
       if (state.playback.status === 'Stopped') {
-        const targetPath = state.playback.current_track || state.playback.last_played_track;
+        const targetPath = state.playback.current_track || state.playback.last_played_track || state.currentTrack?.path;
         if (targetPath) {
           let t = state.tracks.find(x => pathsEqual(x.path, targetPath));
           if (!t) {
             t = state.queue.find(x => pathsEqual(x.path, targetPath));
           }
-          if (!t && state.currentTrack && pathsEqual(state.currentTrack.path, targetPath)) {
+          if (!t && state.currentTrack && (pathsEqual(state.currentTrack.path, targetPath) || !state.playback.current_track)) {
+            t = state.currentTrack;
+          }
+          if (!t && state.currentTrack) {
             t = state.currentTrack;
           }
 
           if (t) {
-            get().playTrack(t);
+            await get().playTrack(t);
             return;
           } else if (targetPath.startsWith('http')) {
-            get().playStream(targetPath);
+            const cachedMeta = onlineTrackCache.get(targetPath) || (resolvedPathMap.has(targetPath) ? onlineTrackCache.get(resolvedPathMap.get(targetPath)!) : null);
+            const meta = parseStreamMetadata(targetPath);
+            await get().playStream(targetPath, {
+              title: cachedMeta?.title || meta.title,
+              artist: cachedMeta?.artist || meta.artist,
+              duration: cachedMeta?.duration ?? meta.duration ?? undefined,
+              cover_url: cachedMeta?.cover_url || meta.cover_url || null,
+            });
             return;
           }
         }
@@ -304,6 +320,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         }
         // Truly nothing to resume locally — don't flip the UI to a fake "Playing".
         if (!state.chromecast_connected && !state.upnp_connected) {
+          toast.warning('Queue is empty — Select tracks from your library or search to start playback.', {
+            title: 'Playback',
+            action: {
+              label: 'Browse Library',
+              onClick: () => {
+                get().setView('library');
+              },
+            },
+          });
           return;
         }
       }
@@ -353,6 +378,18 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   setVolume: async (vol: number) => {
     const clampedVol = Math.max(0, Math.min(1, vol));
+    if (get().playback.bit_perfect && clampedVol < 1.0) {
+      toast.warning('Bit-Perfect Mode is active — Volume is fixed at 100% to preserve lossless dynamic range.', {
+        title: 'Bit-Perfect Mode',
+        dedupKey: 'bit-perfect-vol-warn',
+        action: {
+          label: 'Disable Bit-Perfect',
+          onClick: () => {
+            get().toggleBitPerfect();
+          },
+        },
+      });
+    }
     try {
       if (clampedVol > 0) {
         safeSetStorage('aideo_volume', String(clampedVol));
@@ -363,7 +400,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       await invoke('set_volume', { volume: clampedVol });
       set(s => ({
         playback: { ...s.playback, volume: clampedVol },
-        isMuted: clampedVol === 0 ? s.isMuted : false
+        isMuted: clampedVol === 0 ? true : false,
+        mutedPrevVolume: clampedVol > 0 ? clampedVol : s.mutedPrevVolume
       }));
     } catch (e) { console.error(e); }
   },
@@ -534,6 +572,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
 
       const currentPlayback = get().playback;
+      const sinceSeek = Date.now() - (currentPlayback.last_seek_time || 0);
+      if (sinceSeek < 350) {
+        status.position_secs = currentPlayback.position_secs;
+      }
+
       const statusChanged = currentPlayback.status !== status.status;
       if (
         statusChanged ||
@@ -642,6 +685,29 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       invoke('log_error', { msg: `pollStatus error: ${e}` }).catch(() => {});
     } finally {
       isPolling = false;
+    }
+  },
+
+  handlePlaybackStateChanged: (payload: any) => {
+    if (!payload) return;
+    const current = get().playback;
+    const newStatus = payload.status || current.status;
+    const newTrack = payload.current_track !== undefined ? payload.current_track : current.current_track;
+    const newPos = typeof payload.position_secs === 'number' ? payload.position_secs : current.position_secs;
+    const newVol = typeof payload.volume === 'number' ? payload.volume : current.volume;
+
+    set(s => ({
+      playback: {
+        ...s.playback,
+        status: newStatus,
+        current_track: newTrack,
+        position_secs: newPos,
+        volume: newVol,
+      }
+    }));
+
+    if (newTrack && typeof newTrack === 'string' && newTrack.trim().length > 0 && !pathsEqual(newTrack, current.current_track) && !pathsEqual(newTrack, get().currentTrack?.path)) {
+      get().handleTrackTransition(newTrack).catch(() => {});
     }
   },
 
@@ -850,7 +916,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const res = await invoke<boolean>('toggle_exclusive_mode');
       const nextMode = typeof res === 'boolean' ? res : !get().playback.exclusive;
       set(s => ({ playback: { ...s.playback, exclusive: nextMode } }));
-    } catch (e) { console.error(e); }
+      if (nextMode) {
+        toast.success('WASAPI Exclusive Mode Enabled — Outputting bit-perfect audio directly to your DAC (bypasses Windows Mixer).', {
+          title: 'Exclusive Mode',
+        });
+      } else {
+        toast.info('WASAPI Shared Mode Active — Standard Windows audio routing enabled.', {
+          title: 'Exclusive Mode',
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error(`Could not toggle exclusive mode: ${e}`, { title: 'Exclusive Mode' });
+    }
   },
 
   toggleBitPerfect: async () => {
@@ -862,7 +940,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await get().setVolume(1.0);
       }
       set(s => ({ playback: { ...s.playback, bit_perfect: nextMode } }));
-    } catch (e) { console.error(e); }
+      if (nextMode) {
+        toast.success('Bit-Perfect Mode Active — Volume is fixed at 100% and DSP effects are bypassed for pure bit-exact output.', {
+          title: 'Bit-Perfect Mode',
+        });
+      } else {
+        toast.info('Bit-Perfect Mode Disabled — Volume and DSP controls restored.', {
+          title: 'Bit-Perfect Mode',
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error(`Could not toggle bit-perfect mode: ${e}`, { title: 'Bit-Perfect' });
+    }
   },
 
   keepAwake: localStorage.getItem('aideo_keep_awake') === 'true',
@@ -873,6 +963,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_keep_awake', String(nextState));
     try {
       await invoke('toggle_keep_awake', { enable: nextState });
+      if (nextState) {
+        toast.info('Keep Awake Enabled — Preventing system sleep during active playback.', { title: 'Power Management' });
+      } else {
+        toast.info('Keep Awake Disabled — Standard Windows sleep timers restored.', { title: 'Power Management' });
+      }
     } catch (e) { console.error(e); }
   },
 
@@ -884,6 +979,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_discord_enabled', String(nextState));
     try {
       await invoke('set_discord_enabled', { enabled: nextState });
+      if (nextState) {
+        toast.success('Discord Rich Presence Enabled — Displaying current track on Discord profile.', { title: 'Discord Presence' });
+      } else {
+        toast.info('Discord Rich Presence Disabled.', { title: 'Discord Presence' });
+      }
     } catch (e) {
       console.error(e);
     }
@@ -939,6 +1039,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           get().setDSP(parsedDsp);
         } catch (_) {}
       }
+      toast.success(`Audio output routed to: ${devName || 'System Default Device'}`, {
+        title: 'Output Device',
+        dedupKey: `audio-device:${name}`,
+      });
     } catch (e) { console.error(e); }
   },
 
@@ -948,6 +1052,17 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ playbackRate: clamped });
     try {
       await invoke('set_playback_rate', { rate: clamped });
+      if (clamped !== 1.0) {
+        toast.info(`Playback speed: ${clamped.toFixed(2)}x (Pitch Preserved)`, {
+          title: 'Playback Speed',
+          dedupKey: 'playback-speed',
+        });
+      } else {
+        toast.info('Playback speed reset to 1.0x (Normal)', {
+          title: 'Playback Speed',
+          dedupKey: 'playback-speed',
+        });
+      }
     } catch (e) { console.error('Failed to set playback rate:', e); }
   },
 
@@ -1000,6 +1115,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       };
       await get().recordPlaybackTransition(virtualTrack);
       setOnlineTrackCache(url, virtualTrack);
+      localStorage.setItem('aideo_current_track', JSON.stringify(virtualTrack));
       set({
         coverArt: metadata?.cover_url || null,
         accentColor: '#8b5cf6',
@@ -1245,6 +1361,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // (excluding the paths recorded above) if autoplay is enabled.
       set({ queue: [] });
       localStorage.setItem('aideo_queue', JSON.stringify([]));
+
+      if (currentQueue.length > 0) {
+        const previousQueue = [...currentQueue];
+        toast.info(`Cleared ${previousQueue.length} track${previousQueue.length === 1 ? '' : 's'} from queue`, {
+          title: 'Queue',
+          action: {
+            label: 'Undo',
+            onClick: async () => {
+              set({ queue: previousQueue });
+              localStorage.setItem('aideo_queue', JSON.stringify(previousQueue));
+              for (const t of previousQueue) {
+                await chainQueueOperation(() => invoke('add_to_queue', { path: t.path }));
+              }
+              toast.success(`Restored ${previousQueue.length} track${previousQueue.length === 1 ? '' : 's'} to queue`, { title: 'Queue' });
+            },
+          },
+        });
+      }
     } catch (e) { console.error(e); }
   },
 

@@ -33,6 +33,25 @@ export interface CloudTrack {
   disc_number?: number | null;
 }
 
+export interface BatchDownloadItem {
+  url: string;
+  title: string;
+  artist: string;
+  album?: string;
+  cover_url?: string | null;
+  track_number?: number;
+  duration_raw?: string;
+}
+
+export interface BatchDownloadProgress {
+  completed: number;
+  total: number;
+  current_title: string;
+  percent: number;
+  is_done: boolean;
+  error?: string | null;
+}
+
 export interface YoutubeTrack {
   id: string;
   title: string;
@@ -229,6 +248,7 @@ export interface PlaybackState {
   file_rate?: number;
   file_ch?: number;
   file_format?: string | null;
+  is_buffering?: boolean;
 }
 
 export interface CustomPromptState {
@@ -248,8 +268,30 @@ export interface NetworkTelemetry {
   active_stream_total_bytes: number;
 }
 
+export type ViewMode = 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'aideo' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts' | 'downloaded';
+
+export type SidebarNavItemId = 
+  | 'aideo'
+  | 'charts'
+  | 'library'
+  | 'nowplaying'
+  | 'loved_streams'
+  | 'downloaded'
+  | 'aideo_lab'
+  | 'insights'
+  | 'lastfm'
+  | 'listenbrainz';
+
+export interface SidebarNavItemConfig {
+  id: SidebarNavItemId;
+  label: string;
+  visible: boolean;
+  requiresHybrid?: boolean;
+  requiresAuth?: 'lastfm' | 'listenbrainz';
+}
+
 export interface PlayerState {
-  view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts';
+  view: ViewMode;
   networkTelemetry: NetworkTelemetry | null;
   tracks: Track[];
   queue: Track[];
@@ -301,6 +343,7 @@ export interface PlayerState {
   qobuzSearching: boolean;
   qobuzSearchResults: Track[];
   checkQobuzStatus: () => Promise<void>;
+  openQobuzLoginWindow: () => Promise<void>;
   searchQobuz: (query: string) => Promise<void>;
   playQobuzResult: (track: Track) => Promise<void>;
   downloadQobuzTrack: (track: Track) => Promise<void>;
@@ -356,7 +399,7 @@ export interface PlayerState {
   disconnectUpnpDevice: () => Promise<void>;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
-  setView: (view: 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'tidal' | 'aideo' | 'aideo_search' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts') => void;
+  setView: (view: ViewMode) => void;
   setAppMode: (mode: 'local' | 'hybrid') => void;
   setOnboardingCompleted: (completed: boolean) => void;
   setShowOnboarding: (show: boolean) => void;
@@ -375,6 +418,11 @@ export interface PlayerState {
   toggleLowSpecMode: () => void;
   sidebarCollapsed: boolean;
   toggleSidebarCollapsed: () => void;
+  sidebarNavItems: SidebarNavItemConfig[];
+  setSidebarNavItems: (items: SidebarNavItemConfig[]) => void;
+  toggleSidebarNavItemVisibility: (id: SidebarNavItemId) => void;
+  moveSidebarNavItem: (index: number, direction: 'up' | 'down') => void;
+  resetSidebarNavItems: () => void;
   sidebarLastfmVisible: boolean;
   sidebarListenbrainzVisible: boolean;
   toggleSidebarLastfmVisible: () => void;
@@ -423,6 +471,7 @@ export interface PlayerState {
   toggleMute: () => Promise<void>;
   seek: (secs: number) => Promise<void>;
   pollStatus: () => Promise<void>;
+  handlePlaybackStateChanged: (payload: any) => void;
   toggleProMode: () => void;
   toggleControlCenter: () => void;
   resetProMode: () => void;
@@ -447,7 +496,7 @@ export interface PlayerState {
   deletePlaylist: (id: number) => Promise<void>;
   smartPlaylists: any[];
   fetchSmartPlaylists: () => Promise<void>;
-  createSmartPlaylist: (name: string, rules: any) => Promise<void>;
+  createSmartPlaylist: (name: string, rules: any) => Promise<number | undefined>;
   deleteSmartPlaylist: (id: number) => Promise<void>;
   addToPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
   removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
@@ -497,6 +546,8 @@ export interface PlayerState {
   loadSubsonicPassword: () => Promise<void>;
   connectJellyfin: (url: string, apiKey: string) => Promise<boolean>;
   disconnectJellyfin: () => void;
+  batchDownloadProgress: BatchDownloadProgress | null;
+  downloadBatchPlaylist: (items: BatchDownloadItem[], playlistName?: string) => Promise<number>;
 
   // Notification Preferences
   notificationsEnabled: boolean;
@@ -589,123 +640,4 @@ export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage';
 // these are migrated to 'classic' on load.
 export const LEGACY_AIDEO_PAGE_DESIGNS = ['bento', 'audiophile', 'cinematic'] as const;
 
-function rgbToHsl(r: number, g: number, b: number) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  let h = 0;
-  let s = 0;
-  const l = (max + min) / 2;
-
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      case b: h = (r - g) / d + 4; break;
-    }
-    h /= 6;
-  }
-  return { h: h * 360, s: s * 100, l: l * 100 };
-}
-
-function hslToRgb(h: number, s: number, l: number) {
-  h /= 360; s /= 100; l /= 100;
-  let r = l;
-  let g = l;
-  let b = l;
-
-  if (s !== 0) {
-    const hue2rgb = (p: number, q: number, t: number) => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1/6) return p + (q - p) * 6 * t;
-      if (t < 1/2) return q;
-      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-      return p;
-    };
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1/3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1/3);
-  }
-  return {
-    r: Math.round(r * 255),
-    g: Math.round(g * 255),
-    b: Math.round(b * 255)
-  };
-}
-
-export function extractDominantColor(dataUrl: string | null | undefined): Promise<string> {
-  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.trim()) {
-    return Promise.resolve('#8b5cf6');
-  }
-  return new Promise((resolve) => {
-    const img = new Image();
-    if (!dataUrl.startsWith('data:')) {
-      img.crossOrigin = 'anonymous';
-    }
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 10; canvas.height = 10;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { resolve('#8b5cf6'); return; }
-      ctx.drawImage(img, 0, 0, 10, 10);
-      const data = ctx.getImageData(0, 0, 10, 10).data;
-      
-      // 1. Group pixels into 3D RGB histogram bins (each channel divided by 32, giving 8^3 = 512 bins)
-      const bins: Record<string, { r: number, g: number, b: number, count: number }> = {};
-      for (let i = 0; i < data.length; i += 4) {
-        const pr = data[i];
-        const pg = data[i+1];
-        const pb = data[i+2];
-        const pa = data[i+3];
-        if (pa < 128) continue; // skip transparent pixels
-        
-        // Skip extreme whites and blacks to focus on actual colors
-        const l = (Math.max(pr, pg, pb) + Math.min(pr, pg, pb)) / 2;
-        if (l > 240 || l < 20) continue;
-        
-        const binKey = `${pr >> 5},${pg >> 5},${pb >> 5}`;
-        if (!bins[binKey]) {
-          bins[binKey] = { r: pr, g: pg, b: pb, count: 1 };
-        } else {
-          bins[binKey].r += pr;
-          bins[binKey].g += pg;
-          bins[binKey].b += pb;
-          bins[binKey].count++;
-        }
-      }
-      
-      // 2. Find the bin with the highest frequency count
-      let dominantColor = '#8b5cf6';
-      let maxCount = 0;
-      for (const key in bins) {
-        const bin = bins[key];
-        if (bin.count > maxCount) {
-          maxCount = bin.count;
-          const avgR = Math.round(bin.r / bin.count);
-          const avgG = Math.round(bin.g / bin.count);
-          const avgB = Math.round(bin.b / bin.count);
-          
-          // Adjust color for visibility on dark-themed layouts
-          const hsl = rgbToHsl(avgR, avgG, avgB);
-          
-          // Clamp lightness to 50% - 75% for optimum legibility on dark background
-          const targetL = Math.max(50, Math.min(75, hsl.l));
-          
-          // Boost saturation to at least 55% to keep it vibrant, or leave at 0 if mono grayscale
-          const targetS = hsl.s < 10 ? 0 : Math.max(55, Math.min(95, hsl.s));
-          
-          const adjustedRgb = hslToRgb(hsl.h, targetS, targetL);
-          dominantColor = `rgb(${adjustedRgb.r},${adjustedRgb.g},${adjustedRgb.b})`;
-        }
-      }
-      resolve(dominantColor);
-    };
-    img.onerror = () => resolve('#8b5cf6');
-    img.src = dataUrl;
-  });
-}
+export { extractAccentColor as extractDominantColor } from '../utils/colorExtractor';

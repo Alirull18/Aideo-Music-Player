@@ -137,13 +137,16 @@ export function pathsEqual(p1: string | null | undefined, p2: string | null | un
 }
 
 export function parseStreamMetadata(url: string | null) {
-  if (!url) return { title: 'Unknown Stream', artist: 'Online Stream', album: '' };
+  if (!url) return { title: 'Unknown Stream', artist: 'Online Stream', album: '', duration: null, cover_url: null, format: 'URL' };
   
   let lookupUrl = url;
   if (resolvedPathMap.has(url)) {
     lookupUrl = resolvedPathMap.get(url)!;
   }
   
+  const isYoutube = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('googlevideo.com');
+  const defaultFormat = isYoutube ? 'YouTube Direct' : 'URL';
+
   // Check both the raw stream URL and its resolved track path — metadata may be
   // cached under either key depending on where it was recorded.
   for (const key of [url, lookupUrl]) {
@@ -153,7 +156,10 @@ export function parseStreamMetadata(url: string | null) {
         return {
           title: cached.title,
           artist: cached.artist || 'Online Stream',
-          album: cached.album || ''
+          album: cached.album || '',
+          duration: cached.duration ?? null,
+          cover_url: cached.cover_url || null,
+          format: cached.format || defaultFormat,
         };
       }
     }
@@ -169,7 +175,10 @@ export function parseStreamMetadata(url: string | null) {
           return {
             title: cached.title,
             artist: cached.artist || 'Online Stream',
-            album: cached.album || ''
+            album: cached.album || '',
+            duration: cached.duration ?? null,
+            cover_url: cached.cover_url || null,
+            format: cached.format || defaultFormat,
           };
         }
       }
@@ -186,16 +195,21 @@ export function parseStreamMetadata(url: string | null) {
       return {
         title,
         artist: artist || 'Online Stream',
-        album: album || ''
+        album: album || '',
+        duration: null,
+        cover_url: null,
+        format: defaultFormat,
       };
     }
 
-    const isYoutube = u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be') || u.hostname.includes('googlevideo.com');
     if (isYoutube) {
       return {
         title: 'Web Audio Stream',
         artist: 'Web Stream',
-        album: ''
+        album: '',
+        duration: null,
+        cover_url: null,
+        format: 'YouTube Direct',
       };
     }
   } catch {}
@@ -203,8 +217,37 @@ export function parseStreamMetadata(url: string | null) {
   return {
     title: getStreamName(url),
     artist: 'Online Stream',
-    album: ''
+    album: '',
+    duration: null,
+    cover_url: null,
+    format: defaultFormat,
   };
+}
+
+export function isRadioStream(track: any, playbackTrackUrl?: string | null, duration?: number | null): boolean {
+  const path = track?.path || playbackTrackUrl || '';
+  const format = (track?.format || '').toUpperCase();
+  const isUrlFormat = format === 'URL';
+  const isOnline = path.startsWith('http://') || path.startsWith('https://');
+  const isYTMOrTidalOrCloud =
+    format === 'YOUTUBE DIRECT' ||
+    format === 'YOUTUBE WEB STREAM' ||
+    format === 'TIDAL FLAC' ||
+    format === 'QOBUZ FLAC' ||
+    format === 'SUBSONIC' ||
+    format === 'JELLYFIN' ||
+    path.includes('youtube.com') ||
+    path.includes('youtu.be') ||
+    path.includes('googlevideo.com') ||
+    path.includes('api.tidal.com') ||
+    path.includes('audio.tidal.com') ||
+    path.includes('qobuz.com');
+  
+  if (isYTMOrTidalOrCloud) return false;
+  if (!isOnline && !isUrlFormat) return false;
+
+  const trackDuration = track?.duration ?? duration ?? null;
+  return (!trackDuration || trackDuration <= 0);
 }
 
 // Matches placeholder/degraded stream titles: empty, known placeholders, raw URLs,

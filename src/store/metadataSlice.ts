@@ -11,7 +11,14 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
   lyricOffset: 0,
   lyricStatus: 'idle',
   lyricsDisplayMode: (safeGetStorage('aideo-lyrics-display-mode', 'karaoke') as LyricsDisplayMode) || 'karaoke',
-  coverArt: null,
+  coverArt: (() => {
+    try {
+      const tr = JSON.parse(localStorage.getItem('aideo_current_track') || 'null');
+      return tr?.cover_url || null;
+    } catch {
+      return null;
+    }
+  })(),
   isTranslating: false,
   showRomaji: safeGetStorage('aideo-show-romaji') === 'true',
   showTranslation: safeGetStorage('aideo-show-translation') === 'true',
