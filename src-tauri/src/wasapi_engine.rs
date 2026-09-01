@@ -145,7 +145,7 @@ where
         unsafe {
             let _ = windows::Win32::System::Threading::SetThreadPriority(
                 windows::Win32::System::Threading::GetCurrentThread(),
-                windows::Win32::System::Threading::THREAD_PRIORITY_HIGHEST,
+                windows::Win32::System::Threading::THREAD_PRIORITY_TIME_CRITICAL,
             );
         }
 
@@ -348,13 +348,7 @@ where
             }
         };
 
-        let client = match successful_client {
-            Some(c) => c,
-            None => {
-                let _ = tx.send(Err("Failed to acquire valid exclusive audio client".to_string()));
-                return;
-            }
-        };
+        let client = successful_client.unwrap();
 
         let is_polling = timing_str == "polling";
         let event = if !is_polling {
@@ -473,8 +467,8 @@ where
                 let sleep_ms = ((num_frames as f32 / negotiated_rate as f32) * 500.0) as u64;
                 std::thread::sleep(std::time::Duration::from_millis(std::cmp::max(sleep_ms, 2)));
 
-                let avail_frames = match client.get_current_padding() {
-                    Ok(p) => buffer_size.saturating_sub(p),
+                let avail_frames = match client.get_available_space_in_frames() {
+                    Ok(f) => f,
                     Err(_) => {
                         if !shutdown_clone.load(Ordering::Relaxed) {
                             on_error("WASAPI exclusive polling error".to_string());

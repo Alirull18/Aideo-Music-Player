@@ -82,7 +82,6 @@ fn process_chunk(chunk: &[PathBuf], app_handle: &AppHandle) -> Vec<Track> {
         .collect()
 }
 
-#[allow(dead_code)]
 pub fn scan_directory(dir: &str, app_handle: &AppHandle) -> Vec<Track> {
     let mut all_tracks = Vec::new();
     scan_directory_chunked(dir, app_handle, |chunk| {

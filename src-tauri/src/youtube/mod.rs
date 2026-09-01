@@ -546,43 +546,14 @@ pub async fn search_youtube_internal_impl(
             .trim()
             .to_string();
 
-        let (target_artist, target_title) = if let Some(idx) = query_cleaned.find(" - ") {
-            (query_cleaned[..idx].trim(), query_cleaned[idx + 3..].trim())
-        } else {
-            ("", query_cleaned.as_str())
-        };
-
-        let candidate_title_clean = clean_title(&title);
-        let target_title_clean = clean_title(target_title);
-
-        let mut title_match_score = 0.0;
-
-        if !target_title_clean.is_empty() {
-            if candidate_title_clean == target_title_clean {
-                title_match_score += 50.0;
-            } else if candidate_title_clean.starts_with(&target_title_clean) || target_title_clean.starts_with(&candidate_title_clean) {
-                title_match_score += 35.0;
-            } else if candidate_title_clean.contains(&target_title_clean) || target_title_clean.contains(&candidate_title_clean) {
-                title_match_score += 25.0;
-            } else {
-                let sim = fuzzy_title_similarity(&candidate_title_clean, &target_title_clean);
-                if sim >= 0.7 {
-                    title_match_score += 20.0 * sim;
-                } else if sim < 0.3 {
-                    // Severe penalty if this is a specific track search and title has no match!
-                    title_match_score -= 40.0;
-                }
-            }
+        if title_lower == query_cleaned {
+            title_score += 6.0;
+        } else if title_lower.starts_with(&query_cleaned) && title_lower.len() <= query_cleaned.len() + 5 {
+            title_score += 4.0;
+        } else if query_cleaned.contains(&title_lower) && title_lower.len() >= 4 {
+            title_score += 2.0;
         }
-
-        if !target_artist.is_empty() {
-            if artist_matches(&artist, target_artist) {
-                title_match_score += 10.0;
-            } else {
-                title_match_score -= 15.0;
-            }
-        }
-
+ 
         let mut priority_score = 0.0;
         if is_song_type {
             priority_score += 4.0; // Huge boost for standard Song audio
@@ -592,7 +563,6 @@ pub async fn search_youtube_internal_impl(
         }
         priority_score += views_score;
         priority_score += title_score;
-        priority_score += title_match_score;
  
         scored_tracks.push((YoutubeTrack {
             id: video_id,
@@ -1956,11 +1926,6 @@ fn run_ytdlp_with_progress(
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
 
-    let start_time = std::time::SystemTime::now();
-
-    let last_error = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let last_error_clone = last_error.clone();
-
     let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn yt-dlp: {}", e))?;
     let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to open stderr")?;
@@ -1970,21 +1935,6 @@ fn run_ytdlp_with_progress(
         let reader = BufReader::new(stderr);
         for l in reader.lines().map_while(Result::ok) {
             eprintln!("[yt-dlp-err] {}", l);
-            let trimmed = l.trim();
-            let lower = trimmed.to_lowercase();
-            if trimmed.starts_with("ERROR:")
-                || lower.contains("video unavailable")
-                || lower.contains("copyright")
-                || lower.contains("removed")
-                || lower.contains("private video")
-                || lower.contains("blocked")
-                || lower.contains("sign in")
-                || lower.contains("429")
-            {
-                if let Ok(mut lock) = last_error_clone.lock() {
-                    *lock = trimmed.to_string();
-                }
-            }
         }
     });
 
@@ -2046,17 +1996,16 @@ fn run_ytdlp_with_progress(
             }));
             Ok(valid_path)
         } else {
-            // Fallback: search music_dir for newly created file strictly within this run's time window
-            println!("[youtube] Path resolution from stdout failed. Initiating bounded directory scan...");
+            // Fallback: search music_dir for the newest file created in the last 15 seconds
+            println!("[youtube] Path resolution failed. Initiating fallback directory scan...");
             if let Ok(entries) = std::fs::read_dir(music_dir) {
                 let mut newest_file = None;
                 let mut newest_time = std::time::SystemTime::UNIX_EPOCH;
                 for entry in entries.flatten() {
                     if let Ok(meta) = entry.metadata() {
                         if meta.is_file() {
-                            if let Ok(created) = meta.created().or_else(|_| meta.modified()) {
-                                // Only accept files created after or within 2 seconds before this invocation started
-                                if created + std::time::Duration::from_secs(2) >= start_time && created > newest_time {
+                            if let Ok(created) = meta.created() {
+                                if created > newest_time {
                                     newest_time = created;
                                     newest_file = Some(entry.path());
                                 }
@@ -2065,53 +2014,30 @@ fn run_ytdlp_with_progress(
                     }
                 }
                 if let Some(path) = newest_file {
-                    let path_str = path.to_string_lossy().to_string();
-                    println!("[youtube] Bounded fallback matched newly written file: {}", path_str);
-                    let _ = app_handle.emit("ytdlp-download-progress", serde_json::json!({
-                        "url": url,
-                        "percent": 100.0,
-                        "downloaded_mb": 0.0,
-                        "total_mb": 0.0
-                    }));
-                    return Ok(path_str);
+                    if let Ok(elapsed) = std::time::SystemTime::now().duration_since(newest_time) {
+                        if elapsed.as_secs() < 15 {
+                            let path_str = path.to_string_lossy().to_string();
+                            println!("[youtube] Fallback matched newest file: {}", path_str);
+                            let _ = app_handle.emit("ytdlp-download-progress", serde_json::json!({
+                                "url": url,
+                                "percent": 100.0,
+                                "downloaded_mb": 0.0,
+                                "total_mb": 0.0
+                            }));
+                            return Ok(path_str);
+                        }
+                    }
                 }
             }
 
-            let captured_err = last_error.lock().map(|g| g.clone()).unwrap_or_default();
-            if !captured_err.is_empty() {
-                Err(clean_ytdlp_error(&captured_err))
-            } else {
-                Err(format!(
-                    "yt-dlp completed, but the downloaded file could not be resolved. Captured path was: '{}'",
-                    final_path_str
-                ))
-            }
+            Err(format!(
+                "yt-dlp completed successfully, but the downloaded file could not be resolved. Captured path was: '{}'",
+                final_path_str
+            ))
         }
     } else {
-        let captured_err = last_error.lock().map(|g| g.clone()).unwrap_or_default();
-        if !captured_err.is_empty() {
-            Err(clean_ytdlp_error(&captured_err))
-        } else {
-            Err("yt-dlp command exited with error status".to_string())
-        }
+        Err("yt-dlp command exited with error status".to_string())
     }
-}
-
-fn clean_ytdlp_error(raw: &str) -> String {
-    let mut clean = raw.trim();
-    if clean.starts_with("ERROR:") {
-        clean = clean["ERROR:".len()..].trim();
-    }
-    if clean.starts_with("[youtube]") {
-        clean = clean["[youtube]".len()..].trim();
-    }
-    if let Some(idx) = clean.find(": ") {
-        let prefix = &clean[..idx];
-        if !prefix.contains(' ') {
-            clean = clean[idx + 2..].trim();
-        }
-    }
-    clean.to_string()
 }
 
 use std::os::windows::process::CommandExt;
@@ -2219,15 +2145,6 @@ async fn add_downloaded_track_to_library(
     Ok(())
 }
 
-fn sanitize_filename_str(name: &str) -> String {
-    let invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
-    let sanitized: String = name
-        .chars()
-        .map(|c| if invalid_chars.contains(&c) { '_' } else { c })
-        .collect();
-    sanitized.trim().to_string()
-}
-
 #[tauri::command]
 pub async fn download_track(
     url: String,
@@ -2238,18 +2155,7 @@ pub async fn download_track(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    let target_url = if url.trim().starts_with("http://") || url.trim().starts_with("https://") {
-        url.trim().to_string()
-    } else {
-        match (&artist, &title) {
-            (Some(a), Some(t)) if !a.trim().is_empty() && !t.trim().is_empty() => format!("ytsearch1:{} - {}", a.trim(), t.trim()),
-            (_, Some(t)) if !t.trim().is_empty() => format!("ytsearch1:{}", t.trim()),
-            _ if !url.trim().is_empty() => format!("ytsearch1:{}", url.trim()),
-            _ => return Err("Cannot download: missing URL and track title".to_string()),
-        }
-    };
-
-    println!("[youtube] Initiating robust invisible yt-dlp download for target: {} (Raw: {}) at quality: {}", target_url, url, quality);
+    println!("[youtube] Initiating robust invisible yt-dlp download for URL: {} at quality: {}", url, quality);
     
     // 1. Auto-Installer setup
     let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -2286,17 +2192,8 @@ pub async fn download_track(
         
     std::fs::create_dir_all(&music_dir).map_err(|e| e.to_string())?;
     
-    // Build unique output template to prevent filename collisions
-    let sanitized_artist = artist.as_deref().map(sanitize_filename_str).unwrap_or_default();
-    let sanitized_title = title.as_deref().map(sanitize_filename_str).unwrap_or_default();
-    let output_filename = if !sanitized_artist.is_empty() && !sanitized_title.is_empty() 
-        && sanitized_artist != "Unknown Artist" && sanitized_title != "Untitled Track" && sanitized_title != "Untitled" 
-    {
-        format!("{} - {}.%(ext)s", sanitized_artist, sanitized_title)
-    } else {
-        "%(title)s.%(ext)s".to_string()
-    };
-    let output_template = music_dir.join(&output_filename).to_string_lossy().to_string();
+    // Build the output template to write directly to "Aideo Downloads" using native path joining for absolute backslash structure
+    let output_template = music_dir.join("%(title)s.%(ext)s").to_string_lossy().to_string();
     
     // Check if ffmpeg.exe exists to pass --ffmpeg-location
     let ffmpeg_path = aideo_data_dir.join("ffmpeg.exe");
@@ -2341,7 +2238,7 @@ pub async fn download_track(
     
     let ytdlp_path_c = ytdlp_path.clone();
     let args_1_c = args_1.clone();
-    let url_c = target_url.clone();
+    let url_c = url.clone();
     let app_handle_c = app_handle.clone();
     let music_dir_c = music_dir.clone();
     
@@ -2368,7 +2265,7 @@ pub async fn download_track(
     // Retry 1: updated yt-dlp with default adaptive arguments
     let ytdlp_path_c = ytdlp_path.clone();
     let args_1_c = args_1.clone();
-    let url_c = target_url.clone();
+    let url_c = url.clone();
     let app_handle_c = app_handle.clone();
     let music_dir_c = music_dir.clone();
     
@@ -2412,7 +2309,7 @@ pub async fn download_track(
 
     let ytdlp_path_c = ytdlp_path.clone();
     let args_retry_2_c = args_retry_2.clone();
-    let url_c = target_url.clone();
+    let url_c = url.clone();
     let app_handle_c = app_handle.clone();
     let music_dir_c = music_dir.clone();
     
@@ -2428,210 +2325,9 @@ pub async fn download_track(
         }
         Err(e) => {
             println!("[youtube] All yt-dlp attempts failed. Error: {}", e);
-            if !e.is_empty() && e != "yt-dlp command exited with error status" {
-                Err(e)
-            } else {
-                Err("YouTube rate-limited or blocked this request (HTTP 429 / PO-Token).".to_string())
-            }
+            Err("YouTube rate-limited or blocked this request (HTTP 429 / PO-Token). Please use the Lucida or Squid web bypass options on the track cards to download manually in 1 click!".to_string())
         }
     }
-}
-
-fn deserialize_artist_flexible<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize;
-    let val: Option<serde_json::Value> = Option::deserialize(deserializer)?;
-    match val {
-        Some(serde_json::Value::String(s)) => Ok(if s.trim().is_empty() { None } else { Some(s.trim().to_string()) }),
-        Some(serde_json::Value::Object(obj)) => {
-            if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
-                Ok(if name.trim().is_empty() { None } else { Some(name.trim().to_string()) })
-            } else {
-                Ok(None)
-            }
-        }
-        _ => Ok(None),
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchDownloadItem {
-    #[serde(default, alias = "url", alias = "stream_url", alias = "path")]
-    pub url: Option<String>,
-    #[serde(default, alias = "title", alias = "name", alias = "track")]
-    pub title: Option<String>,
-    #[serde(default, alias = "artist", alias = "artist_name", deserialize_with = "deserialize_artist_flexible")]
-    pub artist: Option<String>,
-    #[serde(default, alias = "album", alias = "album_title")]
-    pub album: Option<String>,
-    #[serde(default, alias = "cover_url", alias = "coverUrl")]
-    pub cover_url: Option<String>,
-    #[serde(default, alias = "track_number", alias = "trackNumber")]
-    pub track_number: Option<u32>,
-    #[serde(default, alias = "duration_raw", alias = "durationRaw")]
-    pub duration_raw: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BatchDownloadProgress {
-    pub completed: usize,
-    pub total: usize,
-    pub current_title: String,
-    pub percent: f64,
-    pub is_done: bool,
-    pub error: Option<String>,
-}
-
-#[tauri::command]
-pub async fn download_playlist_batch(
-    items: serde_json::Value,
-    quality: Option<String>,
-    playlist_name: Option<String>,
-    state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-) -> Result<usize, String> {
-    use tauri::Emitter;
-    use base64::Engine;
-
-    let parsed_items: Vec<BatchDownloadItem> = if let Ok(list) = serde_json::from_value::<Vec<BatchDownloadItem>>(items.clone()) {
-        list
-    } else if let serde_json::Value::Array(arr) = &items {
-        arr.iter().map(|val| {
-            if let Ok(item) = serde_json::from_value::<BatchDownloadItem>(val.clone()) {
-                item
-            } else if let serde_json::Value::String(s) = val {
-                BatchDownloadItem {
-                    url: Some(s.clone()),
-                    title: Some(s.clone()),
-                    ..Default::default()
-                }
-            } else {
-                Default::default()
-            }
-        }).collect()
-    } else if let serde_json::Value::String(s) = &items {
-        if let Ok(list) = serde_json::from_str::<Vec<BatchDownloadItem>>(s) {
-            list
-        } else {
-            vec![BatchDownloadItem { url: Some(s.clone()), title: Some(s.clone()), ..Default::default() }]
-        }
-    } else {
-        Vec::new()
-    };
-
-    let total = parsed_items.len();
-    if total == 0 {
-        return Ok(0);
-    }
-
-    println!("[youtube] Starting batch download of {} items for playlist: {:?}", total, playlist_name);
-
-    let quality_str = quality.unwrap_or_else(|| "high".to_string());
-    let mut successful_count = 0;
-
-    for (index, item) in parsed_items.into_iter().enumerate() {
-        let title_str = item.title.unwrap_or_else(|| "Untitled Track".to_string());
-        let artist_str = item.artist.unwrap_or_else(|| "Unknown Artist".to_string());
-        
-        let progress = BatchDownloadProgress {
-            completed: index,
-            total,
-            current_title: title_str.clone(),
-            percent: (index as f64 / total as f64) * 100.0,
-            is_done: false,
-            error: None,
-        };
-        let _ = app_handle.emit("download_batch_progress", &progress);
-
-        // Resolve clean direct URL & cover if not already direct
-        let raw_url = item.url.unwrap_or_default().trim().to_string();
-        let mut download_url = raw_url.clone();
-        let mut final_cover_url = item.cover_url.clone();
-
-        if !download_url.starts_with("http://") && !download_url.starts_with("https://") {
-            let query = format!("{} - {}", artist_str, title_str);
-            if let Ok(search_res) = search_youtube(query).await {
-                if let Some(best) = search_res.into_iter().next() {
-                    download_url = best.url;
-                    if final_cover_url.is_none() || final_cover_url.as_deref() == Some("") {
-                        final_cover_url = best.cover_url;
-                    }
-                }
-            }
-        }
-
-        let dl_res = download_track(
-            download_url,
-            quality_str.clone(),
-            Some(title_str.clone()),
-            Some(artist_str.clone()),
-            final_cover_url.clone(),
-            state.clone(),
-            app_handle.clone(),
-        ).await;
-
-        match dl_res {
-            Ok(saved_path) => {
-                successful_count += 1;
-                let mut update = crate::tag_editor::AudioTagUpdate {
-                    title: Some(title_str.clone()),
-                    artist: Some(artist_str.clone()),
-                    album: item.album.clone(),
-                    track_number: item.track_number,
-                    ..Default::default()
-                };
-
-                if let Some(ref c_url) = final_cover_url {
-                    if c_url.starts_with("http://") || c_url.starts_with("https://") {
-                        if let Ok(resp) = reqwest::get(c_url).await {
-                            if let Ok(bytes) = resp.bytes().await {
-                                let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                update.cover_base64 = Some(b64);
-                            }
-                        }
-                    }
-                }
-
-                let _ = crate::tag_editor::write_tags(&saved_path, &update);
-
-                // Re-sync updated tags with library database
-                let _ = add_downloaded_track_to_library(
-                    saved_path,
-                    Some(title_str.clone()),
-                    Some(artist_str.clone()),
-                    final_cover_url.clone(),
-                    &state,
-                ).await;
-            }
-            Err(e) => {
-                eprintln!("[youtube] Batch download error for '{}': {}", title_str, e);
-                let err_progress = BatchDownloadProgress {
-                    completed: index,
-                    total,
-                    current_title: title_str.clone(),
-                    percent: (index as f64 / total as f64) * 100.0,
-                    is_done: false,
-                    error: Some(format!("Could not download '{}': {}", title_str, e)),
-                };
-                let _ = app_handle.emit("download_batch_progress", &err_progress);
-            }
-        }
-    }
-
-    let final_progress = BatchDownloadProgress {
-        completed: total,
-        total,
-        current_title: "Completed".to_string(),
-        percent: 100.0,
-        is_done: true,
-        error: None,
-    };
-    let _ = app_handle.emit("download_batch_progress", &final_progress);
-
-    Ok(successful_count)
 }
 
 #[tauri::command]
@@ -4859,7 +4555,7 @@ mod tests {
     #[test]
     fn test_discovery_hub_loved_artist_and_skip_stats_apply() {
         let loved = vec!["Beloved".to_string()];
-        let _empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
+        let empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
         let mut skips = std::collections::HashMap::new();
         skips.insert("skipped one".to_string(), (4i64, 4i64));
         let profile = DiscoveryTasteProfile {

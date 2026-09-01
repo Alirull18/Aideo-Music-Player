@@ -1,53 +1,8 @@
 use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
-pub struct SqliteConnectionManager {
-    path: String,
-}
-
-impl SqliteConnectionManager {
-    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
-        Self {
-            path: path.as_ref().to_string_lossy().to_string(),
-        }
-    }
-}
-
-impl r2d2::ManageConnection for SqliteConnectionManager {
-    type Connection = Connection;
-    type Error = rusqlite::Error;
-
-    fn connect(&self) -> std::result::Result<Self::Connection, Self::Error> {
-        let conn = Connection::open(&self.path)?;
-        let _ = conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;");
-        Ok(conn)
-    }
-
-    fn is_valid(&self, conn: &mut Self::Connection) -> std::result::Result<(), Self::Error> {
-        conn.execute_batch("SELECT 1;")
-    }
-
-    fn has_broken(&self, _conn: &mut Self::Connection) -> bool {
-        false
-    }
-}
-
-pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
-
-pub fn init_db_pool(db_path: &str, max_size: u32) -> Result<DbPool> {
-    let _ = init_db(db_path)?;
-    let manager = SqliteConnectionManager::new(db_path);
-    let pool = r2d2::Pool::builder()
-        .max_size(max_size.max(4))
-        .build(manager)
-        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-    Ok(pool)
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Track {
-
     pub id: i32,
     pub path: String,
     pub title: Option<String>,
@@ -97,8 +52,6 @@ pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> boo
     false
 }
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 1;
-
 pub fn init_db(db_path: &str) -> Result<Connection> {
     let mut conn = Connection::open(db_path)?;
     
@@ -107,22 +60,19 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("PRAGMA synchronous = NORMAL", []);
     conn.execute("PRAGMA foreign_keys = ON", [])?;
     
-    let current_version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap_or(0);
-    if current_version < CURRENT_SCHEMA_VERSION {
-        // Create base table if missing
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS tracks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                path TEXT UNIQUE NOT NULL,
-                title TEXT,
-                artist TEXT,
-                album TEXT,
-                duration REAL,
-                format TEXT
-            )",
-            [],
-        )?;
-
+    // Create base table if missing
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT UNIQUE NOT NULL,
+            title TEXT,
+            artist TEXT,
+            album TEXT,
+            duration REAL,
+            format TEXT
+        )",
+        [],
+    )?;
 
     // Safe Schema Alterations
     if !column_exists(&conn, "tracks", "lyric_offset") {
@@ -386,69 +336,6 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         }
     }
 
-    // Migration: Recover cached cloud tracks present in CloudCache from playback_history
-    if let Some(data_dir) = dirs::data_dir() {
-        let cache_dir = data_dir.join("Aideo").join("CloudCache");
-        if cache_dir.exists() {
-            if let Ok(mut stmt) = conn.prepare(
-                "SELECT DISTINCT track_path, title, artist, album, duration, format 
-                 FROM playback_history 
-                 WHERE track_path IS NOT NULL AND track_path != ''"
-            ) {
-                if let Ok(rows) = stmt.query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<f64>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                    ))
-                }) {
-                    for r in rows.flatten() {
-                        let (path, title, artist, album, duration, format) = r;
-                        let hash = format!("{:x}", md5::compute(path.as_bytes()));
-                        let cache_file = cache_dir.join(format!("{}.cache", hash));
-                        if cache_file.exists() {
-                            let track_in_db: bool = conn
-                                .query_row(
-                                    "SELECT 1 FROM tracks WHERE path = ?1 OR path_hash = ?2 LIMIT 1",
-                                    rusqlite::params![&path, &hash],
-                                    |_| Ok(true),
-                                )
-                                .unwrap_or(false);
-                            if !track_in_db {
-                                let mut cover_url: Option<String> = None;
-                                if path.starts_with("http") {
-                                    if let Some(pos) = path.find("v=") {
-                                        let start = pos + 2;
-                                        let end = path[start..].find('&').map(|idx| start + idx).unwrap_or(path.len());
-                                        let id = &path[start..end];
-                                        if id.len() == 11 {
-                                            cover_url = Some(format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", id));
-                                        }
-                                    } else if path.contains("youtu.be/") {
-                                        if let Some(pos) = path.rfind('/') {
-                                            let id = &path[pos+1..];
-                                            if id.len() == 11 {
-                                                cover_url = Some(format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", id));
-                                            }
-                                        }
-                                    }
-                                }
-                                let _ = conn.execute(
-                                    "INSERT INTO tracks (path, title, artist, album, duration, format, loved, cover_url, path_hash) 
-                                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
-                                    rusqlite::params![path, title, artist, album, duration, format, cover_url, hash],
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // Add high-performance indexes for library filtering and analytics
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album)", []);
@@ -458,9 +345,6 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON playback_history(timestamp)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_path ON playback_history(track_path)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position)", []);
-
-    let _ = conn.execute(&format!("PRAGMA user_version = {}", CURRENT_SCHEMA_VERSION), []);
-    }
 
     Ok(conn)
 }
@@ -497,9 +381,9 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
             "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash, replaygain_gain)
              VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash, :replaygain_gain)
              ON CONFLICT(path) DO UPDATE SET
-                 title = COALESCE(tracks.title, excluded.title),
-                 artist = COALESCE(tracks.artist, excluded.artist),
-                 album = COALESCE(tracks.album, excluded.album),
+                 title = excluded.title,
+                 artist = excluded.artist,
+                 album = excluded.album,
                  duration = excluded.duration,
                  format = excluded.format,
                  cover_url = COALESCE(excluded.cover_url, tracks.cover_url),
@@ -607,36 +491,34 @@ pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energ
     Ok(())
 }
 
-pub(crate) fn row_to_track(row: &rusqlite::Row) -> Result<Track> {
-    let path: String = row.get(1)?;
-    let db_hash: Option<String> = row.get(16).ok();
-    let path_hash = db_hash.or_else(|| Some(format!("{:x}", md5::compute(path.as_bytes()))));
-    Ok(Track {
-        id: row.get(0)?,
-        path,
-        title: row.get(2)?,
-        artist: row.get(3)?,
-        album: row.get(4)?,
-        duration: row.get(5)?,
-        format: row.get(6)?,
-        lyric_offset: row.get(7).unwrap_or(0),
-        loved: Some(row.get(8).unwrap_or(0)),
-        disliked: Some(row.get(9).unwrap_or(0)),
-        cover_url: row.get(10).ok(),
-        path_hash,
-        bpm: row.get(11).ok(),
-        energy: row.get(12).ok(),
-        bass_ratio: row.get(13).ok(),
-        treble_ratio: row.get(14).ok(),
-        replaygain_gain: row.get(15).ok(),
-        track_number: row.get(17).ok(),
-        disc_number: row.get(18).ok(),
-    })
-}
-
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number FROM tracks")?;
-    let track_iter = stmt.query_map([], row_to_track)?;
+    let track_iter = stmt.query_map([], |row| {
+        let path: String = row.get(1)?;
+        let db_hash: Option<String> = row.get(16).ok();
+        let path_hash = db_hash.or_else(|| Some(format!("{:x}", md5::compute(path.as_bytes()))));
+        Ok(Track {
+            id: row.get(0)?,
+            path,
+            title: row.get(2)?,
+            artist: row.get(3)?,
+            album: row.get(4)?,
+            duration: row.get(5)?,
+            format: row.get(6)?,
+            lyric_offset: row.get(7).unwrap_or(0),
+            loved: Some(row.get(8).unwrap_or(0)),
+            disliked: Some(row.get(9).unwrap_or(0)),
+            cover_url: row.get(10).ok(),
+            path_hash,
+            bpm: row.get(11).ok(),
+            energy: row.get(12).ok(),
+            bass_ratio: row.get(13).ok(),
+            treble_ratio: row.get(14).ok(),
+            replaygain_gain: row.get(15).ok(),
+            track_number: row.get(17).ok(),
+            disc_number: row.get(18).ok(),
+        })
+    })?;
 
     let mut tracks = Vec::new();
     for track in track_iter {
@@ -644,81 +526,6 @@ pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
     }
     Ok(tracks)
 }
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PaginatedTracks {
-    pub tracks: Vec<Track>,
-    pub total: usize,
-    pub offset: u32,
-    pub limit: u32,
-}
-
-pub fn get_tracks_count(conn: &Connection, search: Option<&str>) -> Result<usize> {
-    if let Some(query) = search.filter(|s| !s.trim().is_empty()) {
-        let pattern = format!("%{}%", query.trim());
-        let mut stmt = conn.prepare("SELECT COUNT(*) FROM tracks WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1")?;
-        stmt.query_row(rusqlite::params![pattern], |row| row.get::<_, i64>(0).map(|c| c as usize))
-    } else {
-        let mut stmt = conn.prepare("SELECT COUNT(*) FROM tracks")?;
-        stmt.query_row([], |row| row.get::<_, i64>(0).map(|c| c as usize))
-    }
-}
-
-
-pub fn get_tracks_paginated(
-    conn: &Connection,
-    offset: u32,
-    limit: u32,
-    search: Option<&str>,
-    sort_by: Option<&str>,
-) -> Result<PaginatedTracks> {
-    let total = get_tracks_count(conn, search)?;
-    let order_clause = match sort_by.unwrap_or("id") {
-        "title" => "ORDER BY title COLLATE NOCASE ASC, id ASC",
-        "artist" => "ORDER BY artist COLLATE NOCASE ASC, album COLLATE NOCASE ASC, disc_number ASC, track_number ASC",
-        "album" => "ORDER BY album COLLATE NOCASE ASC, disc_number ASC, track_number ASC, title COLLATE NOCASE ASC",
-        "duration" => "ORDER BY duration ASC, id ASC",
-        "-title" => "ORDER BY title COLLATE NOCASE DESC, id DESC",
-        "-artist" => "ORDER BY artist COLLATE NOCASE DESC, album COLLATE NOCASE DESC",
-        "-album" => "ORDER BY album COLLATE NOCASE DESC",
-        "-duration" => "ORDER BY duration DESC, id DESC",
-        _ => "ORDER BY id ASC",
-    };
-
-    let tracks = if let Some(query) = search.filter(|s| !s.trim().is_empty()) {
-        let pattern = format!("%{}%", query.trim());
-        let sql = format!(
-            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number 
-             FROM tracks 
-             WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1 
-             {} 
-             LIMIT ?2 OFFSET ?3",
-            order_clause
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params![pattern, limit, offset], row_to_track)?;
-        rows.filter_map(|r| r.ok()).collect()
-    } else {
-        let sql = format!(
-            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number 
-             FROM tracks 
-             {} 
-             LIMIT ?1 OFFSET ?2",
-            order_clause
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params![limit, offset], row_to_track)?;
-        rows.filter_map(|r| r.ok()).collect()
-    };
-
-    Ok(PaginatedTracks {
-        tracks,
-        total,
-        offset,
-        limit,
-    })
-}
-
 
 pub fn create_playlist(conn: &Connection, name: &str) -> Result<i32> {
     conn.execute("INSERT INTO playlists (name) VALUES (?1)", params![name])?;
@@ -1019,25 +826,18 @@ pub fn execute_smart_rules(conn: &Connection, rules_json: &str) -> Result<Vec<Tr
             _ => continue,
         };
 
-        let is_numeric_col = matches!(rule.field.to_lowercase().as_str(), "loved" | "disliked" | "bpm" | "duration");
-
         match rule.operator.to_lowercase().as_str() {
             "contains" | "like" => {
                 where_clauses.push(format!("{} LIKE ?", col));
                 params.push(Box::new(format!("%{}%", rule.value)));
             }
             "equals" | "=" => {
-                if is_numeric_col {
-                    if let Ok(num) = rule.value.parse::<i32>() {
-                        where_clauses.push(format!("{} = ?", col));
-                        params.push(Box::new(num));
-                    } else if let Ok(num) = rule.value.parse::<f64>() {
-                        where_clauses.push(format!("{} = ?", col));
-                        params.push(Box::new(num));
-                    } else {
-                        where_clauses.push(format!("{} = ?", col));
-                        params.push(Box::new(rule.value.clone()));
-                    }
+                if let Ok(num) = rule.value.parse::<i32>() {
+                    where_clauses.push(format!("{} = ?", col));
+                    params.push(Box::new(num));
+                } else if let Ok(num) = rule.value.parse::<f64>() {
+                    where_clauses.push(format!("{} = ?", col));
+                    params.push(Box::new(num));
                 } else {
                     where_clauses.push(format!("{} = ?", col));
                     params.push(Box::new(rule.value.clone()));

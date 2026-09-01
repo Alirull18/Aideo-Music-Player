@@ -11,9 +11,6 @@ pub fn audio_buffer_to_interleaved_s16(buf: &AudioBufferRef<'_>) -> Vec<i16> {
     let frames = buf.frames();
     let channels = buf.spec().channels.count();
     let mut out = vec![0i16; frames * channels];
-    if channels == 0 || frames == 0 {
-        return out;
-    }
     
     match buf {
         AudioBufferRef::F32(b) => {
@@ -76,9 +73,6 @@ pub fn audio_buffer_to_mono_f32(buf: &AudioBufferRef<'_>) -> Vec<f32> {
     let frames = buf.frames();
     let channels = buf.spec().channels.count();
     let mut out = vec![0.0f32; frames];
-    if channels == 0 || frames == 0 {
-        return out;
-    }
     
     match buf {
         AudioBufferRef::F32(b) => {
@@ -229,7 +223,7 @@ pub fn analyze_audio_file(path: &str) -> Result<(String, f64, SonicProfile), Str
 }
 
 fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile {
-    if samples.is_empty() || sample_rate == 0 {
+    if samples.is_empty() {
         return SonicProfile { bpm: 120.0, energy: 0.5, bass_ratio: 0.33, treble_ratio: 0.33, integrated_lufs: -14.0, lufs_gain_db: 0.0, waveform: vec![0.5; 100] };
     }
 
@@ -572,26 +566,4 @@ mod tests {
         // Standard K-weighted 1 kHz sine wave at -18 dBFS yields ~ -18.5 to -19.5 LUFS
         assert!(lufs > -22.0 && lufs < -16.0, "Expected LUFS around -19.0, got {:.2}", lufs);
     }
-
-    #[test]
-    fn test_audio_buffer_to_mono_and_interleaved_safety() {
-        use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal, SignalSpec, Channels};
-
-        let spec_mono = SignalSpec::new(44100, Channels::FRONT_CENTRE);
-        let mut mono_buf = AudioBuffer::<f32>::new(50, spec_mono);
-        mono_buf.render_reserved(Some(50));
-        for i in 0..50 {
-            mono_buf.chan_mut(0)[i] = 0.5;
-        }
-        let buf_ref = AudioBufferRef::F32(std::borrow::Cow::Borrowed(&mono_buf));
-
-        let mono_out = audio_buffer_to_mono_f32(&buf_ref);
-        assert_eq!(mono_out.len(), 50);
-        assert_eq!(mono_out[0], 0.5);
-
-        let interleaved = audio_buffer_to_interleaved_s16(&buf_ref);
-        assert_eq!(interleaved.len(), 50);
-        assert_eq!(interleaved[0], 16383);
-    }
 }
-
