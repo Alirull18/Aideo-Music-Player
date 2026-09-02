@@ -309,7 +309,21 @@ function AideoApp() {
       if (state.playback.status === 'Playing' && delta > 0 && delta < 1.0) {
         const duration = state.currentTrack?.duration || Infinity;
         const currentPos = state.playback.position_secs || 0;
-        const newPos = Math.min(duration, currentPos + delta);
+        const backendPos = state.playback.backend_position_secs;
+
+        // PLL Rate Adjustment: if client clock leads hardware by > 1.2s,
+        // gently scale the forward delta so hardware catches up smoothly without visible jumps.
+        let rate = 1.0;
+        if (typeof backendPos === 'number' && currentPos > backendPos) {
+          const drift = currentPos - backendPos;
+          if (drift > 2.5) {
+            rate = 0.2;
+          } else if (drift > 1.2) {
+            rate = 0.7;
+          }
+        }
+
+        const newPos = Math.min(duration, currentPos + delta * rate);
         useStore.setState(s => ({
           playback: { ...s.playback, position_secs: newPos }
         }));

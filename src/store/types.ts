@@ -249,6 +249,7 @@ export interface PlaybackState {
   file_ch?: number;
   file_format?: string | null;
   is_buffering?: boolean;
+  backend_position_secs?: number;
 }
 
 export interface CustomPromptState {

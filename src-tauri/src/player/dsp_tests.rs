@@ -724,6 +724,23 @@ mod dsp_tests {
         assert_eq!(popped, 50);
         assert_eq!(received, chunk, "Samples across circular boundary must match input perfectly");
     }
+
+    #[test]
+    fn test_stream_prebuffer_watermark_condition() {
+        use crate::player::is_stream_prebuffer_ready;
+        // 2 seconds @ 44.1kHz = 88200 frames
+        let watermark = 88200;
+        
+        // Insufficient buffer and not complete -> Not ready
+        assert!(!is_stream_prebuffer_ready(1000, watermark, false));
+        
+        // Reached watermark -> Ready even if download still ongoing
+        assert!(is_stream_prebuffer_ready(88200, watermark, false));
+        assert!(is_stream_prebuffer_ready(100000, watermark, false));
+        
+        // Short track completed before watermark -> Ready
+        assert!(is_stream_prebuffer_ready(40000, watermark, true));
+    }
 }
 
 

@@ -3457,6 +3457,13 @@ fn background_decode(
     println!("[player-bg] Successfully completed pre-decoding RAM cache for {} (used_ffmpeg = {})!", path, use_ffmpeg);
 }
 
+pub fn is_stream_prebuffer_ready(
+    samples_len: usize,
+    min_watermark: usize,
+    is_complete: bool,
+) -> bool {
+    samples_len >= min_watermark || is_complete
+}
 
 fn play_file(
     path: &str,
@@ -3765,6 +3772,23 @@ fn play_file(
                 background_decode(path_str, s_clone, c_clone, sd_clone);
             });
             
+            // Wait for initial pre-buffer cushion if it's an actively growing stream (.tmp)
+            // to ensure the audio engine starts with a healthy safety margin against CDN throttling.
+            if resolved_path.contains(".tmp") {
+                let min_prebuffer_frames = file_rate * 2; // 2 seconds of audio
+                let wait_start = std::time::Instant::now();
+                while wait_start.elapsed() < std::time::Duration::from_secs(3) {
+                    let (len, is_done) = {
+                        let lock = safe_lock(&samples);
+                        (if lock.is_empty() { 0 } else { lock[0].len() }, complete.load(Ordering::SeqCst))
+                    };
+                    if is_stream_prebuffer_ready(len, min_prebuffer_frames, is_done) || decode_shutdown.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+            }
+
             (Some(samples), Some(complete))
         }
     } else {
@@ -4848,7 +4872,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                 } else {
                     // STILL LOADING
                     if pending[0].len() < chunk_size {
-                        std::thread::sleep(std::time::Duration::from_millis(2));
+                        std::thread::sleep(std::time::Duration::from_millis(10));
                     }
                 }
             } else {

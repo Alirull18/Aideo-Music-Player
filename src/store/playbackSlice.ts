@@ -574,7 +574,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const currentPlayback = get().playback;
       const sinceSeek = Date.now() - (currentPlayback.last_seek_time || 0);
       const sinceSkip = Date.now() - (currentPlayback.last_skip_time || 0);
-      if (sinceSeek < 1000 || sinceSkip < 1000) {
+      const rawBackendPos = status.position_secs;
+
+      if (sinceSeek < 1500 || sinceSkip < 1500) {
         status.position_secs = currentPlayback.position_secs;
       } else if (
         status.status === 'Playing' &&
@@ -582,12 +584,17 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         typeof currentPlayback.position_secs === 'number' &&
         typeof status.position_secs === 'number'
       ) {
-        // Prevent micro snap-backs caused by audio ring buffer delay vs smooth client clock
+        // Monotonic reconciliation:
+        // When playing, the displayed position must not snap backward due to ring buffer
+        // latency, decode batching, or clock drift (up to 5.0 seconds).
+        // If diff exceeds 5.0 seconds, this is a genuine large external seek/jump and is accepted.
         const diff = currentPlayback.position_secs - status.position_secs;
-        if (diff > 0 && diff < 1.5) {
+        if (diff > 0 && diff <= 5.0) {
           status.position_secs = currentPlayback.position_secs;
         }
       }
+
+      status.backend_position_secs = rawBackendPos;
 
       const statusChanged = currentPlayback.status !== status.status;
       if (
