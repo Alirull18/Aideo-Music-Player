@@ -3465,6 +3465,32 @@ pub fn is_stream_prebuffer_ready(
     samples_len >= min_watermark || is_complete
 }
 
+pub fn should_bypass_dsp_for_bit_perfect(is_bit_perfect: bool, dsp_enabled: bool) -> bool {
+    is_bit_perfect || !dsp_enabled
+}
+
+pub fn resolve_stream_volume(is_bit_perfect: bool, paused: bool, user_vol: f32) -> f32 {
+    if paused {
+        0.0
+    } else if is_bit_perfect {
+        1.0
+    } else {
+        user_vol.clamp(0.0, 1.0)
+    }
+}
+
+pub fn resolve_hardware_upsample_and_dither(
+    is_bit_perfect: bool,
+    requested_upsample: u32,
+    requested_dither: bool,
+) -> (u32, bool) {
+    if is_bit_perfect {
+        (0, false)
+    } else {
+        (requested_upsample, requested_dither)
+    }
+}
+
 fn play_file(
     path: &str,
     start_pos: f64,
@@ -3903,9 +3929,11 @@ fn play_file(
 
     let device_display_name = target.clone().unwrap_or_else(|| "Default Device".to_string());
     
+    let is_bp_mode = bit_perfect.load(Ordering::SeqCst);
     let (upsample_target, exclusive_timing, dither_enabled) = {
         let d = safe_lock(&dsp_state);
-        (d.upsample_rate, d.exclusive_mode_timing.clone(), d.dither)
+        let (u, dit) = resolve_hardware_upsample_and_dither(is_bp_mode, d.upsample_rate, d.dither);
+        (u, d.exclusive_mode_timing.clone(), dit)
     };
     let stream_allows_exclusive = stream_allows_exclusive_mode(&resolved_path);
     let configs_to_try = select_output_config(
@@ -3970,6 +3998,7 @@ fn play_file(
             let paused_cb = Arc::clone(&stream_paused);
             let volume_cb = Arc::clone(&stream_volume);
             let flush_cb = Arc::clone(&flush_signal);
+            let bp_cb = Arc::clone(&bit_perfect);
 
             let actual_dev_name = if device_display_name.starts_with("[WASAPI] ") {
                 device_display_name.trim_start_matches("[WASAPI] ").to_string()
@@ -3989,8 +4018,9 @@ fn play_file(
                 dither_enabled,
                 move |data: &mut [f32]| {
                     let paused = paused_cb.load(Ordering::Relaxed) != 1;
-                    let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                    let target_gain = if paused { 0.0 } else { vol };
+                    let is_bp = bp_cb.load(Ordering::Relaxed);
+                    let user_vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
+                    let target_gain = resolve_stream_volume(is_bp, paused, user_vol);
                     
                     if current_gain == 0.0 && target_gain == 0.0 {
                         data.fill(0.0);
@@ -4018,7 +4048,9 @@ fn play_file(
                         for ch in 0..ch_count {
                             let idx = f * ch_count + ch;
                             if idx < n {
-                                data[idx] *= current_gain;
+                                if !is_bp || current_gain != 1.0 {
+                                    data[idx] *= current_gain;
+                                }
                             } else {
                                 data[idx] = 0.0;
                             }
@@ -4064,6 +4096,7 @@ fn play_file(
         let paused_cb = Arc::clone(&stream_paused);
         let volume_cb = Arc::clone(&stream_volume);
         let flush_cb = Arc::clone(&flush_signal);
+        let bp_cb = Arc::clone(&bit_perfect);
         
         // Compute max ring size (3 seconds of audio at target rate)
         let rate = config.sample_rate as usize;
@@ -4084,6 +4117,7 @@ fn play_file(
                 let app_handle_cb = app_handle.clone();
                 let mut current_gain = 0.0f32;
                 let ch_count = config_inner.channels as usize;
+                let bp_cb_f32 = Arc::clone(&bp_cb);
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [f32], _| {
@@ -4107,8 +4141,9 @@ fn play_file(
                             });
                         }
                         let paused = paused_cb.load(Ordering::Relaxed) != 1;
-                        let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                        let target_gain = if paused { 0.0 } else { vol };
+                        let is_bp = bp_cb_f32.load(Ordering::Relaxed);
+                        let user_vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
+                        let target_gain = resolve_stream_volume(is_bp, paused, user_vol);
                         
                         if current_gain == 0.0 && target_gain == 0.0 {
                             data.fill(0.0);
@@ -4135,8 +4170,12 @@ fn play_file(
                             for ch in 0..ch_count {
                                 let idx = f * ch_count + ch;
                                 if idx < n {
-                                    let s = data[idx] * current_gain;
-                                    data[idx] = s.clamp(-1.0, 1.0);
+                                    let s = if !is_bp || current_gain != 1.0 {
+                                        (data[idx] * current_gain).clamp(-1.0, 1.0)
+                                    } else {
+                                        data[idx]
+                                    };
+                                    data[idx] = s;
                                 } else {
                                     data[idx] = 0.0;
                                 }
@@ -4159,6 +4198,7 @@ fn play_file(
                 let app_handle_cb = app_handle.clone();
                 let mut current_gain = 0.0f32;
                 let ch_count = config_inner.channels as usize;
+                let bp_cb_i16 = Arc::clone(&bp_cb);
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [i16], _| {
@@ -4178,8 +4218,9 @@ fn play_file(
                             }
                         });
                         let paused = paused_cb.load(Ordering::Relaxed) != 1;
-                        let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
-                        let target_gain = if paused { 0.0 } else { vol };
+                        let is_bp = bp_cb_i16.load(Ordering::Relaxed);
+                        let user_vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
+                        let target_gain = resolve_stream_volume(is_bp, paused, user_vol);
                         
                         if current_gain == 0.0 && target_gain == 0.0 {
                             data.fill(0);
@@ -4207,10 +4248,14 @@ fn play_file(
                             for ch in 0..ch_count {
                                 let idx = f * ch_count + ch;
                                 if idx < n {
-                                    let s = buf[idx] * current_gain;
+                                    let s = if !is_bp || current_gain != 1.0 {
+                                        buf[idx] * current_gain
+                                    } else {
+                                        buf[idx]
+                                    };
                                     let clamped = s.clamp(-1.0, 1.0);
                                     let multiplier = 32767.0; // i16::MAX
-                                    let val = if dither_enabled {
+                                    let val = if dither_enabled && !is_bp {
                                         let r1 = rand::random::<f32>() - 0.5;
                                         let r2 = rand::random::<f32>() - 0.5;
                                         clamped * multiplier + r1 + r2
@@ -4565,6 +4610,14 @@ fn play_file(
     
     // REPORT ACTUAL HARDWARE RATE
     current_dev_rate.store(dev_rate as u32, Ordering::Relaxed);
+
+    if is_bp_mode && dev_rate != file_rate {
+        println!("[player] Bit-Perfect Notice: Device running at {}Hz while file is {}Hz (resampling required)", dev_rate, file_rate);
+        let _ = app_handle.emit("ui-toast", serde_json::json!({
+            "message": format!("Audio device does not support native {}Hz for Bit-Perfect. Resampling to {}Hz.", file_rate, dev_rate),
+            "type": "warning"
+        }));
+    }
 
     let chunk_size = 1024usize;
 
@@ -4969,7 +5022,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                 }
             }
 
-            let is_bp = bp_now && file_rate == dev_rate && file_ch == dev_ch && !current_dsp.enabled;
+            let is_bp = bp_now && file_rate == dev_rate && file_ch == dev_ch;
             
             let (mut out_planar, n_out) = if is_bp {
                 (chunk_planar, chunk_size)
@@ -5071,7 +5124,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                     fft_buffer.clear();
                 }
 
-                if current_dsp.enabled {
+                if !should_bypass_dsp_for_bit_perfect(bp_now, current_dsp.enabled) {
                     for node in &mut nodes {
                         node.process(&mut processed, dev_rate as f32);
                     }
@@ -5111,7 +5164,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
 
             let mut interleaved = Vec::with_capacity(n_out * dev_ch);
             let mut out_idx = 0;
-            let mut dither_rng = if dsp_now.dither { Some(rand::rng()) } else { None };
+            let mut dither_rng = if !bp_now && dsp_now.dither { Some(rand::rng()) } else { None };
             use rand::Rng;
 
             while out_idx < n_out {

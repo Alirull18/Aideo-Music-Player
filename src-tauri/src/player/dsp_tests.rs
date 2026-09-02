@@ -741,6 +741,32 @@ mod dsp_tests {
         // Short track completed before watermark -> Ready
         assert!(is_stream_prebuffer_ready(40000, watermark, true));
     }
+
+    #[test]
+    fn test_bit_perfect_rules() {
+        use crate::player::{should_bypass_dsp_for_bit_perfect, resolve_stream_volume, resolve_hardware_upsample_and_dither};
+
+        // 1. DSP Bypass Rule: Bit-Perfect ALWAYS forces bypass, even if DSP is enabled
+        assert!(should_bypass_dsp_for_bit_perfect(true, true));
+        assert!(should_bypass_dsp_for_bit_perfect(true, false));
+        assert!(!should_bypass_dsp_for_bit_perfect(false, true)); // Run DSP when BP off and DSP on
+        assert!(should_bypass_dsp_for_bit_perfect(false, false));
+
+        // 2. Volume Rule: Bit-Perfect locks volume to 1.0 (unity gain) when not paused
+        assert_eq!(resolve_stream_volume(true, false, 0.45), 1.0);
+        assert_eq!(resolve_stream_volume(true, false, 0.0), 1.0);
+        assert_eq!(resolve_stream_volume(true, true, 0.45), 0.0); // Paused is silent
+        assert_eq!(resolve_stream_volume(false, false, 0.45), 0.45); // Normal volume
+
+        // 3. Upsample & Dither: Bit-Perfect disables upsampling and dither
+        let (upsample, dither) = resolve_hardware_upsample_and_dither(true, 192000, true);
+        assert_eq!(upsample, 0);
+        assert!(!dither);
+
+        let (upsample, dither) = resolve_hardware_upsample_and_dither(false, 192000, true);
+        assert_eq!(upsample, 192000);
+        assert!(dither);
+    }
 }
 
 
