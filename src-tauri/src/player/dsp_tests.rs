@@ -767,6 +767,56 @@ mod dsp_tests {
         assert_eq!(upsample, 192000);
         assert!(dither);
     }
+
+    #[test]
+    fn test_can_reuse_stream_session() {
+        use crate::player::can_reuse_stream_session;
+
+        let dev_a = Some("DAC-1".to_string());
+        let dev_b = Some("DAC-2".to_string());
+
+        // 1. Shared mode reuses session across different track sample rates (Rubato resamples)
+        assert!(can_reuse_stream_session(&dev_a, false, 48000, &dev_a, false, 44100, 0));
+        assert!(can_reuse_stream_session(&dev_a, false, 48000, &dev_a, false, 96000, 0));
+
+        // 2. Exclusive mode reuses session when rates match
+        assert!(can_reuse_stream_session(&dev_a, true, 44100, &dev_a, true, 44100, 0));
+        assert!(can_reuse_stream_session(&dev_a, true, 96000, &dev_a, true, 96000, 0));
+
+        // 3. Exclusive mode rejects session when track rates differ (requires DAC clock reset)
+        assert!(!can_reuse_stream_session(&dev_a, true, 44100, &dev_a, true, 96000, 0));
+        assert!(!can_reuse_stream_session(&dev_a, true, 96000, &dev_a, true, 44100, 0));
+
+        // 4. Mode mismatch (shared vs exclusive) rejects session
+        assert!(!can_reuse_stream_session(&dev_a, false, 44100, &dev_a, true, 44100, 0));
+        assert!(!can_reuse_stream_session(&dev_a, true, 44100, &dev_a, false, 44100, 0));
+
+        // 5. Device change rejects session
+        assert!(!can_reuse_stream_session(&dev_a, false, 48000, &dev_b, false, 48000, 0));
+    }
+
+    #[test]
+    fn test_trim_encoder_delay_and_padding() {
+        use crate::player::trim_encoder_delay_and_padding;
+
+        // 2-channel buffer with 1000 samples
+        let mut samples = vec![
+            (0..1000).map(|i| i as f32).collect::<Vec<f32>>(),
+            (0..1000).map(|i| i as f32).collect::<Vec<f32>>(),
+        ];
+
+        // Trim 100 delay frames (primer) and 50 padding frames
+        trim_encoder_delay_and_padding(&mut samples, 100, 50);
+
+        assert_eq!(samples[0].len(), 850);
+        assert_eq!(samples[1].len(), 850);
+        // First sample should now be what was previously index 100
+        assert_eq!(samples[0][0], 100.0);
+        assert_eq!(samples[1][0], 100.0);
+        // Last sample should now be what was index 949 (1000 - 50 - 1)
+        assert_eq!(samples[0][849], 949.0);
+        assert_eq!(samples[1][849], 949.0);
+    }
 }
 
 
