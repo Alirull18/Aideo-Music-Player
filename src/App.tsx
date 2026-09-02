@@ -37,23 +37,24 @@ import { DesktopLyricBar } from './components/DesktopLyricBar';
 import { BrowserCallbackLanding } from './components/BrowserCallbackLanding';
 import { OauthChildCallback } from './components/OauthChildCallback';
 import { MiniPlayer } from './components/MiniPlayer';
+import { DebugLogsModal } from './components/DebugLogsModal';
+import { logger } from './utils/logger';
 
-// Global Error Logging to Backend Terminal
+// Global Error & Unhandled Rejection Capture
 if (typeof window !== 'undefined') {
-  window.onerror = (msg, _url, line, col, error) => {
-    if ((window as any).__TAURI_INTERNALS__) {
-      invoke('log_error', { msg: `[JS Error] ${msg} at line ${line}:${col} - ${error?.stack || 'No stack'}` });
-    } else {
-      console.error(`[JS Error] ${msg} at line ${line}:${col}`, error);
-    }
+  window.onerror = (msg, url, line, col, error) => {
+    logger.crash(
+      `[Global JS Error] ${msg} at ${url || 'unknown'}:${line}:${col}`,
+      error || new Error(String(msg)),
+      undefined,
+      { url, line, col }
+    ).catch(() => {});
     return false;
   };
   window.onunhandledrejection = (event) => {
-    if ((window as any).__TAURI_INTERNALS__) {
-      invoke('log_error', { msg: `[Unhandled Rejection] ${event.reason}` });
-    } else {
-      console.error(`[Unhandled Rejection]`, event.reason);
-    }
+    const reason = event.reason;
+    const msg = reason instanceof Error ? reason.message : String(reason || 'Unknown Rejection');
+    logger.error('PROMISE', `[Unhandled Promise Rejection] ${msg}`, reason).catch(() => {});
   };
 }
 
@@ -104,6 +105,27 @@ function AideoApp() {
     accentColor: s.accentColor,
   })));
   const [systemIsLight, setSystemIsLight] = useState(window.matchMedia('(prefers-color-scheme: light)').matches);
+  const [showDebugLogs, setShowDebugLogs] = useState(false);
+
+  useEffect(() => {
+    logger.addBreadcrumb('NAV', `View changed to: ${view}`);
+  }, [view]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault();
+        setShowDebugLogs(prev => !prev);
+      }
+    };
+    const handleOpenEvent = () => setShowDebugLogs(true);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('open-debug-logs', handleOpenEvent);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('open-debug-logs', handleOpenEvent);
+    };
+  }, []);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
@@ -274,6 +296,26 @@ function AideoApp() {
       startPolling(document.visibilityState === 'visible' ? 2000 : 5000);
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Smooth high-resolution client-side playback position clock (zero IPC cost)
+    let lastClockTime = performance.now();
+    const clockInterval = setInterval(() => {
+      if (isCancelled) return;
+      const state = useStore.getState();
+      const now = performance.now();
+      const delta = (now - lastClockTime) / 1000;
+      lastClockTime = now;
+
+      if (state.playback.status === 'Playing' && delta > 0 && delta < 1.0) {
+        const duration = state.currentTrack?.duration || Infinity;
+        const currentPos = state.playback.position_secs || 0;
+        const newPos = Math.min(duration, currentPos + delta);
+        useStore.setState(s => ({
+          playback: { ...s.playback, position_secs: newPos }
+        }));
+      }
+    }, 100);
+    cleanups.push(() => clearInterval(clockInterval));
 
     const setupListeners = async () => {
       const uStateChanged = await listen('playback-state-changed', (event: any) => {
@@ -940,6 +982,8 @@ function AideoApp() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <DebugLogsModal isOpen={showDebugLogs} onClose={() => setShowDebugLogs(false)} />
 
       </div>
     </MotionConfig>

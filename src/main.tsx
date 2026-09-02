@@ -1,22 +1,27 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
+import { logger } from "./utils/logger";
 
 if (typeof window !== "undefined") {
   window.addEventListener("error", (event) => {
     try {
-      invoke("log_error", {
-        msg: `[Frontend Error] ${event.message} at ${event.filename}:${event.lineno}:${event.colno}\nStack: ${event.error?.stack || "No stack"}`,
-      }).catch(() => {});
+      const errorObj = event.error || new Error(event.message);
+      const loc = `${event.filename || "unknown"}:${event.lineno || 0}:${event.colno || 0}`;
+      logger.crash(
+        `Uncaught Frontend Exception: ${event.message} at ${loc}`,
+        errorObj,
+        undefined,
+        { filename: event.filename, lineno: event.lineno, colno: event.colno }
+      );
     } catch (_) {}
   });
 
   window.addEventListener("unhandledrejection", (event) => {
     try {
-      invoke("log_error", {
-        msg: `[Frontend Unhandled Rejection] Reason: ${event.reason?.stack || event.reason || "Unknown"}`,
-      }).catch(() => {});
+      const reason = event.reason;
+      const msg = reason instanceof Error ? reason.message : String(reason || "Unknown Rejection");
+      logger.error("PROMISE", `Unhandled Promise Rejection: ${msg}`, reason);
     } catch (_) {}
   });
 }

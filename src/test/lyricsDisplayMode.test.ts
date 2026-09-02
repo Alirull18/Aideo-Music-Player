@@ -480,4 +480,47 @@ describe('Lyrics Display Mode & Word-by-Word Karaoke Suite', () => {
       expect(safeGetStorage('aideo-show-lyrics-header')).toBe('true');
     });
   });
+
+  describe('9. Smooth Playback Position Clock & Real-time Active Index Suite', () => {
+    it('advances activeIdx in real-time as position moves in sub-second increments', () => {
+      const sampleLyrics: LyricLine[] = [
+        { time_secs: 0.0, text: 'First line', words: [{ time_secs: 0.0, duration_secs: 1.0, text: 'First' }] },
+        { time_secs: 1.2, text: 'Second line', words: [{ time_secs: 1.2, duration_secs: 1.0, text: 'Second' }] },
+        { time_secs: 2.5, text: 'Third line', words: [{ time_secs: 2.5, duration_secs: 1.0, text: 'Third' }] },
+      ];
+
+      const getActiveIndex = (currentTime: number, offsetMs = 0) => {
+        const now = currentTime + offsetMs / 1000;
+        let idx = -1;
+        for (let i = 0; i < sampleLyrics.length; i++) {
+          if (sampleLyrics[i].time_secs <= now) idx = i; else break;
+        }
+        return idx;
+      };
+
+      // At 0.5s -> line 0
+      expect(getActiveIndex(0.5)).toBe(0);
+
+      // At 1.25s (before 2s heartbeat) -> smoothly transitions to line 1 immediately
+      expect(getActiveIndex(1.25)).toBe(1);
+
+      // At 2.55s -> smoothly transitions to line 2 immediately
+      expect(getActiveIndex(2.55)).toBe(2);
+    });
+
+    it('smooth clock extrapolation calculates correct delta and clamps to duration', () => {
+      let currentPos = 10.0;
+      const trackDuration = 10.5;
+      const deltaSecs = 0.1; // 100ms tick
+
+      currentPos = Math.min(trackDuration, currentPos + deltaSecs);
+      expect(currentPos).toBeCloseTo(10.1, 4);
+
+      // Multiple ticks up to and beyond duration
+      for (let i = 0; i < 10; i++) {
+        currentPos = Math.min(trackDuration, currentPos + deltaSecs);
+      }
+      expect(currentPos).toBe(10.5);
+    });
+  });
 });

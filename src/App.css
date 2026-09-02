@@ -848,7 +848,6 @@ input[type=range] {
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  transition: background-position 0.05s linear;
 }
 
 .desktop-lyric-word {
@@ -864,7 +863,6 @@ input[type=range] {
   -webkit-text-fill-color: transparent;
   color: transparent;
   text-shadow: none;
-  transition: background-position 0.05s linear;
 }
 
 .lyric-romaji {

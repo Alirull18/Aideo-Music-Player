@@ -573,8 +573,20 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       const currentPlayback = get().playback;
       const sinceSeek = Date.now() - (currentPlayback.last_seek_time || 0);
-      if (sinceSeek < 350) {
+      const sinceSkip = Date.now() - (currentPlayback.last_skip_time || 0);
+      if (sinceSeek < 1000 || sinceSkip < 1000) {
         status.position_secs = currentPlayback.position_secs;
+      } else if (
+        status.status === 'Playing' &&
+        currentPlayback.status === 'Playing' &&
+        typeof currentPlayback.position_secs === 'number' &&
+        typeof status.position_secs === 'number'
+      ) {
+        // Prevent micro snap-backs caused by audio ring buffer delay vs smooth client clock
+        const diff = currentPlayback.position_secs - status.position_secs;
+        if (diff > 0 && diff < 1.5) {
+          status.position_secs = currentPlayback.position_secs;
+        }
       }
 
       const statusChanged = currentPlayback.status !== status.status;

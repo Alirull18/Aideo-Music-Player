@@ -12,10 +12,12 @@ import {
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
   Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3,
-  Headphones, Heart, ArrowUp, ArrowDown, RotateCcw
+  Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen
 } from 'lucide-react';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
+import { DebugLogsModal } from './DebugLogsModal';
+import { logger } from '../utils/logger';
 
 interface PresetTheme {
   name: string;
@@ -214,6 +216,7 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account' | 'shortcuts'>('appearance');
   const [recordingAction, setRecordingAction] = useState<string | null>(null);
   const [recordingGlobalAction, setRecordingGlobalAction] = useState<string | null>(null);
+  const [showDebugModal, setShowDebugModal] = useState(false);
 
   useEffect(() => {
     if (!recordingGlobalAction) return;
@@ -3345,6 +3348,94 @@ export function SettingsView() {
     },
 
     {
+      id: 'system-diagnostics-logs',
+      title: 'Diagnostics, Terminal Logs & Crash Reporting',
+      description: 'Inspect live backend & frontend terminal logs, export debug bundles, or open the persistent log storage directory.',
+      keywords: 'logs terminal debug diagnostics crash report bug troubleshoot errors developer trace stdout stderr',
+      tab: 'system',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+            <div style={{ flex: '1 1 400px', minWidth: 280 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Application Observability & Crash Tracing</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.5 }}>
+                Aideo records timestamped logs, audio hardware state, and Rust panic / JavaScript crash dumps in your AppData directory. Use the live terminal viewer or export full diagnostics when troubleshooting.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                onClick={() => setShowDebugModal(true)}
+                className="btn btn-primary"
+                style={{
+                  fontSize: 11,
+                  padding: '8px 14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <Terminal size={13} />
+                <span>View Live Logs</span>
+              </button>
+
+              <button
+                onClick={async () => {
+                  try {
+                    await logger.openLogsFolder();
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Opened logs directory in File Explorer', type: 'info' } }));
+                  } catch (e: any) {
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to open logs directory: ${e}`, type: 'error' } }));
+                  }
+                }}
+                className="btn btn-secondary"
+                style={{
+                  fontSize: 11,
+                  padding: '8px 14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <FolderOpen size={13} />
+                <span>Open Logs Folder</span>
+              </button>
+
+              <button
+                onClick={async () => {
+                  try {
+                    const report = await logger.exportDebugReport();
+                    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `aideo-debug-report-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Diagnostic report exported successfully!', type: 'success' } }));
+                  } catch (e: any) {
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to export report: ${e}`, type: 'error' } }));
+                  }
+                }}
+                className="btn btn-secondary"
+                style={{
+                  fontSize: 11,
+                  padding: '8px 14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <DownloadCloud size={13} />
+                <span>Export Report</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    },
+
+    {
       id: 'auto-updater',
       title: 'Application Updates',
       description: 'Check for and install updates from GitHub releases.',
@@ -3602,6 +3693,8 @@ export function SettingsView() {
           </AnimatePresence>
         </div>
       </div>
+
+      <DebugLogsModal isOpen={showDebugModal} onClose={() => setShowDebugModal(false)} />
     </div>
   );
 }

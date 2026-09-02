@@ -249,7 +249,7 @@ impl std::io::Read for GrowingFileReader {
                             "GrowingFileReader: Download stalled for more than 120 seconds",
                         ));
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 res => return res,
             }
@@ -675,9 +675,8 @@ fn spawn_youtube_downloader(
                     let encrypted = crate::cloud::xor_cipher(&bytes);
                     if std::fs::write(&cache_path, encrypted).is_ok() {
                         println!("[player-bg] Encrypted cache written successfully: {:?}", cache_path);
-                        // Clean up temp file
-                        let _ = std::fs::remove_file(&temp_path);
-                        // Enforce strict 5.0 GB cache limit via LRU eviction
+                        // Retain temp file during active stream playback to prevent I/O truncation on Windows;
+                        // enforce_cache_size_limit() handles cleanup of aged .tmp files automatically.
                         enforce_cache_size_limit();
                     }
                 }
@@ -2179,7 +2178,7 @@ fn player_loop(
                 while let Ok(next_cmd) = rx.try_recv() {
                     match next_cmd {
                         PlayerCommand::Play(p, pos) => {
-                            println!("[player] Rapid skip detected: Dropping '{}', jumping straight to '{}'", path, p);
+                            crate::log_debug!("AUDIO", "Rapid skip detected: Dropping '{}', jumping straight to '{}'", path, p);
                             path = p;
                             start_pos = pos;
                         }
@@ -2219,6 +2218,8 @@ fn player_loop(
                     *ct = Some(path.clone());
                     position_secs.store(start_pos.to_bits(), Ordering::Relaxed);
                 }
+
+                crate::log_info!("AUDIO", "Beginning playback: '{}' (start_pos: {:.2}s)", path, start_pos);
 
                 let ffmpeg_path = find_ffmpeg_path();
                 next_track = play_file(&path, start_pos, Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queue), Arc::clone(&current_process), cmd_tx.clone(), &rx, &app_handle, &fft_tx, &ffmpeg_path, Arc::clone(&decode_shutdown), Arc::clone(&file_rate), Arc::clone(&file_ch), Arc::clone(&file_format));
@@ -3237,6 +3238,14 @@ fn background_decode(
     complete: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
 ) {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        let _ = windows::Win32::System::Threading::SetThreadPriority(
+            windows::Win32::System::Threading::GetCurrentThread(),
+            windows::Win32::System::Threading::THREAD_PRIORITY_ABOVE_NORMAL,
+        );
+    }
+
     let mut use_ffmpeg = false;
     let mut format_opt = None;
     let mut decoder_opt = None;
@@ -3393,6 +3402,7 @@ fn background_decode(
     };
     let mut local_buffers = vec![Vec::new(); file_ch];
     let mut packet_count = 0;
+    let mut is_initial_batch = true;
 
     loop {
         if shutdown.load(Ordering::Relaxed) { break; }
@@ -3419,12 +3429,14 @@ fn background_decode(
             }
             
             packet_count += 1;
-            if packet_count >= 64 {
+            let flush_threshold = if is_initial_batch { 2 } else { 8 };
+            if packet_count >= flush_threshold {
                 let mut lock = safe_lock(&samples);
                 for ch in 0..file_ch {
                     lock[ch].append(&mut local_buffers[ch]);
                 }
                 packet_count = 0;
+                is_initial_batch = false;
             }
         }
     }
@@ -4836,7 +4848,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                 } else {
                     // STILL LOADING
                     if pending[0].len() < chunk_size {
-                        std::thread::sleep(std::time::Duration::from_millis(15));
+                        std::thread::sleep(std::time::Duration::from_millis(2));
                     }
                 }
             } else {
@@ -5103,13 +5115,19 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
 
             // Lock-free loop to wait for buffer space
             let mut prod_stall_count = 0u32;
+            let mut last_remaining = prod.remaining();
             while prod.remaining() < interleaved.len() && running {
                 std::thread::sleep(std::time::Duration::from_millis(5));
 
-                if status.load(Ordering::Relaxed) == 1 {
+                let cur_rem = prod.remaining();
+                if cur_rem != last_remaining {
+                    // Consumer is actively making progress reading audio from ring buffer
+                    prod_stall_count = 0;
+                    last_remaining = cur_rem;
+                } else if status.load(Ordering::Relaxed) == 1 {
                     prod_stall_count += 1;
-                    if prod_stall_count >= 200 {
-                        eprintln!("[player] Audio consumer stall detected. Triggering stream restart/recovery...");
+                    if prod_stall_count >= 2000 {
+                        eprintln!("[player] Audio consumer stall detected (10s zero consumption). Triggering stream restart/recovery...");
                         let _ = cmd_tx.send(PlayerCommand::RestartStream);
                         prod_stall_count = 0;
                     }

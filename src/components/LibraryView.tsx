@@ -883,7 +883,6 @@ export function LibraryView() {
   const [searchQuery, setSearchQuery] = useState(librarySearchQuery || '');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(librarySearchQuery || '');
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
 
   // Sync with store-level librarySearchQuery navigation
   useEffect(() => {
@@ -1269,7 +1268,7 @@ export function LibraryView() {
     startIndex: localStartIndex,
   } = useVirtualList(filteredTracks, {
     itemHeight: 52,
-    scrollContainer: scrollEl,
+    scrollContainer: scrollRef,
   });
 
   const {
@@ -1279,7 +1278,7 @@ export function LibraryView() {
     startIndex: subsonicStartIndex,
   } = useVirtualList(subsonicTracks, {
     itemHeight: 52,
-    scrollContainer: scrollEl,
+    scrollContainer: scrollRef,
   });
 
   const {
@@ -1289,7 +1288,7 @@ export function LibraryView() {
     startIndex: jellyfinStartIndex,
   } = useVirtualList(jellyfinTracks, {
     itemHeight: 52,
-    scrollContainer: scrollEl,
+    scrollContainer: scrollRef,
   });
 
   const applyMatch = async () => {
@@ -1329,10 +1328,7 @@ export function LibraryView() {
 
   return (
     <div 
-      ref={(el) => {
-        scrollRef.current = el;
-        if (scrollEl !== el) setScrollEl(el);
-      }}
+      ref={scrollRef}
       className="library-wrap" 
       onClick={() => setMenuOpenFor(null)}
       onScroll={(e) => {

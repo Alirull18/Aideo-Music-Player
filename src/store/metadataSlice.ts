@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, extractDominantColor, LyricsDisplayMode } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { cleanSearchQuery, pathsEqual } from '../utils';
+import { cleanSearchQuery, pathsEqual, getVariantPenalty } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { romanizeText } from '../utils/romanizer';
 
@@ -174,8 +174,9 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
           else if (r.source === 'NetEase' || r.source === 'Kugou') sourceBonus = 0.15;
           else if (r.source === 'QQMusic') sourceBonus = 0.05;
 
+          const variantPenalty = getVariantPenalty(targetTitle, r.title);
           const rankBonus = Math.max(0, 0.15 - (index * 0.03));
-          const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + sourceBonus + rankBonus;
+          const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + sourceBonus + rankBonus + variantPenalty;
 
           return { result: r, score, titleScore };
         });

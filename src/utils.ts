@@ -399,6 +399,30 @@ export function buildResolvedLinkQuery(meta: { title?: string; artist?: string |
   return [meta.title, meta.artist].filter(Boolean).join(' ').trim();
 }
 
+export const VARIANT_PATTERNS = [
+  /\b(japanese\s*ver(sion)?|jp\s*ver)\b/i,
+  /\b(korean\s*ver(sion)?|kr\s*ver|kor\s*ver)\b/i,
+  /\b(chinese\s*ver(sion)?|cn\s*ver)\b/i,
+  /\b(english\s*ver(sion)?|eng\s*ver)\b/i,
+  /\b(spanish\s*ver(sion)?)\b/i,
+  /\b(instrumental|inst|off\s*vocal|minus\s*one)\b/i,
+  /\b(acoustic\s*ver(sion)?)\b/i,
+  /\b(remix|speed\s*up|slowed)\b/i,
+];
+
+export function getVariantPenalty(targetTitle?: string | null, resultTitle?: string | null): number {
+  if (!targetTitle || !resultTitle) return 0;
+  for (const pattern of VARIANT_PATTERNS) {
+    const targetHas = pattern.test(targetTitle);
+    const resultHas = pattern.test(resultTitle);
+    if (targetHas !== resultHas) {
+      return -0.60;
+    }
+  }
+  return 0.0;
+}
+
+
 
 
 

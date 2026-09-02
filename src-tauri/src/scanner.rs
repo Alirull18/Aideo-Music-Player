@@ -23,8 +23,11 @@ where
     F: FnMut(Vec<Track>),
 {
     if !std::path::Path::new(dir).exists() {
+        crate::log_warn!("SCANNER", "Directory does not exist for scanning: '{}'", dir);
         return 0;
     }
+
+    crate::log_info!("SCANNER", "Beginning library scan in directory: '{}'", dir);
 
     let mut total_scanned = 0;
     let mut current_chunk: Vec<PathBuf> = Vec::with_capacity(SCAN_CHUNK_SIZE);
@@ -59,6 +62,8 @@ where
         current_chunk.clear();
     }
 
+    crate::log_info!("SCANNER", "Finished library scan in '{}': {} tracks loaded", dir, total_scanned);
+
     total_scanned
 }
 
@@ -73,7 +78,7 @@ fn process_chunk(chunk: &[PathBuf], app_handle: &AppHandle) -> Vec<Track> {
                 Ok(None) => None,
                 Err(e) => {
                     let msg = format!("Failed to read file: {:?}. Error: {:?}", path_owned, e);
-                    eprintln!("[scanner] {}", msg);
+                    crate::log_warn!("SCANNER", "{}", msg);
                     let _ = app_handle.emit("scanner-error", msg);
                     None
                 }

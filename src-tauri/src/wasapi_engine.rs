@@ -343,12 +343,25 @@ where
         let (_format, bits, valid_bits, is_float, negotiated_rate) = match negotiated_format {
             Some(f) => f,
             None => {
-                let _ = tx.send(Err(format!("Device does not support Exclusive Mode (attempted rates: {:?})", candidate_rates)));
+                let err_msg = format!("Device does not support Exclusive Mode (attempted rates: {:?})", candidate_rates);
+                crate::log_warn!("WASAPI", "Exclusive Mode negotiation failed on '{}': {}", dev_name, err_msg);
+                let _ = tx.send(Err(err_msg));
                 return;
             }
         };
 
         let client = successful_client.unwrap();
+
+        crate::log_info!(
+            "WASAPI",
+            "Exclusive Mode stream established on '{}' @ {}Hz ({}bit, float: {}, buffer: {} frames, timing: {})",
+            dev_name,
+            negotiated_rate,
+            valid_bits,
+            is_float,
+            client.get_buffer_size().unwrap_or(0),
+            timing_str
+        );
 
         let is_polling = timing_str == "polling";
         let event = if !is_polling {

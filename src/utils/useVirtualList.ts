@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type RefObject } from 'react';
 
 interface UseVirtualListOptions {
   itemHeight: number;
   overscan?: number;
-  scrollContainer?: HTMLElement | null;
+  scrollContainer?: HTMLElement | null | RefObject<HTMLElement | null>;
 }
 
 export function useVirtualList<T>(
@@ -23,7 +23,10 @@ export function useVirtualList<T>(
   }, []);
 
   useEffect(() => {
-    const targetContainer = scrollContainer || node;
+    const targetContainer = (scrollContainer && typeof scrollContainer === 'object' && 'current' in scrollContainer)
+      ? scrollContainer.current
+      : ((scrollContainer as HTMLElement | null) || node);
+
     if (!targetContainer) return;
 
     const initialHeight = targetContainer.clientHeight || 600;
@@ -31,8 +34,8 @@ export function useVirtualList<T>(
 
     lastHeightRef.current = initialHeight;
     lastScrollTopRef.current = initialScroll;
-    setContainerHeight(initialHeight);
-    setScrollTop(initialScroll);
+    setContainerHeight(prev => (prev !== initialHeight ? initialHeight : prev));
+    setScrollTop(prev => (prev !== initialScroll ? initialScroll : prev));
 
     let rafId: number | null = null;
 

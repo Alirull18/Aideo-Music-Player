@@ -46,6 +46,7 @@ mod m3u;
 pub mod watcher;
 pub mod tag_editor;
 pub mod upnp;
+pub mod logger;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -125,16 +126,20 @@ async fn translate_lyric_line(text: String) -> Result<(String, String), String> 
         if res.status().is_success() {
             if let Ok(data) = res.json::<serde_json::Value>().await {
                 let translation = data.get(0)
-                    .and_then(|v| v.get(0))
-                    .and_then(|v| v.get(0))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|item| item.get(0).and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join("")
+                    })
+                    .unwrap_or_default();
                 
                 let transliteration = data.get(0)
                     .and_then(|v| v.as_array())
                     .and_then(|arr| arr.iter().rev().find_map(|item| {
                         item.get(3).and_then(|t| t.as_str())
+                            .or_else(|| item.get(2).and_then(|t| t.as_str()))
                     }))
                     .unwrap_or("")
                     .to_string();
@@ -189,65 +194,22 @@ async fn translate_lyric_line(text: String) -> Result<(String, String), String> 
     Ok((String::new(), String::new()))
 }
 
+async fn process_lyric_line_translation(line: String) -> (String, String) {
+    if line.trim().is_empty() {
+        (String::new(), String::new())
+    } else {
+        translate_lyric_line(line).await.unwrap_or_default()
+    }
+}
+
 #[tauri::command]
 async fn translate_lyrics_batch(lines: Vec<String>) -> Result<Vec<(String, String)>, String> {
     if lines.is_empty() {
         return Ok(Vec::new());
     }
 
-    let mut results: Vec<(String, String)> = vec![(String::new(), String::new()); lines.len()];
-    let client = get_http_client();
-
-    const CHUNK_SIZE: usize = 25;
-    for (chunk_idx, chunk) in lines.chunks(CHUNK_SIZE).enumerate() {
-        let chunk_start = chunk_idx * CHUNK_SIZE;
-        let joined_text = chunk.join("\n");
-
-        let mut chunk_translated = false;
-
-        // Try 1: Google Mobile Web Batch (fast, reliable, handles multi-line text)
-        let mobile_url = format!(
-            "https://translate.google.com/m?sl=auto&tl=en&q={}",
-            urlencoding::encode(&joined_text)
-        );
-
-        if let Ok(res) = client
-            .get(&mobile_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .send()
-            .await
-        {
-            if let Ok(html) = res.text().await {
-                if let Some(start) = html.find("<div class=\"result-container\">") {
-                    let rest = &html[start + 30..];
-                    if let Some(end) = rest.find("</div>") {
-                        let trans_raw = clean_translated_text(&rest[..end]);
-                        let trans_lines: Vec<&str> = trans_raw.split('\n').map(|s| s.trim()).collect();
-                        for (i, &trans_line) in trans_lines.iter().enumerate() {
-                            if chunk_start + i < results.len() {
-                                results[chunk_start + i].0 = trans_line.to_string();
-                            }
-                        }
-                        chunk_translated = true;
-                    }
-                }
-            }
-        }
-
-        // Try 2: If batch failed or for romaji, run translate_lyric_line
-        if !chunk_translated {
-            for (i, line) in chunk.iter().enumerate() {
-                if !line.trim().is_empty() {
-                    if let Ok((trans, rom)) = translate_lyric_line(line.clone()).await {
-                        if chunk_start + i < results.len() {
-                            results[chunk_start + i] = (trans, rom);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
+    let tasks: Vec<_> = lines.into_iter().map(process_lyric_line_translation).collect();
+    let results = futures::future::join_all(tasks).await;
     Ok(results)
 }
 
@@ -2628,7 +2590,157 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
 
 #[tauri::command]
 fn log_error(msg: String) {
-    println!("[frontend-error] {}", msg);
+    crate::logger::log_msg(crate::logger::LogLevel::Error, "FRONTEND", &msg, None);
+}
+
+#[tauri::command]
+fn log_message(level: String, tag: String, message: String, details: Option<String>) {
+    let log_level = crate::logger::LogLevel::from_str(&level);
+    crate::logger::log_msg(log_level, &tag, &message, details.as_deref());
+}
+
+#[tauri::command]
+fn log_crash(report: crate::logger::FrontendCrashReport) -> Result<String, String> {
+    let logger = crate::logger::get_logger().ok_or_else(|| "Logger not initialized".to_string())?;
+
+    let mut extra_info = String::new();
+    if let Some(view) = &report.view {
+        extra_info.push_str(&format!("Active View: {}\n", view));
+    }
+    if let Some(url) = &report.url {
+        extra_info.push_str(&format!("Location URL: {}\n", url));
+    }
+    if let Some(comp_stack) = &report.component_stack {
+        extra_info.push_str(&format!("React Component Stack:\n{}\n", comp_stack));
+    }
+    if let Some(breadcrumbs) = &report.breadcrumbs {
+        extra_info.push_str("Recent Frontend Actions:\n");
+        for b in breadcrumbs {
+            extra_info.push_str(&format!(" - {}\n", b));
+        }
+    }
+    if let Some(extra) = &report.extra {
+        extra_info.push_str(&format!("Extra State: {}\n", extra));
+    }
+
+    let path = logger.write_crash_dump(
+        "frontend",
+        &report.message,
+        report.stack.as_deref(),
+        if extra_info.is_empty() { None } else { Some(&extra_info) }
+    )?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn get_debug_system_info(app: AppHandle) -> Result<crate::logger::SystemDiagnosticInfo, String> {
+    let logs_dir = match app.path().app_data_dir() {
+        Ok(d) => d.join("logs"),
+        Err(_) => dirs::data_dir()
+            .map(|d| d.join("com.alirul.music-player").join("logs"))
+            .unwrap_or_else(|| std::path::PathBuf::from("logs")),
+    };
+    let log_file = logs_dir.join("aideo.log");
+    Ok(crate::logger::AppLogger::collect_system_info(&logs_dir, &log_file))
+}
+
+#[tauri::command]
+fn get_recent_logs(limit: Option<usize>) -> Vec<crate::logger::LogEntry> {
+    if let Some(logger) = crate::logger::get_logger() {
+        logger.get_recent_entries(limit)
+    } else {
+        Vec::new()
+    }
+}
+
+#[tauri::command]
+fn open_logs_folder(app: AppHandle) -> Result<(), String> {
+    let logs_dir = match app.path().app_data_dir() {
+        Ok(d) => d.join("logs"),
+        Err(_) => dirs::data_dir()
+            .map(|d| d.join("com.alirul.music-player").join("logs"))
+            .unwrap_or_else(|| std::path::PathBuf::from("logs")),
+    };
+    let _ = std::fs::create_dir_all(&logs_dir);
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(logs_dir.to_string_lossy().to_string())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(logs_dir.to_string_lossy().to_string())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(logs_dir.to_string_lossy().to_string())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn export_debug_report(app: AppHandle) -> Result<String, String> {
+    let logs_dir = match app.path().app_data_dir() {
+        Ok(d) => d.join("logs"),
+        Err(_) => dirs::data_dir()
+            .map(|d| d.join("com.alirul.music-player").join("logs"))
+            .unwrap_or_else(|| std::path::PathBuf::from("logs")),
+    };
+    let log_file = logs_dir.join("aideo.log");
+    let sys_info = crate::logger::AppLogger::collect_system_info(&logs_dir, &log_file);
+
+    let mut report = String::new();
+    report.push_str("================================================================================\n");
+    report.push_str(" AIDEO MUSIC PLAYER - DIAGNOSTIC SYSTEM REPORT\n");
+    report.push_str("================================================================================\n\n");
+    report.push_str(&format!("Generated:       {}\n", sys_info.timestamp));
+    report.push_str(&format!("Application:     {} v{}\n", sys_info.app_name, sys_info.app_version));
+    report.push_str(&format!("OS / Platform:   {}\n", sys_info.os_version));
+    report.push_str(&format!("Architecture:    {}\n", sys_info.arch));
+    report.push_str(&format!("CPU Cores:       {}\n", sys_info.cpu_count));
+    report.push_str(&format!("Process ID:      {}\n", sys_info.process_id));
+    report.push_str(&format!("Audio Backend:   {}\n", sys_info.active_audio_backend));
+    report.push_str(&format!("Logs Directory:  {}\n", sys_info.log_dir));
+    report.push_str(&format!("Main Log File:   {}\n\n", sys_info.log_file));
+
+    report.push_str("--------------------------------------------------------------------------------\n");
+    report.push_str("RECENT LOG ENTRIES (Last 150 Records)\n");
+    report.push_str("--------------------------------------------------------------------------------\n");
+    if let Some(logger) = crate::logger::get_logger() {
+        let entries = logger.get_recent_entries(Some(150));
+        for entry in entries {
+            report.push_str(&format!("[{}] [{: <5}] [{: <9}] {}\n", entry.timestamp, entry.level, entry.tag, entry.message));
+            if let Some(d) = entry.details {
+                report.push_str(&format!("    Details: {}\n", d));
+            }
+        }
+    } else {
+        report.push_str("No active logger instance found.\n");
+    }
+    report.push_str("\n================================================================================\n");
+    report.push_str(" END OF REPORT\n");
+    report.push_str("================================================================================\n");
+
+    Ok(report)
+}
+
+#[tauri::command]
+fn clear_log_files() -> Result<(), String> {
+    if let Some(logger) = crate::logger::get_logger() {
+        logger.clear_logs()
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -3197,6 +3309,26 @@ async fn upnp_get_status() -> Result<upnp::UpnpStatus, String> {
 
 pub fn run() {
     dotenvy::dotenv().ok();
+
+    let logs_dir = dirs::data_dir()
+        .map(|d| d.join("com.alirul.music-player").join("logs"))
+        .unwrap_or_else(|| std::path::PathBuf::from("logs"));
+    let _ = std::fs::create_dir_all(&logs_dir);
+
+    logger::init_logger(logs_dir.clone());
+    logger::install_panic_hook();
+
+    log_info!("SYSTEM", "=== Aideo Music Player v{} Startup ===", env!("CARGO_PKG_VERSION"));
+    log_info!(
+        "SYSTEM",
+        "Platform: {} ({}) | Architecture: {} | CPUs: {}",
+        std::env::consts::OS,
+        std::env::consts::FAMILY,
+        std::env::consts::ARCH,
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+    );
+    log_info!("SYSTEM", "Logs Directory: {:?}", logs_dir);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -3262,6 +3394,13 @@ pub fn run() {
             get_close_to_tray,
             open_oauth_window,
             log_error,
+            log_message,
+            log_crash,
+            get_debug_system_info,
+            get_recent_logs,
+            open_logs_folder,
+            export_debug_report,
+            clear_log_files,
             start_dragging,
             set_window_resizable,
             move_window_by,

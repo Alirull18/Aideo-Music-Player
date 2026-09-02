@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cleanSearchQuery } from '../utils';
+import { cleanSearchQuery, getVariantPenalty } from '../utils';
 
 // Types matching lyrics.rs / metadataSlice.ts
 interface LyricWord {
@@ -243,8 +243,9 @@ function scoreLyricResult(
   else if (r.source === 'NetEase' || r.source === 'Kugou') sourceBonus = 0.15;
   else if (r.source === 'QQMusic') sourceBonus = 0.05;
 
+  const variantPenalty = getVariantPenalty(targetTitle, r.title);
   const rankBonus = Math.max(0, 0.15 - (index * 0.03));
-  const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + sourceBonus + rankBonus;
+  const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + sourceBonus + rankBonus + variantPenalty;
 
   return { score, titleScore };
 }
@@ -505,5 +506,71 @@ describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
 
     const kugou = await resolvePickedLrc({ id: 'key123', title: 'Song C', artist: 'Artist', source: 'Kugou', content_id: 'kg99', synced: true });
     expect(kugou).toBe('[00:01.00]kugou:kg99');
+  });
+
+  it('prioritizes exact original track over word-synced language variants (e.g. LOVE DIVE vs LOVE DIVE -Japanese ver.-)', () => {
+    const targetTitle = 'LOVE DIVE';
+    const targetArtist = 'IVE';
+    const targetDuration = 177;
+
+    // Original Korean track with line sync (e.g. from LRCLIB)
+    const koreanOriginal: SearchResult = {
+      id: 'kr-1',
+      title: 'LOVE DIVE',
+      artist: 'IVE',
+      source: 'LRCLIB',
+      synced: true,
+      raw_lrc: '[00:10.00]숨 참고 love dive',
+      duration: 177,
+    };
+
+    // Japanese variant with word-synced TTML from Unison
+    const japaneseVariant: SearchResult = {
+      id: 'jp-1',
+      title: 'LOVE DIVE -Japanese ver.-',
+      artist: 'IVE',
+      source: 'Unison',
+      synced: true,
+      raw_lrc: '<tt xmlns="http://www.w3.org/ns/ttml">...</tt>',
+      duration: 177,
+    };
+
+    const sKorean = scoreLyricResult(koreanOriginal, targetTitle, targetArtist, targetDuration, 0).score;
+    const sJapanese = scoreLyricResult(japaneseVariant, targetTitle, targetArtist, targetDuration, 0).score;
+
+    // The original Korean version must strictly outrank the Japanese variant despite Unison word-sync bonus
+    expect(sKorean).toBeGreaterThan(sJapanese);
+  });
+
+  it('correctly matches language variant when target track explicitly requests that variant', () => {
+    const targetTitle = 'LOVE DIVE (Japanese ver.)';
+    const targetArtist = 'IVE';
+    const targetDuration = 177;
+
+    const japaneseVariant: SearchResult = {
+      id: 'jp-1',
+      title: 'LOVE DIVE -Japanese ver.-',
+      artist: 'IVE',
+      source: 'Unison',
+      synced: true,
+      raw_lrc: '<tt xmlns="http://www.w3.org/ns/ttml">...</tt>',
+      duration: 177,
+    };
+
+    const koreanOriginal: SearchResult = {
+      id: 'kr-1',
+      title: 'LOVE DIVE',
+      artist: 'IVE',
+      source: 'LRCLIB',
+      synced: true,
+      raw_lrc: '[00:10.00]숨 참고 love dive',
+      duration: 177,
+    };
+
+    const sJapanese = scoreLyricResult(japaneseVariant, targetTitle, targetArtist, targetDuration, 0).score;
+    const sKorean = scoreLyricResult(koreanOriginal, targetTitle, targetArtist, targetDuration, 0).score;
+
+    // When the track title is Japanese ver, the Japanese lyric must win
+    expect(sJapanese).toBeGreaterThan(sKorean);
   });
 });

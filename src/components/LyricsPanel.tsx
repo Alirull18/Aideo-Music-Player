@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, X, Tv2, ChevronUp, ChevronDown } from 'lucide-react';
-import { fmt, baseName, cleanSearchQuery } from '../utils';
+import { fmt, baseName, cleanSearchQuery, getVariantPenalty } from '../utils';
 import { LyricsDisplayMode } from '../store/types';
 import { KaraokeActiveLine } from './KaraokeActiveLine';
 
@@ -219,8 +219,9 @@ export function LyricsPanel() {
         else if (item.source === 'NetEase') sourceBonus = 0.10;
         else if (item.source === 'QQMusic') sourceBonus = 0.05;
 
+        const variantPenalty = getVariantPenalty(targetTitle, item.title);
         const rankBonus = Math.max(0, 0.15 - (index * 0.03));
-        const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + sourceBonus + rankBonus;
+        const score = (titleScore * 0.5) + (artistScore * 0.3) + durationBonus + syncBonus + sourceBonus + rankBonus + variantPenalty;
 
         return { item, score };
       });

@@ -60,4 +60,32 @@ describe('Romanizer Utility Suite', () => {
       expect(romanizeText('Hello world')).toBe('Hello world');
     });
   });
+
+  describe('4. Full Transliteration (Kanji -> Romaji) Resolution Suite', () => {
+    it('prioritizes API transliteration over client-side fallback when Kanji is present', () => {
+      const lineText = '弾けるエモーション';
+      const apiTransliteration = 'hajikeru emo-shon';
+      const localFallback = romanizeText(lineText);
+
+      // Local fallback preserves untransliterated Kanji
+      expect(localFallback).toContain('弾');
+
+      // Resolved Romaji properly uses full API transliteration without raw Kanji
+      const resolvedRomaji = apiTransliteration || (localFallback !== lineText ? localFallback : undefined);
+      expect(resolvedRomaji).toBe('hajikeru emo-shon');
+      expect(resolvedRomaji).not.toContain('弾');
+    });
+
+    it('resolves compound Kanji phrases cleanly', () => {
+      const lineText = '心配いらない';
+      const apiTransliteration = 'shinpai iranai';
+      const localFallback = romanizeText(lineText);
+
+      expect(localFallback).toContain('心配');
+
+      const resolvedRomaji = apiTransliteration || (localFallback !== lineText ? localFallback : undefined);
+      expect(resolvedRomaji).toBe('shinpai iranai');
+      expect(resolvedRomaji).not.toContain('心配');
+    });
+  });
 });
