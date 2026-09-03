@@ -3,6 +3,24 @@ export function fmt(s: number | null) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
+export function parseDuration(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const parts = String(raw).trim().split(':').map(Number);
+  if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+    return parts[0] * 60 + parts[1];
+  }
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  const n = Number(raw);
+  return !isNaN(n) && n > 0 ? n : 0;
+}
+
+export function sortLyricLines<T extends { time_secs: number }>(lines: T[]): T[] {
+  if (!Array.isArray(lines) || lines.length <= 1) return lines || [];
+  return [...lines].sort((a, b) => (a.time_secs || 0) - (b.time_secs || 0));
+}
+
 export function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
 }
@@ -153,11 +171,12 @@ export function parseStreamMetadata(url: string | null) {
     if (key && onlineTrackCache.has(key)) {
       const cached = onlineTrackCache.get(key);
       if (cached && cached.title && cached.title !== 'Web Audio Stream') {
+        const dur = cached.duration ?? ((cached as any).duration_raw ? parseDuration((cached as any).duration_raw) : null);
         return {
           title: cached.title,
           artist: cached.artist || 'Online Stream',
           album: cached.album || '',
-          duration: cached.duration ?? null,
+          duration: dur,
           cover_url: cached.cover_url || null,
           format: cached.format || defaultFormat,
         };
@@ -172,11 +191,12 @@ export function parseStreamMetadata(url: string | null) {
     for (const [key, cached] of onlineTrackCache.entries()) {
       if (key.includes(hash) || pathsEqual(key, lookupUrl)) {
         if (cached && cached.title && cached.title !== 'Web Audio Stream') {
+          const dur = cached.duration ?? ((cached as any).duration_raw ? parseDuration((cached as any).duration_raw) : null);
           return {
             title: cached.title,
             artist: cached.artist || 'Online Stream',
             album: cached.album || '',
-            duration: cached.duration ?? null,
+            duration: dur,
             cover_url: cached.cover_url || null,
             format: cached.format || defaultFormat,
           };
@@ -241,6 +261,7 @@ export function isRadioStream(track: any, playbackTrackUrl?: string | null, dura
     path.includes('googlevideo.com') ||
     path.includes('api.tidal.com') ||
     path.includes('audio.tidal.com') ||
+    path.includes('tidal.com') ||
     path.includes('qobuz.com');
   
   if (isYTMOrTidalOrCloud) return false;

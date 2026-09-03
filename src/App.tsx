@@ -31,6 +31,7 @@ import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { toggleOsFullscreen } from './utils/windowFullscreen';
+import { isStreamTrack } from './utils';
 import { CoverArtModal } from './components/CoverArtModal';
 import { TagEditorModal } from './components/TagEditorModal';
 import { DesktopLyricBar } from './components/DesktopLyricBar';
@@ -306,10 +307,17 @@ function AideoApp() {
       const delta = (now - lastClockTime) / 1000;
       lastClockTime = now;
 
-      if (state.playback.status === 'Playing' && delta > 0 && delta < 1.0) {
+      if (state.playback.status === 'Playing' && !state.playback.is_buffering && delta > 0 && delta < 1.0) {
         const duration = state.currentTrack?.duration || Infinity;
         const currentPos = state.playback.position_secs || 0;
         const backendPos = state.playback.backend_position_secs;
+
+        // If playing an uncached or online stream and the audio backend has not yet output any audio (backendPos === 0),
+        // pause the forward delta so the progress bar and lyrics do not run ahead while buffering/loading.
+        const isStream = state.currentTrack && isStreamTrack(state.currentTrack.path, state.currentTrack.format);
+        if (isStream && (backendPos === 0 || backendPos === undefined) && currentPos >= 0) {
+          return;
+        }
 
         // PLL Rate Adjustment: if client clock leads hardware by > 1.2s,
         // gently scale the forward delta so hardware catches up smoothly without visible jumps.

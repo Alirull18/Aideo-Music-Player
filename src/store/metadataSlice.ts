@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, extractDominantColor, LyricsDisplayMode } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { cleanSearchQuery, pathsEqual, getVariantPenalty } from '../utils';
+import { cleanSearchQuery, pathsEqual, getVariantPenalty, sortLyricLines } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { romanizeText } from '../utils/romanizer';
 
@@ -88,7 +88,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
       await invoke('save_lyrics_file', { path, content: lrc });
       const lines: any = await invoke('get_lyrics', { path });
       if (pathsEqual(get().playback.current_track, path)) {
-        if (Array.isArray(lines)) set({ lyrics: lines, lyricStatus: 'found' });
+        if (Array.isArray(lines)) set({ lyrics: sortLyricLines(lines), lyricStatus: 'found' });
       }
     } catch (e) { console.error(e); }
   },
@@ -221,7 +221,7 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             const stillCurrent = pathsEqual(get().playback.current_track, track.path);
             if (stillCurrent) {
               if (Array.isArray(lines) && lines.length > 0) {
-                set({ lyrics: lines, lyricStatus: 'found' });
+                set({ lyrics: sortLyricLines(lines), lyricStatus: 'found' });
               } else {
                 set({ lyricStatus: 'not_found' });
               }

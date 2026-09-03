@@ -34,6 +34,7 @@ target/
 *.sqlite-journal
 src-tauri/*.db
 src-tauri/*.db-journal
+src-tauri/*.ttml
 
 # Logs & Diagnostics
 logs/

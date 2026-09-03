@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle } from '../utils';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, sortLyricLines } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { toast } from '../utils/toast';
 import { notifyTidalAuthFailure } from './tidalSlice';
@@ -576,7 +576,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const sinceSkip = Date.now() - (currentPlayback.last_skip_time || 0);
       const rawBackendPos = status.position_secs;
 
-      if (sinceSeek < 1500 || sinceSkip < 1500) {
+      if (currentPlayback.is_buffering && rawBackendPos > 0) {
+        status.is_buffering = false;
+      }
+      if (currentPlayback.is_buffering && (rawBackendPos === 0 || rawBackendPos === undefined)) {
+        status.position_secs = currentPlayback.position_secs || 0;
+      } else if (sinceSeek < 1500 || sinceSkip < 1500) {
         status.position_secs = currentPlayback.position_secs;
       } else if (
         status.status === 'Playing' &&
@@ -1141,7 +1146,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         lyrics: [],
         lyricStatus: 'idle',
         currentTrack: virtualTrack,
-        playback: { ...get().playback, current_track: url, status: 'Playing', position_secs: 0, last_skip_time: Date.now() },
+        playback: {
+          ...get().playback,
+          current_track: url,
+          status: 'Playing',
+          position_secs: 0,
+          backend_position_secs: 0,
+          is_buffering: true,
+          last_skip_time: Date.now()
+        },
       });
       get().updateDiscordPresence();
 
@@ -1199,6 +1212,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       } else {
         await invoke('play_track', { path: url, startPos: 0.0 });
       }
+      if (get().playback.is_buffering) {
+        set(s => ({ playback: { ...s.playback, is_buffering: false } }));
+      }
       if (triggerAutoplay) {
         get().triggerAutoplayRadio(virtualTrack, true).catch(console.error);
       }
@@ -1208,7 +1224,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       invoke('get_lyrics', { path: url }).then((lrc: any) => {
         if (!pathsEqual(get().playback.current_track, url)) return;
         if (Array.isArray(lrc) && lrc.length > 0) {
-          set({ lyrics: lrc, lyricStatus: 'found' });
+          set({ lyrics: sortLyricLines(lrc), lyricStatus: 'found' });
           const hasWordSync = lrc.some((l: any) => l.words && l.words.length > 0);
           if (!hasWordSync && pathsEqual(get().playback.current_track, url)) {
             get().autoFetchLyricsOnline(virtualTrack);

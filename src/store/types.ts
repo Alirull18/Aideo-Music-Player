@@ -8,6 +8,7 @@ export interface Track {
   format: string | null;
   lyric_offset: number;
   cover_url?: string | null;
+  duration_raw?: string | null;
   is_autoplay?: boolean;
   loved?: number;
   disliked?: number;

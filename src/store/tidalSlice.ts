@@ -1,6 +1,7 @@
 import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
+import { parseDuration } from '../utils';
 
 export const createTidalSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   tidalConnected: false,
@@ -39,7 +40,15 @@ export const createTidalSlice: StateCreator<PlayerState, [], [], any> = (set, ge
   },
 
   playTidalResult: async (track: Track) => {
-    await get().playTrack(track, false, true);
+    let dur = track.duration;
+    if ((!dur || dur <= 0) && (track as any).duration_raw) {
+      dur = parseDuration((track as any).duration_raw);
+    }
+    const normalizedTrack: Track = {
+      ...track,
+      duration: dur && dur > 0 ? dur : 180,
+    };
+    await get().playTrack(normalizedTrack, false, true);
   },
 
   downloadTidalTrack: async (track: Track) => {

@@ -1,6 +1,6 @@
 # 💎 Aideo Music Player v0.9.7 — Feature Expansion, Streaming Services & Stability
 
-Welcome to **Aideo v0.9.7**! This version represents a substantial expansion beyond the v0.9.6 baseline (+33,289 lines / -13,442 lines across 18 commits), introducing official Qobuz streaming, overhauled discovery layouts, structured system diagnostics, storage management, and a robust test suite of 424 frontend tests and 206 backend tests.
+Welcome to **Aideo v0.9.7**! This version represents a substantial expansion beyond the v0.9.6 baseline (+33,289 lines / -13,442 lines across 18 commits), introducing official Qobuz streaming, overhauled discovery layouts, structured system diagnostics, storage management, and a robust test suite of 427 frontend tests and 238 backend tests.
 
 ---
 
@@ -30,7 +30,28 @@ Welcome to **Aideo v0.9.7**! This version represents a substantial expansion bey
 * **React Error Boundaries (`src/components/ErrorBoundary.tsx`)**: Wrapped core views (`AideoView`, `LibraryView`, etc.) in error boundaries to prevent a single rendering error from crashing the entire application window.
 * **Toast Notification Engine (`src/utils/toast.ts`, `src/components/Toast.tsx`)**: Rewritten toast notification pipeline with deduplication, message categorization (`info`, `success`, `warning`, `error`, `help`), and action callbacks.
 * **Karaoke Active Line Focus (`src/components/KaraokeActiveLine.tsx`)**: Dedicated typography component for real-time synced lyrics.
-* **Queue Promise Serialization (`src/store/playbackSlice.ts`)**: Strict queue operation chaining preventing race conditions during rapid track additions, queue clears, or shuffle toggles.
+### 🛡️ External Audit Remediation & Pipeline Hardening
+* **Audio DSP Parameter Ingestion Safety (`AUD-DSP-06`)**: Added `DSPState::sanitize` clamping EQ bands, preamp gains, crossfeed, and limiter thresholds to bounded finite values, eliminating `NaN` and infinite gain filter corruption.
+* **Limiter Multichannel Expansion Alignment (`AUD-DSP-08`)**: Pre-filled newly expanded channel queues in `LookaheadLimiter` with `window_len` zeros to prevent inter-channel phase skew.
+* **EOF Residual Frame Padding (`AUD-CON-06`)**: Zero-padded partial residual frames (< `chunk_size`) at EOF instead of discarding them, eliminating end-of-track audio clipping.
+* **Double-Dither Removal (`AUD-DSP-01`)**: Removed premature float dither from the audio pump loop, ensuring triangular dither is applied solely at hardware integer quantization inside WASAPI/CPAL callbacks.
+* **Multichannel Downmix Matrix (`AUD-AUD-06`)**: Implemented ITU-R compliant `downmix_to_stereo` properly folding 3.0 center into L/R, 5.1 LFE into L/R (-6dB), and 7.1 rear/side surrounds into stereo.
+* **RAM Cache Footprint Guard (`AUD-AUD-05`)**: Implemented `should_bypass_ram_cache` checking uncompressed decoded float footprint (`duration * rate * channels * 4 > 400MB`) to stream high-sample-rate audio directly from disk and prevent out-of-memory crashes.
+* **Playback Speed Resampling (`AUD-DSP-02`)**: Fixed playback speed adjustments so they engage even when `file_rate == dev_rate`, and removed the inaccurate `(Pitch Preserved)` toast label.
+* **Multichannel Phase Alignment (`AUD-DSP-04`)**: Refactored `PhaseResponseNode` to process all audio channels uniformly through independent allpass cascades.
+* **Convolution IR Scaling & Path Caching (`AUD-DSP-07`)**: Cached IR paths immediately to prevent infinite reload attempt loops on missing files, and scaled L/R impulse responses using global max peak normalization to preserve spatial stereo balance.
+* **Safe Audio Device Matching (`AUD-HW-06`)**: Implemented `find_best_matching_device_name` prioritizing exact and case-insensitive matches, scoring distinctive model tokens, and preventing generic words (e.g. "Speakers") from hijacking arbitrary endpoints.
+* **FFmpeg Fallback Sample Rate & Channel Desync (`AUD-AUD-04`, `AUD-P0-06`)**: Passed dynamic `file_rate` and `file_ch` to background FFmpeg decoding, eliminating 4x chipmunk pitch and speed distortion on DSD and high-res audio.
+* **Session Reuse Channel Validation (`AUD-AUD-08`, `AUD-CON-05`)**: Validated output channels in `can_reuse_stream_session` and unflagged `ActiveStreamSession.channels` from dead code, preventing 2ch session reuse on surround tracks.
+* **Bit-Perfect Resampled DSP Bypass Correction (`AUD-AUD-01`, `AUD-DSP-10`)**: Passed the evaluated pipeline bit-perfect state `is_bp` rather than raw preference `bp_now` to `should_bypass_dsp_for_bit_perfect`, ensuring user DSP remains active when sample rates differ and audio is resampled.
+* **DSD Badge Integrity (`AUD-AUD-02`, `AUD-P0-04`)**: Corrected misleading `DSD NATIVE` label to `DSD` in FullscreenView, reflecting transcode-to-PCM playback.
+* **Graceful Player Shutdown (`AUD-CON-11`)**: Added `PlayerCommand::Shutdown` variant handled across all decoder and playback loops, dispatched on `Player::drop` to prevent orphaned background threads.
+* **Crossfade Queue Restoration (`AUD-CON-07`)**: Pushed the popped track back to the head of the queue if crossfade decoder or resampler initialization fails.
+* **Chromecast HTTP Range Compliance (`AUD-NET-08`)**: Supported open-ended, closed, suffix ranges, and `416 Range Not Satisfiable` in Chromecast streaming server.
+* **UPnP Header Formatting & Casting (`AUD-NET-05`, `AUD-NET-06`, `AUD-P0-07`)**: Fixed syntax error in UPnP `protocolInfo`, added DLNA profile identifiers (`FLAC`, `MP3`, `AAC_ISO`), and wired frontend `upnp_play` so UPnP casting streams directly to remote renderers.
+* **Dual-Layer Lyric Cache Invalidation (`AUD-PERF-08`)**: Added `clean_stale_lyrics_cache` purging conflicting extensions (`.lrc` vs `.ttml`) and AppData cache layers upon saving lyrics.
+* **Modal Accessibility Polish (`AUD-A11Y-01` to `AUD-A11Y-06`)**: Added explicit `aria-label` attributes to icon-only modal close buttons across all dialogs.
+* **Copyright & Security Cleanliness (`AUD-LEG-04`, `AUD-UPD-06`, `AUD-UPD-07`)**: Removed stale `updater.json`, purged 22 tracked commercial `.ttml` lyric files from git, pinned external GitHub Actions to immutable SHAs, and ensured minisign `.sig` files are not parsed as SHA-256 sidecars.
 
 ---
 
@@ -72,7 +93,7 @@ npx tsc --noEmit
 
 # 2. Frontend Vitest Unit Test Suite
 npx vitest run src/test
-# Result: Passed (66 test files passed, 424 tests passed)
+# Result: Passed (66 test files passed, 427 tests passed)
 
 # 3. Backend Rust Compilation Check
 cargo check --manifest-path src-tauri/Cargo.toml
@@ -80,7 +101,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 # 4. Backend Rust Unit Test Suite
 cargo test --manifest-path src-tauri/Cargo.toml
-# Result: Passed (206 passed, 0 failed, 1 ignored)
+# Result: Passed (238 passed, 0 failed, 1 ignored)
 ```
 
 ---
@@ -89,7 +110,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 In keeping with our strict zero-sugarcoating audit policy, the following items remain open for resolution before a public v0.9.7 binary release can be signed and distributed:
 
-1. **Auto-Updater Contract (`H-01`)**: The custom updater in `updater.rs` expects a 64-hex SHA-256 sidecar, but GitHub Actions produces `.sig` signatures. This must be harmonized with Tauri's official updater plugin.
+1. **Auto-Updater Contract (`H-01`)**: The custom updater in `updater.rs` expects a 64-hex SHA-256 sidecar (`.sha256` / `.sha256sum`). `updater.rs` has been patched to ignore minisign `.sig` files so they are no longer misparsed as checksums, and CI release workflows will publish official `.sha256` sidecars alongside binaries.
 2. **Missing Backend Commands (`H-02`)**: The frontend calls `download_playlist_batch` (`cloudSlice.ts`) and `qobuz_open_login_window` (`qobuzSlice.ts`), which need to be registered in `src-tauri/src/lib.rs`.
 3. **Event System Mismatch (`M-01`)**: `qobuzSlice` and `tidalSlice` dispatch DOM `CustomEvent`s for auth failure navigation, while `App.tsx` listens via Tauri IPC `listen`.
 4. **Dependency Advisories (`H-03`, `H-04`)**: Dependency audits report 9 npm advisories and 2 Cargo advisories (`h2`, `quick-xml`).

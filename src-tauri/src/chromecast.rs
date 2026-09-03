@@ -27,6 +27,72 @@ pub fn get_local_ip() -> Option<String> {
     socket.local_addr().ok().map(|addr| addr.ip().to_string())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum HttpRange {
+    None,
+    Satisfiable { start: u64, end: u64 },
+    NotSatisfiable,
+}
+
+pub fn parse_http_range(range_header: &str, file_size: u64) -> HttpRange {
+    let header_lower = range_header.to_lowercase();
+    let pos = match header_lower.find("bytes=") {
+        Some(p) => p + 6,
+        None => return HttpRange::None,
+    };
+    let range_val = &header_lower[pos..];
+    let hyphen_pos = match range_val.find('-') {
+        Some(p) => p,
+        None => return HttpRange::None,
+    };
+
+    let start_str = range_val[..hyphen_pos].trim();
+    let end_str = range_val[hyphen_pos + 1..].trim();
+
+    if file_size == 0 {
+        return HttpRange::NotSatisfiable;
+    }
+
+    if start_str.is_empty() {
+        if let Ok(suffix_len) = end_str.parse::<u64>() {
+            if suffix_len == 0 {
+                return HttpRange::NotSatisfiable;
+            }
+            let start = file_size.saturating_sub(suffix_len);
+            return HttpRange::Satisfiable {
+                start,
+                end: file_size - 1,
+            };
+        }
+        return HttpRange::None;
+    }
+
+    let start = match start_str.parse::<u64>() {
+        Ok(s) => s,
+        Err(_) => return HttpRange::None,
+    };
+
+    if start >= file_size {
+        return HttpRange::NotSatisfiable;
+    }
+
+    let end = if end_str.is_empty() {
+        file_size - 1
+    } else {
+        match end_str.parse::<u64>() {
+            Ok(e) => {
+                if e < start {
+                    return HttpRange::NotSatisfiable;
+                }
+                e.min(file_size - 1)
+            }
+            Err(_) => file_size - 1,
+        }
+    };
+
+    HttpRange::Satisfiable { start, end }
+}
+
 pub async fn ensure_local_stream_server(app_state: &crate::AppState) -> Option<u16> {
     let mut port_lock = LOCAL_SERVER_PORT.lock().await;
     if let Some(port) = *port_lock {
@@ -228,23 +294,13 @@ async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver
                             };
                             
                             // Parse Range header for seeking capability
-                            let mut range_start = 0u64;
-                            let mut is_partial = false;
-                            
+                            let mut range_req = HttpRange::None;
                             for line in &lines[1..] {
                                 let line_lower = line.to_lowercase();
                                 if line_lower.starts_with("range:") {
                                     println!("[chromecast-http] Range header found: {}", line);
-                                    if let Some(pos) = line_lower.find("bytes=") {
-                                        let range_val = &line_lower[pos + 6..];
-                                        if let Some(hyphen_pos) = range_val.find('-') {
-                                            let start_str = range_val[..hyphen_pos].trim();
-                                            if let Ok(start) = start_str.parse::<u64>() {
-                                                range_start = start;
-                                                is_partial = true;
-                                            }
-                                        }
-                                    }
+                                    range_req = parse_http_range(line, file_size);
+                                    break;
                                 }
                             }
                             
@@ -257,58 +313,82 @@ async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver
                                 "ogg" => "audio/ogg",
                                 _ => "audio/mpeg",
                             };
-                            
-                            if is_partial && range_start < file_size {
-                                println!("[chromecast-http] Serving Partial Content starting at {} bytes (MIME: {})", range_start, mime_type);
-                                if file.seek(SeekFrom::Start(range_start)).await.is_err() {
-                                    let _ = socket.write_all(b"HTTP/1.1 500 Internal Server Error\r\n\r\n").await;
-                                    return;
+
+                            match range_req {
+                                HttpRange::NotSatisfiable => {
+                                    println!("[chromecast-http] Range not satisfiable for file size {}", file_size);
+                                    let headers = format!(
+                                        "HTTP/1.1 416 Range Not Satisfiable\r\n\
+                                         Content-Range: bytes */{}\r\n\
+                                         Access-Control-Allow-Origin: *\r\n\
+                                         Access-Control-Allow-Headers: *\r\n\
+                                         Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+                                         Connection: close\r\n\r\n",
+                                        file_size
+                                    );
+                                    let _ = socket.write_all(headers.as_bytes()).await;
                                 }
-                                
-                                let content_length = file_size - range_start;
-                                let headers = format!(
-                                    "HTTP/1.1 206 Partial Content\r\n\
-                                     Content-Type: {}\r\n\
-                                     Content-Length: {}\r\n\
-                                     Content-Range: bytes {}-{}/{}\r\n\
-                                     Accept-Ranges: bytes\r\n\
-                                     Access-Control-Allow-Origin: *\r\n\
-                                     Access-Control-Allow-Headers: *\r\n\
-                                     Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
-                                     Connection: close\r\n\r\n",
-                                    mime_type, content_length, range_start, file_size - 1, file_size
-                                );
-                                
-                                if socket.write_all(headers.as_bytes()).await.is_err() { return; }
-                                
-                                if method == "GET" {
-                                    let mut file_buf = vec![0u8; 64 * 1024];
-                                    while let Ok(n) = file.read(&mut file_buf).await {
-                                        if n == 0 { break; }
-                                        if socket.write_all(&file_buf[..n]).await.is_err() { break; }
+                                HttpRange::Satisfiable { start, end } => {
+                                    println!("[chromecast-http] Serving Partial Content {}-{} of {} bytes (MIME: {})", start, end, file_size, mime_type);
+                                    if file.seek(SeekFrom::Start(start)).await.is_err() {
+                                        let _ = socket.write_all(b"HTTP/1.1 500 Internal Server Error\r\n\r\n").await;
+                                        return;
+                                    }
+                                    
+                                    let content_length = end - start + 1;
+                                    let headers = format!(
+                                        "HTTP/1.1 206 Partial Content\r\n\
+                                         Content-Type: {}\r\n\
+                                         Content-Length: {}\r\n\
+                                         Content-Range: bytes {}-{}/{}\r\n\
+                                         Accept-Ranges: bytes\r\n\
+                                         Access-Control-Allow-Origin: *\r\n\
+                                         Access-Control-Allow-Headers: *\r\n\
+                                         Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+                                         Connection: close\r\n\r\n",
+                                        mime_type, content_length, start, end, file_size
+                                    );
+                                    
+                                    if socket.write_all(headers.as_bytes()).await.is_err() { return; }
+                                    
+                                    if method == "GET" {
+                                        let mut remaining = content_length;
+                                        let mut file_buf = vec![0u8; 64 * 1024];
+                                        while remaining > 0 {
+                                            let to_read = (remaining as usize).min(file_buf.len());
+                                            match file.read(&mut file_buf[..to_read]).await {
+                                                Ok(0) => break,
+                                                Ok(n) => {
+                                                    remaining -= n as u64;
+                                                    if socket.write_all(&file_buf[..n]).await.is_err() { break; }
+                                                }
+                                                Err(_) => break,
+                                            }
+                                        }
                                     }
                                 }
-                            } else {
-                                println!("[chromecast-http] Serving full stream: {} bytes (MIME: {})", file_size, mime_type);
-                                let headers = format!(
-                                    "HTTP/1.1 200 OK\r\n\
-                                     Content-Type: {}\r\n\
-                                     Content-Length: {}\r\n\
-                                     Accept-Ranges: bytes\r\n\
-                                     Access-Control-Allow-Origin: *\r\n\
-                                     Access-Control-Allow-Headers: *\r\n\
-                                     Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
-                                     Connection: close\r\n\r\n",
-                                    mime_type, file_size
-                                );
-                                
-                                if socket.write_all(headers.as_bytes()).await.is_err() { return; }
-                                
-                                if method == "GET" {
-                                    let mut file_buf = vec![0u8; 64 * 1024];
-                                    while let Ok(n) = file.read(&mut file_buf).await {
-                                        if n == 0 { break; }
-                                        if socket.write_all(&file_buf[..n]).await.is_err() { break; }
+                                HttpRange::None => {
+                                    println!("[chromecast-http] Serving full stream: {} bytes (MIME: {})", file_size, mime_type);
+                                    let headers = format!(
+                                        "HTTP/1.1 200 OK\r\n\
+                                         Content-Type: {}\r\n\
+                                         Content-Length: {}\r\n\
+                                         Accept-Ranges: bytes\r\n\
+                                         Access-Control-Allow-Origin: *\r\n\
+                                         Access-Control-Allow-Headers: *\r\n\
+                                         Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+                                         Connection: close\r\n\r\n",
+                                        mime_type, file_size
+                                    );
+                                    
+                                    if socket.write_all(headers.as_bytes()).await.is_err() { return; }
+                                    
+                                    if method == "GET" {
+                                        let mut file_buf = vec![0u8; 64 * 1024];
+                                        while let Ok(n) = file.read(&mut file_buf).await {
+                                            if n == 0 { break; }
+                                            if socket.write_all(&file_buf[..n]).await.is_err() { break; }
+                                        }
                                     }
                                 }
                             }
@@ -630,5 +710,55 @@ pub async fn chromecast_get_status() -> Result<serde_json::Value, String> {
             }))
         }
         Err(e) => Err(format!("Failed to query media status: {}", e)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_http_range_standard() {
+        let res = parse_http_range("Range: bytes=0-499", 1000);
+        assert_eq!(res, HttpRange::Satisfiable { start: 0, end: 499 });
+    }
+
+    #[test]
+    fn test_parse_http_range_open_ended() {
+        let res = parse_http_range("Range: bytes=500-", 1000);
+        assert_eq!(res, HttpRange::Satisfiable { start: 500, end: 999 });
+    }
+
+    #[test]
+    fn test_parse_http_range_suffix() {
+        let res = parse_http_range("Range: bytes=-200", 1000);
+        assert_eq!(res, HttpRange::Satisfiable { start: 800, end: 999 });
+    }
+
+    #[test]
+    fn test_parse_http_range_clamps_excessive_end() {
+        let res = parse_http_range("Range: bytes=100-5000", 1000);
+        assert_eq!(res, HttpRange::Satisfiable { start: 100, end: 999 });
+    }
+
+    #[test]
+    fn test_parse_http_range_out_of_bounds_start_returns_not_satisfiable() {
+        let res = parse_http_range("Range: bytes=1000-2000", 1000);
+        assert_eq!(res, HttpRange::NotSatisfiable);
+
+        let res2 = parse_http_range("Range: bytes=1000-", 1000);
+        assert_eq!(res2, HttpRange::NotSatisfiable);
+    }
+
+    #[test]
+    fn test_parse_http_range_inverted_range_returns_not_satisfiable() {
+        let res = parse_http_range("Range: bytes=500-200", 1000);
+        assert_eq!(res, HttpRange::NotSatisfiable);
+    }
+
+    #[test]
+    fn test_parse_http_range_missing_or_invalid() {
+        assert_eq!(parse_http_range("User-Agent: Mozilla", 1000), HttpRange::None);
+        assert_eq!(parse_http_range("Range: chars=0-100", 1000), HttpRange::None);
     }
 }

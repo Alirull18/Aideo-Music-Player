@@ -231,7 +231,43 @@ pub async fn disconnect_upnp_device() -> Result<(), String> {
     Ok(())
 }
 
-/// Play a track on the connected UPnP device via AVTransport SOAP actions.
+pub fn build_protocol_info(mime_type: &str) -> String {
+    let clean_mime = mime_type.trim();
+    let dlna_pn = match clean_mime {
+        m if m.contains("flac") => ";DLNA.ORG_PN=FLAC",
+        m if m.contains("mpeg") || m.contains("mp3") => ";DLNA.ORG_PN=MP3",
+        m if m.contains("aac") || m.contains("mp4") || m.contains("m4a") => ";DLNA.ORG_PN=AAC_ISO",
+        _ => "",
+    };
+    format!(
+        "http-get:*:{}:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000{}",
+        clean_mime, dlna_pn
+    )
+}
+
+pub fn build_didl_metadata(title: &str, artist: &str, album: &str, stream_url: &str, mime_type: &str) -> String {
+    let protocol_info = build_protocol_info(mime_type);
+    format!(
+        "&lt;DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" \
+         xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
+         xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"&gt;\
+         &lt;item id=\"1\" parentID=\"0\" restricted=\"1\"&gt;\
+         &lt;dc:title&gt;{}&lt;/dc:title&gt;\
+         &lt;dc:creator&gt;{}&lt;/dc:creator&gt;\
+         &lt;upnp:artist&gt;{}&lt;/upnp:artist&gt;\
+         &lt;upnp:album&gt;{}&lt;/upnp:album&gt;\
+         &lt;upnp:class&gt;object.item.audioItem.musicTrack&lt;/upnp:class&gt;\
+         &lt;res protocolInfo=\"{}\"&gt;{}&lt;/res&gt;\
+         &lt;/item&gt;&lt;/DIDL-Lite&gt;",
+        escape_xml(title),
+        escape_xml(artist),
+        escape_xml(artist),
+        escape_xml(album),
+        protocol_info,
+        escape_xml(stream_url)
+    )
+}
+
 pub async fn upnp_play_stream(
     stream_url: &str,
     title: &str,
@@ -248,25 +284,7 @@ pub async fn upnp_play_stream(
     let av_url = device.av_transport_url.ok_or("Device does not support AVTransport")?;
 
     // 1. Build DIDL-Lite Metadata
-    let didl_metadata = format!(
-        "&lt;DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" \
-         xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
-         xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"&gt;\
-         &lt;item id=\"1\" parentID=\"0\" restricted=\"1\"&gt;\
-         &lt;dc:title&gt;{}&lt;/dc:title&gt;\
-         &lt;dc:creator&gt;{}&lt;/dc:creator&gt;\
-         &lt;upnp:artist&gt;{}&lt;/upnp:artist&gt;\
-         &lt;upnp:album&gt;{}&lt;/upnp:album&gt;\
-         &lt;upnp:class&gt;object.item.audioItem.musicTrack&lt;/upnp:class&gt;\
-         &lt;res protocolInfo=\"http-get:*:{} :DLNA.ORG_PN=FLAC;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000\"&gt;{}&lt;/res&gt;\
-         &lt;/item&gt;&lt;/DIDL-Lite&gt;",
-        escape_xml(title),
-        escape_xml(artist),
-        escape_xml(artist),
-        escape_xml(album),
-        mime_type.trim(),
-        escape_xml(stream_url)
-    );
+    let didl_metadata = build_didl_metadata(title, artist, album, stream_url, mime_type);
 
     // 2. SetAVTransportURI
     let set_uri_body = format!(
@@ -527,5 +545,35 @@ mod tests {
         assert_eq!(dev.manufacturer, "Linkplay");
         assert_eq!(dev.av_transport_url.as_deref(), Some("http://192.168.1.50:49152/upnp/control/avtransport"));
         assert_eq!(dev.rendering_control_url.as_deref(), Some("http://192.168.1.50:49152/upnp/control/renderingcontrol"));
+    }
+
+    #[test]
+    fn test_build_protocol_info_formatting() {
+        let flac_info = build_protocol_info("audio/flac");
+        assert_eq!(
+            flac_info,
+            "http-get:*:audio/flac:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000;DLNA.ORG_PN=FLAC"
+        );
+        assert!(!flac_info.contains(" :"));
+
+        let mp3_info = build_protocol_info("audio/mpeg");
+        assert_eq!(
+            mp3_info,
+            "http-get:*:audio/mpeg:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000;DLNA.ORG_PN=MP3"
+        );
+        assert!(!mp3_info.contains(" :"));
+
+        let aac_info = build_protocol_info("audio/mp4");
+        assert_eq!(
+            aac_info,
+            "http-get:*:audio/mp4:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000;DLNA.ORG_PN=AAC_ISO"
+        );
+
+        let wav_info = build_protocol_info("audio/wav");
+        assert_eq!(
+            wav_info,
+            "http-get:*:audio/wav:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+        );
+        assert!(!wav_info.contains(" :"));
     }
 }

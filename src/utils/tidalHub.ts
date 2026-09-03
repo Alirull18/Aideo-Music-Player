@@ -9,6 +9,7 @@ export interface TidalHubTrack extends YoutubeTrack {
   path: string;
   format: 'Tidal FLAC';
   album?: string;
+  duration?: number;
 }
 
 interface RawTidalResult {
@@ -37,6 +38,7 @@ export function tidalResultsToHubTracks(results: RawTidalResult[]): TidalHubTrac
       title: t.title!,
       artist: t.artist!,
       cover_url: t.cover_url || null,
+      duration: t.duration || 180,
       duration_raw: formatDuration(t.duration),
       url: String(t.id),
       path: String(t.id),

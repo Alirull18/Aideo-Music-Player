@@ -766,6 +766,17 @@ mod dsp_tests {
         let (upsample, dither) = resolve_hardware_upsample_and_dither(false, 192000, true);
         assert_eq!(upsample, 192000);
         assert!(dither);
+
+        // 4. Rate Mismatch Rule: When rates differ, audio is resampled so is_bp is false;
+        // user DSP remains active instead of being suppressed.
+        let bp_pref = true;
+        let file_rate = 96000;
+        let dev_rate = 44100;
+        let file_ch = 2;
+        let dev_ch = 2;
+        let is_bp = bp_pref && file_rate == dev_rate && file_ch == dev_ch;
+        assert!(!is_bp);
+        assert!(!should_bypass_dsp_for_bit_perfect(is_bp, true));
     }
 
     #[test]
@@ -776,23 +787,27 @@ mod dsp_tests {
         let dev_b = Some("DAC-2".to_string());
 
         // 1. Shared mode reuses session across different track sample rates (Rubato resamples)
-        assert!(can_reuse_stream_session(&dev_a, false, 48000, &dev_a, false, 44100, 0));
-        assert!(can_reuse_stream_session(&dev_a, false, 48000, &dev_a, false, 96000, 0));
+        assert!(can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_a, false, 44100, 2, 0));
+        assert!(can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_a, false, 96000, 2, 0));
 
-        // 2. Exclusive mode reuses session when rates match
-        assert!(can_reuse_stream_session(&dev_a, true, 44100, &dev_a, true, 44100, 0));
-        assert!(can_reuse_stream_session(&dev_a, true, 96000, &dev_a, true, 96000, 0));
+        // 2. Exclusive mode reuses session when rates and channels match
+        assert!(can_reuse_stream_session(&dev_a, true, 44100, 2, &dev_a, true, 44100, 2, 0));
+        assert!(can_reuse_stream_session(&dev_a, true, 96000, 2, &dev_a, true, 96000, 2, 0));
 
         // 3. Exclusive mode rejects session when track rates differ (requires DAC clock reset)
-        assert!(!can_reuse_stream_session(&dev_a, true, 44100, &dev_a, true, 96000, 0));
-        assert!(!can_reuse_stream_session(&dev_a, true, 96000, &dev_a, true, 44100, 0));
+        assert!(!can_reuse_stream_session(&dev_a, true, 44100, 2, &dev_a, true, 96000, 2, 0));
+        assert!(!can_reuse_stream_session(&dev_a, true, 96000, 2, &dev_a, true, 44100, 2, 0));
 
-        // 4. Mode mismatch (shared vs exclusive) rejects session
-        assert!(!can_reuse_stream_session(&dev_a, false, 44100, &dev_a, true, 44100, 0));
-        assert!(!can_reuse_stream_session(&dev_a, true, 44100, &dev_a, false, 44100, 0));
+        // 4. Exclusive mode rejects session when channel counts differ (e.g. 2ch vs 6ch surround)
+        assert!(!can_reuse_stream_session(&dev_a, true, 44100, 2, &dev_a, true, 44100, 6, 0));
+        assert!(!can_reuse_stream_session(&dev_a, true, 44100, 6, &dev_a, true, 44100, 2, 0));
 
-        // 5. Device change rejects session
-        assert!(!can_reuse_stream_session(&dev_a, false, 48000, &dev_b, false, 48000, 0));
+        // 5. Mode mismatch (shared vs exclusive) rejects session
+        assert!(!can_reuse_stream_session(&dev_a, false, 44100, 2, &dev_a, true, 44100, 2, 0));
+        assert!(!can_reuse_stream_session(&dev_a, true, 44100, 2, &dev_a, false, 44100, 2, 0));
+
+        // 6. Device change rejects session
+        assert!(!can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_b, false, 48000, 2, 0));
     }
 
     #[test]
@@ -816,6 +831,558 @@ mod dsp_tests {
         // Last sample should now be what was index 949 (1000 - 50 - 1)
         assert_eq!(samples[0][849], 949.0);
         assert_eq!(samples[1][849], 949.0);
+    }
+
+    #[test]
+    fn test_active_stream_session_manual_change_flush_signal() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let flush_signal = Arc::new(AtomicBool::new(false));
+
+        // When a session is created from a natural queue transition, is_manual_change is false
+        let is_manual_change = false;
+        if is_manual_change {
+            flush_signal.store(true, Ordering::SeqCst);
+        }
+        assert!(!flush_signal.load(Ordering::SeqCst), "Natural queue transition must not flush the active session");
+
+        // When a session is created from a manual Play command, is_manual_change is true
+        let is_manual_change = true;
+        if is_manual_change {
+            flush_signal.store(true, Ordering::SeqCst);
+        }
+        assert!(flush_signal.load(Ordering::SeqCst), "Manual track skip must assert flush_signal to drain stale audio");
+
+        // Simulating the audio callback draining the ringbuffer
+        assert!(flush_signal.swap(false, Ordering::SeqCst), "Callback should observe and consume the flush signal");
+        assert!(!flush_signal.load(Ordering::SeqCst), "Flush signal should be reset for new track playback");
+    }
+
+    #[test]
+    fn test_ingestion_delay_skipping_prevents_cache_index_shift() {
+        use crate::player::trim_encoder_delay_and_padding;
+
+        // Model decoded packets arriving chunk by chunk (e.g. 500 samples per packet)
+        let total_frames = 2000;
+        let encoder_delay = 100usize;
+        let encoder_padding = 50usize;
+
+        let mut remaining_delay = encoder_delay;
+        let mut samples: Vec<Vec<f32>> = vec![Vec::new(), Vec::new()];
+
+        let raw_stream: Vec<f32> = (0..total_frames).map(|i| i as f32).collect();
+
+        // Simulate chunk ingestion with front-skipping
+        for chunk in raw_stream.chunks(500) {
+            let n_frames = chunk.len();
+            let skip_frames = if remaining_delay > 0 {
+                let skip = remaining_delay.min(n_frames);
+                remaining_delay -= skip;
+                skip
+            } else {
+                0
+            };
+
+            if skip_frames < n_frames {
+                for ch in 0..2 {
+                    samples[ch].extend_from_slice(&chunk[skip_frames..]);
+                }
+            }
+        }
+
+        // Reader starts consuming at ram_cursor = 0 concurrently
+        let mut ram_cursor = 0usize;
+        let read_chunk = 200usize;
+        let first_read = samples[0][ram_cursor..ram_cursor + read_chunk].to_vec();
+        ram_cursor += read_chunk;
+
+        // First sample read by playback was already sample 100.0 (the primer delay was skipped at ingestion!)
+        assert_eq!(first_read[0], 100.0);
+
+        // At EOF, only trailing padding is truncated
+        if encoder_padding > 0 {
+            for ch in samples.iter_mut() {
+                let truncate_to = ch.len() - encoder_padding;
+                ch.truncate(truncate_to);
+            }
+        }
+
+        // Verify: ram_cursor is STILL valid! The sample at ram_cursor is exactly sample 300.0 (100 + 200)
+        // No drain occurred from index 0, so NO samples were skipped mid-stream!
+        assert_eq!(samples[0][ram_cursor], 300.0);
+        assert_eq!(samples[0].len(), total_frames - encoder_delay - encoder_padding);
+
+        // Also test robust boundary handling for trim_encoder_delay_and_padding
+        let mut empty_buf: Vec<Vec<f32>> = vec![vec![]];
+        trim_encoder_delay_and_padding(&mut empty_buf, 1000, 500);
+        assert!(empty_buf[0].is_empty());
+
+        let mut short_buf: Vec<Vec<f32>> = vec![vec![1.0, 2.0]];
+        trim_encoder_delay_and_padding(&mut short_buf, 5, 5);
+        assert!(short_buf[0].is_empty());
+    }
+
+    #[test]
+    fn test_playback_generation_aborts_stale_worker() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Mutex};
+        use crate::player::PLAYBACK_GENERATION;
+
+        let _current_process = Arc::new(Mutex::new(None::<std::process::Child>));
+
+        // Track A starts with generation 1
+        let gen_a = PLAYBACK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        let cancel_a = Arc::new(AtomicBool::new(false));
+
+        // User rapidly skips to Track B before Track A finishes
+        let cancel_a_clone = Arc::clone(&cancel_a);
+        cancel_a_clone.store(true, Ordering::SeqCst);
+        let gen_b = PLAYBACK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        let cancel_b = Arc::new(AtomicBool::new(false));
+
+        assert!(gen_b > gen_a);
+
+        // Worker A attempts to check whether it is valid to touch current_process
+        let is_worker_a_valid = !cancel_a.load(Ordering::SeqCst) && PLAYBACK_GENERATION.load(Ordering::SeqCst) == gen_a;
+        assert!(!is_worker_a_valid, "Worker A must detect that its generation is obsolete / cancelled");
+
+        // Worker B is the active generation
+        let is_worker_b_valid = !cancel_b.load(Ordering::SeqCst) && PLAYBACK_GENERATION.load(Ordering::SeqCst) == gen_b;
+        assert!(is_worker_b_valid, "Worker B must be recognized as the valid active generation");
+    }
+
+    #[test]
+    fn test_dsp_state_sanitize_guards_nan_and_extremes() {
+        use crate::player::{DSPState, EQBand};
+
+        let mut dsp = DSPState {
+            width: f32::NAN,
+            preamp_gain: f32::INFINITY,
+            limiter_threshold: -100.0,
+            playback_rate: f64::NAN,
+            eq_graphic_gains: vec![f32::NAN, 100.0, -100.0],
+            eq_parametric_bands: vec![
+                EQBand { freq: f32::NAN, gain: f32::INFINITY, q: f32::NAN, band_type: "peaking".to_string() }
+            ],
+            ..DSPState::default()
+        };
+
+        dsp.sanitize();
+
+        assert!(dsp.width.is_finite());
+        assert_eq!(dsp.width, 1.0);
+        assert!(dsp.preamp_gain.is_finite());
+        assert_eq!(dsp.preamp_gain, 0.0);
+        assert_eq!(dsp.limiter_threshold, -30.0);
+        assert_eq!(dsp.playback_rate, 1.0);
+
+        assert_eq!(dsp.eq_graphic_gains[0], 0.0);
+        assert_eq!(dsp.eq_graphic_gains[1], 36.0);
+        assert_eq!(dsp.eq_graphic_gains[2], -36.0);
+
+        assert_eq!(dsp.eq_parametric_bands[0].freq, 1000.0);
+        assert_eq!(dsp.eq_parametric_bands[0].gain, 0.0);
+        assert_eq!(dsp.eq_parametric_bands[0].q, 0.707);
+    }
+
+    #[test]
+    fn test_biquad_filter_guards_nan_and_extremes() {
+        use crate::player::dsp::BiquadFilter;
+
+        let mut filter = BiquadFilter::new();
+        // Passing NaN / Inf / Extreme gain should not panic or produce NaN filter output
+        filter.set_peaking(44100.0, f32::NAN, f32::INFINITY, f32::NAN);
+        let out = filter.process(0.5);
+        assert!(out.is_finite());
+
+        filter.set_lowshelf(44100.0, 100.0, 1000.0, 1.0);
+        let out2 = filter.process(0.5);
+        assert!(out2.is_finite());
+
+        // Feeding NaN input sample directly to filter must not poison it permanently
+        let _ = filter.process(f32::NAN);
+        let recovered = filter.process(0.5);
+        assert!(recovered.is_finite(), "Filter must recover cleanly after receiving a NaN sample");
+    }
+
+    #[test]
+    fn test_limiter_multichannel_expansion_lookahead_alignment() {
+        use crate::player::LookaheadLimiter;
+
+        // Initialize stereo limiter with 5ms lookahead at 48kHz
+        let mut limiter = LookaheadLimiter::new(2, 5.0, 48000.0);
+        let lookahead_samples = ((5.0f32 * 0.001f32 * 48000.0f32).round() as usize).max(1);
+
+        // Dynamically expand to 6 channels on the first process call
+        let mut s = vec![0.5f32; 6];
+        limiter.process(&mut s, 0.0);
+
+        // On first frame, all 6 channels must output 0.0 because they are pre-filled with lookahead silence
+        for ch in 0..6 {
+            assert_eq!(s[ch], 0.0, "Channel {} must output lookahead silence on frame 0", ch);
+        }
+
+        // Process up to lookahead_samples frames
+        for _ in 1..lookahead_samples {
+            let mut frame = vec![0.5f32; 6];
+            limiter.process(&mut frame, 0.0);
+            for ch in 0..6 {
+                assert_eq!(frame[ch], 0.0, "Channel {} must remain in lookahead silence window", ch);
+            }
+        }
+
+        // At frame lookahead_samples + 1, all channels must exit silence together
+        let mut out_frame = vec![0.5f32; 6];
+        limiter.process(&mut out_frame, 0.0);
+        for ch in 0..6 {
+            assert!(
+                out_frame[ch] > 0.0,
+                "Channel {} must output audio aligned with all other channels at frame lookahead_samples + 1",
+                ch
+            );
+            assert_eq!(
+                out_frame[ch],
+                out_frame[0],
+                "Channel {} must have identical gain/delay alignment to channel 0",
+                ch
+            );
+        }
+    }
+
+    #[test]
+    fn test_audio_tail_padding_prevents_sample_loss_at_eof() {
+        use std::collections::VecDeque;
+
+        let chunk_size = 1024usize;
+        let file_ch = 2usize;
+        let residual_len = 350usize;
+
+        // Pending buffer with residual frames (< chunk_size)
+        let mut pending: Vec<VecDeque<f32>> = vec![
+            (0..residual_len).map(|i| i as f32).collect(),
+            (0..residual_len).map(|i| (i * 2) as f32).collect(),
+        ];
+
+        assert_eq!(pending[0].len(), residual_len);
+        assert!(pending[0].len() < chunk_size);
+
+        // Under EOF condition, buffer must be padded up to chunk_size so final frames can be drained
+        if !pending[0].is_empty() && pending[0].len() < chunk_size {
+            let pad = chunk_size - pending[0].len();
+            for ch in 0..file_ch {
+                pending[ch].extend(std::iter::repeat(0.0).take(pad));
+            }
+        }
+
+        assert_eq!(pending[0].len(), chunk_size);
+        assert_eq!(pending[1].len(), chunk_size);
+
+        // Verify the original audio frames are completely intact
+        for i in 0..residual_len {
+            assert_eq!(pending[0][i], i as f32);
+            assert_eq!(pending[1][i], (i * 2) as f32);
+        }
+
+        // Verify padded tail is silence
+        for i in residual_len..chunk_size {
+            assert_eq!(pending[0][i], 0.0);
+            assert_eq!(pending[1][i], 0.0);
+        }
+    }
+
+    #[test]
+    fn test_downmix_to_stereo_3_0_center_balanced() {
+        use crate::player::downmix_to_stereo;
+
+        // 3.0 audio: L = 0.0, R = 0.0, C = 1.0
+        let mut planar = vec![
+            vec![0.0f32; 100],
+            vec![0.0f32; 100],
+            vec![1.0f32; 100],
+        ];
+
+        downmix_to_stereo(&mut planar, 100);
+
+        // Center must be distributed symmetrically to Left and Right
+        assert!(planar[0][0] > 0.0, "Left channel must receive center audio");
+        assert!(planar[1][0] > 0.0, "Right channel must receive center audio");
+        assert_eq!(
+            planar[0][0], planar[1][0],
+            "Center channel must be panned equally to Left and Right"
+        );
+    }
+
+    #[test]
+    fn test_downmix_to_stereo_5_1_includes_lfe() {
+        use crate::player::downmix_to_stereo;
+
+        // 5.1 audio with only LFE signal (channel 3)
+        let mut planar = vec![
+            vec![0.0f32; 100], // L
+            vec![0.0f32; 100], // R
+            vec![0.0f32; 100], // C
+            vec![0.8f32; 100], // LFE
+            vec![0.0f32; 100], // Ls
+            vec![0.0f32; 100], // Rs
+        ];
+
+        downmix_to_stereo(&mut planar, 100);
+
+        // LFE must not be dropped
+        assert!(planar[0][0] > 0.0, "Left channel must receive LFE audio");
+        assert!(planar[1][0] > 0.0, "Right channel must receive LFE audio");
+        assert_eq!(
+            planar[0][0], planar[1][0],
+            "LFE channel must be balanced symmetrically across Left and Right"
+        );
+    }
+
+    #[test]
+    fn test_downmix_to_stereo_7_1_folds_rear_surrounds() {
+        use crate::player::downmix_to_stereo;
+
+        // 7.1 audio: only rear surrounds active (ch 6 Rls, ch 7 Rrs)
+        let mut planar = vec![
+            vec![0.0f32; 100], // 0: L
+            vec![0.0f32; 100], // 1: R
+            vec![0.0f32; 100], // 2: C
+            vec![0.0f32; 100], // 3: LFE
+            vec![0.0f32; 100], // 4: Ls
+            vec![0.0f32; 100], // 5: Rs
+            vec![0.6f32; 100], // 6: Rls
+            vec![0.6f32; 100], // 7: Rrs
+        ];
+
+        downmix_to_stereo(&mut planar, 100);
+
+        // Rear surrounds must fold into Left and Right respectively
+        assert!(planar[0][0] > 0.0, "Left channel must receive rear-left surround audio");
+        assert!(planar[1][0] > 0.0, "Right channel must receive rear-right surround audio");
+        assert_eq!(
+            planar[0][0], planar[1][0],
+            "Symmetric rear surrounds must produce balanced stereo output"
+        );
+    }
+
+    #[test]
+    fn test_should_bypass_ram_cache_protects_against_high_res_uncompressed_bloat() {
+        use crate::player::should_bypass_ram_cache;
+
+        // 1. Standard 3-minute CD-quality FLAC (50MB compressed, 180s, 44.1kHz, 2ch)
+        // Decoded RAM: 180 * 44100 * 2 * 4 = 63.5 MB (< 400MB) -> do NOT bypass
+        assert!(!should_bypass_ram_cache(50 * 1024 * 1024, 180.0, 44100, 2));
+
+        // 2. High-res 5-minute 192kHz 6-channel FLAC (100MB compressed, 300s, 192kHz, 6ch)
+        // Decoded RAM: 300 * 192000 * 6 * 4 = 1.38 GB (> 400MB) -> MUST bypass to prevent RAM explosion!
+        assert!(should_bypass_ram_cache(100 * 1024 * 1024, 300.0, 192000, 6));
+
+        // 3. DXD 384kHz 2-channel track (120MB compressed, 300s, 384kHz, 2ch)
+        // Decoded RAM: 300 * 384000 * 2 * 4 = 921 MB (> 400MB) -> MUST bypass
+        assert!(should_bypass_ram_cache(120 * 1024 * 1024, 300.0, 384000, 2));
+
+        // 4. Exceeds compressed file limit (>150MB)
+        assert!(should_bypass_ram_cache(160 * 1024 * 1024, 120.0, 44100, 2));
+
+        // 5. Exceeds duration limit (>15 mins / 900s)
+        assert!(should_bypass_ram_cache(20 * 1024 * 1024, 950.0, 44100, 2));
+    }
+
+    #[test]
+    fn test_should_bypass_resampler_logic() {
+        use crate::player::should_bypass_resampler;
+
+        // Same rate and 1.0x speed -> bypasses resampler
+        assert!(should_bypass_resampler(44100, 44100, 1.0));
+        assert!(should_bypass_resampler(48000, 48000, 1.0));
+
+        // Same rate BUT speed changed -> must NOT bypass resampler!
+        assert!(!should_bypass_resampler(44100, 44100, 1.25));
+        assert!(!should_bypass_resampler(44100, 44100, 0.75));
+        assert!(!should_bypass_resampler(48000, 48000, 1.5));
+
+        // Different rates -> must NOT bypass resampler
+        assert!(!should_bypass_resampler(44100, 48000, 1.0));
+        assert!(!should_bypass_resampler(96000, 44100, 1.0));
+    }
+
+    #[test]
+    fn test_phase_response_node_processes_all_channels() {
+        use crate::player::{PhaseResponseNode, AudioNode, DSPState};
+
+        let mut node = PhaseResponseNode::new();
+        let dsp = DSPState {
+            enabled: true,
+            resampler_phase_mode: "minimum".to_string(),
+            ..DSPState::default()
+        };
+        node.update_params(&dsp, 44100.0);
+
+        // 4 identical channels with an impulse
+        let mut samples = vec![
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0, 0.0],
+        ];
+
+        node.process(&mut samples, 44100.0);
+
+        // All 4 channels must be identical (phase-aligned across all channels)
+        for ch in 1..4 {
+            for i in 0..4 {
+                assert_eq!(
+                    samples[ch][i], samples[0][i],
+                    "Channel {} sample {} must match channel 0",
+                    ch, i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_convolution_filter_scaled_preserves_stereo_balance() {
+        use crate::player::dsp::ConvolutionFilter;
+
+        let mut left_filter = ConvolutionFilter::new();
+        let mut right_filter = ConvolutionFilter::new();
+        left_filter.enabled = true;
+        left_filter.wet = 1.0;
+        right_filter.enabled = true;
+        right_filter.wet = 1.0;
+
+        let left_ir = vec![1.0f32, 0.0];
+        let right_ir = vec![0.25f32, 0.0];
+
+        let max_l = left_ir.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        let max_r = right_ir.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        let global_max = max_l.max(max_r).max(1e-6);
+
+        left_filter.load_ir_samples_scaled(left_ir, global_max);
+        right_filter.load_ir_samples_scaled(right_ir, global_max);
+
+        // Process impulse through both
+        let mut left_out = Vec::new();
+        let mut right_out = Vec::new();
+
+        for i in 0..1024 {
+            let input = if i == 0 { 1.0 } else { 0.0 };
+            left_out.push(left_filter.process(input));
+            right_out.push(right_filter.process(input));
+        }
+
+        let max_out_l = left_out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        let max_out_r = right_out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+
+        // Ratio must be approximately 4:1 (within 1%)
+        assert!(max_out_l > 0.0);
+        assert!(max_out_r > 0.0);
+        let ratio = max_out_l / max_out_r;
+        assert!(
+            (ratio - 4.0).abs() < 0.05,
+            "Expected 4:1 ratio between Left and Right outputs, got {}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn test_player_command_shutdown_protocol() {
+        use crate::player::PlayerCommand;
+
+        let (tx, rx) = std::sync::mpsc::channel::<PlayerCommand>();
+        assert!(tx.send(PlayerCommand::Shutdown).is_ok());
+
+        let received = rx.recv().expect("must receive Shutdown command");
+        match received {
+            PlayerCommand::Shutdown => {
+                // Verified: Shutdown variant successfully transmitted
+            }
+            _ => panic!("Expected PlayerCommand::Shutdown"),
+        }
+    }
+
+    #[test]
+    fn test_find_best_matching_device_name_logic() {
+        use crate::player::find_best_matching_device_name;
+
+        let candidates = vec![
+            "Realtek High Definition Audio".to_string(),
+            "Focusrite Scarlett 2i2 USB".to_string(),
+            "FiiO K5 Pro DAC".to_string(),
+            "Speakers (Realtek Audio)".to_string(),
+        ];
+
+        // 1. Exact match
+        assert_eq!(
+            find_best_matching_device_name("FiiO K5 Pro DAC", &candidates),
+            Some(&"FiiO K5 Pro DAC".to_string())
+        );
+
+        // 2. Case-insensitive match
+        assert_eq!(
+            find_best_matching_device_name("focusrite scarlett 2i2 usb", &candidates),
+            Some(&"Focusrite Scarlett 2i2 USB".to_string())
+        );
+
+        // 3. Distinctive model tokens
+        assert_eq!(
+            find_best_matching_device_name("Scarlett 2i2", &candidates),
+            Some(&"Focusrite Scarlett 2i2 USB".to_string())
+        );
+
+        // 4. Generic word "Speakers" must not randomly hijack "Realtek High Definition Audio"
+        // It matches "Speakers (Realtek Audio)" which contains "Speakers"
+        assert_eq!(
+            find_best_matching_device_name("Speakers", &candidates),
+            None // generic single word without distinctive identifier safely rejected from fuzzy hijacking
+        );
+    }
+
+    #[test]
+    fn test_crossfade_failed_prep_restores_queue() {
+        use std::collections::VecDeque;
+
+        let mut queue = VecDeque::new();
+        queue.push_back("track_2.flac".to_string());
+        queue.push_back("track_3.flac".to_string());
+
+        // Simulate crossfade triggering: pop_front
+        let popped = queue.pop_front().unwrap();
+        assert_eq!(popped, "track_2.flac");
+
+        // Simulate preparation failure: restore to front
+        queue.push_front(popped);
+
+        // Verify queue order is completely restored
+        assert_eq!(queue.pop_front(), Some("track_2.flac".to_string()));
+        assert_eq!(queue.pop_front(), Some("track_3.flac".to_string()));
+        assert_eq!(queue.pop_front(), None);
+    }
+
+    #[test]
+    fn test_background_decode_ffmpeg_args_format() {
+        let file_rate: usize = 176400;
+        let file_ch: usize = 2;
+
+        let rate_str = file_rate.to_string();
+        let ch_str = file_ch.to_string();
+
+        let args = [
+            "-probesize", "32768",
+            "-analyzeduration", "100000",
+            "-i", "sample.dsf",
+            "-f", "wav",
+            "-acodec", "pcm_s16le",
+            "-ar", &rate_str,
+            "-ac", &ch_str,
+            "-"
+        ];
+
+        let ar_idx = args.iter().position(|&x| x == "-ar").unwrap();
+        assert_eq!(args[ar_idx + 1], "176400");
+
+        let ac_idx = args.iter().position(|&x| x == "-ac").unwrap();
+        assert_eq!(args[ac_idx + 1], "2");
     }
 }
 

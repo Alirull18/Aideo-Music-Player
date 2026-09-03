@@ -190,7 +190,7 @@ export function QueueView() {
                     </button>
                   </>
                 )}
-                <button className="modal-close" onClick={toggleQueue}><X size={18} /></button>
+                <button className="modal-close" onClick={toggleQueue} aria-label="Close queue"><X size={18} /></button>
               </div>
             </div>
 

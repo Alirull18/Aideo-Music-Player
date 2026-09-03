@@ -9,7 +9,7 @@ interface KaraokeActiveLineProps {
   className?: string;
 }
 
-export function KaraokeActiveLine({
+function KaraokeActiveLineComponent({
   words,
   positionSecs,
   lyricOffset,
@@ -17,12 +17,11 @@ export function KaraokeActiveLine({
   className,
 }: KaraokeActiveLineProps) {
   const spanRefs = useRef<(HTMLSpanElement | null)[]>([]);
-  const lastPosRef = useRef(positionSecs);
-  const lastTimeRef = useRef(performance.now());
+  const basePosRef = useRef(positionSecs);
+  const baseTimeRef = useRef(performance.now());
   const lyricOffsetRef = useRef(lyricOffset);
   const wordsRef = useRef(words);
 
-  lastPosRef.current = positionSecs;
   lyricOffsetRef.current = lyricOffset;
   wordsRef.current = words;
 
@@ -33,21 +32,23 @@ export function KaraokeActiveLine({
         : nextWord && nextWord.time_secs > word.time_secs
         ? nextWord.time_secs - word.time_secs
         : 0.8;
-    const isStarted = currentTime >= word.time_secs;
-    const isFinished =
-      word.duration_secs && word.duration_secs > 0
-        ? currentTime >= word.time_secs + word.duration_secs
-        : nextWord
-        ? currentTime >= nextWord.time_secs
-        : currentTime >= word.time_secs + duration;
 
-    let progress = 0;
-    if (isFinished) {
-      progress = 100;
-    } else if (isStarted) {
-      progress = Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
+    if (currentTime < word.time_secs) {
+      return 0;
     }
-    return progress;
+
+    const finishTime =
+      word.duration_secs && word.duration_secs > 0
+        ? word.time_secs + word.duration_secs
+        : nextWord && nextWord.time_secs > word.time_secs
+        ? nextWord.time_secs
+        : word.time_secs + duration;
+
+    if (currentTime >= finishTime) {
+      return 100;
+    }
+
+    return Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
   }, []);
 
   const updateDomProgress = useCallback((currentTime: number) => {
@@ -61,17 +62,17 @@ export function KaraokeActiveLine({
   }, [calculateWordProgress]);
 
   useEffect(() => {
-    lastPosRef.current = positionSecs;
-    lastTimeRef.current = performance.now();
-    updateDomProgress(positionSecs + lyricOffset / 1000);
-  }, [positionSecs, lyricOffset, updateDomProgress]);
+    basePosRef.current = positionSecs;
+    baseTimeRef.current = performance.now();
+    updateDomProgress(positionSecs + lyricOffsetRef.current / 1000);
+  }, [positionSecs, updateDomProgress]);
 
   useEffect(() => {
     if (!isPlaying) return;
     let frameId: number;
     const update = () => {
-      const delta = (performance.now() - lastTimeRef.current) / 1000;
-      const currentTime = lastPosRef.current + Math.max(0, delta) + lyricOffsetRef.current / 1000;
+      const elapsed = (performance.now() - baseTimeRef.current) / 1000;
+      const currentTime = basePosRef.current + Math.max(0, elapsed) + lyricOffsetRef.current / 1000;
       updateDomProgress(currentTime);
       frameId = requestAnimationFrame(update);
     };
@@ -103,4 +104,16 @@ export function KaraokeActiveLine({
     </>
   );
 }
+
+export const KaraokeActiveLine = React.memo(KaraokeActiveLineComponent, (prev, next) => {
+  if (prev.words !== next.words) return false;
+  if (prev.isPlaying !== next.isPlaying) return false;
+  if (prev.lyricOffset !== next.lyricOffset) return false;
+  if (prev.className !== next.className) return false;
+  // External seek jumps (> 0.35s) trigger re-render & re-sync
+  if (Math.abs(prev.positionSecs - next.positionSecs) > 0.35) return false;
+  // During normal playback, skip re-renders so RequestAnimationFrame drives 60fps DOM styles uninterrupted
+  if (next.isPlaying) return true;
+  return prev.positionSecs === next.positionSecs;
+});
 
