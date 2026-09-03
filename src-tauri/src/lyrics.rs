@@ -91,6 +91,29 @@ pub fn get_lyrics_save_path(audio_path: &str, content: &str) -> std::path::PathB
     get_lyrics_file_path(audio_path, ext)
 }
 
+/// Cleans conflicting or stale alternative lyric formats and caches when new lyrics are saved.
+pub fn clean_stale_lyrics_cache(audio_path: &str, new_ext: &str) {
+    let alt_ext = if new_ext == "ttml" { "lrc" } else { "ttml" };
+    
+    // 1. AppData cache for the alternative format
+    let appdata_alt = get_lyrics_cache_path(audio_path, alt_ext);
+    if appdata_alt.exists() {
+        let _ = std::fs::remove_file(appdata_alt);
+    }
+
+    // 2. Local sidecar alt file (only if not a web stream)
+    if !audio_path.starts_with("http://") && !audio_path.starts_with("https://") {
+        let sidecar_alt = get_lyrics_file_path(audio_path, alt_ext);
+        if sidecar_alt.exists() {
+            let _ = std::fs::remove_file(sidecar_alt);
+        }
+        let appdata_new = get_lyrics_cache_path(audio_path, new_ext);
+        if appdata_new.exists() {
+            let _ = std::fs::remove_file(appdata_new);
+        }
+    }
+}
+
 /// Extracts embedded lyric tags from audio file (USLT, LYRICS, UNSYNCEDLYRICS)
 pub fn extract_embedded_lyrics(audio_path: &str) -> Option<String> {
     let path = std::path::Path::new(audio_path);
@@ -749,8 +772,18 @@ pub fn parse_ttml(content: &str) -> Vec<LyricLine> {
                     b"span" => {
                         if let Some(span) = span_stack.pop() {
                             if span.begin.is_some() && !span.text.trim().is_empty() {
+                                let span_raw = span.begin.unwrap();
+                                let abs_time = if let Some(line_begin) = current_line_begin {
+                                    if span_raw < line_begin {
+                                        line_begin + span_raw
+                                    } else {
+                                        span_raw
+                                    }
+                                } else {
+                                    span_raw
+                                };
                                 current_line_words.push(LyricWord {
-                                    time_secs: span.begin.unwrap(),
+                                    time_secs: abs_time,
                                     text: span.text.clone(),
                                     duration_secs: span.dur,
                                 });
@@ -1874,6 +1907,50 @@ mod tests {
         assert_eq!(w[6].text, "shoul");
         assert_eq!(w[7].text, "der");
         assert_eq!(w[8].text, "s");
+    }
+
+    #[test]
+    fn test_clean_stale_lyrics_cache_removes_conflicting_extension() {
+        let temp_dir = std::env::temp_dir().join(format!("aideo_lyric_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let audio_path = temp_dir.join("test_song.flac");
+        let ttml_path = temp_dir.join("test_song.ttml");
+        let lrc_path = temp_dir.join("test_song.lrc");
+
+        let _ = std::fs::write(&audio_path, b"mock audio");
+        let _ = std::fs::write(&ttml_path, b"<tt></tt>");
+        let _ = std::fs::write(&lrc_path, b"[00:00.00] old lyrics");
+
+        assert!(ttml_path.exists());
+        assert!(lrc_path.exists());
+
+        // Saving TTML -> must clean stale LRC
+        clean_stale_lyrics_cache(audio_path.to_str().unwrap(), "ttml");
+
+        assert!(ttml_path.exists(), "Newly saved format must remain");
+        assert!(!lrc_path.exists(), "Conflicting old format must be cleaned");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_ttml_relative_span_begin_timestamps() {
+        let ttml = r#"<tt>
+  <body>
+    <div>
+      <p begin="00:20.000" end="00:25.000">
+        <span begin="00:01.000" dur="00:01.000">Hello </span>
+        <span begin="00:02.000" dur="00:01.500">World</span>
+      </p>
+    </div>
+  </body>
+</tt>"#;
+        let parsed = parse_ttml(ttml);
+        assert_eq!(parsed.len(), 1);
+        let words = parsed[0].words.as_ref().expect("words present");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].time_secs, 21.0);
+        assert_eq!(words[1].time_secs, 22.0);
     }
 }
 

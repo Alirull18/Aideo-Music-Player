@@ -1697,7 +1697,7 @@ export function LibraryView() {
       {viewMode === 'albums' ? (
         <AlbumsView 
           tracks={isCloudTab ? (activeSector === 'subsonic' ? subsonicTracks : jellyfinTracks) : (activeFilter === 'all' ? sourceTracks : filteredTracks)} 
-          searchQuery={searchQuery} 
+          searchQuery={debouncedSearchQuery} 
           sortBy={albumSortBy} 
           onAlbumCountChange={setAlbumCount} 
         />

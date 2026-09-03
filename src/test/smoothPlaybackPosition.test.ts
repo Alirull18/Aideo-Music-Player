@@ -53,6 +53,54 @@ describe('Smooth playback position and snap-back prevention in pollStatus', () =
     expect(s.playback.position_secs).toBe(114.0);
   });
 
+  it('prevents snap-back when backend lag reaches 2.0s during continuous playback without seek', async () => {
+    // Backend reports 112.0s (2.0s behind frontend due to ringbuffer depth + audio clock drift)
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_playback_status') {
+        return {
+          status: 'Playing',
+          current_track: TRACK_PATH,
+          position_secs: 112.0,
+          volume: 1,
+        };
+      }
+      return null;
+    });
+
+    await useStore.getState().pollStatus();
+
+    const s = useStore.getState();
+    // Must remain monotonic — never snap backward during normal playback
+    expect(s.playback.position_secs).toBe(114.0);
+  });
+
+  it('immediately accepts backward seek when user explicitly seeks', async () => {
+    useStore.setState({
+      playback: {
+        ...useStore.getState().playback,
+        last_seek_time: Date.now(),
+        position_secs: 50.0,
+      }
+    });
+
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_playback_status') {
+        return {
+          status: 'Playing',
+          current_track: TRACK_PATH,
+          position_secs: 50.0,
+          volume: 1,
+        };
+      }
+      return null;
+    });
+
+    await useStore.getState().pollStatus();
+
+    const s = useStore.getState();
+    expect(s.playback.position_secs).toBe(50.0);
+  });
+
   it('correctly accepts genuine large seeks (e.g. jumped from 114s to 30s)', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === 'get_playback_status') {

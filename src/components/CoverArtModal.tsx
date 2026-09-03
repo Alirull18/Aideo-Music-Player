@@ -172,7 +172,7 @@ export function CoverArtModal() {
               Update artwork for <strong>{track.title || baseName(track.path)}</strong>
             </div>
           </div>
-          <button className="modal-close" onClick={() => setCoverArtModalTrack(null)}>✕</button>
+          <button className="modal-close" onClick={() => setCoverArtModalTrack(null)} aria-label="Close cover art modal">✕</button>
         </div>
 
         {/* Body */}

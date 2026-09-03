@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, VolumeX, Heart, ThumbsDown, Music, Lock, Unlock, Pin, PinOff, Tv2 } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Maximize2, Volume2, VolumeX, Heart, ThumbsDown, Music, Lock, Unlock, Pin, PinOff, Tv2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -45,11 +45,13 @@ export function MiniPlayer() {
     playbackPositionSecs,
     playbackCurrentTrack,
     playbackStatus,
-    playbackVolume
+    playbackVolume,
+    playbackIsBuffering
   } = useStore(useShallow(s => ({
     playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
     playbackStatus: s.playback.status,
+    playbackIsBuffering: Boolean(s.playback.is_buffering),
     playbackVolume: s.playback.volume,
     isMuted: s.isMuted,
     toggleMute: s.toggleMute,
@@ -280,9 +282,9 @@ export function MiniPlayer() {
             <button 
               className="mini-btn play-pause" 
               onClick={playbackStatus === 'Playing' ? pauseTrack : resumeTrack}
-              title={playbackStatus === 'Playing' ? 'Pause' : 'Play'}
+              title={playbackIsBuffering ? 'Buffering stream...' : playbackStatus === 'Playing' ? 'Pause' : 'Play'}
             >
-              {playbackStatus === 'Playing' ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" style={{ marginLeft: 2 }} />}
+              {playbackIsBuffering ? <Loader2 size={14} className="animate-spin" /> : playbackStatus === 'Playing' ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" style={{ marginLeft: 2 }} />}
             </button>
             <button className="mini-btn" onClick={playNext} title="Next">
               <SkipForward size={14} fill="currentColor" />

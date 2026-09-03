@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { CastSelector } from './CastSelector';
-import { fmt, baseName, getStreamName, isRadioStream } from '../utils';
+import { fmt, parseDuration, baseName, getStreamName, isRadioStream } from '../utils';
 import { generateWaveformPeaks } from '../utils/waveform';
 
 export function PlayerBar() {
@@ -68,13 +68,13 @@ export function PlayerBar() {
     const now = playback.position_secs + lyricOffset / 1000;
     let current = null;
     for (let i = 0; i < lyrics.length; i++) {
-      if (lyrics[i].time_secs <= now) current = lyrics[i]; else break;
+      if (lyrics[i].time_secs <= now) current = lyrics[i];
     }
     return current;
   }, [lyrics, playback.position_secs, lyricOffset]);
 
   const current = currentTrack;
-  const duration = current?.duration ?? 0;
+  const duration = current?.duration || (current?.duration_raw ? parseDuration(current.duration_raw) : 0);
   const pct = duration > 0 ? (playback.position_secs / duration) * 100 : 0;
   const isPlaying = playback.status === 'Playing';
   const isBuffering = Boolean(playback.is_buffering);

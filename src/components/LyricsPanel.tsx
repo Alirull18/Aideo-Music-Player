@@ -138,10 +138,10 @@ export function LyricsPanel() {
     }
   }, [activeIdx, userScrolling, lyricsDisplayMode]);
 
-  const onScroll = () => {
+  const handleUserInteraction = () => {
     setUserScrolling(true);
     if (userScrollTimer.current) clearTimeout(userScrollTimer.current);
-    userScrollTimer.current = window.setTimeout(() => setUserScrolling(false), 3500);
+    userScrollTimer.current = window.setTimeout(() => setUserScrolling(false), 3000);
   };
 
   const doSearch = async (manualQuery?: string) => {
@@ -410,7 +410,13 @@ export function LyricsPanel() {
 
       {/* Lyrics scroll */}
       <div className={`lyrics-fade-wrap ${lyricsDisplayMode === 'static' ? 'plain-mode' : ''}`}>
-        <div className="lyrics-scroll" ref={scrollRef} onScroll={onScroll}>
+        <div
+          className="lyrics-scroll"
+          ref={scrollRef}
+          onWheel={handleUserInteraction}
+          onTouchMove={handleUserInteraction}
+          onPointerDown={handleUserInteraction}
+        >
           <div className="lyric-spacer-top" />
           {lyrics.length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 16, padding: '48px 24px' }}>
@@ -481,7 +487,17 @@ export function LyricsPanel() {
                 style={{ cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default' }}
                 onClick={() => {
                   if (lyricsDisplayMode !== 'static') {
+                    setUserScrolling(false);
+                    if (userScrollTimer.current) clearTimeout(userScrollTimer.current);
                     seek(l.time_secs - lyricOffset / 1000);
+                    const container = scrollRef.current;
+                    if (container) {
+                      const el = container.querySelector(`[data-idx="${i}"]`) as HTMLElement | null;
+                      if (el) {
+                        const targetTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
+                        container.scrollTo({ top: targetTop, behavior: 'smooth' });
+                      }
+                    }
                   }
                 }}
               >

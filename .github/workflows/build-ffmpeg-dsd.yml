@@ -50,8 +50,9 @@ jobs:
             --enable-decoder=dsd_msbf_planar
             --enable-decoder=dst
         run: |
-          git clone --depth 1 https://github.com/xihan123/FFmpeg-Audio.git
+          git clone https://github.com/xihan123/FFmpeg-Audio.git
           cd FFmpeg-Audio
+          git checkout d93d67d485de5ab7181fd935e6946dfe4c6ed04e
           bash scripts/build_ffmpeg_audio.sh
 
       - name: Verify DSD support in binary

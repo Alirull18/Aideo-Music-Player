@@ -22,7 +22,8 @@ import {
   Type,
   Mic,
   AlignLeft,
-  FileText
+  FileText,
+  Loader2
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
@@ -66,11 +67,13 @@ export function FullscreenView() {
     playbackStatus,
     playbackVolume,
     playbackBitPerfect,
-    playbackDevRate
+    playbackDevRate,
+    playbackIsBuffering
   } = useStore(useShallow(s => ({
     playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
     playbackStatus: s.playback.status,
+    playbackIsBuffering: Boolean(s.playback.is_buffering),
     playbackVolume: s.playback.volume,
     playbackBitPerfect: s.playback.bit_perfect,
     playbackDevRate: s.playback.dev_rate,
@@ -289,7 +292,7 @@ export function FullscreenView() {
     if (currentTrack?.format) {
       const fmtLower = currentTrack.format.toLowerCase();
       if (fmtLower.includes('dsf') || fmtLower.includes('dff') || fmtLower.includes('dsd')) {
-        return `DSD NATIVE · ${currentTrack.format.toUpperCase()}`;
+        return `DSD · ${currentTrack.format.toUpperCase()}`;
       }
       if (playbackBitPerfect) {
         const rate = playbackDevRate > 0 ? `· ${playbackDevRate / 1000}kHz` : '';
@@ -690,9 +693,9 @@ export function FullscreenView() {
             <button
               className="fullscreen-hud-btn fullscreen-hud-btn-play"
               onClick={handlePlayPause}
-              title={playbackStatus === 'Playing' ? 'Pause' : 'Play'}
+              title={playbackIsBuffering ? 'Buffering stream...' : playbackStatus === 'Playing' ? 'Pause' : 'Play'}
             >
-              {playbackStatus === 'Playing' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 4 }} />}
+              {playbackIsBuffering ? <Loader2 size={24} className="animate-spin" /> : playbackStatus === 'Playing' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 4 }} />}
             </button>
 
             <button className="fullscreen-hud-btn" onClick={playNext} title="Next Track">

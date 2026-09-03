@@ -65,11 +65,12 @@ impl BiquadFilter {
     }
 
     pub fn set_peaking(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let safe_fs = fs.max(1000.0);
+        let safe_fs = if fs.is_finite() { fs.max(1000.0) } else { 44100.0 };
         let max_f0 = (safe_fs * 0.49).max(10.0);
-        let f0 = f0.clamp(10.0, max_f0);
-        let q = q.clamp(0.01, 100.0);
-        let a = 10.0f32.powf(gain_db / 40.0);
+        let f0 = if f0.is_finite() { f0.clamp(10.0, max_f0) } else { 1000.0 };
+        let q = if q.is_finite() { q.clamp(0.01, 100.0) } else { 0.707 };
+        let safe_gain = if gain_db.is_finite() { gain_db.clamp(-36.0, 36.0) } else { 0.0 };
+        let a = 10.0f32.powf(safe_gain / 40.0);
         let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
@@ -85,11 +86,12 @@ impl BiquadFilter {
     }
 
     pub fn set_lowshelf(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let safe_fs = fs.max(1000.0);
+        let safe_fs = if fs.is_finite() { fs.max(1000.0) } else { 44100.0 };
         let max_f0 = (safe_fs * 0.49).max(10.0);
-        let f0 = f0.clamp(10.0, max_f0);
-        let q = q.clamp(0.01, 100.0);
-        let a = 10.0f32.powf(gain_db / 40.0);
+        let f0 = if f0.is_finite() { f0.clamp(10.0, max_f0) } else { 1000.0 };
+        let q = if q.is_finite() { q.clamp(0.01, 100.0) } else { 0.707 };
+        let safe_gain = if gain_db.is_finite() { gain_db.clamp(-36.0, 36.0) } else { 0.0 };
+        let a = 10.0f32.powf(safe_gain / 40.0);
         let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
@@ -106,11 +108,12 @@ impl BiquadFilter {
     }
 
     pub fn set_highshelf(&mut self, fs: f32, f0: f32, gain_db: f32, q: f32) {
-        let safe_fs = fs.max(1000.0);
+        let safe_fs = if fs.is_finite() { fs.max(1000.0) } else { 44100.0 };
         let max_f0 = (safe_fs * 0.49).max(10.0);
-        let f0 = f0.clamp(10.0, max_f0);
-        let q = q.clamp(0.01, 100.0);
-        let a = 10.0f32.powf(gain_db / 40.0);
+        let f0 = if f0.is_finite() { f0.clamp(10.0, max_f0) } else { 1000.0 };
+        let q = if q.is_finite() { q.clamp(0.01, 100.0) } else { 0.707 };
+        let safe_gain = if gain_db.is_finite() { gain_db.clamp(-36.0, 36.0) } else { 0.0 };
+        let a = 10.0f32.powf(safe_gain / 40.0);
         let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
@@ -127,10 +130,10 @@ impl BiquadFilter {
     }
 
     pub fn set_highpass(&mut self, fs: f32, f0: f32, q: f32) {
-        let safe_fs = fs.max(1000.0);
+        let safe_fs = if fs.is_finite() { fs.max(1000.0) } else { 44100.0 };
         let max_f0 = (safe_fs * 0.49).max(10.0);
-        let f0 = f0.clamp(10.0, max_f0);
-        let q = q.clamp(0.01, 100.0);
+        let f0 = if f0.is_finite() { f0.clamp(10.0, max_f0) } else { 1000.0 };
+        let q = if q.is_finite() { q.clamp(0.01, 100.0) } else { 0.707 };
         let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
@@ -146,10 +149,10 @@ impl BiquadFilter {
     }
 
     pub fn set_lowpass(&mut self, fs: f32, f0: f32, q: f32) {
-        let safe_fs = fs.max(1000.0);
+        let safe_fs = if fs.is_finite() { fs.max(1000.0) } else { 44100.0 };
         let max_f0 = (safe_fs * 0.49).max(10.0);
-        let f0 = f0.clamp(10.0, max_f0);
-        let q = q.clamp(0.01, 100.0);
+        let f0 = if f0.is_finite() { f0.clamp(10.0, max_f0) } else { 1000.0 };
+        let q = if q.is_finite() { q.clamp(0.01, 100.0) } else { 0.707 };
         let w0 = 2.0 * std::f32::consts::PI * f0 / safe_fs;
         let cos_w0 = w0.cos();
         let alpha = w0.sin() / (2.0 * q);
@@ -176,11 +179,11 @@ impl BiquadFilter {
         self.a2 += (self.ta2 - self.a2) * k;
 
         let mut y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
-        if y.abs() < 1e-20 {
+        if y.abs() < 1e-20 || !y.is_finite() {
             y = 0.0;
         }
         self.x2 = self.x1;
-        self.x1 = x;
+        self.x1 = if x.is_finite() { x } else { 0.0 };
         self.y2 = self.y1;
         self.y1 = y;
         y
@@ -300,16 +303,16 @@ impl ConvolutionFilter {
         self.dry_pos = 0;
     }
 
-    pub fn load_ir_samples(&mut self, samples: Vec<f32>) {
+    pub fn load_ir_samples_scaled(&mut self, samples: Vec<f32>, max_val: f32) {
         if samples.is_empty() {
             self.ir_partitions.clear();
             self.history.clear();
             self.reset_runtime_state();
             return;
         }
-        // Peak-normalize (same loudness convention as the direct-form version)
-        let max_val = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max).max(1e-6);
-        let mut ir: Vec<f32> = samples.iter().map(|s| s / max_val).collect();
+        // Peak-normalize with provided scale
+        let scale = max_val.max(1e-6);
+        let mut ir: Vec<f32> = samples.iter().map(|s| s / scale).collect();
         ir.truncate(MAX_IR_SAMPLES);
         let num_parts = (ir.len() + CONV_BLOCK - 1) / CONV_BLOCK;
         ir.resize(num_parts * CONV_BLOCK, 0.0);
@@ -336,6 +339,11 @@ impl ConvolutionFilter {
         self.history =
             vec![vec![rustfft::num_complex::Complex::new(0.0, 0.0); CONV_FFT_SIZE]; num_parts];
         self.reset_runtime_state();
+    }
+
+    pub fn load_ir_samples(&mut self, samples: Vec<f32>) {
+        let max_val = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max).max(1e-6);
+        self.load_ir_samples_scaled(samples, max_val);
     }
 
     #[inline]

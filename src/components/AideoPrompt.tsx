@@ -32,7 +32,7 @@ export function AideoPrompt({ title, placeholder, initialValue = '', actionLabel
             <Activity size={20} color="var(--accent)" />
             {title}
           </h2>
-          <button className="modal-close" onClick={onClose}><X size={20} /></button>
+          <button className="modal-close" onClick={onClose} aria-label="Close dialog"><X size={20} /></button>
         </div>
 
         <div style={{ marginBottom: 24 }}>

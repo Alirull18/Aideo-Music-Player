@@ -206,7 +206,7 @@ We are featured on **Product Hunt**! If you're enjoying Aideo Music Player, plea
 ### Technology Stack
 - **Frontend**: React 19, TypeScript, Framer Motion, Zustand, Lucide React
 - **Desktop Architecture**: Tauri v2, Rust, Tokio Async Runtime, Windows WASAPI
-- **Audio & DSP**: CPAL, Symphonia (pure Rust multi-format decoder), Rubato Resampler, Biquad Filter Array, EBU R128 LUFS Loudness Engine
+- **Audio & DSP**: CPAL, Symphonia (pure Rust multi-format decoder), Rubato Resampler, Biquad Filter Array, Dynamic Loudness Normalizer (AGC)
 - **Audio Metadata & Tagging**: Lofty (Pure Rust ID3, FLAC, MP4, Vorbis container editor)
 - **Network Streaming**: SSDP (Simple Service Discovery Protocol), UPnP AVTransport 1.0 SOAP Engine
 - **Database**: SQLite (via rusqlite), Supabase Cloud Sync
@@ -215,7 +215,7 @@ We are featured on **Product Hunt**! If you're enjoying Aideo Music Player, plea
 ### Security, Privacy & Transparency
 Aideo is 100% open-source, client-side, and privacy-first. Your music library, playback history, and login keys stay securely on your computer.
 
-* **Helper Tools (`yt-dlp`, `ffmpeg`)**: Used to stream and transcode online tracks. All helper tools are verified against official SHA-256 cryptographic signatures before running.
+* **Helper Tools (`yt-dlp`, `ffmpeg`)**: Used to stream and transcode online tracks. All helper tools are verified against official SHA-256 checksums before running.
 * **Windows System Integrations**: Uses official Windows OS APIs for real-time audio scheduling (MMCSS / WASAPI Exclusive mode), Taskbar thumbnail controls, and secure local credential storage (Windows Credential Manager).
 
 </details>

@@ -86,7 +86,7 @@ pub async fn check_update(app_handle: tauri::AppHandle) -> Result<UpdateResponse
                     download_url = Some(asset.browser_download_url.clone());
                 }
             }
-            if asset.name.ends_with(".sha256") || asset.name.ends_with(".sig") {
+            if asset.name.ends_with(".sha256") || asset.name.ends_with(".sha256sum") {
                 sha256_url = Some(asset.browser_download_url.clone());
             }
         }
@@ -245,6 +245,15 @@ mod tests {
         assert!(is_trusted_github_url("https://objects.githubusercontent.com/github-production-release-asset/123"));
         assert!(!is_trusted_github_url("https://malicious-domain.com/setup.exe"));
         assert!(!is_trusted_github_url("http://github.com/insecure"));
+    }
+
+    #[test]
+    fn test_is_sha256_sidecar_extension() {
+        let is_sidecar = |name: &str| name.ends_with(".sha256") || name.ends_with(".sha256sum");
+        assert!(is_sidecar("aideo.exe.sha256"));
+        assert!(is_sidecar("aideo.msi.sha256sum"));
+        assert!(!is_sidecar("aideo.exe.sig")); // minisign signature must not be parsed as sha256
+        assert!(!is_sidecar("aideo.msi.zip.sig"));
     }
 
     #[test]

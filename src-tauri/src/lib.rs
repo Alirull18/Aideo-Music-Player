@@ -1013,7 +1013,8 @@ fn clear_discord_presence() {
 
 // ── FX Commands ────────────────────────────────────────────────────────────
 #[tauri::command]
-fn set_dsp_state(state: State<'_, AppState>, dsp: player::DSPState) -> Result<(), String> {
+fn set_dsp_state(state: State<'_, AppState>, mut dsp: player::DSPState) -> Result<(), String> {
+    dsp.sanitize();
     let player = safe_lock(&state.player);
     let mut current = safe_lock(&player.dsp_state);
     *current = dsp;
@@ -1578,7 +1579,10 @@ async fn get_cover_art(path: String) -> Result<Option<String>, String> {
 #[tauri::command]
 fn save_lyrics_file(path: String, content: String) -> Result<(), String> {
     let save_path = lyrics::get_lyrics_save_path(&path, &content);
-    std::fs::write(save_path, content).map_err(|e| e.to_string())
+    let ext = save_path.extension().and_then(|e| e.to_str()).unwrap_or("lrc");
+    std::fs::write(&save_path, content).map_err(|e| e.to_string())?;
+    lyrics::clean_stale_lyrics_cache(&path, ext);
+    Ok(())
 }
 
 pub fn is_valid_text_file_extension(path: &str) -> bool {

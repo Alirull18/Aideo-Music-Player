@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist } from '../utils';
+import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
@@ -118,7 +118,7 @@ const fetchTrackMetadataAndLyrics = async (
   invoke('get_lyrics', { path }).then((lrc: any) => {
     if (!isCurrent()) return;
     if (Array.isArray(lrc) && lrc.length > 0) {
-      set({ lyrics: lrc, lyricStatus: 'found' });
+      set({ lyrics: sortLyricLines(lrc), lyricStatus: 'found' });
       const hasWordSync = lrc.some((l: any) => l.words && l.words.length > 0);
       if (!hasWordSync && isCurrent()) {
         get().autoFetchLyricsOnline(track);
@@ -373,6 +373,18 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
     
     const isOnline = isStreamTrack(track.path, track.format);
+    if (isOnline) {
+      set({
+        playback: {
+          ...get().playback,
+          is_buffering: true,
+          status: 'Playing',
+          current_track: track.path,
+          position_secs: startPos || 0,
+          backend_position_secs: 0,
+        }
+      });
+    }
     let isCached = false;
     if (isOnline) {
       try {
@@ -398,7 +410,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       await get().recordPlaybackTransition(track, playbackSource);
 
       // De-duplicate / consume track from queue when starting playback
-      const currentQueue = get().queue;
+      const currentQueue = get().queue || [];
       const matchingIndices: number[] = [];
       currentQueue.forEach((t, i) => {
         if (pathsEqual(t.path, track.path)) {
@@ -421,9 +433,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         await chainQueueOperation(async () => {});
       }
 
-      const index = get().tracks.findIndex(t => pathsEqual(t.path, track.path));
+      const tracks = get().tracks || [];
+      const index = tracks.findIndex(t => pathsEqual(t.path, track.path));
       const prevTrack = get().currentTrack;
-      const history = prevTrack && !isHistory ? [...get().playHistory, prevTrack].slice(-200) : get().playHistory;
+      const history = prevTrack && !isHistory ? [...(get().playHistory || []), prevTrack].slice(-200) : (get().playHistory || []);
       localStorage.setItem('aideo_play_history', JSON.stringify(history));
 
       lastPlayedPathFromUI = track.path;
@@ -455,7 +468,15 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         coverArt: track.cover_url || null,
         accentColor: '#8b5cf6',
         scrobbledCurrent: false,
-        playback: { ...get().playback, current_track: track.path, status: 'Playing', position_secs: startPos || 0, last_skip_time: Date.now() },
+        playback: {
+          ...get().playback,
+          current_track: track.path,
+          status: 'Playing',
+          position_secs: startPos || 0,
+          backend_position_secs: 0,
+          is_buffering: Boolean(isOnline && !isCached),
+          last_skip_time: Date.now()
+        },
       });
 
       if (isOnline) {
@@ -525,8 +546,39 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           }));
           return;
         }
+      } else if (get().upnp_connected) {
+        const title = track.title || 'Unknown Track';
+        const artist = track.artist || 'Unknown Artist';
+        const album = track.album || 'Unknown Album';
+        try {
+          await invoke('upnp_play', {
+            path: finalPath,
+            title,
+            artist,
+            album,
+            coverUrl: track.cover_url || null
+          });
+        } catch (e) {
+          console.error('UPnP playTrack error:', e);
+          set(s => ({
+            playback: {
+              ...s.playback,
+              status: 'Stopped',
+              current_track: null,
+              position_secs: 0
+            },
+            currentTrack: null
+          }));
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: { message: `UPnP casting failed: ${e}`, type: 'error' }
+          }));
+          return;
+        }
       } else {
         await invoke('play_track', { path: finalPath, startPos: startPos || 0.0 });
+      }
+      if (get().playback.is_buffering) {
+        set(s => ({ playback: { ...s.playback, is_buffering: false } }));
       }
       get().triggerAutoplayRadio(track, forceResetAutoplay);
 

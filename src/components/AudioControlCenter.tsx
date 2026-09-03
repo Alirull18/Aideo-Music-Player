@@ -378,6 +378,7 @@ export function AudioControlCenter() {
             {/* Modal Close */}
             <button
               className="modal-close"
+              aria-label="Close audio control center"
               onClick={toggleControlCenter}
               style={{
                 width: 32,
