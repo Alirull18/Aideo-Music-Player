@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Disc3, Disc, Music } from 'lucide-react';
+import { Disc } from 'lucide-react';
 import { TheaterLayoutProps } from './types';
 import { baseName, getStreamName } from '../../utils';
 

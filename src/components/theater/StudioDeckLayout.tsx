@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Sliders, Cpu, Activity, Disc } from 'lucide-react';
+import { Sliders, Cpu, Activity } from 'lucide-react';
 import { TheaterLayoutProps } from './types';
 import { baseName, getStreamName } from '../../utils';
 
@@ -75,8 +75,10 @@ export function StudioDeckLayout({
       drawVUMeter(leftCanvasRef.current, p.leftAngle, p.leftPeak, 'CH 1 · LEFT');
       // Draw Right Meter
       drawVUMeter(rightCanvasRef.current, p.rightAngle, p.rightPeak, 'CH 2 · RIGHT');
-      // Draw Oscilloscope
-      drawOscilloscope(oscCanvasRef.current, spectrumBands, isPlaying, accentColor);
+      // Draw Oscilloscope (skip in low spec mode)
+      if (!lowSpecMode) {
+        drawOscilloscope(oscCanvasRef.current, spectrumBands, isPlaying, accentColor);
+      }
 
       animId = requestAnimationFrame(renderMeters);
     };

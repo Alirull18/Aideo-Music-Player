@@ -28,7 +28,6 @@ import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
 import { Visualizer } from './Visualizer';
 import { generateWaveformPeaks } from '../utils/waveform';
-import { baseName, getStreamName } from '../utils';
 import { LyricsDisplayMode, TheaterModeDesign } from '../store/types';
 import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
 
@@ -70,6 +69,8 @@ export function FullscreenView() {
     isTranslating,
     getRomaji,
     albumArtFit,
+    theaterModeDesign,
+    setTheaterModeDesign,
     playbackPositionSecs,
     playbackCurrentTrack,
     playbackStatus,
