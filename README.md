@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.9.6
+# 💎 Aideo Music Player v0.9.7
 
 **A beautiful, crystal-clear desktop music player built for pure sound, real-time karaoke lyrics, and a listening experience that looks as good as it feels.**
 
@@ -66,9 +66,39 @@ Aideo is a modern, lightweight desktop music player designed for music lovers wh
 
 ---
 
-## ✨ What's New in v0.9.6
+## ✨ What's New in v0.9.7
 
-Version **0.9.6** brings huge improvements to sound quality, visual customization, and everyday speed:
+Version **0.9.7** introduces 5 immersive Theater Mode visual themes, an interactive audio signal path inspector, fluid 60fps karaoke lyrics rendering, lossless streaming upgrades, and major audio engine stability:
+
+* 🎭 **5 Theater Mode Visual Themes**: Turn music playback into a visual centerpiece with dedicated full-screen themes (switch anytime in *Settings > Appearance* or press `H` on your keyboard):
+  * **Stage Mode**: Immersive concert lighting and ambient stage glow.
+  * **Hi-Fi Studio Deck**: Vintage twin-needle VU meters that pulse with your music and a brushed aluminum faceplate.
+  * **Vinyl Turntable**: A 33⅓ RPM rotating vinyl record with groove lighting, needle drop/lift effects, and an animated tonearm that tracks across the album.
+  * **Editorial Poster**: Modern Swiss typography with vinyl sleeve artwork matched dynamically to your album colors.
+  * **Zen Minimalist**: A clean, distraction-free sanctuary with breathing typography and hover-only controls.
+* 🎛️ **Live Audio Signal Path Inspector**: See the exact path your music takes from file to speakers or headphones with a real-time chain inspector (audio format, sample rate, bit depth, active equalizer/DSP, and a glowing Bit-Perfect badge).
+* 📋 **Slide-Out "Up Next" Queue Drawer**: View and rearrange your upcoming playlist or queue without leaving Theater Mode or Now Playing.
+* 🌊 **PureScope Sound Visualizer**: Upgraded real-time audio wave and spectrum analyzer running at a buttery-smooth 60fps.
+* 🎤 **Silky-Smooth Karaoke Lyrics**: Word-by-word syllable timing that flows naturally with no lag, stutter, or jumping text.
+* 🎵 **Lossless Streaming (Qobuz & Tidal)**: Browse and stream studio-quality lossless music directly inside Aideo with instant auto-login and secure credential protection.
+* 📊 **Redesigned Top Charts**: Explore trending hits and top global and regional charts, with automatic matching to songs already in your local library for instant offline playback.
+* 🧭 **3 Discovery Hub Layouts**: Personalize your music discovery screen — choose between **Command Deck**, **Editorial Home**, and **Stage Home**.
+* 🔊 **Rock-Solid Audio Engine**:
+  * **No Cutoffs at Song Ends**: Fixed audio cutting off prematurely on the final notes in exclusive mode.
+  * **Pure Bit-Perfect Sound**: Ensures untouched, studio-master audio reaches your DAC without unwanted Windows modifications.
+  * **True Gapless Playback**: Continuous live albums and classical movements transition seamlessly with zero pause or gap between tracks.
+  * **Glitch-Free Audio Clock**: Eliminated micro-skips and playback stutter during long listening sessions.
+  * **Windows Stutter Protection**: Audio priority protection prevents Windows battery savers or background tasks from causing audio drops.
+
+> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.7 Release Notes**](docs/RELEASE_NOTES_v0.9.7.md).*
+
+---
+
+## 📜 Previous Release Highlights
+
+<details>
+<summary><strong>✨ What Was New in v0.9.6 (Click to expand)</strong></summary>
+<br />
 
 * 🎨 **4 Choose-Your-Own Home Page Looks**: Pick how your home screen looks under *Settings > Appearance* — choose between **Classic Studio**, modern **Bento Grid**, minimalist **Audiophile Deck**, or full-screen **Cinematic Flow**.
 * 🎛️ **5 Bottom Player Bar Styles**: Customize the playback bar at the bottom with options like **Floating Pill**, **Sleek Minimalist**, **Soundwave Deck**, or a fun **Retro Vinyl Turntable** with a spinning record that lights up with your album colors!
@@ -86,11 +116,9 @@ Version **0.9.6** brings huge improvements to sound quality, visual customizatio
 * 🔋 **Battery & Laptop Friendly**: Animations and visualizers automatically sleep when Aideo is minimized, keeping your laptop cool and quiet.
 * 🚀 **Faster & Lighter**: Starts up in a flash and uses very little computer memory (~75MB RAM).
 
-> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.6 Release Notes**](docs/RELEASE_NOTES_v0.9.6.md).*
+> 📖 *Read the [**v0.9.6 Release Notes**](docs/RELEASE_NOTES_v0.9.6.md) for more details.*
 
----
-
-## 📜 Previous Release Highlights
+</details>
 
 <details>
 <summary><strong>✨ What Was New in v0.9.5 (Click to expand)</strong></summary>
@@ -183,7 +211,7 @@ Control your music instantly from anywhere in the app:
 
 ## 🚀 How to Get Started
 
-1. **Download**: Grab the latest installer (`.msi` or `.exe`) from the [**Releases Page**](https://github.com/Alirul/Aideo-Music-Player/releases/latest).
+1. **Download**: Grab the latest installer (`.msi` or `.exe`) from the [**Releases Page**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest).
 2. **Install**: Run the installer on your Windows PC and open Aideo.
 3. **Listen**: Select your music folder (or connect your cloud server) and enjoy your music!
 

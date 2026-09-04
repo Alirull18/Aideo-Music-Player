@@ -5,7 +5,7 @@ import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildT
 const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay: (t: any) => void }) => (
   <div className="ah-row" onClick={() => onPlay(track)}>
     <div className="ah-row-idx">{idx + 1}</div>
-    <TrackCover src={track.cover_url} path={track.url} size={46} outline={sourceTypeColor(track)} />
+    <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={46} outline={sourceTypeColor(track)} />
     <div className="ah-row-meta">
       <div className="ah-row-title" title={track.title}>{track.title}</div>
       <div className="ah-row-artist" title={track.artist}>{track.artist}</div>
@@ -18,7 +18,7 @@ const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay
 const ArtCard = memo(({ track, onPlay }: { track: any; onPlay: (t: any) => void }) => (
   <div className="ah-card" onClick={() => onPlay(track)}>
     <div className="ah-card-cover">
-      <TrackCover src={track.cover_url} path={track.url} size={172} radius={12} outline={sourceTypeColor(track)} />
+      <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={172} radius={12} outline={sourceTypeColor(track)} />
       <PlayButton size={38} onClick={() => onPlay(track)} />
     </div>
     <div className="ah-card-title" title={track.title}>{track.title}</div>

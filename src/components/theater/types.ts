@@ -17,7 +17,7 @@ export interface TheaterLayoutProps {
   accentColor: string;
   telemetryText: string;
   albumArtFit: 'cover' | 'contain';
-  vizMode: 'baseline' | 'circle' | 'wave';
+  vizMode: 'baseline' | 'circle' | 'wave' | 'vectorscope';
   seek: (secs: number) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
   spectrumBands?: number[];

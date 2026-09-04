@@ -1,6 +1,56 @@
 use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone)]
+pub struct SqliteConnectionManager {
+    path: String,
+}
+
+impl SqliteConnectionManager {
+    pub fn new<P: AsRef<std::path::Path>>(path: P) -> Self {
+        Self {
+            path: path.as_ref().to_string_lossy().to_string(),
+        }
+    }
+}
+
+impl r2d2::ManageConnection for SqliteConnectionManager {
+    type Connection = Connection;
+    type Error = rusqlite::Error;
+
+    fn connect(&self) -> std::result::Result<Self::Connection, Self::Error> {
+        let conn = Connection::open(&self.path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 5000;",
+        )?;
+        Ok(conn)
+    }
+
+    fn is_valid(&self, conn: &mut Self::Connection) -> std::result::Result<(), Self::Error> {
+        conn.execute_batch("SELECT 1;")
+    }
+
+    fn has_broken(&self, _conn: &mut Self::Connection) -> bool {
+        false
+    }
+}
+
+pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
+
+pub fn init_db_pool(db_path: &str, max_size: u32) -> Result<DbPool> {
+    // Run the normal schema/migration path before opening pooled reader
+    // connections so every connection sees the same initialized database.
+    let _ = init_db(db_path)?;
+    let manager = SqliteConnectionManager::new(db_path);
+    r2d2::Pool::builder()
+        .max_size(max_size.max(4))
+        .build(manager)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Track {
     pub id: i32,
@@ -493,38 +543,116 @@ pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energ
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number FROM tracks")?;
-    let track_iter = stmt.query_map([], |row| {
-        let path: String = row.get(1)?;
-        let db_hash: Option<String> = row.get(16).ok();
-        let path_hash = db_hash.or_else(|| Some(format!("{:x}", md5::compute(path.as_bytes()))));
-        Ok(Track {
-            id: row.get(0)?,
-            path,
-            title: row.get(2)?,
-            artist: row.get(3)?,
-            album: row.get(4)?,
-            duration: row.get(5)?,
-            format: row.get(6)?,
-            lyric_offset: row.get(7).unwrap_or(0),
-            loved: Some(row.get(8).unwrap_or(0)),
-            disliked: Some(row.get(9).unwrap_or(0)),
-            cover_url: row.get(10).ok(),
-            path_hash,
-            bpm: row.get(11).ok(),
-            energy: row.get(12).ok(),
-            bass_ratio: row.get(13).ok(),
-            treble_ratio: row.get(14).ok(),
-            replaygain_gain: row.get(15).ok(),
-            track_number: row.get(17).ok(),
-            disc_number: row.get(18).ok(),
-        })
-    })?;
+    let track_iter = stmt.query_map([], row_to_track)?;
 
     let mut tracks = Vec::new();
     for track in track_iter {
         tracks.push(track?);
     }
     Ok(tracks)
+}
+
+fn row_to_track(row: &rusqlite::Row<'_>) -> Result<Track> {
+    let path: String = row.get(1)?;
+    let db_hash: Option<String> = row.get(16).ok();
+    let path_hash = db_hash.or_else(|| Some(format!("{:x}", md5::compute(path.as_bytes()))));
+    Ok(Track {
+        id: row.get(0)?,
+        path,
+        title: row.get(2)?,
+        artist: row.get(3)?,
+        album: row.get(4)?,
+        duration: row.get(5)?,
+        format: row.get(6)?,
+        lyric_offset: row.get(7).unwrap_or(0),
+        loved: Some(row.get(8).unwrap_or(0)),
+        disliked: Some(row.get(9).unwrap_or(0)),
+        cover_url: row.get(10).ok(),
+        path_hash,
+        bpm: row.get(11).ok(),
+        energy: row.get(12).ok(),
+        bass_ratio: row.get(13).ok(),
+        treble_ratio: row.get(14).ok(),
+        replaygain_gain: row.get(15).ok(),
+        track_number: row.get(17).ok(),
+        disc_number: row.get(18).ok(),
+    })
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PaginatedTracks {
+    pub tracks: Vec<Track>,
+    pub total: usize,
+    pub offset: u32,
+    pub limit: u32,
+}
+
+pub fn get_tracks_count(conn: &Connection, search: Option<&str>) -> Result<usize> {
+    if let Some(query) = search.filter(|s| !s.trim().is_empty()) {
+        let pattern = format!("%{}%", query.trim());
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*) FROM tracks
+             WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1",
+        )?;
+        stmt.query_row(params![pattern], |row| row.get::<_, i64>(0).map(|count| count as usize))
+    } else {
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM tracks")?;
+        stmt.query_row([], |row| row.get::<_, i64>(0).map(|count| count as usize))
+    }
+}
+
+pub fn get_tracks_paginated(
+    conn: &Connection,
+    offset: u32,
+    limit: u32,
+    search: Option<&str>,
+    sort_by: Option<&str>,
+) -> Result<PaginatedTracks> {
+    let total = get_tracks_count(conn, search)?;
+    let order_clause = match sort_by.unwrap_or("id") {
+        "title" => "ORDER BY title COLLATE NOCASE ASC, id ASC",
+        "artist" => "ORDER BY artist COLLATE NOCASE ASC, album COLLATE NOCASE ASC, disc_number ASC, track_number ASC, id ASC",
+        "album" => "ORDER BY album COLLATE NOCASE ASC, disc_number ASC, track_number ASC, title COLLATE NOCASE ASC, id ASC",
+        "duration" => "ORDER BY duration ASC, id ASC",
+        "-title" => "ORDER BY title COLLATE NOCASE DESC, id DESC",
+        "-artist" => "ORDER BY artist COLLATE NOCASE DESC, album COLLATE NOCASE DESC, disc_number DESC, track_number DESC, id DESC",
+        "-album" => "ORDER BY album COLLATE NOCASE DESC, disc_number DESC, track_number DESC, title COLLATE NOCASE DESC, id DESC",
+        "-duration" => "ORDER BY duration DESC, id DESC",
+        _ => "ORDER BY id ASC",
+    };
+
+    let tracks = if let Some(query) = search.filter(|s| !s.trim().is_empty()) {
+        let pattern = format!("%{}%", query.trim());
+        let sql = format!(
+            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number
+             FROM tracks
+             WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1
+             {} LIMIT ?2 OFFSET ?3",
+            order_clause
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![pattern, limit, offset], row_to_track)?
+            .collect::<Result<Vec<_>>>()?;
+        rows
+    } else {
+        let sql = format!(
+            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number
+             FROM tracks
+             {} LIMIT ?1 OFFSET ?2",
+            order_clause
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![limit, offset], row_to_track)?
+            .collect::<Result<Vec<_>>>()?;
+        rows
+    };
+
+    Ok(PaginatedTracks {
+        tracks,
+        total,
+        offset,
+        limit,
+    })
 }
 
 pub fn create_playlist(conn: &Connection, name: &str) -> Result<i32> {

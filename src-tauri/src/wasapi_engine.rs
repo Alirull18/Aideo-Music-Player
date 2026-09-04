@@ -94,6 +94,40 @@ pub enum ExclusiveRecovery {
     StayShared,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct WasapiOutputFormat {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub container_bits: u16,
+    pub valid_bits: u16,
+    pub is_float: bool,
+    pub channel_mask: Option<u32>,
+}
+
+#[cfg(target_os = "windows")]
+struct ComMtaGuard {
+    initialized: bool,
+}
+
+#[cfg(target_os = "windows")]
+impl ComMtaGuard {
+    fn new() -> Self {
+        let ok = initialize_mta().is_ok();
+        Self { initialized: ok }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ComMtaGuard {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe {
+                windows::Win32::System::Com::CoUninitialize();
+            }
+        }
+    }
+}
+
 /// Pure backoff policy for exclusive-stream failures. First retry is quick,
 /// later retries wait longer, and past [`MAX_EXCLUSIVE_FAILURES`] the shared
 /// engine takes over for the rest of the track.
@@ -115,7 +149,7 @@ pub fn start_exclusive_stream<F, E>(
     dither_enabled: bool,
     mut callback: F,
     mut on_error: E,
-) -> Result<(WasapiStream, u16, bool, u32), String>
+) -> Result<(WasapiStream, WasapiOutputFormat), String>
 where
     F: FnMut(&mut [f32]) + Send + 'static,
     E: FnMut(String) + Send + 'static,
@@ -125,13 +159,19 @@ where
     let dev_name = device_name.to_string();
     let timing_str = timing_mode.to_string();
 
-    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(u16, bool, u32), String>>(1);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Result<WasapiOutputFormat, String>>(1);
 
     let handle = thread::spawn(move || {
-        let _ = initialize_mta();
+        let _com_guard = ComMtaGuard::new();
 
         // Give audiosrv a brief moment to finish tearing down any previous endpoint handle
         std::thread::sleep(std::time::Duration::from_millis(60));
+
+        let prev_priority = unsafe {
+            windows::Win32::System::Threading::GetThreadPriority(
+                windows::Win32::System::Threading::GetCurrentThread(),
+            )
+        };
 
         // ELEVATE THREAD TO REAL-TIME PRO AUDIO PRIORITY WITH MMCSS
         let mut task_index = 0u32;
@@ -340,7 +380,7 @@ where
             }
         }
 
-        let (_format, bits, valid_bits, is_float, negotiated_rate) = match negotiated_format {
+        let (format, bits, valid_bits, is_float, negotiated_rate) = match negotiated_format {
             Some(f) => f,
             None => {
                 let err_msg = format!("Device does not support Exclusive Mode (attempted rates: {:?})", candidate_rates);
@@ -419,7 +459,14 @@ where
         }
 
         // Notify main thread of success FIRST (including negotiated_rate)
-        if tx.send(Ok((valid_bits as u16, is_float, negotiated_rate))).is_err() {
+        if tx.send(Ok(WasapiOutputFormat {
+            sample_rate: negotiated_rate,
+            channels: negotiated_channels,
+            container_bits: bits as u16,
+            valid_bits: valid_bits as u16,
+            is_float,
+            channel_mask: Some(format.get_dwchannelmask()),
+        })).is_err() {
             // Main thread dropped the receiver, abort
             return;
         }
@@ -465,6 +512,7 @@ where
                             on_error("WASAPI exclusive start_stream failed".to_string());
                             break;
                         }
+                        std::thread::sleep(std::time::Duration::from_millis(HW_RESTART_DELAY_MS * u64::from(start_failures)));
                     }
                     continue;
                 }
@@ -524,12 +572,11 @@ where
                 let byte_slice = unsafe {
                     std::slice::from_raw_parts(
                         f32_data.as_ptr() as *const u8,
-                        f32_data.len() * 4,
+                        f32_data.len() * std::mem::size_of::<f32>(),
                     )
                 };
-                if output_bytes.len() == byte_slice.len() {
-                    output_bytes.copy_from_slice(byte_slice);
-                }
+                let copy_len = output_bytes.len().min(byte_slice.len());
+                output_bytes[..copy_len].copy_from_slice(&byte_slice[..copy_len]);
             } else if bits == 32 {
                 // 32-bit container: Int32 or Int24
                 // WASAPI expects 24-bit valid data to be left-justified in the 32-bit container.
@@ -631,17 +678,21 @@ where
                 let _ = windows::Win32::System::Threading::AvRevertMmThreadCharacteristics(h);
             }
         }
+        unsafe {
+            let _ = windows::Win32::System::Threading::SetThreadPriority(
+                windows::Win32::System::Threading::GetCurrentThread(),
+                windows::Win32::System::Threading::THREAD_PRIORITY(prev_priority),
+            );
+        }
     });
 
     match rx.recv() {
-        Ok(Ok((bits, is_float, negotiated_rate))) => Ok((
+        Ok(Ok(format)) => Ok((
             WasapiStream {
                 shutdown,
                 handle: Some(handle),
             },
-            bits,
-            is_float,
-            negotiated_rate,
+            format,
         )),
         Ok(Err(e)) => Err(e),
         Err(_) => Err("WASAPI initialization thread panicked".to_string()),
@@ -658,7 +709,7 @@ pub fn start_exclusive_stream<F, E>(
     _dither_enabled: bool,
     _callback: F,
     _on_error: E,
-) -> Result<(WasapiStream, u16, bool, u32), String>
+) -> Result<(WasapiStream, WasapiOutputFormat), String>
 where
     F: FnMut(&mut [f32]) + Send + 'static,
     E: FnMut(String) + Send + 'static,

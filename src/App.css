@@ -546,6 +546,7 @@ input[type=range] {
   inset: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  column-gap: clamp(20px, 4vw, 72px);
   color: #fff;
   z-index: 1;
   padding-bottom: var(--player-h);
@@ -589,7 +590,6 @@ input[type=range] {
   justify-content: space-between;
   gap: 16px;
   padding: 32px 40px 16px;
-  border-right: 1px solid rgba(255, 255, 255, 0.04);
   min-width: 0;
   height: 100%;
   overflow: hidden;
@@ -610,6 +610,43 @@ input[type=range] {
 
 .np-art-wrap.has-art {
   box-shadow: 0 30px 60px rgba(0, 0, 0, 0.7), 0 0 60px rgba(var(--accent-rgb), 0.15);
+}
+
+/* ── Interactive 3D Parallax Tilt Artwork ── */
+.np-art-wrap.np-art-interactive {
+  transform: perspective(1000px)
+    rotateX(var(--np-art-tilt-x, 0deg))
+    rotateY(var(--np-art-tilt-y, 0deg))
+    translate3d(var(--np-art-shift-x, 0px), var(--np-art-shift-y, 0px), 0);
+  transition: transform 0.1s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.3s ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.np-art-wrap.np-art-interactive:not(.np-art-motion-disabled):hover {
+  box-shadow: 0 36px 72px rgba(0, 0, 0, 0.75), 0 0 50px rgba(var(--accent-rgb), 0.2);
+}
+
+.np-art-wrap.np-art-interactive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at var(--np-art-light-x, 50%) var(--np-art-light-y, 50%), rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.04) 35%, transparent 65%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  mix-blend-mode: overlay;
+  z-index: 5;
+}
+
+.np-art-wrap.np-art-interactive:hover::after {
+  opacity: 1;
+}
+
+.np-art-wrap.np-art-motion-disabled {
+  transform: none !important;
+  will-change: auto;
 }
 
 .np-art {
@@ -698,7 +735,6 @@ input[type=range] {
   padding: 32px 48px 20px;
   background: linear-gradient(to bottom, rgba(10, 10, 18, 0.95) 80%, transparent);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
   position: sticky;
   top: 0;
@@ -2301,7 +2337,7 @@ input[type=range] {
   transition: border-color 0.8s ease, box-shadow 0.8s ease, background 0.8s ease;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .vinyl-deck-left {
@@ -6300,6 +6336,39 @@ input[type=range] {
   transition: box-shadow 0.5s ease;
 }
 
+/* Stage Theater Mode 3D Artwork Tilt */
+.fullscreen-cover-art-wrap.stage-art-interactive {
+  transform: perspective(1200px)
+    rotateX(var(--stage-art-tilt-x, 0deg))
+    rotateY(var(--stage-art-tilt-y, 0deg))
+    translate3d(var(--stage-art-shift-x, 0px), var(--stage-art-shift-y, 0px), 0);
+  transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.3s ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.fullscreen-cover-art-wrap.stage-art-interactive:hover {
+  animation-play-state: paused;
+  box-shadow: 0 35px 75px rgba(0, 0, 0, 0.85), 0 0 50px rgba(var(--accent-rgb), 0.25);
+}
+
+.fullscreen-cover-art-wrap.stage-art-interactive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at var(--stage-art-light-x, 50%) var(--stage-art-light-y, 50%), rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 35%, transparent 65%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  mix-blend-mode: overlay;
+  z-index: 5;
+}
+
+.fullscreen-cover-art-wrap.stage-art-interactive:hover::after {
+  opacity: 1;
+}
+
 .fullscreen-cover-art {
   width: 100%;
   height: 100%;
@@ -6650,16 +6719,23 @@ input[type=range] {
 /* HUD bottom playback bar */
 .fullscreen-hud {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 40px 10% 48px;
-  background: linear-gradient(to top, rgba(5, 5, 8, 0.95) 0%, rgba(5, 5, 8, 0.6) 60%, transparent 100%);
+  bottom: 22px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: min(1180px, calc(100% - 48px));
+  max-width: 1180px;
+  padding: 14px 28px 16px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
   z-index: 50;
-  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  transition: background 0.3s cubic-bezier(0.2, 0, 0, 1),
+              border-color 0.3s cubic-bezier(0.2, 0, 0, 1),
+              box-shadow 0.3s cubic-bezier(0.2, 0, 0, 1),
+              opacity 0.25s ease,
+              transform 0.25s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .fullscreen-hud-progress-wrap {
@@ -6675,6 +6751,70 @@ input[type=range] {
   color: var(--text-dim);
   min-width: 45px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  user-select: none;
+}
+
+/* Waveform Track & Interactive Scrubber */
+.fullscreen-hud-waveform-track {
+  flex: 1;
+  position: relative;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.fullscreen-hud-waveform-bar {
+  border-radius: 1.5px;
+  transform-origin: center;
+}
+
+/* Scrubber Hover Needle Line & Tooltip */
+.fullscreen-hud-scrub-tooltip {
+  position: absolute;
+  top: -30px;
+  transform: translateX(-50%);
+  background: rgba(12, 14, 22, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 20;
+  white-space: nowrap;
+}
+
+.fullscreen-hud-scrub-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 6px;
+  height: 6px;
+  background: rgba(12, 14, 22, 0.94);
+  border-right: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.fullscreen-hud-scrub-needle {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 2px;
+  background: #ffffff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+  z-index: 15;
+  transform: translateX(-50%);
+  border-radius: 1px;
 }
 
 .fullscreen-hud-progress-bar {
@@ -6708,7 +6848,6 @@ input[type=range] {
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
   cursor: pointer;
   margin-top: -5px;
-  /* Centers thumb vertically */
   transition: transform 0.15s, background-color 0.15s;
 }
 
@@ -6719,91 +6858,153 @@ input[type=range] {
 }
 
 .fullscreen-hud-controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   width: 100%;
+  gap: 16px;
+  min-width: 0;
 }
 
 .fullscreen-hud-left {
+  grid-column: 1;
+  justify-self: start;
   display: flex;
   align-items: center;
-  gap: 16px;
-  min-width: 250px;
-}
-
-.fullscreen-hud-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 24px;
-  min-width: 250px;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .fullscreen-hud-center {
+  grid-column: 2;
+  justify-self: center;
   display: flex;
   align-items: center;
-  gap: 24px;
+  justify-content: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
+.fullscreen-hud-right {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
+/* Micro-interaction refined buttons */
 .fullscreen-hud-btn {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.72);
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  flex-shrink: 0;
+  transition: color 0.15s ease,
+              background-color 0.15s ease,
+              transform 0.12s cubic-bezier(0.2, 0, 0, 1),
+              box-shadow 0.15s ease;
 }
 
 .fullscreen-hud-btn:hover {
   color: #ffffff;
-  transform: scale(1.08);
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.06);
+}
+
+.fullscreen-hud-btn:active {
+  transform: scale(0.96) !important;
 }
 
 .fullscreen-hud-btn.active {
   color: var(--accent);
-  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.16);
+  text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.6);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+}
+
+.fullscreen-love-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+.fullscreen-love-btn.loved {
+  color: #ef4444;
 }
 
 .fullscreen-hud-btn-play {
-  width: 56px;
-  height: 56px;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
   border-radius: 50%;
   background: #ffffff;
   color: #050508;
-  box-shadow: 0 8px 24px rgba(255, 255, 255, 0.2);
+  box-shadow: 0 6px 22px rgba(255, 255, 255, 0.3), 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1),
+              box-shadow 0.15s ease,
+              background-color 0.15s ease;
 }
 
 .fullscreen-hud-btn-play:hover {
   color: #000;
   transform: scale(1.06);
-  box-shadow: 0 10px 28px rgba(255, 255, 255, 0.35);
+  box-shadow: 0 8px 28px rgba(255, 255, 255, 0.5), 0 0 16px rgba(var(--accent-rgb), 0.3);
 }
 
+.fullscreen-hud-btn-play:active {
+  transform: scale(0.96) !important;
+}
+
+/* Volume Control & Tooltip */
 .fullscreen-hud-volume-wrap {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
+  flex-shrink: 0;
+  position: relative;
 }
 
 .fullscreen-hud-volume-slider {
   -webkit-appearance: none;
-  width: 100px;
+  width: 68px;
   height: 4px;
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.15);
   outline: none;
+  flex-shrink: 0;
+  transition: width 0.2s cubic-bezier(0.2, 0, 0, 1), height 0.15s ease;
+  cursor: pointer;
+}
+
+.fullscreen-hud-volume-slider:hover {
+  width: 86px;
+  height: 6px;
 }
 
 .fullscreen-hud-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.fullscreen-hud-volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
 }
 
 /* Background visualizer container in fullscreen */
@@ -6821,7 +7022,482 @@ input[type=range] {
 
 .hud-hidden .fullscreen-visualizer-container {
   opacity: 0.65;
-  /* Corrected class selector & increased opacity for high visibility when HUD hides */
+}
+
+/* ── Theater Playback HUD Archetype Styles ── */
+
+/* 1. Floating Studio Capsule (Aerospace Glass Island) */
+.fullscreen-hud.hud-capsule {
+  border-radius: 9999px;
+  background: rgba(14, 16, 26, 0.78);
+  backdrop-filter: blur(36px) saturate(190%);
+  -webkit-backdrop-filter: blur(36px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 64px -8px rgba(0, 0, 0, 0.75),
+              0 8px 24px -4px rgba(0, 0, 0, 0.5),
+              inset 0 1px 1px 0 rgba(255, 255, 255, 0.22),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.hud-capsule .fullscreen-hud-btn-play {
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.35),
+              0 0 24px rgba(var(--accent-rgb, 139, 92, 246), 0.35);
+}
+
+/* 2. Audiophile Master Deck (Professional 1U/2U Studio Rack Chassis) */
+.fullscreen-hud.hud-master {
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(35, 38, 48, 0.98) 0%, rgba(20, 22, 30, 0.98) 45%, rgba(11, 12, 18, 1) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.85),
+              inset 0 1px 0 rgba(255, 255, 255, 0.25),
+              inset 0 2px 4px rgba(0, 0, 0, 0.5),
+              inset 0 -1px 0 rgba(0, 0, 0, 0.9);
+  position: relative;
+}
+
+/* Authentic CNC Countersunk Hex Screws */
+.hud-master-screw {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #94a3b8 0%, #475569 50%, #1e293b 100%);
+  border: 1px solid #334155;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6),
+              0 1px 3px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hud-master-screw::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  background: #0f172a;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.95);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+}
+
+.hud-master-screw.top-left { top: 8px; left: 10px; }
+.hud-master-screw.top-right { top: 8px; right: 10px; }
+.hud-master-screw.bottom-left { bottom: 8px; left: 10px; }
+.hud-master-screw.bottom-right { bottom: 8px; right: 10px; }
+
+/* Studio Rack LED Peak Meter */
+.hud-master-led-meter {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+  background: #06070a;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85);
+  flex-shrink: 0;
+}
+
+.hud-meter-dot {
+  width: 4px;
+  height: 10px;
+  border-radius: 1px;
+  opacity: 0.16;
+  transition: opacity 0.08s ease, box-shadow 0.08s ease;
+}
+
+.hud-meter-dot.green { background: #22c55e; }
+.hud-meter-dot.yellow { background: #eab308; }
+.hud-meter-dot.red { background: #ef4444; }
+
+.hud-meter-dot.lit {
+  opacity: 1;
+  box-shadow: 0 0 10px currentColor;
+}
+
+/* Master Switchgear Controls */
+.hud-master .fullscreen-hud-btn {
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.hud-master .fullscreen-hud-btn:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 100%);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.hud-master .fullscreen-hud-btn:active {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.7);
+}
+
+.hud-master .fullscreen-hud-btn.active {
+  color: #22d3ee;
+  border-color: #0891b2;
+  background: rgba(6, 182, 212, 0.16);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
+}
+
+.hud-master .fullscreen-hud-btn-play {
+  border-radius: 8px;
+  background: linear-gradient(180deg, #22d3ee 0%, #0891b2 100%);
+  color: #042f2e;
+  border: 1px solid #67e8f9;
+  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.hud-master .fullscreen-telemetry-btn {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: #06080d !important;
+  border-color: #1e293b !important;
+  color: #38bdf8 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+/* 3. Zen Minimalist Hairline (Ultra-Light Architectural Glass Strip) */
+.fullscreen-hud.hud-minimal {
+  border-radius: 16px;
+  background: rgba(8, 9, 14, 0.55);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.45);
+  padding: 10px 24px 12px;
+}
+
+.hud-minimal .fullscreen-hud-progress-bar {
+  height: 3px;
+}
+
+.hud-minimal .fullscreen-hud-progress-bar:hover {
+  height: 5px;
+}
+
+.hud-minimal .fullscreen-hud-btn {
+  color: rgba(255, 255, 255, 0.6);
+  background: transparent;
+}
+
+.hud-minimal .fullscreen-hud-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.hud-minimal .fullscreen-hud-btn-play {
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #09090b;
+  box-shadow: 0 4px 18px rgba(255, 255, 255, 0.25);
+}
+
+/* 4. Retro Turntable & Vacuum Tube Console (Golden-Age Hi-Fi) */
+.fullscreen-hud.hud-analog {
+  border-radius: 14px;
+  background: linear-gradient(180deg, #2b1c11 0%, #1a110a 50%, #100a06 100%);
+  border: 1.5px solid rgba(245, 158, 11, 0.45);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.9),
+              0 0 35px rgba(217, 119, 6, 0.18),
+              inset 0 1px 0 rgba(251, 191, 36, 0.32),
+              inset 0 -1px 0 rgba(0, 0, 0, 0.9);
+}
+
+/* Realistic Vacuum Tube Valve Stage */
+.hud-analog-tube-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.22) 0%, rgba(26, 16, 10, 0.85) 100%);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.65),
+              0 0 14px rgba(245, 158, 11, 0.25);
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.hud-analog-tube-glow {
+  width: 6px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 10px #f59e0b, 0 0 4px #fbbf24, 0 0 18px rgba(245, 158, 11, 0.9);
+  animation: tubePulse 2s ease-in-out infinite alternate;
+}
+
+.hud-analog-badge-text {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #fbbf24;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+}
+
+/* Analog Controls Warm Brass Glow */
+.hud-analog .fullscreen-hud-btn {
+  color: #d97706;
+  border-radius: 50%;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: rgba(38, 25, 15, 0.6);
+  box-shadow: inset 0 1px 0 rgba(251, 191, 36, 0.15), 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.hud-analog .fullscreen-hud-btn:hover {
+  color: #fef3c7;
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.35);
+}
+
+.hud-analog .fullscreen-hud-btn.active {
+  color: #fbbf24;
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.65);
+}
+
+.hud-analog .fullscreen-hud-btn-play {
+  background: linear-gradient(180deg, #f59e0b 0%, #b45309 100%);
+  color: #1c1007;
+  border: 1px solid #fbbf24;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.hud-analog .fullscreen-hud-btn-play:hover {
+  box-shadow: 0 6px 22px rgba(245, 158, 11, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.hud-analog .fullscreen-hud-time {
+  color: #fbbf24;
+  font-family: 'JetBrains Mono', monospace;
+  text-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+
+.hud-analog .fullscreen-telemetry-btn {
+  background: rgba(35, 22, 13, 0.8) !important;
+  border-color: rgba(245, 158, 11, 0.35) !important;
+  color: #fbbf24 !important;
+}
+
+@keyframes tubePulse {
+  0% {
+    opacity: 0.75;
+    transform: scale(0.95);
+    box-shadow: 0 0 6px #f59e0b, 0 0 2px #fbbf24;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.05);
+    box-shadow: 0 0 14px #f59e0b, 0 0 8px #fbbf24, 0 0 22px rgba(245, 158, 11, 0.9);
+  }
+}
+
+.hud-hidden .fullscreen-hud.hud-capsule,
+.hud-hidden .fullscreen-hud.hud-master,
+.hud-hidden .fullscreen-hud.hud-minimal,
+.hud-hidden .fullscreen-hud.hud-analog {
+  transform: translateX(-50%) translateY(40px) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+@media (max-width: 1024px) {
+  .fullscreen-hud {
+    width: calc(100% - 32px);
+    padding: 12px 16px 14px;
+  }
+  .fullscreen-hud-controls {
+    gap: 10px;
+  }
+  .fullscreen-hud-center {
+    gap: 8px;
+  }
+  .fullscreen-hud-right {
+    gap: 4px;
+  }
+  .fullscreen-hud-volume-slider {
+    width: 48px;
+  }
+}
+
+/* ── Settings Appearance HUD Preview Cards ── */
+.thud-prev-box {
+  height: 64px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.thud-prev-box.prev-capsule {
+  background: radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.15) 0%, rgba(14, 16, 26, 0.8) 100%);
+}
+
+.thud-prev-box.prev-master {
+  background: linear-gradient(180deg, #1f222d 0%, #12141c 100%);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.thud-prev-box.prev-minimal {
+  background: rgba(8, 9, 14, 0.6);
+}
+
+.thud-prev-box.prev-analog {
+  background: linear-gradient(180deg, #2b1c11 0%, #140d08 100%);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.thud-prev-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.thud-prev-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.thud-prev-meta-line {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.thud-prev-controls, .thud-prev-center-deck, .thud-prev-minimal-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thud-prev-btn, .thud-prev-btn-sm {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.thud-prev-btn-play {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.thud-prev-btn.square, .thud-prev-btn-play.square {
+  border-radius: 3px;
+}
+
+.thud-prev-rack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: #181a24;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.thud-prev-screw {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  border: 1px solid #475569;
+}
+
+.thud-prev-leds {
+  display: flex;
+  gap: 3px;
+}
+
+.thud-led {
+  width: 4px;
+  height: 6px;
+  border-radius: 1px;
+}
+
+.thud-led.green { background: #22c55e; box-shadow: 0 0 4px #22c55e; }
+.thud-led.yellow { background: #eab308; box-shadow: 0 0 4px #eab308; }
+.thud-led.red { background: #ef4444; box-shadow: 0 0 4px #ef4444; }
+
+.thud-prev-telemetry {
+  font-size: 8px;
+  font-family: monospace;
+  color: #06b6d4;
+  font-weight: 700;
+}
+
+.thud-prev-hairline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 180px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.thud-prev-line-progress {
+  flex: 1;
+  height: 2px;
+  background: #10b981;
+  border-radius: 1px;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.thud-prev-analog-console {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(38, 28, 18, 0.9);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+
+.thud-prev-btn.round.amber {
+  background: #d97706;
+}
+
+.thud-prev-vu-strip {
+  width: 28px;
+  height: 6px;
+  background: linear-gradient(90deg, #d97706, #f59e0b, #fbbf24);
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+}
+
+.thud-prev-analog-badge {
+  font-size: 8px;
+  font-family: monospace;
+  font-weight: 700;
+  color: #fbbf24;
+  letter-spacing: 0.5px;
 }
 
 /* ==========================================================================
@@ -6870,6 +7546,677 @@ input[type=range] {
 @keyframes pulse-glow {
   0% { transform: scale(1) translate(0, 0); opacity: 0.8; }
   100% { transform: scale(1.15) translate(5%, 5%); opacity: 1; }
+}
+
+/* ============================================================================
+   THEATER HUD OVERHAUL: SIGNAL CONSOLE
+   Shared structure, distinct materials, and no decorative glass treatment.
+   ============================================================================ */
+
+.fullscreen-top-bar {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  background: rgba(12, 14, 20, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 12px;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.fullscreen-top-bar .fullscreen-layout-toggle,
+.fullscreen-top-bar .fullscreen-exit-btn {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: rgba(255, 255, 255, 0.68);
+  transition: color 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.fullscreen-top-bar .fullscreen-layout-toggle {
+  width: auto;
+  min-width: 0;
+  padding: 0 10px;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fullscreen-top-bar .fullscreen-exit-btn {
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+}
+
+.fullscreen-top-bar .fullscreen-layout-toggle:hover,
+.fullscreen-top-bar .fullscreen-exit-btn:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.fullscreen-top-bar .fullscreen-exit-btn:hover {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.36);
+  color: #fda4af;
+}
+
+.hud-hidden .fullscreen-top-bar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
+.fullscreen-hud.hud-shell {
+  --hud-panel: rgba(16, 18, 26, 0.97);
+  --hud-control: rgba(255, 255, 255, 0.055);
+  --hud-control-hover: rgba(255, 255, 255, 0.105);
+  --hud-border: rgba(255, 255, 255, 0.13);
+  --hud-control-border: rgba(255, 255, 255, 0.08);
+  --hud-ink: rgba(255, 255, 255, 0.9);
+  --hud-muted: rgba(255, 255, 255, 0.52);
+  --hud-accent: var(--accent);
+  --hud-accent-rgb: var(--accent-rgb);
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  right: auto;
+  z-index: 20;
+  width: min(1160px, calc(100% - 48px));
+  max-width: 1160px;
+  padding: 12px 14px 14px;
+  gap: 10px;
+  color: var(--hud-ink);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-border);
+  border-radius: 14px;
+  box-shadow: 0 7px 12px rgba(0, 0, 0, 0.42);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease,
+    opacity 0.22s ease, transform 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.fullscreen-hud-progress-wrap.hud-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-time {
+  min-width: 38px;
+  color: var(--hud-muted);
+  font-family: 'JetBrains Mono', 'Cascadia Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.fullscreen-hud-waveform-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.fullscreen-hud-waveform {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  pointer-events: none;
+}
+
+.fullscreen-hud-waveform-bar {
+  flex: 1;
+  min-width: 1px;
+  border-radius: 2px;
+  opacity: 0.9;
+  transition: background-color 0.16s ease, opacity 0.16s ease;
+}
+
+.fullscreen-hud-waveform-track:hover .fullscreen-hud-waveform-bar {
+  opacity: 1;
+}
+
+.fullscreen-hud-progress-bar {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 2;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.fullscreen-hud-progress-bar::-webkit-slider-runnable-track {
+  height: 100%;
+}
+
+.fullscreen-hud-scrub-tooltip {
+  top: -30px;
+  z-index: 4;
+  background: #161923;
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.42);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.fullscreen-hud-scrub-needle {
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--hud-accent);
+  box-shadow: 0 0 6px rgba(var(--hud-accent-rgb), 0.65);
+}
+
+.fullscreen-hud-controls.hud-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas: 'left center right';
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+.fullscreen-hud-controls.hud-controls .fullscreen-hud-left {
+  grid-area: left;
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.fullscreen-hud-controls.hud-controls .fullscreen-hud-center {
+  grid-area: center;
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.fullscreen-hud-controls.hud-controls .fullscreen-hud-right {
+  grid-area: right;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--hud-muted);
+  background: var(--hud-control);
+  box-shadow: none;
+  transition: color 0.16s ease, background-color 0.16s ease,
+    border-color 0.16s ease, transform 0.12s ease;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn:hover {
+  transform: translateY(-1px);
+  color: #fff;
+  background: var(--hud-control-hover);
+  border-color: var(--hud-control-border);
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn:active {
+  transform: translateY(0);
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn:focus-visible,
+.fullscreen-hud.hud-shell .fullscreen-telemetry-btn:focus-visible,
+.fullscreen-top-bar button:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: 2px;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn.active {
+  color: var(--hud-accent);
+  background: rgba(var(--hud-accent-rgb), 0.16);
+  border-color: rgba(var(--hud-accent-rgb), 0.38);
+  text-shadow: none;
+  box-shadow: none;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn-play {
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+  border-radius: 12px;
+  border-color: transparent;
+  background: var(--hud-accent);
+  color: #090b10;
+  box-shadow: 0 5px 10px rgba(var(--hud-accent-rgb), 0.25);
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-btn-play:hover {
+  color: #050609;
+  background: var(--hud-accent);
+  box-shadow: 0 6px 12px rgba(var(--hud-accent-rgb), 0.34);
+}
+
+.fullscreen-telemetry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 190px;
+  height: 30px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid var(--hud-control-border);
+  border-radius: 8px;
+  color: var(--hud-muted);
+  background: var(--hud-control);
+  font-family: 'JetBrains Mono', 'Cascadia Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.16s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.fullscreen-telemetry-btn:hover,
+.fullscreen-telemetry-btn[aria-pressed='true'] {
+  color: var(--hud-accent);
+  background: rgba(var(--hud-accent-rgb), 0.12);
+  border-color: rgba(var(--hud-accent-rgb), 0.36);
+}
+
+.fullscreen-telemetry-btn > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fullscreen-telemetry-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.fullscreen-hud-queue-btn {
+  position: relative;
+}
+
+.fullscreen-hud-queue-count {
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--hud-panel);
+  border-radius: 7px;
+  color: #090b10;
+  background: var(--hud-accent);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.fullscreen-hud-volume-wrap {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-volume-slider {
+  width: 64px;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  flex-shrink: 0;
+  transition: width 0.16s ease, height 0.16s ease;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-volume-slider:hover {
+  width: 78px;
+  height: 5px;
+}
+
+.fullscreen-hud.hud-shell .fullscreen-hud-volume-slider::-webkit-slider-thumb {
+  width: 11px;
+  height: 11px;
+  box-shadow: none;
+}
+
+/* Capsule: the balanced default, compact and softly squared. */
+.fullscreen-hud.hud-capsule {
+  --hud-panel: rgba(17, 19, 29, 0.97);
+  --hud-border: rgba(var(--accent-rgb), 0.28);
+  border-radius: 14px;
+}
+
+/* Master: a measured control rack, with stateful meters instead of ornament. */
+.fullscreen-hud.hud-master {
+  --hud-panel: #171b23;
+  --hud-accent: #22d3ee;
+  --hud-accent-rgb: 34, 211, 238;
+  --hud-control: #202630;
+  --hud-control-hover: #2a323e;
+  --hud-border: rgba(255, 255, 255, 0.19);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.48);
+}
+
+.hud-master .fullscreen-hud-btn {
+  border-color: rgba(255, 255, 255, 0.09);
+  border-radius: 5px;
+}
+
+.hud-master .fullscreen-hud-btn-play {
+  border-radius: 7px;
+}
+
+.hud-master .hud-master-screw {
+  width: 6px;
+  height: 6px;
+  background: #667181;
+  border: 0;
+  box-shadow: none;
+}
+
+.hud-master .hud-master-screw::before {
+  width: 2px;
+  height: 2px;
+  background: #15191f;
+  box-shadow: none;
+}
+
+.hud-master .hud-master-led-meter {
+  gap: 3px;
+  padding: 4px 6px;
+  background: #0a0d11;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+.hud-master .fullscreen-telemetry-btn {
+  color: #67e8f9;
+  background: #0c1117;
+  border-color: rgba(34, 211, 238, 0.22);
+}
+
+/* Minimal: a quiet rail that gets out of the way of the artwork. */
+.fullscreen-hud.hud-minimal {
+  --hud-panel: rgba(10, 12, 17, 0.92);
+  --hud-control: transparent;
+  --hud-control-hover: rgba(255, 255, 255, 0.08);
+  --hud-border: rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  padding: 9px 12px 10px;
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.24);
+}
+
+.hud-minimal .fullscreen-hud-btn {
+  border-color: transparent;
+  border-radius: 6px;
+}
+
+.hud-minimal .fullscreen-hud-btn-play {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  border-radius: 10px;
+}
+
+/* Analog: a warm console material, with amber reserved for the output state. */
+.fullscreen-hud.hud-analog {
+  --hud-panel: #24170d;
+  --hud-accent: #f6b44f;
+  --hud-accent-rgb: 246, 180, 79;
+  --hud-control: #342211;
+  --hud-control-hover: #493019;
+  --hud-border: rgba(246, 180, 79, 0.4);
+  --hud-control-border: rgba(246, 180, 79, 0.22);
+  --hud-muted: rgba(255, 228, 177, 0.66);
+  border-radius: 10px;
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.52);
+}
+
+.hud-analog .fullscreen-hud-btn {
+  border-color: rgba(246, 180, 79, 0.2);
+  border-radius: 7px;
+}
+
+.hud-analog .fullscreen-hud-btn-play {
+  border-radius: 10px;
+}
+
+.hud-analog .hud-analog-tube-badge {
+  gap: 7px;
+  padding: 0 8px;
+  height: 26px;
+  border: 1px solid rgba(246, 180, 79, 0.32);
+  border-radius: 6px;
+  background: #2b1b0c;
+  box-shadow: none;
+}
+
+.hud-analog .hud-analog-tube-glow {
+  width: 6px;
+  height: 6px;
+  background: #f6b44f;
+  box-shadow: 0 0 8px #f6b44f;
+  animation: none;
+}
+
+.hud-analog .hud-analog-badge-text,
+.hud-analog .fullscreen-hud-time {
+  color: #f6b44f;
+  text-shadow: none;
+}
+
+.hud-analog .fullscreen-telemetry-btn {
+  color: #f6b44f;
+  background: #2b1b0c;
+  border-color: rgba(246, 180, 79, 0.28);
+}
+
+/* Settings previews use the same materials as the live HUD. */
+.thud-prev-box {
+  background: #0d1016 !important;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+
+.thud-prev-box.prev-capsule {
+  background: #171521 !important;
+  border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.thud-prev-box.prev-master {
+  background: #171b23 !important;
+}
+
+.thud-prev-box.prev-minimal {
+  background: #0a0c11 !important;
+}
+
+.thud-prev-box.prev-analog {
+  background: #24170d !important;
+  border-color: rgba(246, 180, 79, 0.36);
+}
+
+.thud-prev-pill,
+.thud-prev-rack,
+.thud-prev-hairline,
+.thud-prev-analog-console {
+  box-shadow: none;
+}
+
+.thud-prev-pill {
+  border-radius: 10px;
+  background: #20202d;
+}
+
+.thud-prev-rack {
+  background: #202630;
+}
+
+.thud-prev-hairline {
+  border-radius: 7px;
+  background: #12151b;
+}
+
+.thud-prev-analog-console {
+  background: #342211;
+}
+
+.thud-prev-vu-strip {
+  background: #d99028;
+  box-shadow: 0 0 6px rgba(246, 180, 79, 0.52);
+}
+
+@media (max-width: 860px) {
+  .fullscreen-top-bar {
+    top: 12px;
+    right: 12px;
+  }
+
+  .fullscreen-hud.hud-shell {
+    bottom: 12px;
+    width: calc(100% - 24px);
+    padding: 10px 10px 11px;
+  }
+
+  .fullscreen-hud-controls.hud-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'left right' 'center center';
+    row-gap: 8px;
+  }
+
+  .fullscreen-hud-controls.hud-controls .fullscreen-hud-center {
+    justify-self: center;
+  }
+
+  .fullscreen-hud-controls.hud-controls .fullscreen-hud-right {
+    gap: 2px;
+  }
+}
+
+@media (max-width: 560px) {
+  .fullscreen-top-bar .fullscreen-layout-toggle span {
+    display: none;
+  }
+
+  .fullscreen-top-bar .fullscreen-layout-toggle {
+    width: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .fullscreen-hud.hud-shell {
+    width: calc(100% - 16px);
+    bottom: 8px;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .fullscreen-hud.hud-shell .fullscreen-hud-time {
+    min-width: 32px;
+    font-size: 9px;
+  }
+
+  .fullscreen-hud-controls.hud-controls {
+    gap: 6px;
+  }
+
+  .fullscreen-hud-controls.hud-controls .fullscreen-hud-left {
+    gap: 3px;
+  }
+
+  .fullscreen-hud-controls.hud-controls .fullscreen-hud-right {
+    gap: 1px;
+  }
+
+  .fullscreen-hud.hud-shell .fullscreen-hud-btn {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+  }
+
+  .fullscreen-hud.hud-shell .fullscreen-hud-btn-play,
+  .hud-minimal .fullscreen-hud-btn-play {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+
+  .fullscreen-hud.hud-shell .fullscreen-hud-volume-slider {
+    width: 46px;
+  }
+
+  .fullscreen-hud.hud-shell .fullscreen-hud-volume-slider:hover {
+    width: 54px;
+  }
+
+  .fullscreen-telemetry-btn {
+    max-width: 128px;
+    padding: 0 7px;
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fullscreen-top-bar,
+  .fullscreen-hud.hud-shell,
+  .fullscreen-hud.hud-shell * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Glassmorphic card */

@@ -1,3 +1,4 @@
+import { type PointerEvent as ReactPointerEvent } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Music } from 'lucide-react';
 import { TheaterLayoutProps } from './types';
@@ -24,7 +25,35 @@ export function StageLayout({
   vizMode,
   seek,
   scrollRef,
+  lowSpecMode,
 }: TheaterLayoutProps) {
+  const handleArtworkPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (lowSpecMode) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const pointerX = Math.max(-1, Math.min(1, ((e.clientX - rect.left) / rect.width) * 2 - 1));
+    const pointerY = Math.max(-1, Math.min(1, ((e.clientY - rect.top) / rect.height) * 2 - 1));
+    const style = e.currentTarget.style;
+
+    style.setProperty('--stage-art-tilt-x', `${(-pointerY * 8).toFixed(2)}deg`);
+    style.setProperty('--stage-art-tilt-y', `${(pointerX * 10).toFixed(2)}deg`);
+    style.setProperty('--stage-art-shift-x', `${(pointerX * 6).toFixed(2)}px`);
+    style.setProperty('--stage-art-shift-y', `${(pointerY * 6).toFixed(2)}px`);
+    style.setProperty('--stage-art-light-x', `${((pointerX + 1) * 50).toFixed(1)}%`);
+    style.setProperty('--stage-art-light-y', `${((pointerY + 1) * 50).toFixed(1)}%`);
+  };
+
+  const handleArtworkPointerLeave = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const style = e.currentTarget.style;
+    style.setProperty('--stage-art-tilt-x', '0deg');
+    style.setProperty('--stage-art-tilt-y', '0deg');
+    style.setProperty('--stage-art-shift-x', '0px');
+    style.setProperty('--stage-art-shift-y', '0px');
+    style.setProperty('--stage-art-light-x', '50%');
+    style.setProperty('--stage-art-light-y', '50%');
+  };
+
   return (
     <motion.div
       key="stage"
@@ -49,7 +78,12 @@ export function StageLayout({
               <Visualizer mode="circle" />
             </div>
           )}
-          <div className={`fullscreen-cover-art-wrap ${albumArtFit === 'contain' ? 'contain-mode' : ''}`} style={{ zIndex: 2, margin: 0 }}>
+          <div
+            className={`fullscreen-cover-art-wrap stage-art-interactive ${albumArtFit === 'contain' ? 'contain-mode' : ''}`}
+            onPointerMove={handleArtworkPointerMove}
+            onPointerLeave={handleArtworkPointerLeave}
+            style={{ zIndex: 2, margin: 0 }}
+          >
             {albumArtFit === 'contain' && (
               <div
                 className="fullscreen-cover-ambient-bg"

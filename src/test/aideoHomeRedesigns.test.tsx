@@ -82,12 +82,14 @@ describe('Aideo home redesigns render suite', () => {
   });
 
   it('Command Deck renders rail, feed tabs and reason column', () => {
-    const { getByText } = render(<CommandDeckHome {...baseProps} />);
+    const { getByText, getAllByText } = render(<CommandDeckHome {...baseProps} />);
     expect(getByText('Command Deck')).toBeTruthy();
     expect(getByText('Discovery feed')).toBeTruthy();
     expect(getByText('Track')).toBeTruthy();
     expect(getByText('Reason')).toBeTruthy();
-    expect(getByText('Harbour Lights')).toBeTruthy();
+    expect(getAllByText('Harbour Lights').length).toBeGreaterThan(0);
+    expect(getByText('Radar Spotlight')).toBeTruthy();
+    expect(getByText('STUDIO CONSOLE · COMMAND DECK')).toBeTruthy();
   });
 
   it('Ambient Stage renders hero, grouped feed and recently played strip', () => {
@@ -130,5 +132,14 @@ describe('Aideo home redesigns render suite', () => {
     const rowTitle = getAllByText('Paper Planes at Dawn').find(el => el.className === 'ah-row-title')!;
     fireEvent.click(rowTitle.closest('.ah-row') as HTMLElement);
     expect(onPlayTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it('Command Deck stream rows and spotlight cards are playable from click', () => {
+    const onPlayTrack = vi.fn();
+    const { getAllByText } = render(<CommandDeckHome {...baseProps} onPlayTrack={onPlayTrack} />);
+    const rowTitle = getAllByText('Harbour Lights').find(el => el.className === 'ah-row-title')!;
+    fireEvent.click(rowTitle.closest('.ah-trow') as HTMLElement);
+    expect(onPlayTrack).toHaveBeenCalledTimes(1);
+    expect(onPlayTrack.mock.calls[0][0].title).toBe('Harbour Lights');
   });
 });

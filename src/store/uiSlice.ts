@@ -144,6 +144,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   })(),
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
   theaterModeDesign: (safeGetStorage('aideo-theater-design') as any) || (safeGetStorage('aideo-fullscreen-layout') as any) || 'stage',
+  theaterHudStyle: (safeGetStorage('aideo-theater-hud-style') as any) || 'capsule',
 
   setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }
@@ -478,6 +479,11 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setTheaterModeDesign: (design: any) => {
     safeSetStorage('aideo-theater-design', design);
     set({ theaterModeDesign: design });
+  },
+
+  setTheaterHudStyle: (style: any) => {
+    safeSetStorage('aideo-theater-hud-style', style);
+    set({ theaterHudStyle: style });
   },
 
   setPlayerBarTransparent: (transparent: boolean) => {

@@ -72,11 +72,23 @@ pub(crate) fn get_http_client() -> &'static reqwest::Client {
     })
 }
 
+#[derive(Clone)]
 pub struct AppState {
     pub player: Arc<Mutex<player::Player>>,
     pub db: Arc<Mutex<rusqlite::Connection>>,
+    pub db_pool: Option<db::DbPool>,
     pub media_controls: Arc<Mutex<Option<MediaControls>>>,
     pub cached_devices: Arc<Mutex<Vec<String>>>,
+}
+
+impl AppState {
+    pub fn get_reader_conn(&self) -> Result<r2d2::PooledConnection<db::SqliteConnectionManager>, String> {
+        self.db_pool
+            .as_ref()
+            .ok_or_else(|| "Database pool not available".to_string())?
+            .get()
+            .map_err(|e| format!("Failed to acquire database connection: {}", e))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -208,7 +220,17 @@ async fn translate_lyrics_batch(lines: Vec<String>) -> Result<Vec<(String, Strin
         return Ok(Vec::new());
     }
 
-    let tasks: Vec<_> = lines.into_iter().map(process_lyric_line_translation).collect();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut tasks = Vec::with_capacity(lines.len());
+
+    for line in lines {
+        let sem = semaphore.clone();
+        tasks.push(async move {
+            let _permit = sem.acquire().await;
+            process_lyric_line_translation(line).await
+        });
+    }
+
     let results = futures::future::join_all(tasks).await;
     Ok(results)
 }
@@ -1392,8 +1414,43 @@ fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<V
 
 #[tauri::command]
 fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    let conn = safe_lock(&state.db);
-    db::get_all_tracks(&conn).map_err(|e| e.to_string())
+    if let Ok(conn) = state.get_reader_conn() {
+        db::get_all_tracks(&conn).map_err(|e| e.to_string())
+    } else {
+        let conn = safe_lock(&state.db);
+        db::get_all_tracks(&conn).map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn get_library_page(
+    state: State<'_, AppState>,
+    offset: u32,
+    limit: u32,
+    search: Option<String>,
+    sort_by: Option<String>,
+) -> Result<db::PaginatedTracks, String> {
+    if let Ok(conn) = state.get_reader_conn() {
+        db::get_tracks_paginated(&conn, offset, limit, search.as_deref(), sort_by.as_deref())
+            .map_err(|e| e.to_string())
+    } else {
+        let conn = safe_lock(&state.db);
+        db::get_tracks_paginated(&conn, offset, limit, search.as_deref(), sort_by.as_deref())
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+fn get_library_count(
+    state: State<'_, AppState>,
+    search: Option<String>,
+) -> Result<usize, String> {
+    if let Ok(conn) = state.get_reader_conn() {
+        db::get_tracks_count(&conn, search.as_deref()).map_err(|e| e.to_string())
+    } else {
+        let conn = safe_lock(&state.db);
+        db::get_tracks_count(&conn, search.as_deref()).map_err(|e| e.to_string())
+    }
 }
 
 pub fn verify_authorized_library_track(conn: &rusqlite::Connection, path: &str) -> Result<std::path::PathBuf, String> {
@@ -1596,11 +1653,31 @@ pub fn is_valid_text_file_extension(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+pub fn is_safe_text_file_path(path: &str) -> Result<(), &'static str> {
+    if !is_valid_text_file_extension(path) {
+        return Err("Invalid file extension: only .m3u, .m3u8, .txt, and .json files are permitted");
+    }
+    let p = std::path::Path::new(path);
+    for component in p.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err("Path traversal ('..') is not permitted");
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(windir) = std::env::var("WINDIR") {
+            let win_path = std::path::PathBuf::from(windir);
+            if p.starts_with(&win_path) {
+                return Err("Writing to system directories is forbidden");
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
-    if !is_valid_text_file_extension(&path) {
-        return Err("Invalid file extension: only .m3u, .m3u8, .txt, and .json files are permitted".to_string());
-    }
+    is_safe_text_file_path(&path).map_err(|e| e.to_string())?;
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
@@ -1832,11 +1909,14 @@ async fn apply_local_cover(state: State<'_, AppState>, path: String, base64_data
 
 // ── Exclusive Mode commands ──────────────────────────────────────────────────
 #[tauri::command]
-fn toggle_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
+fn toggle_exclusive_mode(state: State<'_, AppState>, enable: Option<bool>) -> Result<bool, String> {
     let player = safe_lock(&state.player);
     let current = player.exclusive_mode.load(Ordering::Relaxed);
-    let next_mode = !current;
+    let next_mode = enable.unwrap_or(!current);
     player.exclusive_mode.store(next_mode, Ordering::Relaxed);
+    if !next_mode {
+        player.bit_perfect.store(false, Ordering::Relaxed);
+    }
     // A manual toggle is explicit user intent: re-arm the exclusive failure
     // budget so a previously wedged device gets fresh retry attempts.
     player::EXCLUSIVE_STREAM_FAILURES.store(0, Ordering::Relaxed);
@@ -1852,11 +1932,16 @@ fn get_exclusive_mode(state: State<'_, AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn toggle_bit_perfect_mode(state: State<'_, AppState>) -> Result<bool, String> {
+fn toggle_bit_perfect_mode(state: State<'_, AppState>, enable: Option<bool>) -> Result<bool, String> {
     let player = safe_lock(&state.player);
     let current = player.bit_perfect.load(Ordering::Relaxed);
-    let next_mode = !current;
+    let next_mode = enable.unwrap_or(!current);
     player.bit_perfect.store(next_mode, Ordering::Relaxed);
+    if next_mode {
+        player.exclusive_mode.store(true, Ordering::Relaxed);
+    }
+    player::EXCLUSIVE_STREAM_FAILURES.store(0, Ordering::Relaxed);
+    player::EXCLUSIVE_FALLBACK_NOTIFIED.store(false, Ordering::Relaxed);
     let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
     Ok(next_mode)
 }
@@ -2284,6 +2369,9 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
 
 #[tauri::command]
 fn play_track(path: String, start_pos: Option<f64>, state: State<'_, AppState>) -> Result<(), String> {
+    if !path.starts_with("http://") && !path.starts_with("https://") && !std::path::Path::new(&path).exists() {
+        return Err(format!("Cannot play track: file or stream not found: '{}'", path));
+    }
     let player = safe_lock(&state.player);
     player
         .cmd_tx
@@ -2574,20 +2662,30 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
     let position_val = f64::from_bits(player.position_secs.load(Ordering::Relaxed));
     let volume_val = f32::from_bits(player.volume.load(Ordering::Relaxed));
     let telemetry = player::get_network_telemetry();
+    let requested_exclusive = player.exclusive_mode.load(Ordering::Relaxed);
+    let requested_bit_perfect = player.bit_perfect.load(Ordering::Relaxed) && requested_exclusive;
+    let dsp = safe_lock(&player.dsp_state).clone();
+    let effective_audio_path = player.effective_audio_path.snapshot(
+        &dsp,
+        requested_exclusive,
+        requested_bit_perfect,
+        volume_val,
+    );
     
     Ok(serde_json::json!({
         "status": status_enum,
         "current_track": *safe_lock(&player.current_track),
         "position_secs": position_val,
         "volume": volume_val,
-        "exclusive": player.exclusive_mode.load(Ordering::Relaxed),
-        "bit_perfect": player.bit_perfect.load(Ordering::Relaxed),
+        "exclusive": requested_exclusive,
+        "bit_perfect": requested_bit_perfect,
         "dev_rate": player.current_dev_rate.load(Ordering::Relaxed),
-        "dsp": *safe_lock(&player.dsp_state),
+        "dsp": dsp,
         "driver_type": if is_asio { "ASIO" } else { "WASAPI" },
         "file_rate": player.file_rate.load(Ordering::Relaxed),
         "file_ch": player.file_ch.load(Ordering::Relaxed),
         "file_format": *safe_lock(&player.file_format),
+        "effective_audio_path": effective_audio_path,
         "network_telemetry": telemetry,
     }))
 }
@@ -3412,6 +3510,8 @@ pub fn run() {
             scan_and_save,
             clean_missing_tracks,
             get_library,
+            get_library_page,
+            get_library_count,
             play_track,
             queue_next,
             pause_track,
@@ -3503,6 +3603,7 @@ pub fn run() {
             youtube::get_artist_discography,
             youtube::get_search_suggestions,
             youtube::download_track,
+            youtube::download_playlist_batch,
             youtube::get_aideo_recommendations,
             youtube::check_and_download_ytdlp,
             youtube::get_youtube_autoplay_recommendations,
@@ -3520,6 +3621,7 @@ pub fn run() {
             tidal::get_tidal_autoplay_recommendations,
             tidal::get_tidal_hub_recommendations,
             qobuz::qobuz_connect,
+            qobuz::qobuz_open_login_window,
             qobuz::qobuz_status,
             qobuz::qobuz_logout,
             qobuz::qobuz_search,
@@ -3673,11 +3775,23 @@ pub fn run() {
                 let _ = std::fs::create_dir_all(parent);
             }
             let db_path_lossy = db_path.to_string_lossy();
-            let conn = match db::init_db(&db_path_lossy) {
-                Ok(c) => c,
+            let (conn, db_pool) = match db::init_db(&db_path_lossy) {
+                Ok(c) => {
+                    let pool = match db::init_db_pool(&db_path_lossy, 8) {
+                        Ok(pool) => Some(pool),
+                        Err(error) => {
+                            eprintln!("[system] SQLite reader pool unavailable; using the primary connection: {}", error);
+                            None
+                        }
+                    };
+                    (c, pool)
+                }
                 Err(e) => {
                     eprintln!("[system] SQLite initialization failed ({}). Falling back to safe in-memory database configuration.", e);
-                    db::init_db(":memory:").expect("Failed to initialize in-memory database fallback")
+                    (
+                        db::init_db(":memory:").expect("Failed to initialize in-memory database fallback"),
+                        None,
+                    )
                 }
             };
 
@@ -3755,6 +3869,7 @@ pub fn run() {
             app.manage(AppState {
                 player: player_arc.clone(),
                 db: db_arc.clone(),
+                db_pool: db_pool.clone(),
                 media_controls: media_controls_arc.clone(),
                 cached_devices: cached_devices_arc.clone(),
             });
@@ -3762,6 +3877,7 @@ pub fn run() {
             let app_state_clone = Arc::new(AppState {
                 player: player_arc,
                 db: db_arc,
+                db_pool,
                 media_controls: media_controls_arc,
                 cached_devices: cached_devices_arc,
             });
@@ -3878,6 +3994,21 @@ mod write_text_file_tests {
         assert!(!is_valid_text_file_extension(""));
         assert!(!is_valid_text_file_extension("playlist.m3u8.exe"));
         assert!(!is_valid_text_file_extension("image.png"));
+    }
+
+    #[test]
+    fn test_is_safe_text_file_path() {
+        assert!(is_safe_text_file_path("playlist.m3u").is_ok());
+        assert!(is_safe_text_file_path("C:\\Users\\Music\\playlist.m3u8").is_ok());
+        assert!(is_safe_text_file_path("/home/user/playlist.json").is_ok());
+
+        // Traversal rejection
+        assert_eq!(is_safe_text_file_path("../evil.m3u"), Err("Path traversal ('..') is not permitted"));
+        assert_eq!(is_safe_text_file_path("folder/../../evil.txt"), Err("Path traversal ('..') is not permitted"));
+        assert_eq!(is_safe_text_file_path("C:\\Users\\..\\Windows\\evil.json"), Err("Path traversal ('..') is not permitted"));
+
+        // Extension rejection
+        assert_eq!(is_safe_text_file_path("evil.exe"), Err("Invalid file extension: only .m3u, .m3u8, .txt, and .json files are permitted"));
     }
 
     #[test]

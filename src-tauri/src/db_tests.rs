@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::db::{init_db, column_exists};
+    use crate::db::{column_exists, init_db, init_db_pool};
 
     #[test]
     fn test_init_db_in_memory() {
@@ -139,5 +139,57 @@ mod tests {
         delete_track(&mut conn, "C:/song.mp3").unwrap();
         let remaining_pl_tracks = get_playlist_tracks(&conn, pl_id).unwrap();
         assert_eq!(remaining_pl_tracks.len(), 0);
+    }
+
+    #[test]
+    fn test_library_pagination_filters_and_orders_tracks() {
+        use crate::db::{get_tracks_count, get_tracks_paginated};
+
+        let conn = init_db(":memory:").unwrap();
+        conn.execute(
+            "INSERT INTO tracks (path, title, artist, album, duration, format) VALUES
+             ('C:/b.mp3', 'Bravo', 'Artist B', 'Album 2', 240.0, 'MP3'),
+             ('C:/a.mp3', 'Alpha', 'Artist A', 'Album 1', 180.0, 'FLAC'),
+             ('C:/c.mp3', 'Charlie', 'Artist A', 'Album 1', 300.0, 'FLAC')",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(get_tracks_count(&conn, Some("artist a")).unwrap(), 2);
+
+        let page = get_tracks_paginated(&conn, 1, 1, Some("artist a"), Some("title")).unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.offset, 1);
+        assert_eq!(page.limit, 1);
+        assert_eq!(page.tracks.len(), 1);
+        assert_eq!(page.tracks[0].title.as_deref(), Some("Charlie"));
+    }
+
+    #[test]
+    fn test_sqlite_pool_opens_valid_connections() {
+        let db_path = std::env::temp_dir().join(format!(
+            "aideo-db-pool-test-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let db_path_string = db_path.to_string_lossy().to_string();
+
+        let pool = init_db_pool(&db_path_string, 2).expect("pool should initialize");
+        let connection = pool.get().expect("pool should provide a connection");
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'tracks'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1);
+        drop(connection);
+        drop(pool);
+
+        let _ = std::fs::remove_file(db_path);
     }
 }

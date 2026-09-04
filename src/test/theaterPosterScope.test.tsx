@@ -49,8 +49,32 @@ describe('EditorialPosterLayout, PureScopeLayout, and TheaterLayoutSwitch', () =
     expect(screen.getByText('Ink on paper beats the screen')).toBeInTheDocument();
   });
 
-  it('renders PureScopeLayout with canvas scope and ethereal overlay', () => {
+  it('renders PureScopeLayout with canvas scope, metadata, and ethereal overlay', () => {
     render(<PureScopeLayout {...mockProps} />);
+    expect(screen.getByText('Editorial Masterwork')).toBeInTheDocument();
+    expect(screen.getByText('Swiss Typographer')).toBeInTheDocument();
+    expect(screen.getByText('SWISS EDITORIAL · 96kHz')).toBeInTheDocument();
+    expect(screen.getByText('Ink on paper beats the screen')).toBeInTheDocument();
+    expect(screen.getByTestId('pure-scope-canvas')).toBeInTheDocument();
+  });
+
+  it('renders PureScopeLayout with lowSpecMode and karaoke mode without crashing', () => {
+    const karaokeProps: TheaterLayoutProps = {
+      ...mockProps,
+      lowSpecMode: true,
+      lyricsDisplayMode: 'karaoke',
+      lyrics: [
+        {
+          time_secs: 0,
+          text: 'Synced beat',
+          words: [
+            { text: 'Synced', time_secs: 0, duration_secs: 1.5 },
+            { text: 'beat', time_secs: 1.5, duration_secs: 1.5 },
+          ],
+        },
+      ],
+    };
+    render(<PureScopeLayout {...karaokeProps} />);
     expect(screen.getByText('Editorial Masterwork')).toBeInTheDocument();
     expect(screen.getByTestId('pure-scope-canvas')).toBeInTheDocument();
   });

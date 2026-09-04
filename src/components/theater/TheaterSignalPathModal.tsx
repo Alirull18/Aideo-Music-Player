@@ -52,10 +52,11 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
   }, [isOpen, onClose]);
 
   const effectivePath = playback.effective_audio_path;
-  const isBitPerfect = effectivePath ? effectivePath.strict_bit_perfect : playback.bit_perfect;
-  const isExclusive = effectivePath
-    ? effectivePath.share_mode === 'exclusive' || effectivePath.share_mode === 'direct'
-    : playback.exclusive;
+  const isBitPerfect = Boolean(effectivePath?.active && effectivePath.strict_bit_perfect);
+  const isExclusive = Boolean(
+    effectivePath?.active &&
+      (effectivePath.share_mode === 'exclusive' || effectivePath.share_mode === 'direct')
+  );
 
   const engineLabel = effectivePath
     ? effectivePath.engine === 'asio'
@@ -481,7 +482,7 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                       </div>
                     ) : (
                       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {activeTransforms.map((t, i) => (
+                        {activeTransforms.map((t: string, i: number) => (
                           <div
                             key={i}
                             style={{

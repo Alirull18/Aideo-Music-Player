@@ -1,519 +1,456 @@
-import { useState, useEffect, useRef } from 'react';
-import { useStore } from '../store';
-import { motion } from 'framer-motion';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Plus, RefreshCw, Loader2, Globe } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
+  BarChart3,
+  BrainCircuit,
+  Clock3,
+  Globe2,
+  ListMusic,
+  Loader2,
+  MapPin,
+  Minus,
+  Play,
+  Plus,
+  Radio,
+  RefreshCw,
+  Tag,
+  WifiOff,
+} from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
-import { extractDominantColor } from '../utils/colorExtractor';
+import { useStore } from '../store';
+import {
+  buildChartRequest,
+  chartEntryToTrack,
+  formatChartCount,
+  getPlayableChartEntries,
+  mergeChartEntries,
+  parseChartDuration,
+  resolveChartArtwork,
+  type ChartEntry,
+  type ChartPage,
+  type ChartScope,
+  type ChartSource,
+  type ListenBrainzRange,
+} from '../utils/charts';
+import './ChartsView.css';
 
-function parseDuration(raw: string | null | undefined): number {
-  if (!raw) return 180;
-  const parts = raw.split(':').map(Number);
-  if (parts.some(isNaN)) return 180;
-  let secs = 0;
-  if (parts.length === 3) {
-    secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
-  } else if (parts.length === 2) {
-    secs = parts[0] * 60 + parts[1];
-  } else {
-    secs = parts[0] || 0;
+const PAGE_SIZE = 20;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const SOURCE_ORDER: ChartSource[] = ['lastfm', 'billboard', 'listenbrainz'];
+const chartCache = new Map<string, { page: ChartPage; savedAt: number }>();
+
+const SOURCES: Array<{
+  id: ChartSource;
+  label: string;
+  shortLabel: string;
+  description: string;
+  icon: typeof Radio;
+}> = [
+  { id: 'lastfm', label: 'Last.fm', shortLabel: 'Listener momentum', description: 'Worldwide, genre, and country popularity from Last.fm listeners.', icon: Radio },
+  { id: 'billboard', label: 'Billboard', shortLabel: 'Hot 100', description: 'The published United States Hot 100 singles ranking.', icon: BarChart3 },
+  { id: 'listenbrainz', label: 'ListenBrainz', shortLabel: 'Open listens', description: 'Open, sitewide recording statistics across selectable time ranges.', icon: BrainCircuit },
+];
+
+const GENRES = ['pop', 'hip-hop', 'rock', 'electronic', 'k-pop', 'latin', 'r&b', 'indie'];
+const COUNTRIES = [
+  'Malaysia', 'United States', 'United Kingdom', 'Japan', 'South Korea',
+  'Indonesia', 'Philippines', 'Singapore', 'Thailand', 'India', 'Australia',
+  'Canada', 'Brazil', 'Mexico', 'Germany', 'France', 'Italy', 'Netherlands',
+  'Spain', 'Sweden',
+];
+const RANGES: Array<{ id: ListenBrainzRange; label: string }> = [
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
+  { id: 'quarter', label: 'Quarter' },
+  { id: 'year', label: 'Year' },
+  { id: 'all_time', label: 'All time' },
+];
+
+function dispatchToast(message: string, type: 'info' | 'success' | 'error'): void {
+  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message, type } }));
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getStoredSource(): ChartSource {
+  const stored = localStorage.getItem('aideo-charts-source');
+  return SOURCE_ORDER.includes(stored as ChartSource) ? stored as ChartSource : 'lastfm';
+}
+
+function formatUpdatedAt(value: string | null): string | null {
+  if (!value) return null;
+  const numeric = Number(value);
+  const date = Number.isFinite(numeric) && numeric > 1_000_000 ? new Date(numeric * 1000) : new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+}
+
+function MovementIndicator({ entry }: { entry: ChartEntry }) {
+  const previousRank = entry.previous_rank;
+  if (previousRank === null) return <span className="charts-movement is-new">NEW</span>;
+  if (previousRank > entry.rank) {
+    return <span className="charts-movement is-up" aria-label={`Up ${previousRank - entry.rank} places`}><ArrowUpRight aria-hidden="true" />{previousRank - entry.rank}</span>;
   }
-  return secs > 0 ? secs : 180;
+  if (previousRank < entry.rank) {
+    return <span className="charts-movement is-down" aria-label={`Down ${entry.rank - previousRank} places`}><ArrowDownRight aria-hidden="true" />{entry.rank - previousRank}</span>;
+  }
+  return <span className="charts-movement is-steady" aria-label="No rank change"><Minus aria-hidden="true" /></span>;
+}
+
+function ChartArtwork({ entry, featured = false }: { entry: ChartEntry; featured?: boolean }) {
+  const artwork = resolveChartArtwork(entry) ?? defaultCover;
+  return (
+    <div className={featured ? 'charts-artwork is-featured' : 'charts-artwork'}>
+      <img
+        src={artwork}
+        alt={`Cover art for ${entry.title}`}
+        loading={featured ? 'eager' : 'lazy'}
+        decoding="async"
+        onError={(event) => { event.currentTarget.src = defaultCover; }}
+      />
+    </div>
+  );
+}
+
+function ProviderTabs({ value, onChange }: { value: ChartSource; onChange: (source: ChartSource) => void }) {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = SOURCE_ORDER.indexOf(value);
+    if (event.key === 'Home') return onChange(SOURCE_ORDER[0]);
+    if (event.key === 'End') return onChange(SOURCE_ORDER[SOURCE_ORDER.length - 1]);
+    const direction = event.key === 'ArrowRight' ? 1 : -1;
+    onChange(SOURCE_ORDER[(currentIndex + direction + SOURCE_ORDER.length) % SOURCE_ORDER.length]);
+  };
+
+  return (
+    <div className="charts-provider-tabs" role="tablist" aria-label="Chart provider" onKeyDown={handleKeyDown}>
+      {SOURCES.map((source) => {
+        const Icon = source.icon;
+        const selected = value === source.id;
+        return (
+          <button
+            key={source.id}
+            id={`chart-tab-${source.id}`}
+            className="charts-provider-tab"
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(source.id)}
+          >
+            <Icon aria-hidden="true" /><span>{source.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChartRow({ entry, isPlaying, onPlay, onQueue }: {
+  entry: ChartEntry;
+  isPlaying: boolean;
+  onPlay: (entry: ChartEntry) => void;
+  onQueue: (entry: ChartEntry) => void;
+}) {
+  const playbackTrack = entry.playback_track;
+  const metric = entry.listen_count !== null
+    ? `${formatChartCount(entry.listen_count)} plays`
+    : entry.weeks_on_chart !== null
+      ? `${entry.weeks_on_chart} wk${entry.weeks_on_chart === 1 ? '' : 's'}`
+      : 'Published rank';
+
+  return (
+    <li className={`charts-row${isPlaying ? ' is-playing' : ''}${playbackTrack ? '' : ' is-unavailable'}`}>
+      <div className="charts-row-rank" aria-label={`Rank ${entry.rank}`}><span>{String(entry.rank).padStart(2, '0')}</span><MovementIndicator entry={entry} /></div>
+      <ChartArtwork entry={entry} />
+      <div className="charts-row-title"><strong>{entry.title}</strong><span>{entry.artist}</span></div>
+      <span className="charts-row-metric">{metric}</span>
+      <span className="charts-row-duration">{playbackTrack?.duration_raw ?? '—'}</span>
+      <div className="charts-row-actions">
+        <button
+          className="charts-icon-button"
+          type="button"
+          aria-label={playbackTrack ? `Play ${entry.title}` : `Playback unavailable for ${entry.title}`}
+          title={playbackTrack ? `Play ${entry.title}` : 'No reliable playback match found'}
+          disabled={!playbackTrack}
+          onClick={() => onPlay(entry)}
+        >
+          {isPlaying ? <span className="charts-playing-bars" aria-hidden="true"><i /><i /><i /></span> : <Play aria-hidden="true" />}
+        </button>
+        <button className="charts-icon-button charts-queue-button" type="button" aria-label={`Add ${entry.title} to queue`} title="Add to queue" disabled={!playbackTrack} onClick={() => onQueue(entry)}>
+          <Plus aria-hidden="true" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function ChartsSkeleton() {
+  return (
+    <div className="charts-skeleton" aria-label="Loading chart ranks" aria-busy="true">
+      <div className="charts-skeleton-feature" />
+      <div className="charts-skeleton-ledger">{Array.from({ length: 7 }, (_, index) => <div key={index} />)}</div>
+    </div>
+  );
 }
 
 export function ChartsView() {
-  const playStream = useStore((s) => s.playStream);
-  const addToQueue = useStore((s) => s.addToQueue);
-
-  const [selectedGenre, setSelectedGenre] = useState<string>('global');
-  const [selectedCountry, setSelectedCountry] = useState<string>('global');
-  const [chartSource, setChartSource] = useState<'lastfm' | 'billboard' | 'listenbrainz'>('lastfm');
-  const [leaderboard, setLeaderboard] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [heroColor, setHeroColor] = useState<string>('rgba(168, 85, 247, 0.25)');
-  const fetchSeq = useRef(0);
-
-  const chartSources = [
-    { id: 'lastfm', label: '📻 Last.fm Realtime' },
-    { id: 'billboard', label: '🇺🇸 Billboard Hot 100' },
-    { id: 'listenbrainz', label: '🧠 ListenBrainz Open' },
-  ];
-
-  const genres = [
-    { id: 'global', label: '🌐 All Genres' },
-    { id: 'pop', label: '🎤 Pop' },
-    { id: 'hip-hop', label: '🎧 Hip-Hop' },
-    { id: 'rock', label: '🎸 Rock' },
-    { id: 'electronic', label: '🎹 Electronic' },
-    { id: 'k-pop', label: '🇰🇷 K-Pop' },
-    { id: 'latin', label: '💃 Latin' },
-    { id: 'r&b', label: '🎷 R&B' },
-    { id: 'indie', label: '🌿 Indie' },
-  ];
-
-  const continents = [
-    { id: 'global', label: '🌐 Worldwide (Global)' },
-    { id: 'asia', label: '🌏 Asia' },
-    { id: 'europe', label: '🌍 Europe' },
-    { id: 'north america', label: '🌎 North America' },
-    { id: 'south america', label: '🌎 South America' },
-    { id: 'africa', label: '🌍 Africa' },
-    { id: 'oceania', label: '🌏 Oceania' },
-  ];
-
+  const playStream = useStore((state) => state.playStream);
+  const addToQueue = useStore((state) => state.addToQueue);
+  const currentTrackPath = useStore((state) => state.currentTrack?.path ?? null);
+  const [source, setSource] = useState<ChartSource>(getStoredSource);
+  const [scope, setScope] = useState<ChartScope>('global');
+  const [genre, setGenre] = useState('pop');
+  const [country, setCountry] = useState('Malaysia');
+  const [range, setRange] = useState<ListenBrainzRange>('week');
+  const [page, setPage] = useState<ChartPage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [queueing, setQueueing] = useState(false);
+  const [queueProgress, setQueueProgress] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const requestSequence = useRef(0);
+  const selectedSource = SOURCES.find((item) => item.id === source) ?? SOURCES[0];
+  const cacheKey = `${source}:${scope}:${genre}:${country}:${range}`;
 
-  const fetchLeaderboard = async () => {
-    const seq = ++fetchSeq.current;
-    setLoading(true);
-    setHasMore(true);
+  const requestPage = useCallback(async (isManualRefresh = false) => {
+    const sequence = ++requestSequence.current;
+    const cached = chartCache.get(cacheKey);
+    if (cached && !isManualRefresh) {
+      setPage(cached.page);
+      setLoading(false);
+      setRefreshing(Date.now() - cached.savedAt > CACHE_TTL_MS);
+    } else {
+      setLoading(true);
+      setRefreshing(isManualRefresh);
+    }
+    setError(null);
+
     try {
-      const res: any[] = await invoke('get_worldwide_leaderboard', {
-        genre: selectedGenre === 'global' ? '' : selectedGenre,
-        country: selectedCountry === 'global' ? '' : selectedCountry,
-        source: chartSource,
-        offset: 0,
-        limit: 15,
-      });
-      if (seq !== fetchSeq.current) return;
-      setLeaderboard(res || []);
-      if (!res || res.length < 15) {
-        setHasMore(false);
-      }
-
-      if (res && res.length > 0 && res[0].cover_url) {
-        extractDominantColor(res[0].cover_url).then(c => {
-          if (seq === fetchSeq.current) setHeroColor(c);
-        });
-      } else {
-        setHeroColor('rgba(168, 85, 247, 0.25)');
-      }
-    } catch (e) {
-      if (seq !== fetchSeq.current) return;
-      console.error('Failed to fetch leaderboard:', e);
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to load charts: ${e}`, type: 'error' } }));
+      const nextPage = await invoke<ChartPage>('get_worldwide_leaderboard', buildChartRequest({ source, scope, genre, country, range, offset: 0, limit: PAGE_SIZE }));
+      if (sequence !== requestSequence.current) return;
+      chartCache.set(cacheKey, { page: nextPage, savedAt: Date.now() });
+      setPage(nextPage);
+    } catch (requestError) {
+      if (sequence !== requestSequence.current) return;
+      setError(getErrorMessage(requestError));
     } finally {
-      if (seq === fetchSeq.current) {
+      if (sequence === requestSequence.current) {
         setLoading(false);
+        setRefreshing(false);
       }
+    }
+  }, [cacheKey, country, genre, range, scope, source]);
+
+  useEffect(() => { void requestPage(); }, [requestPage]);
+  useEffect(() => {
+    const markOnline = () => setIsOnline(true);
+    const markOffline = () => setIsOnline(false);
+    window.addEventListener('online', markOnline);
+    window.addEventListener('offline', markOffline);
+    return () => {
+      window.removeEventListener('online', markOnline);
+      window.removeEventListener('offline', markOffline);
+    };
+  }, []);
+
+  const entries = page?.entries ?? [];
+  const featured = entries[0] ?? null;
+  const rankedEntries = entries.slice(1);
+  const playableEntries = useMemo(() => getPlayableChartEntries(entries), [entries]);
+
+  const changeSource = (nextSource: ChartSource) => {
+    if (nextSource === source) return;
+    localStorage.setItem('aideo-charts-source', nextSource);
+    setSource(nextSource);
+    setPage(null);
+    setError(null);
+  };
+
+  const changeScope = (nextScope: ChartScope) => { setScope(nextScope); setPage(null); };
+
+  const handlePlay = async (entry: ChartEntry): Promise<boolean> => {
+    const playbackTrack = entry.playback_track;
+    if (!playbackTrack) return false;
+    try {
+      await playStream(playbackTrack.url, {
+        title: entry.title,
+        artist: entry.artist,
+        cover_url: resolveChartArtwork(entry) ?? playbackTrack.cover_url,
+        duration: parseChartDuration(playbackTrack.duration_raw),
+      });
+      return true;
+    } catch (playbackError) {
+      dispatchToast(`Couldn't play ${entry.title}: ${getErrorMessage(playbackError)}`, 'error');
+      return false;
+    }
+  };
+
+  const handleQueue = async (entry: ChartEntry) => {
+    const track = chartEntryToTrack(entry);
+    if (!track) return;
+    try {
+      await addToQueue(track);
+      dispatchToast(`Added to queue: ${entry.title}`, 'success');
+    } catch (queueError) {
+      dispatchToast(`Couldn't queue ${entry.title}: ${getErrorMessage(queueError)}`, 'error');
+    }
+  };
+
+  const handlePlayChart = async () => {
+    if (playableEntries.length === 0 || queueing) return;
+    setQueueing(true);
+    let queued = 0;
+    let failed = 0;
+    try {
+      setQueueProgress(`Starting 1 of ${playableEntries.length}`);
+      const started = await handlePlay(playableEntries[0]);
+      for (let index = 1; index < playableEntries.length; index += 1) {
+        setQueueProgress(`Queueing ${index + 1} of ${playableEntries.length}`);
+        const track = chartEntryToTrack(playableEntries[index]);
+        if (!track) continue;
+        try { await addToQueue(track); queued += 1; } catch { failed += 1; }
+      }
+      const unavailable = entries.length - playableEntries.length;
+      const summary = [started ? 'Playing 1' : 'Playback failed', `${queued} queued`];
+      if (unavailable > 0) summary.push(`${unavailable} unavailable`);
+      if (failed > 0) summary.push(`${failed} failed`);
+      dispatchToast(summary.join(' · '), failed > 0 || !started ? 'info' : 'success');
+    } finally {
+      setQueueProgress('');
+      setQueueing(false);
     }
   };
 
   const handleLoadMore = async () => {
-    if (loadingMore || !hasMore) return;
+    if (!page || loadingMore || !page.has_more) return;
+    const sequence = ++requestSequence.current;
     setLoadingMore(true);
     try {
-      const nextBatch: any[] = await invoke('get_worldwide_leaderboard', {
-        genre: selectedGenre === 'global' ? '' : selectedGenre,
-        country: selectedCountry === 'global' ? '' : selectedCountry,
-        source: chartSource,
-        offset: leaderboard.length,
-        limit: 15,
-      });
-
-      if (nextBatch && nextBatch.length > 0) {
-        setLeaderboard(prev => {
-          const seen = new Set(prev.map(p => p.id));
-          const filtered = nextBatch.filter(nb => !seen.has(nb.id));
-          return [...prev, ...filtered];
-        });
-        if (nextBatch.length < 15) {
-          setHasMore(false);
-        }
-      } else {
-        setHasMore(false);
-      }
-    } catch (e) {
-      console.error('Failed to load more chart tracks:', e);
+      const nextPage = await invoke<ChartPage>('get_worldwide_leaderboard', buildChartRequest({ source, scope, genre, country, range, offset: page.offset + page.entries.length, limit: PAGE_SIZE }));
+      if (sequence !== requestSequence.current) return;
+      const mergedPage = { ...nextPage, offset: page.offset, entries: mergeChartEntries(page.entries, nextPage.entries) };
+      chartCache.set(cacheKey, { page: mergedPage, savedAt: Date.now() });
+      setPage(mergedPage);
+    } catch (requestError) {
+      if (sequence !== requestSequence.current) return;
+      dispatchToast(`Couldn't load more ranks: ${getErrorMessage(requestError)}`, 'error');
     } finally {
-      setLoadingMore(false);
+      if (sequence === requestSequence.current) setLoadingMore(false);
     }
   };
 
-  useEffect(() => {
-    fetchLeaderboard();
-  }, [selectedGenre, selectedCountry, chartSource]);
-
-  const handlePlayTrack = async (t: any) => {
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `Playing: ${t.title}...`, type: 'info' } 
-    }));
-    try {
-      const parsedSeconds = parseDuration(t.duration_raw);
-      await playStream(t.url, {
-        title: t.title,
-        artist: t.artist,
-        cover_url: t.cover_url,
-        duration: parsedSeconds
-      });
-    } catch (err) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Playback failed: ${err}`, type: 'error' } 
-      }));
-    }
-  };
-
-  const handlePlayAll = async () => {
-    if (leaderboard.length === 0) return;
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `Queued all ${leaderboard.length} chart tracks!`, type: 'success' } 
-    }));
-    await handlePlayTrack(leaderboard[0]);
-    for (let i = 1; i < leaderboard.length; i++) {
-      const t = leaderboard[i];
-      const parsedSeconds = parseDuration(t.duration_raw);
-      addToQueue({
-        id: i + 1,
-        path: t.url,
-        title: t.title,
-        artist: t.artist,
-        cover_url: t.cover_url,
-        duration: parsedSeconds,
-        format: 'YouTube Web Stream',
-        lyric_offset: 0
-      });
-    }
-  };
-
-  const top1 = leaderboard[0];
+  const formattedUpdate = page ? formatUpdatedAt(page.updated_at) : null;
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', padding: '32px 32px calc(var(--player-h) + 40px) 32px', background: 'var(--bg)', boxSizing: 'border-box' }}>
-      
-      {/* 🔮 Dynamic Spotify-Style Hero Header */}
-      <div style={{
-        background: `linear-gradient(180deg, ${heroColor} 0%, var(--hero-fade) 100%)`,
-        border: '1px solid var(--glass-border)',
-        borderRadius: 24,
-        padding: 32,
-        marginBottom: 32,
-        boxShadow: `0 20px 50px ${heroColor.replace('0.25', '0.15')}`,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 32,
-        flexWrap: 'wrap',
-        position: 'relative',
-        overflow: 'hidden'
-      }}>
-        {/* Top 1 Hero Thumbnail */}
-        <div style={{ width: 180, height: 180, borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-cover)', flexShrink: 0, background: '#111' }}>
-          <img 
-            src={top1?.cover_url || defaultCover} 
-            alt={top1?.title || 'Top Track'} 
-            loading="lazy" 
-            decoding="async" 
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-          />
-        </div>
+    <div className="charts-page" role="region" aria-labelledby="charts-title">
+      <div className="charts-shell">
+        <header className="charts-header">
+          <div className="charts-heading">
+            <h1 id="charts-title">Top charts</h1>
+            <p>Published rank first. Reliable playback where Aideo can find it.</p>
+          </div>
+          <ProviderTabs value={source} onChange={changeSource} />
+        </header>
 
-        {/* Hero Meta Info */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 260 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, color: '#f59e0b', background: 'rgba(245, 158, 11, 0.15)', padding: '4px 10px', borderRadius: 20, border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-              Official Worldwide Leaderboard
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Updated Live</span>
+        <section className="charts-context" aria-label="Chart controls">
+          <div className="charts-context-source">
+            <selectedSource.icon aria-hidden="true" />
+            <span><strong>{selectedSource.shortLabel}</strong>{selectedSource.description}</span>
           </div>
 
-          <h1 style={{ fontSize: 36, fontWeight: 900, color: 'var(--hero-ink)', margin: 0, letterSpacing: -0.5 }}>
-            Top Songs — {selectedCountry !== 'global' ? continents.find(c => c.id === selectedCountry)?.label : 'Global'}
-          </h1>
-
-          <p style={{ fontSize: 13, color: 'var(--text-dim)', margin: 0, maxWidth: 520 }}>
-            Real-time global stream rankings across millions of listeners. Explore top tracks by genre or country.
-          </p>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
-            <button
-              onClick={handlePlayAll}
-              disabled={leaderboard.length === 0}
-              style={{
-                padding: '12px 28px',
-                borderRadius: 28,
-                fontSize: 14,
-                fontWeight: 800,
-                background: '#10b981',
-                color: '#000',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                boxShadow: '0 6px 20px rgba(16, 185, 129, 0.4)',
-                transition: 'transform 0.2s',
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.04)'}
-              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1.0)'}
-            >
-              <Play size={18} fill="#000" />
-              Play All Charts
-            </button>
-
-            <button
-              onClick={fetchLeaderboard}
-              disabled={loading}
-              style={{
-                padding: '12px 20px',
-                borderRadius: 28,
-                fontSize: 13,
-                fontWeight: 700,
-                background: 'var(--glass-h)',
-                color: 'var(--text)',
-                border: '1px solid var(--glass-border)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <RefreshCw size={14} className={loading ? 'spin' : ''} />
-              Refresh
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* 🎛️ Data Provider & Category Filters */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24 }}>
-        {/* Source Provider Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginRight: 4 }}>Chart Engine:</span>
-          {chartSources.map(s => {
-            const isSel = chartSource === s.id;
-            return (
-              <button
-                key={s.id}
-                onClick={() => setChartSource(s.id as any)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 12,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  background: isSel ? 'rgba(var(--accent-rgb), 0.15)' : 'var(--glass)',
-                  color: isSel ? 'var(--accent)' : 'var(--text-dim)',
-                  border: isSel ? '1px solid rgba(var(--accent-rgb), 0.45)' : '1px solid var(--glass-border)',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                {s.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Only show Genre and Continent filters when Last.fm Realtime engine is active */}
-        {chartSource === 'lastfm' ? (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            {/* Genre Pills */}
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>
-              {genres.map(g => {
-                const isSel = selectedGenre === g.id;
-                return (
-                  <button
-                    key={g.id}
-                    onClick={() => setSelectedGenre(g.id)}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: 20,
-                      fontSize: 13,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      background: isSel ? 'var(--accent)' : 'var(--glass)',
-                      color: isSel ? '#ffffff' : 'var(--text-dim)',
-                      border: isSel ? '1px solid var(--accent)' : '1px solid var(--glass-border)',
-                      transition: 'all 0.2s ease',
-                      boxShadow: isSel ? '0 4px 14px rgba(139, 92, 246, 0.35)' : 'none',
-                    }}
-                  >
-                    {g.label}
+          {source === 'lastfm' && (
+            <div className="charts-filter-group">
+              <div className="charts-segmented" aria-label="Last.fm chart scope">
+                {(['global', 'genre', 'country'] as ChartScope[]).map((option) => (
+                  <button key={option} type="button" aria-pressed={scope === option} onClick={() => changeScope(option)}>
+                    {option === 'global' && <Globe2 aria-hidden="true" />}
+                    {option === 'genre' && <Tag aria-hidden="true" />}
+                    {option === 'country' && <MapPin aria-hidden="true" />}
+                    {option[0].toUpperCase() + option.slice(1)}
                   </button>
-                );
-              })}
-            </div>
-
-            {/* Continent Selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Globe size={14} color="var(--text-dim)" />
-              <select
-                value={selectedCountry}
-                onChange={(e) => setSelectedCountry(e.target.value)}
-                style={{
-                  background: 'var(--glass)',
-                  border: '1px solid var(--glass-border)',
-                  color: 'var(--text)',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  padding: '8px 12px',
-                  borderRadius: 12,
-                  outline: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                {continents.map(c => (
-                  <option key={c.id} value={c.id} style={{ background: 'var(--surface, #141420)', color: 'var(--text, white)' }}>
-                    {c.label}
-                  </option>
                 ))}
-              </select>
-            </div>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic' }}>
-            {chartSource === 'billboard' 
-              ? '🇺🇸 Showing United States Billboard Hot 100 Singles Chart.' 
-              : '🧠 Showing global ListenBrainz sitewide top recordings.'}
-          </div>
-        )}
-      </div>
-
-      {/* 📊 Ranked Leaderboard Table (1 to 50) */}
-      {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 260, color: 'var(--text-dim)' }}>
-          <Loader2 className="spin" size={32} style={{ marginBottom: 12, color: 'var(--accent)' }} />
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Loading Realtime Leaderboards...</span>
-        </div>
-      ) : leaderboard.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-dim)', fontSize: 14 }}>
-          No chart data returned for this selection. Try selecting another category above.
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {leaderboard.map((t, idx) => {
-            const rank = idx + 1;
-            const isGold = rank === 1;
-            const isSilver = rank === 2;
-            const isBronze = rank === 3;
-
-            return (
-              <motion.div
-                key={t.id || idx}
-                whileHover={{ background: 'var(--glass-h)' }}
-                onClick={() => handlePlayTrack(t)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '12px 16px',
-                  borderRadius: 12,
-                  background: isGold ? 'rgba(255, 215, 0, 0.08)' : isSilver ? 'rgba(192, 192, 192, 0.05)' : isBronze ? 'rgba(205, 127, 50, 0.05)' : 'var(--glass)',
-                  border: isGold ? '1px solid rgba(255, 215, 0, 0.25)' : '1px solid var(--glass-border)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  gap: 16
-                }}
-              >
-                {/* Rank Number & Badge */}
-                <div style={{ width: 44, textAlign: 'center', fontWeight: 900, fontSize: isGold ? 16 : 14 }}>
-                  {isGold ? (
-                    <span style={{ color: '#FFD700' }}>🥇 #1</span>
-                  ) : isSilver ? (
-                    <span style={{ color: '#E0E0E0' }}>🥈 #2</span>
-                  ) : isBronze ? (
-                    <span style={{ color: '#CD7F32' }}>🥉 #3</span>
-                  ) : (
-                    <span style={{ color: 'var(--text-dim)' }}>#{rank}</span>
-                  )}
-                </div>
-
-                {/* Cover Art */}
-                <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', background: '#181824', flexShrink: 0, position: 'relative' }}>
-                  <img 
-                    src={t.cover_url || defaultCover} 
-                    alt={t.title || ''} 
-                    loading="lazy"
-                    decoding="async"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                  />
-                </div>
-
-                {/* Title & Artist */}
-                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.title}
-                  </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.artist}
-                  </span>
-                </div>
-
-                {/* Source Badge */}
-                <div style={{ fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 12, background: 'var(--glass-h)', color: 'var(--text-dim)' }}>
-                  {t.recommendation_source || 'Trending'}
-                </div>
-
-                {/* Duration */}
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', width: 60, textAlign: 'right' }}>
-                  {t.duration_raw}
-                </div>
-
-                {/* Action controls */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
-                  <button
-                    onClick={() => {
-                      const parsedSeconds = parseDuration(t.duration_raw);
-                      addToQueue({
-                        id: idx + 1,
-                        path: t.url,
-                        title: t.title,
-                        artist: t.artist,
-                        cover_url: t.cover_url,
-                        duration: parsedSeconds,
-                        format: 'YouTube Web Stream',
-                        lyric_offset: 0
-                      });
-                      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added to queue: ${t.title}`, type: 'success' } }));
-                    }}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 6 }}
-                    title="Add to queue"
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </motion.div>
-            );
-          })}
-
-          {/* Load More Button */}
-          {hasMore && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 20, marginBottom: 20 }}>
-              <button
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-                style={{
-                  padding: '12px 28px',
-                  borderRadius: 24,
-                  fontSize: 13,
-                  fontWeight: 700,
-                  background: 'var(--glass)',
-                  border: '1px solid var(--glass-border)',
-                  color: 'var(--text)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  transition: 'all 0.2s',
-                  opacity: loadingMore ? 0.7 : 1
-                }}
-                onMouseEnter={(e) => { if (!loadingMore) e.currentTarget.style.background = 'var(--glass-h)'; }}
-                onMouseLeave={(e) => { if (!loadingMore) e.currentTarget.style.background = 'var(--glass)'; }}
-              >
-                {loadingMore ? (
-                  <>
-                    <Loader2 className="spin" size={16} style={{ color: 'var(--accent)' }} />
-                    Fetching More Rankings...
-                  </>
-                ) : (
-                  <>
-                    Load More Charts (# {leaderboard.length + 1} - #{leaderboard.length + 15})
-                  </>
-                )}
-              </button>
+              </div>
+              {scope === 'genre' && (
+                <label className="charts-select"><span>Genre</span><select value={genre} onChange={(event) => { setGenre(event.target.value); setPage(null); }}>{GENRES.map((option) => <option key={option} value={option}>{option.toUpperCase()}</option>)}</select></label>
+              )}
+              {scope === 'country' && (
+                <label className="charts-select"><span>Country</span><select value={country} onChange={(event) => { setCountry(event.target.value); setPage(null); }}>{COUNTRIES.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+              )}
             </div>
           )}
-        </div>
-      )}
+
+          {source === 'listenbrainz' && (
+            <div className="charts-segmented charts-range" aria-label="ListenBrainz range">
+              {RANGES.map((option) => <button key={option.id} type="button" aria-pressed={range === option.id} onClick={() => { setRange(option.id); setPage(null); }}>{option.label}</button>)}
+            </div>
+          )}
+          {source === 'billboard' && <div className="charts-fixed-scope"><MapPin aria-hidden="true" /> United States · weekly</div>}
+          <button className="charts-refresh-button" type="button" onClick={() => void requestPage(true)} disabled={loading || refreshing}>
+            <RefreshCw className={refreshing ? 'is-spinning' : ''} aria-hidden="true" />{refreshing ? 'Refreshing' : 'Refresh'}
+          </button>
+        </section>
+
+        {!isOnline && <div className="charts-notice is-offline" role="status"><WifiOff aria-hidden="true" />Offline. Cached chart ranks remain available; playback may fail until you're connected.</div>}
+        {page?.fallback && <div className="charts-notice is-warning" role="status"><AlertTriangle aria-hidden="true" /><span><strong>Source changed for this view.</strong>{page.fallback.message}</span></div>}
+        {error && page && <div className="charts-notice is-warning" role="status"><AlertTriangle aria-hidden="true" /><span><strong>Showing saved ranks.</strong>The latest refresh failed: {error}</span></div>}
+
+        {error && !page && (
+          <section className="charts-state" role="alert"><AlertTriangle aria-hidden="true" /><h2>Chart signal unavailable</h2><p>We couldn't reach {selectedSource.label}. Check your connection, then try again.</p><button type="button" onClick={() => void requestPage(true)}>Try again</button><small>{error}</small></section>
+        )}
+        {loading && !page && <ChartsSkeleton />}
+        {!loading && !error && page && entries.length === 0 && <section className="charts-state"><ListMusic aria-hidden="true" /><h2>No ranks in this view</h2><p>Choose a different scope or refresh the current source.</p></section>}
+
+        {page && featured && (
+          <>
+            <div className="charts-data-line">
+              <div><span>{page.source_label}</span><strong>{page.scope_label}</strong><span>{page.period_label}</span></div>
+              <div>
+                {refreshing && <span className="charts-live-status"><Loader2 className="is-spinning" aria-hidden="true" /> Updating ranks</span>}
+                {formattedUpdate && <span><Clock3 aria-hidden="true" /> Updated {formattedUpdate}</span>}
+                <span>{page.total ? `${page.total} published positions` : `${entries.length}${page.has_more ? '+' : ''} positions loaded`}</span>
+              </div>
+            </div>
+
+            <section className="charts-board" aria-label={`${page.source_label} ${page.scope_label} ranking`}>
+              <article className="charts-number-one">
+                <div className="charts-number-one-art"><ChartArtwork entry={featured} featured /><span>NO. 01</span></div>
+                <div className="charts-number-one-copy">
+                  <span className="charts-number-one-label">CURRENT LEADER</span><h2>{featured.title}</h2><p>{featured.artist}</p>
+                  <div className="charts-number-one-facts">
+                    <MovementIndicator entry={featured} />
+                    {featured.listen_count !== null && <span>{formatChartCount(featured.listen_count)} plays</span>}
+                    {featured.weeks_on_chart !== null && <span>{featured.weeks_on_chart} weeks charting</span>}
+                    {!featured.playback_track && <span className="is-unavailable">Playback match unavailable</span>}
+                  </div>
+                  <div className="charts-number-one-actions">
+                    <button className="charts-primary-button" type="button" disabled={!featured.playback_track || queueing} aria-label={featured.playback_track ? `Play ${featured.title}` : `Playback unavailable for ${featured.title}`} onClick={() => void handlePlay(featured)}><Play aria-hidden="true" /> Play number one</button>
+                    <button className="charts-secondary-button" type="button" disabled={playableEntries.length === 0 || queueing} onClick={() => void handlePlayChart()}>{queueing ? <Loader2 className="is-spinning" aria-hidden="true" /> : <ListMusic aria-hidden="true" />}{queueing ? queueProgress : `Play chart · ${playableEntries.length}`}</button>
+                  </div>
+                </div>
+              </article>
+
+              <div className="charts-ledger">
+                <div className="charts-ledger-head" aria-hidden="true"><span>RANK</span><span>TRACK</span><span>SIGNAL</span><span>TIME</span><span>ACTION</span></div>
+                {rankedEntries.length > 0 ? (
+                  <ol start={rankedEntries[0].rank}>
+                    {rankedEntries.map((entry) => <ChartRow key={entry.chart_id} entry={entry} isPlaying={entry.playback_track?.url === currentTrackPath} onPlay={(item) => void handlePlay(item)} onQueue={(item) => void handleQueue(item)} />)}
+                  </ol>
+                ) : <p className="charts-ledger-empty">This source returned one published position.</p>}
+                {page.has_more && <button className="charts-load-more" type="button" disabled={loadingMore} onClick={() => void handleLoadMore()}>{loadingMore ? <Loader2 className="is-spinning" aria-hidden="true" /> : <Plus aria-hidden="true" />}{loadingMore ? 'Loading more ranks' : `Load positions ${entries.length + 1}–${entries.length + PAGE_SIZE}`}</button>}
+              </div>
+            </section>
+          </>
+        )}
+      </div>
     </div>
   );
 }

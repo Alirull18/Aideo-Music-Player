@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useStore } from '../store';
 import { notifyTidalAuthFailure } from '../store/tidalSlice';
+import { trackIdToStreamUrl } from '../utils';
 
 const tauriListeners: Record<string, Array<(event: { payload: any }) => void>> = {};
 
@@ -30,8 +31,11 @@ vi.mocked(listen).mockImplementation(async (event: any, handler: any) => {
   };
 });
 
+const initialPlayTrack = useStore.getState().playTrack;
+
 beforeEach(() => {
   vi.clearAllMocks();
+  trackIdToStreamUrl.clear();
   vi.mocked(listen).mockImplementation(async (event: any, handler: any) => {
     if (!tauriListeners[event]) tauriListeners[event] = [];
     tauriListeners[event].push(handler);
@@ -41,6 +45,7 @@ beforeEach(() => {
   });
   for (const k of Object.keys(tauriListeners)) delete tauriListeners[k];
   useStore.setState({
+    playTrack: initialPlayTrack,
     tidalConnected: false,
     tidalSearching: false,
     tidalSearchResults: [],
@@ -330,6 +335,67 @@ describe('TidalConnectCard', () => {
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('tidal_logout');
       expect(screen.getByRole('button', { name: /connect.*tidal/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('Tidal Playback Resolution Guards', () => {
+    const tidalTrack = {
+      id: -30001,
+      path: '455738980',
+      title: 'Tidal Test Song',
+      artist: 'Tidal Artist',
+      album: 'Tidal Album',
+      duration: 210,
+      format: 'Tidal FLAC' as const,
+      lyric_offset: 0,
+      cover_url: null,
+    };
+
+    it('should abort playback and never call play_track with raw ID when stream resolution fails', async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args: any) => {
+        if (cmd === 'tidal_get_stream_url') {
+          throw new Error('User is not authenticated with Tidal');
+        }
+        if (cmd === 'play_track') {
+          throw new Error(`play_track should not be called with ${args?.path}`);
+        }
+        return null;
+      });
+
+      await useStore.getState().playTrack(tidalTrack);
+
+      const state = useStore.getState();
+      expect(state.playback.status).toBe('Stopped');
+      expect(state.playback.current_track).toBeNull();
+      expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
+    });
+
+    it('should resolve stream URL and pass resolved CDN URL to play_track on success', async () => {
+      const cdnUrl = 'https://sp-play.tidal.com/stream/455738980.flac?token=mock';
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'tidal_get_stream_url') return cdnUrl;
+        if (cmd === 'play_track') return null;
+        if (cmd === 'check_url_is_cached') return false;
+        return null;
+      });
+
+      await useStore.getState().playTrack(tidalTrack);
+
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: cdnUrl, startPos: 0 });
+    });
+
+    it('should reject addToQueue when stream resolution fails', async () => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'tidal_get_stream_url') {
+          throw new Error('User is not authenticated with Tidal');
+        }
+        return null;
+      });
+
+      await useStore.getState().addToQueue(tidalTrack);
+
+      expect(invoke).not.toHaveBeenCalledWith('add_to_queue', expect.anything());
+      expect(useStore.getState().queue).toEqual([]);
     });
   });
 });

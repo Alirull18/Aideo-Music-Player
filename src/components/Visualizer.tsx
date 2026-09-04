@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store';
 
+export type VisualizerMode = 'baseline' | 'circle' | 'wave';
+
 interface VisualizerProps {
-  mode?: 'baseline' | 'circle' | 'wave';
+  mode?: VisualizerMode;
 }
 
 export function Visualizer({ mode: propMode }: VisualizerProps) {

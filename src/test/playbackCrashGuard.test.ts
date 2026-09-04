@@ -118,4 +118,106 @@ describe('Playback Crash Guard & Event Deduplication', () => {
     // current_track should be updated to null, but no crash
     expect(useStore.getState().playback.current_track).toBeNull();
   });
+
+  it('recovers to the next track when a playing track reaches its end without a track-ended event', async () => {
+    const tidalTrack = {
+      id: 101,
+      path: '455738980',
+      title: 'Tidal Track',
+      artist: 'Tidal Artist',
+      album: 'Tidal Album',
+      duration: 180,
+      format: 'Tidal FLAC',
+      lyric_offset: 0,
+    };
+    const nextTrack = {
+      ...tidalTrack,
+      id: 102,
+      path: '455738981',
+      title: 'Next Tidal Track',
+    };
+
+    useStore.setState({
+      currentTrack: tidalTrack,
+      queue: [nextTrack],
+      playback: {
+        ...useStore.getState().playback,
+        status: 'Playing',
+        current_track: tidalTrack.path,
+        position_secs: tidalTrack.duration,
+        backend_position_secs: tidalTrack.duration,
+        is_buffering: false,
+        last_skip_time: 0,
+        last_stop_time: 0,
+        backend_stop_detected_at: 0,
+      },
+    });
+
+    const playNextSpy = vi.spyOn(useStore.getState(), 'playNext').mockResolvedValue();
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_playback_status') {
+        return {
+          status: 'Stopped',
+          current_track: null,
+          position_secs: 0,
+          volume: 1,
+        };
+      }
+      return null;
+    });
+
+    await useStore.getState().pollStatus();
+
+    expect(playNextSpy).toHaveBeenCalledTimes(1);
+    playNextSpy.mockRestore();
+  });
+
+  it('does not skip a Tidal track that stopped before its end', async () => {
+    const tidalTrack = {
+      id: 101,
+      path: '455738980',
+      title: 'Tidal Track',
+      artist: 'Tidal Artist',
+      album: 'Tidal Album',
+      duration: 180,
+      format: 'Tidal FLAC',
+      lyric_offset: 0,
+    };
+
+    useStore.setState({
+      currentTrack: tidalTrack,
+      queue: [tidalTrack],
+      playback: {
+        ...useStore.getState().playback,
+        status: 'Playing',
+        current_track: tidalTrack.path,
+        position_secs: 74,
+        backend_position_secs: 74,
+        is_buffering: false,
+        last_skip_time: 0,
+        last_stop_time: 0,
+        backend_stop_detected_at: 0,
+      },
+    });
+
+    const playNextSpy = vi.spyOn(useStore.getState(), 'playNext').mockResolvedValue();
+    const { invoke } = await import('@tauri-apps/api/core');
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_playback_status') {
+        return {
+          status: 'Stopped',
+          current_track: null,
+          position_secs: 0,
+          volume: 1,
+        };
+      }
+      return null;
+    });
+
+    await useStore.getState().pollStatus();
+
+    expect(playNextSpy).not.toHaveBeenCalled();
+    playNextSpy.mockRestore();
+  });
 });

@@ -204,7 +204,7 @@ export const DebugLogsModal: React.FC<DebugLogsModalProps> = ({ isOpen, onClose 
                   <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, letterSpacing: '0.02em', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span>Aideo Diagnostics & Terminal Logs</span>
                     <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.1)', color: '#8b949e', fontWeight: 500 }}>
-                      v{sysInfo?.app_version || '0.9.6'}
+                      v{sysInfo?.app_version || '0.9.7'}
                     </span>
                   </h2>
                   <p style={{ margin: 0, fontSize: 11, color: '#8b949e' }}>

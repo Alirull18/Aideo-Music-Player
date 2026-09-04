@@ -702,7 +702,7 @@ mod dsp_tests {
         // Pushing a 50-element chunk with multi-pass logic MUST push all 50 samples without dropping!
         let chunk: Vec<f32> = (0..50).map(|i| i as f32).collect();
         let mut pushed = prod.push_slice(&chunk);
-        
+
         // Multi-pass push completes the remaining samples
         while pushed < chunk.len() {
             let n = prod.push_slice(&chunk[pushed..]);
@@ -730,14 +730,14 @@ mod dsp_tests {
         use crate::player::is_stream_prebuffer_ready;
         // 2 seconds @ 44.1kHz = 88200 frames
         let watermark = 88200;
-        
+
         // Insufficient buffer and not complete -> Not ready
         assert!(!is_stream_prebuffer_ready(1000, watermark, false));
-        
+
         // Reached watermark -> Ready even if download still ongoing
         assert!(is_stream_prebuffer_ready(88200, watermark, false));
         assert!(is_stream_prebuffer_ready(100000, watermark, false));
-        
+
         // Short track completed before watermark -> Ready
         assert!(is_stream_prebuffer_ready(40000, watermark, true));
     }
@@ -786,9 +786,11 @@ mod dsp_tests {
         let dev_a = Some("DAC-1".to_string());
         let dev_b = Some("DAC-2".to_string());
 
-        // 1. Shared mode reuses session across different track sample rates (Rubato resamples)
-        assert!(can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_a, false, 44100, 2, 0));
-        assert!(can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_a, false, 96000, 2, 0));
+        // 1. Shared mode reuses session when rates match, but rejects reuse across different rates to avoid broken forced resampling
+        assert!(can_reuse_stream_session(&dev_a, false, 44100, 2, &dev_a, false, 44100, 2, 0));
+        assert!(can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_a, false, 48000, 2, 0));
+        assert!(!can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_a, false, 44100, 2, 0));
+        assert!(!can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_a, false, 96000, 2, 0));
 
         // 2. Exclusive mode reuses session when rates and channels match
         assert!(can_reuse_stream_session(&dev_a, true, 44100, 2, &dev_a, true, 44100, 2, 0));
@@ -808,6 +810,76 @@ mod dsp_tests {
 
         // 6. Device change rejects session
         assert!(!can_reuse_stream_session(&dev_a, false, 48000, 2, &dev_b, false, 48000, 2, 0));
+
+        // 7. Upsampling target in exclusive mode
+        assert!(can_reuse_stream_session(&dev_a, true, 96000, 2, &dev_a, true, 44100, 2, 96000));
+        assert!(!can_reuse_stream_session(&dev_a, true, 44100, 2, &dev_a, true, 44100, 2, 96000));
+    }
+
+    #[test]
+    fn test_exclusive_mode_turn_off_rules() {
+        use crate::player::{can_reuse_stream_session, evaluate_audio_path, AudioFormatSnapshot, AudioRouteSnapshot, DSPState};
+
+        let dev = Some("Test DAC".to_string());
+
+        // 1. When exclusive mode was active (true) and is turned off (false), session reuse MUST be rejected
+        assert!(!can_reuse_stream_session(&dev, true, 44100, 2, &dev, false, 44100, 2, 0));
+
+        // 2. Shared route cannot be bit-perfect even if bit-perfect was requested
+        let shared_route = AudioRouteSnapshot {
+            active: true,
+            engine: "cpal".to_string(),
+            share_mode: "shared".to_string(),
+            source: AudioFormatSnapshot {
+                sample_rate: 44100,
+                channels: 2,
+                sample_format: Some("pcm_s16".to_string()),
+                bits_per_sample: Some(16),
+                valid_bits_per_sample: Some(16),
+                channel_mask: Some(3),
+            },
+            pipeline_sample_format: "pcm_f32".to_string(),
+            output: AudioFormatSnapshot {
+                sample_rate: 48000,
+                channels: 2,
+                sample_format: Some("pcm_f32".to_string()),
+                bits_per_sample: Some(32),
+                valid_bits_per_sample: Some(32),
+                channel_mask: Some(3),
+            },
+            fallback_reason: None,
+            gain_ramp: false,
+            volume_bypass_in_bit_perfect: false,
+            dither_enabled: false,
+            sample_integrity_verified: false,
+        };
+
+        // If exclusive mode is turned off, requested_exclusive is false
+        let path = evaluate_audio_path(&shared_route, &DSPState::default(), false, false, 1.0, 0);
+        assert!(!path.strict_bit_perfect);
+        assert_eq!(path.share_mode, "shared");
+
+        // Even if bit-perfect was requested while exclusive is false, it MUST reject bit-perfect
+        let path_bp_requested = evaluate_audio_path(&shared_route, &DSPState::default(), false, true, 1.0, 0);
+        assert!(!path_bp_requested.strict_bit_perfect);
+        assert!(path_bp_requested.strict_failure_reasons.contains(&"shared_output".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_exclusive_target_rate() {
+        use crate::player::resolve_exclusive_target_rate;
+
+        // Native rate pass-through when no upsample target is requested
+        assert_eq!(resolve_exclusive_target_rate(44100, 0), 44100);
+        assert_eq!(resolve_exclusive_target_rate(48000, 0), 48000);
+        assert_eq!(resolve_exclusive_target_rate(88200, 0), 88200);
+        assert_eq!(resolve_exclusive_target_rate(96000, 0), 96000);
+        assert_eq!(resolve_exclusive_target_rate(192000, 0), 192000);
+
+        // Explicit upsampling target overrides file rate
+        assert_eq!(resolve_exclusive_target_rate(44100, 96000), 96000);
+        assert_eq!(resolve_exclusive_target_rate(44100, 192000), 192000);
+        assert_eq!(resolve_exclusive_target_rate(96000, 192000), 192000);
     }
 
     #[test]
@@ -1384,8 +1456,374 @@ mod dsp_tests {
         let ac_idx = args.iter().position(|&x| x == "-ac").unwrap();
         assert_eq!(args[ac_idx + 1], "2");
     }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_timer_resolution_guard_windows() {
+        use crate::player::TimePeriodGuard;
+        let guard = TimePeriodGuard::new();
+        assert!(guard.is_active(), "TimePeriodGuard must be active on Windows");
+        drop(guard);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_windows_audio_thread_guard_activation() {
+        use crate::player::WindowsAudioThreadGuard;
+        let guard = WindowsAudioThreadGuard::activate();
+        // Guard must activate without panic and drop cleanly
+        drop(guard);
+    }
+
+    #[test]
+    fn test_cache_reuse_and_decode_shutdown_safety() {
+        use crate::player::{can_reuse_cached_track, should_mark_decode_complete};
+
+        // 1. Same track, already fully decoded into RAM: always reusable
+        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", true, false));
+        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", true, true));
+
+        // 2. Same track, partially decoded, background decoder thread STILL ACTIVE:
+        // Must be reused so mode toggles / stream restarts don't abort decoding or truncate buffer!
+        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", false, true));
+
+        // 3. Same track, partially decoded, but background decoder thread was ABORTED:
+        // Must NOT be reused (stale truncated buffer), must rebuild cache fresh!
+        assert!(!can_reuse_cached_track("track_a.flac", "track_a.flac", false, false));
+
+        // 4. Different tracks: never reusable
+        assert!(!can_reuse_cached_track("track_a.flac", "track_b.flac", true, true));
+        assert!(!can_reuse_cached_track("track_a.flac", "track_b.flac", false, true));
+
+        // 5. Aborted background decodes must NEVER be marked as complete (prevents false EOF / premature next-track skip)
+        assert!(!should_mark_decode_complete(true));
+        assert!(should_mark_decode_complete(false));
+    }
+
+    #[test]
+    fn test_crossfade_disabled_by_default() {
+        let dsp = DSPState::default();
+        // Crossfade must be disabled by default so songs play naturally to completion
+        assert!(!dsp.crossfade_transition_enabled);
+    }
+
+    #[test]
+    fn test_eof_drain_delay_calculation_converges_to_track_end() {
+        let file_rate = 44100usize;
+        let dev_rate = 44100usize;
+        let dev_ch = 2usize;
+        let duration_secs = 180.0f64;
+        let total_frames = (duration_secs * file_rate as f64) as usize;
+        let ram_cursor = total_frames;
+
+        // 1. At initial EOF before drain, pending is empty, but ringbuffer (prod) is full (e.g. 2.5s of audio)
+        let initial_prod_len = (dev_rate as f64 * 2.5 * dev_ch as f64) as usize;
+        let p_len = 0.0f64;
+        let r_len_initial = initial_prod_len as f64 / dev_ch as f64;
+        let delay_initial = (p_len / file_rate as f64) + (r_len_initial / dev_rate as f64);
+        let pos_before_drain = (ram_cursor as f64 / file_rate as f64) - delay_initial;
+        assert!((pos_before_drain - 177.5).abs() < 1e-4);
+
+        // 2. Midway through drain (1.0s remaining)
+        let mid_prod_len = (dev_rate as f64 * 1.0 * dev_ch as f64) as usize;
+        let r_len_mid = mid_prod_len as f64 / dev_ch as f64;
+        let delay_mid = (p_len / file_rate as f64) + (r_len_mid / dev_rate as f64);
+        let pos_mid_drain = (ram_cursor as f64 / file_rate as f64) - delay_mid;
+        assert!((pos_mid_drain - 179.0).abs() < 1e-4);
+
+        // 3. Fully drained (0 remaining) - position smoothly converges to 100% of duration
+        let drained_prod_len = 0usize;
+        let r_len_drained = drained_prod_len as f64 / dev_ch as f64;
+        let delay_drained = (p_len / file_rate as f64) + (r_len_drained / dev_rate as f64);
+        let pos_after_drain = (ram_cursor as f64 / file_rate as f64) - delay_drained;
+        assert_eq!(pos_after_drain, duration_secs);
+    }
+
+    #[test]
+    fn test_stream_restart_circuit_breaker_retries_with_progressive_backoff() {
+        use crate::player::{decide_stream_restart, RestartAction};
+
+        // First failure: retries with 250ms backoff
+        assert_eq!(
+            decide_stream_restart(0, 1),
+            RestartAction::Retry { delay_ms: 250, next_count: 1 }
+        );
+
+        // Second failure in rapid succession: retries with 500ms backoff
+        assert_eq!(
+            decide_stream_restart(1, 1),
+            RestartAction::Retry { delay_ms: 500, next_count: 2 }
+        );
+
+        // Third failure: retries with 750ms backoff
+        assert_eq!(
+            decide_stream_restart(2, 2),
+            RestartAction::Retry { delay_ms: 750, next_count: 3 }
+        );
+
+        // Exceeded limit (4th attempt): circuit breaker halts to protect system and audio drivers
+        assert_eq!(
+            decide_stream_restart(3, 1),
+            RestartAction::Halt
+        );
+    }
+
+    #[test]
+    fn test_stream_restart_circuit_breaker_resets_after_grace_period() {
+        use crate::player::{decide_stream_restart, RestartAction};
+
+        // If a failure happens after the 5s grace period, count resets back to 1
+        assert_eq!(
+            decide_stream_restart(3, 6),
+            RestartAction::Retry { delay_ms: 250, next_count: 1 }
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_windows_audio_thread_guard_restores_thread_priority() {
+        use crate::player::WindowsAudioThreadGuard;
+
+        unsafe {
+            let initial_priority = windows::Win32::System::Threading::GetThreadPriority(
+                windows::Win32::System::Threading::GetCurrentThread(),
+            );
+
+            let guard = WindowsAudioThreadGuard::activate();
+            // While active, priority is elevated (either TIME_CRITICAL or MMCSS Audio profile level >= HIGHEST)
+            let elevated_priority = windows::Win32::System::Threading::GetThreadPriority(
+                windows::Win32::System::Threading::GetCurrentThread(),
+            );
+            assert!(elevated_priority >= windows::Win32::System::Threading::THREAD_PRIORITY_HIGHEST.0);
+
+            drop(guard);
+
+            // After drop, priority must be restored to its initial level to prevent system starvation
+            let restored_priority = windows::Win32::System::Threading::GetThreadPriority(
+                windows::Win32::System::Threading::GetCurrentThread(),
+            );
+            assert_eq!(restored_priority, initial_priority);
+        }
+    }
+
+    #[test]
+    fn test_build_ffmpeg_decoder_args_tidal_seeking() {
+        use crate::player::build_ffmpeg_decoder_args;
+
+        let tidal_url = "https://sp-play.tidal.com/stream/mock_track_12345.flac?token=abc";
+        let start_pos = 206.505;
+        let use_ffmpeg_seek = true;
+        let is_stream = true;
+        let is_youtube_stream = false;
+        let quality = "native";
+        let is_dsd = false;
+
+        let args = build_ffmpeg_decoder_args(
+            tidal_url,
+            start_pos,
+            use_ffmpeg_seek,
+            is_stream,
+            is_youtube_stream,
+            quality,
+            is_dsd,
+        );
+
+        // 1. For piped streams, -ss MUST be placed AFTER -i pipe: so FFmpeg uses decoder-level seeking
+        // instead of attempting demuxer seeking on non-seekable standard input (which causes "could not seek to position")
+        let ss_idx = args.iter().position(|x| x == "-ss").expect("Must contain -ss");
+        let i_idx = args.iter().position(|x| x == "-i").expect("Must contain -i");
+        assert!(i_idx < ss_idx, "-ss must succeed -i for piped streams to avoid unseekable pipe demux errors");
+        assert_eq!(args[ss_idx + 1], "206.505");
+
+        // 2. The input target MUST be pipe: because Aideo's audio-only FFmpeg build uses stdin piping
+        assert_eq!(args[i_idx + 1], "pipe:", "Stream input must be pipe:");
+
+        // 3. Must NEVER pass -user_agent, -protocol_whitelist, or -reconnect to FFmpeg (not supported in audio-only build)
+        assert!(!args.contains(&"-user_agent".to_string()), "Must not contain -user_agent");
+        assert!(!args.contains(&"-protocol_whitelist".to_string()), "Must not contain -protocol_whitelist");
+        assert!(!args.contains(&"-reconnect".to_string()), "Must not contain -reconnect");
+    }
+
+    #[test]
+    fn test_build_ffmpeg_decoder_args_subsonic_injected_seek() {
+        use crate::player::build_ffmpeg_decoder_args;
+
+        let subsonic_url = "https://subsonic.local/rest/stream?id=123&timeOffset=45";
+        let start_pos = 45.0;
+        let use_ffmpeg_seek = false; // Server-side seek injected
+        let is_stream = true;
+        let is_youtube_stream = false;
+        let quality = "studio";
+        let is_dsd = false;
+
+        let args = build_ffmpeg_decoder_args(
+            subsonic_url,
+            start_pos,
+            use_ffmpeg_seek,
+            is_stream,
+            is_youtube_stream,
+            quality,
+            is_dsd,
+        );
+
+        // Subsonic server handles seek offset via query parameter, so -ss should not be passed to ffmpeg
+        assert!(!args.iter().any(|x| x == "-ss"), "When server-side seek is active, -ss must be omitted");
+        let i_idx = args.iter().position(|x| x == "-i").expect("Must contain -i");
+        assert_eq!(args[i_idx + 1], "pipe:");
+    }
+
+    #[test]
+    fn test_build_ffmpeg_decoder_args_local_file_seeking() {
+        use crate::player::build_ffmpeg_decoder_args;
+
+        let local_path = "C:\\Music\\Album\\track.flac";
+        let start_pos = 30.0;
+        let use_ffmpeg_seek = true;
+        let is_stream = false;
+        let is_youtube_stream = false;
+        let quality = "hires";
+        let is_dsd = false;
+
+        let args = build_ffmpeg_decoder_args(
+            local_path,
+            start_pos,
+            use_ffmpeg_seek,
+            is_stream,
+            is_youtube_stream,
+            quality,
+            is_dsd,
+        );
+
+        let ss_idx = args.iter().position(|x| x == "-ss").expect("Must contain -ss");
+        let i_idx = args.iter().position(|x| x == "-i").expect("Must contain -i");
+        assert!(ss_idx < i_idx);
+        assert_eq!(args[i_idx + 1], local_path);
+        // Local files do not require protocol whitelist or network reconnection arguments
+        assert!(!args.contains(&"-reconnect".to_string()));
+    }
+
+    #[test]
+    fn test_stream_active_downloads_coordination() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+        use crate::player::{ACTIVE_STREAM_DOWNLOADS, ActiveStreamDownload, abort_inactive_stream_downloads};
+
+        let url1 = "https://sp-pr-cf.audio.tidal.com/stream1";
+        let url2 = "https://sp-pr-cf.audio.tidal.com/stream2";
+        let temp_dir = std::env::temp_dir();
+
+        let dl1 = Arc::new(ActiveStreamDownload {
+            url: url1.to_string(),
+            stream_path: temp_dir.join("test_stream1.stream"),
+            cache_path: temp_dir.join("test_stream1.cache"),
+            total_bytes: Arc::new(AtomicU64::new(10_000_000)),
+            downloaded_bytes: Arc::new(AtomicU64::new(5_000_000)),
+            complete: Arc::new(AtomicBool::new(false)),
+            abort: Arc::new(AtomicBool::new(false)),
+        });
+
+        let dl2 = Arc::new(ActiveStreamDownload {
+            url: url2.to_string(),
+            stream_path: temp_dir.join("test_stream2.stream"),
+            cache_path: temp_dir.join("test_stream2.cache"),
+            total_bytes: Arc::new(AtomicU64::new(20_000_000)),
+            downloaded_bytes: Arc::new(AtomicU64::new(1_000_000)),
+            complete: Arc::new(AtomicBool::new(false)),
+            abort: Arc::new(AtomicBool::new(false)),
+        });
+
+        {
+            let mut active = ACTIVE_STREAM_DOWNLOADS.lock().unwrap();
+            active.insert(url1.to_string(), Arc::clone(&dl1));
+            active.insert(url2.to_string(), Arc::clone(&dl2));
+        }
+
+        // Seeking on url1 or switching to url1 should preserve url1 and abort url2
+        abort_inactive_stream_downloads(Some(url1));
+
+        assert!(!dl1.abort.load(Ordering::SeqCst), "Active track stream download must not be aborted");
+        assert!(dl2.abort.load(Ordering::SeqCst), "Inactive track stream download must be aborted");
+
+        {
+            let active = ACTIVE_STREAM_DOWNLOADS.lock().unwrap();
+            assert!(active.contains_key(url1), "Active track must remain registered");
+            assert!(!active.contains_key(url2), "Aborted track must be evicted from active registry");
+        }
+
+        // Stopping playback should abort all active streams
+        abort_inactive_stream_downloads(None);
+        assert!(dl1.abort.load(Ordering::SeqCst), "All streams must be aborted on stop");
+        {
+            let active = ACTIVE_STREAM_DOWNLOADS.lock().unwrap();
+            assert!(active.is_empty(), "Registry must be empty after full abort");
+        }
+    }
+
+    #[test]
+    fn test_stream_feeder_from_growing_file_simulation() {
+        use std::io::{Read, Write, Seek, SeekFrom};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let temp_dir = std::env::temp_dir();
+        let test_file_path = temp_dir.join(format!("aideo_test_feeder_{}.tmp", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let complete = Arc::new(AtomicBool::new(false));
+        let abort = Arc::new(AtomicBool::new(false));
+
+        let producer_path = test_file_path.clone();
+        let producer_complete = Arc::clone(&complete);
+
+        // Spawn producer (simulating run_stream_downloader)
+        let producer_handle = std::thread::spawn(move || {
+            let mut file = std::fs::File::create(&producer_path).unwrap();
+            for i in 0..5 {
+                let chunk = vec![i as u8; 4096];
+                file.write_all(&chunk).unwrap();
+                file.flush().unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            producer_complete.store(true, Ordering::SeqCst);
+        });
+
+        // Simulate feeder loop (reading from growing file)
+        let mut read_bytes = Vec::new();
+        let mut read_offset: u64 = 0;
+        let mut file = loop {
+            if let Ok(f) = std::fs::File::open(&test_file_path) {
+                break f;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+
+        let mut buf = [0u8; 2048];
+        let start = std::time::Instant::now();
+        loop {
+            if abort.load(Ordering::SeqCst) || start.elapsed() > std::time::Duration::from_secs(5) {
+                break;
+            }
+            file.seek(SeekFrom::Start(read_offset)).unwrap();
+            match file.read(&mut buf) {
+                Ok(0) => {
+                    if complete.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Ok(n) => {
+                    read_bytes.extend_from_slice(&buf[..n]);
+                    read_offset += n as u64;
+                }
+                Err(_) => break,
+            }
+        }
+
+        producer_handle.join().unwrap();
+        let _ = std::fs::remove_file(&test_file_path);
+
+        assert_eq!(read_bytes.len(), 5 * 4096, "Feeder must receive all chunks from growing file");
+        for i in 0..5 {
+            let chunk_slice = &read_bytes[i * 4096..(i + 1) * 4096];
+            assert!(chunk_slice.iter().all(|&b| b == i as u8), "Data chunk {} must match produced content", i);
+        }
+    }
 }
-
-
-
-

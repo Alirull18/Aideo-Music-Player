@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
-import { PlayerBarDesign, AideoPageDesign, TheaterModeDesign } from '../store/types';
+import { PlayerBarDesign, AideoPageDesign, TheaterModeDesign, TheaterHudStyle } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -11,9 +11,9 @@ import {
   Settings, Library, Radio, FolderSearch, RefreshCw, DownloadCloud, 
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
-  Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3,
+  Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3, TrendingUp,
   Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen,
-  Tv2, Sliders, FileText, Type
+  Tv2, Sliders, FileText, Type, Sun, Moon
 } from 'lucide-react';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
@@ -122,6 +122,7 @@ export function SettingsView() {
     playerBarDesign, setPlayerBarDesign,
     aideoPageDesign, setAideoPageDesign,
     theaterModeDesign, setTheaterModeDesign,
+    theaterHudStyle, setTheaterHudStyle,
     playerBarTransparent, togglePlayerBarTransparent, setPlayerBarTransparent,
     discoveryLayout, setDiscoveryLayout
   } = useStore(useShallow(s => ({
@@ -209,6 +210,8 @@ export function SettingsView() {
     setAideoPageDesign: s.setAideoPageDesign,
     theaterModeDesign: s.theaterModeDesign,
     setTheaterModeDesign: s.setTheaterModeDesign,
+    theaterHudStyle: s.theaterHudStyle,
+    setTheaterHudStyle: s.setTheaterHudStyle,
     playerBarTransparent: s.playerBarTransparent,
     togglePlayerBarTransparent: s.togglePlayerBarTransparent,
     discoveryLayout: s.discoveryLayout,
@@ -438,8 +441,12 @@ export function SettingsView() {
       spatial_haas_delay: 15.0,
       spatial_wet: 0.5
     });
-    if (playbackExclusive) await toggleExclusive();
-    if (playbackBitPerfect) await useStore.getState().toggleBitPerfect();
+    const hasSavedDirectOutputMode =
+      localStorage.getItem('aideo_exclusive_mode') === 'true' ||
+      localStorage.getItem('aideo_bit_perfect_mode') === 'true';
+    if (useStore.getState().playback.exclusive || useStore.getState().playback.bit_perfect || hasSavedDirectOutputMode) {
+      await toggleExclusive(false);
+    }
     
     window.dispatchEvent(new CustomEvent('ui-toast', { 
       detail: { message: 'Audio hardware engine restored to bit-perfect flat!', type: 'success' } 
@@ -681,28 +688,36 @@ export function SettingsView() {
       element: (
         <div className="settings-ctrl-card">
           <div className="settings-ctrl-header-row">
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Theme Mode</span>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Theme Mode</span>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Switch between high-contrast Dark mode, crisp Light mode, or follow OS system preference.
+              </div>
+            </div>
+            <div className="theme-mode-segmented">
               <button 
-                className={`btn ${colorScheme === 'dark' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: 11, padding: '6px 12px' }}
+                type="button"
+                className={`theme-mode-option ${colorScheme === 'dark' ? 'active' : ''}`}
                 onClick={() => setColorScheme('dark')}
               >
-                Dark
+                <Moon size={13} />
+                <span>Dark</span>
               </button>
               <button 
-                className={`btn ${colorScheme === 'light' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: 11, padding: '6px 12px' }}
+                type="button"
+                className={`theme-mode-option ${colorScheme === 'light' ? 'active' : ''}`}
                 onClick={() => setColorScheme('light')}
               >
-                Light
+                <Sun size={13} />
+                <span>Light</span>
               </button>
               <button 
-                className={`btn ${colorScheme === 'system' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: 11, padding: '6px 12px' }}
+                type="button"
+                className={`theme-mode-option ${colorScheme === 'system' ? 'active' : ''}`}
                 onClick={() => setColorScheme('system')}
               >
-                System
+                <Laptop size={13} />
+                <span>System</span>
               </button>
             </div>
           </div>
@@ -874,7 +889,7 @@ export function SettingsView() {
                   icon = <Sparkles size={16} />;
                   subtitle = 'AI Music Companion & Discovery';
                 } else if (item.id === 'charts') {
-                  icon = <BarChart3 size={16} style={{ color: '#f59e0b' }} />;
+                  icon = <TrendingUp size={16} />;
                   subtitle = 'Global Top Streaming Charts (Hybrid mode)';
                 } else if (item.id === 'library') {
                   icon = <Library size={16} />;
@@ -915,7 +930,7 @@ export function SettingsView() {
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       padding: '8px 12px',
-                      background: 'rgba(255, 255, 255, 0.03)',
+                      background: 'var(--glass)',
                       borderRadius: 8,
                       border: '1px solid var(--glass-border)',
                       opacity: item.visible ? 1 : 0.6,
@@ -1267,6 +1282,202 @@ export function SettingsView() {
                       }}
                     >
                       ✓ Active Persona
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'theater-hud-style',
+      title: 'Theater Playback HUD Style',
+      description: 'Choose your preferred tailored floating playback bar in Theater / Fullscreen mode.',
+      keywords: 'theater fullscreen hud playback bar floating capsule master minimal analog controls appearance UI',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+            {[
+              {
+                id: 'capsule' as TheaterHudStyle,
+                name: 'Floating Studio Capsule',
+                badge: 'BALANCED CONTROL',
+                badgeColor: '#8b5cf6',
+                icon: <Radio size={18} color="#a78bfa" />,
+                desc: 'Compact control bay with waveform scrubbing, centered transport, and audio-path status.',
+                visual: (
+                  <div className="thud-prev-box prev-capsule">
+                    <div className="thud-prev-pill">
+                      <div className="thud-prev-dot" style={{ background: '#8b5cf6' }} />
+                      <div className="thud-prev-meta-line" style={{ width: '40px' }} />
+                      <div className="thud-prev-controls">
+                        <div className="thud-prev-btn" />
+                        <div className="thud-prev-btn-play" style={{ background: '#8b5cf6' }} />
+                        <div className="thud-prev-btn" />
+                      </div>
+                      <div className="thud-prev-meta-line" style={{ width: '28px' }} />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'master' as TheaterHudStyle,
+                name: 'Precision Master Deck',
+                badge: 'METERED OUTPUT',
+                badgeColor: '#06b6d4',
+                icon: <Sliders size={18} color="#22d3ee" />,
+                desc: 'Compact output rack with readable metering, signal telemetry, and firm tactile controls.',
+                visual: (
+                  <div className="thud-prev-box prev-master">
+                    <div className="thud-prev-rack">
+                      <div className="thud-prev-screw left" />
+                      <div className="thud-prev-leds">
+                        <span className="thud-led green" />
+                        <span className="thud-led green" />
+                        <span className="thud-led yellow" />
+                        <span className="thud-led red" />
+                      </div>
+                      <div className="thud-prev-center-deck">
+                        <div className="thud-prev-btn square" />
+                        <div className="thud-prev-btn-play square" style={{ background: '#06b6d4' }} />
+                        <div className="thud-prev-btn square" />
+                      </div>
+                      <div className="thud-prev-telemetry">24/96k</div>
+                      <div className="thud-prev-screw right" />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'minimal' as TheaterHudStyle,
+                name: 'Quiet Minimal Rail',
+                badge: 'LOW DISTRACTION',
+                badgeColor: '#10b981',
+                icon: <Type size={18} color="#34d399" />,
+                desc: 'Low-profile controls that keep the artwork and lyrics in command of the screen.',
+                visual: (
+                  <div className="thud-prev-box prev-minimal">
+                    <div className="thud-prev-hairline">
+                      <div className="thud-prev-line-progress" />
+                      <div className="thud-prev-minimal-btns">
+                        <div className="thud-prev-btn-sm" />
+                        <div className="thud-prev-btn-play sm" style={{ background: '#10b981' }} />
+                        <div className="thud-prev-btn-sm" />
+                      </div>
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'analog' as TheaterHudStyle,
+                name: 'Warm Analog Console',
+                badge: 'AMBER OUTPUT',
+                badgeColor: '#f59e0b',
+                icon: <Disc size={18} color="#fbbf24" />,
+                desc: 'Warm console with amber output cues, stereo VU levels, and a slower physical feel.',
+                visual: (
+                  <div className="thud-prev-box prev-analog">
+                    <div className="thud-prev-analog-console">
+                      <div className="thud-prev-vu-strip">
+                        <div className="thud-prev-vu-fill" />
+                      </div>
+                      <div className="thud-prev-center-deck">
+                        <div className="thud-prev-btn round amber" />
+                        <div className="thud-prev-btn-play round" style={{ background: '#f59e0b' }} />
+                        <div className="thud-prev-btn round amber" />
+                      </div>
+                      <div className="thud-prev-analog-badge">VU STEREO</div>
+                    </div>
+                  </div>
+                )
+              },
+            ].map((d) => {
+              const isSelected = theaterHudStyle === d.id;
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => {
+                    setTheaterHudStyle(d.id);
+                    window.dispatchEvent(new CustomEvent('ui-toast', {
+                      detail: { message: `Switched Theater HUD style to ${d.name}!`, type: 'success' }
+                    }));
+                  }}
+                  className={`settings-design-card ${isSelected ? 'active' : ''}`}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    padding: 16,
+                    borderRadius: 14,
+                    border: isSelected ? '1.5px solid var(--accent, #8b5cf6)' : '1px solid var(--glass-border)',
+                    background: isSelected ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.08)' : 'var(--glass)',
+                    cursor: 'pointer',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    position: 'relative',
+                    gap: 12,
+                    boxShadow: isSelected ? '0 8px 24px rgba(var(--accent-rgb), 0.2)' : 'none'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          background: isSelected ? 'rgba(var(--accent-rgb), 0.2)' : 'var(--glass-h)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          {d.icon}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{d.name}</div>
+                          <span style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: d.badgeColor,
+                            background: `${d.badgeColor}18`,
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.5
+                          }}>
+                            {d.badge}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: '50%',
+                        border: isSelected ? '5px solid var(--accent, #8b5cf6)' : '2px solid var(--glass-border)',
+                        background: isSelected ? '#fff' : 'transparent',
+                        transition: 'all 0.2s ease',
+                        flexShrink: 0
+                      }} />
+                    </div>
+                    <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4, margin: '6px 0 0', minHeight: 32 }}>
+                      {d.desc}
+                    </p>
+                  </div>
+                  {d.visual}
+                  {isSelected && (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: 'var(--accent, #8b5cf6)',
+                        letterSpacing: '0.5px',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      ✓ Active HUD Style
                     </div>
                   )}
                 </div>

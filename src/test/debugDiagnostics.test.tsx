@@ -18,7 +18,7 @@ vi.mock('@tauri-apps/api/core', () => ({
     if (cmd === 'get_debug_system_info') {
       return {
         app_name: 'Aideo Music Player',
-        app_version: '0.9.6',
+        app_version: '0.9.7',
         os_name: 'windows',
         os_version: 'windows (windows)',
         arch: 'x86_64',
@@ -32,7 +32,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       };
     }
     if (cmd === 'export_debug_report') {
-      return '=== AIDEO DIAGNOSTIC REPORT ===\nVersion: 0.9.6\nOS: Windows\n';
+      return '=== AIDEO DIAGNOSTIC REPORT ===\nVersion: 0.9.7\nOS: Windows\n';
     }
     if (cmd === 'log_crash') {
       return 'C:/Users/Alirul/AppData/Roaming/com.alirul.music-player/logs/crash-frontend-test.log';
@@ -77,7 +77,7 @@ describe('Frontend Logger & Diagnostics Bridge', () => {
   it('retrieves system diagnostics and recent logs', async () => {
     const info = await logger.getSystemInfo();
     expect(info).not.toBeNull();
-    expect(info?.app_version).toBe('0.9.6');
+    expect(info?.app_version).toBe('0.9.7');
     expect(info?.cpu_count).toBe(8);
 
     const logs = await logger.getRecentLogs();

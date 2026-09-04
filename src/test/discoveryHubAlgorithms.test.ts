@@ -48,11 +48,10 @@ describe('Discovery Hub Algorithms & Layout Tests (TDD)', () => {
       recommendations: [mockTrack('rec-1', 'Rec Song 1', 'Artist A', 'Similar to Loved Tracks')],
       global_charts: [mockTrack('chart-1', 'Chart Song 1', 'Top Artist', 'Global Top Hits')],
       mixed_for_you: [
-        mockMix('mix-energy', 'High Energy Flow', 'Fast-paced rhythmic tracks'),
-        mockMix('mix-focus', 'Deep Focus & Flow', 'Ambient and instrumental focus tracks'),
-        mockMix('mix-chill', 'Late Night Chill', 'Relaxed acoustic soundscapes'),
-        mockMix('mix-melancholy', 'Moody Reflections', 'Emotional ballads'),
+        mockMix('mix-supermix', 'My Supermix', 'Your personal mix station'),
         mockMix('mix-spotlight', 'Artist Spotlight', 'Deep dive into top artist'),
+        mockMix('mix-forgotten', 'Forgotten Favorites', 'Beloved tracks you haven\'t played in a while'),
+        mockMix('mix-repeat', 'On Repeat', 'Current obsessions and most repeated tracks'),
       ],
       recently_played: [
         mockTrack('recent-1', 'Yesterday Jam', 'Artist B', 'Recently Played'),
@@ -74,13 +73,15 @@ describe('Discovery Hub Algorithms & Layout Tests (TDD)', () => {
     const stored = useStore.getState().discoveryData;
 
     expect(stored).not.toBeNull();
-    expect(stored?.mixed_for_you.length).toBe(5);
+    expect(stored?.mixed_for_you.length).toBe(4);
     expect(stored?.recently_played?.length).toBe(2);
     expect(stored?.heavy_rotation?.length).toBe(2);
     expect(stored?.forgotten_gems?.length).toBe(1);
     expect(stored?.playlist_mixes?.length).toBe(1);
-    expect(stored?.mixed_for_you.some(m => m.title.includes('High Energy'))).toBe(true);
-    expect(stored?.mixed_for_you.some(m => m.title.includes('Deep Focus'))).toBe(true);
+    expect(stored?.mixed_for_you.some(m => m.title.includes('Supermix'))).toBe(true);
+    expect(stored?.mixed_for_you.some(m => m.title.includes('Spotlight'))).toBe(true);
+    expect(stored?.mixed_for_you.some(m => m.title.includes('Forgotten Favorites'))).toBe(true);
+    expect(stored?.mixed_for_you.some(m => m.title.includes('On Repeat'))).toBe(true);
   });
 
   it('supports local mode offline discovery data without internet dependency', () => {
@@ -111,9 +112,9 @@ describe('Discovery Hub Algorithms & Layout Tests (TDD)', () => {
       ],
       mixed_for_you: [
         {
-          id: 'local_mix_energy',
-          title: 'High Energy Flow (Local)',
-          description: 'High tempo local library tracks',
+          id: 'local_mix_supermix',
+          title: 'My Supermix',
+          description: 'Your favorite local tracks mixed with hidden library gems.',
           cover_url: null,
           tracks: []
         }

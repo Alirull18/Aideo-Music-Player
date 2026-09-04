@@ -16,20 +16,28 @@ import {
   Minimize2,
   Sparkles,
   LayoutGrid,
-  Activity,
   Languages,
   Type,
   Mic,
   AlignLeft,
   FileText,
   Loader2,
-  ListMusic
+  ListMusic,
+  Sliders,
+  Shuffle,
+  Repeat,
+  Repeat1,
+  Heart,
+  Activity,
+  Infinity as InfinityIcon
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
-import { Visualizer } from './Visualizer';
+import { Visualizer, VisualizerMode } from './Visualizer';
+
 import { generateWaveformPeaks } from '../utils/waveform';
-import { LyricsDisplayMode, TheaterModeDesign } from '../store/types';
+import { TheaterModeDesign, TheaterHudStyle, LyricsDisplayMode } from '../store/types';
+
 import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
 import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
@@ -41,6 +49,13 @@ const THEATER_NAMES: Record<TheaterModeDesign, string> = {
   vinyl: 'Turntable',
   poster: 'Poster View',
   scope: 'Pure Scope',
+};
+
+export const THEATER_HUD_NAMES: Record<TheaterHudStyle, string> = {
+  capsule: 'Floating Capsule',
+  master: 'Master Deck',
+  minimal: 'Zen Minimal',
+  analog: 'Vintage Analog',
 };
 
 export function FullscreenView() {
@@ -74,6 +89,8 @@ export function FullscreenView() {
     albumArtFit,
     theaterModeDesign,
     setTheaterModeDesign,
+    theaterHudStyle,
+    setTheaterHudStyle,
     playbackPositionSecs,
     playbackCurrentTrack,
     playbackStatus,
@@ -81,7 +98,14 @@ export function FullscreenView() {
     playbackBitPerfect,
     playbackDevRate,
     playbackIsBuffering,
-    queue
+    queue,
+    shuffle,
+    toggleShuffle,
+    repeat,
+    toggleRepeat,
+    autoplayEnabled,
+    toggleAutoplay,
+    toggleLoveTrack,
   } = useStore(useShallow(s => ({
     playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
@@ -119,7 +143,16 @@ export function FullscreenView() {
     albumArtFit: s.albumArtFit,
     theaterModeDesign: s.theaterModeDesign,
     setTheaterModeDesign: s.setTheaterModeDesign,
+    theaterHudStyle: s.theaterHudStyle,
+    setTheaterHudStyle: s.setTheaterHudStyle,
     queue: s.queue,
+    shuffle: s.shuffle,
+    toggleShuffle: s.toggleShuffle,
+    repeat: s.repeat,
+    toggleRepeat: s.toggleRepeat,
+    autoplayEnabled: s.autoplayEnabled,
+    toggleAutoplay: s.toggleAutoplay,
+    toggleLoveTrack: s.toggleLoveTrack,
   })));
 
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
@@ -131,8 +164,14 @@ export function FullscreenView() {
   const [spectrumBands, setSpectrumBands] = useState<number[]>([]);
   useEffect(() => {
     let active = true;
+    let lastUpdate = 0;
     const unlistenPromise = listen<number[]>('audio-spectrum', event => {
-      if (active) setSpectrumBands(event.payload);
+      const now = performance.now();
+      // Throttle telemetry/meter state updates to ~15fps to eliminate React render thrashing
+      if (active && now - lastUpdate >= 65) {
+        lastUpdate = now;
+        setSpectrumBands(event.payload);
+      }
     });
     return () => {
       active = false;
@@ -142,11 +181,14 @@ export function FullscreenView() {
 
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(true);
   const [isHUDHidden, setIsHUDHidden] = useState(false);
+  const [hoverSeek, setHoverSeek] = useState<{ clientX: number; secs: number; pct: number } | null>(null);
 
   // Persistent Visualizer Mode Preference
-  const [vizMode, setVizMode] = useState<'baseline' | 'circle' | 'wave'>(() => {
-    return (localStorage.getItem('aideo-fullscreen-viz-mode') as 'baseline' | 'circle' | 'wave') || 'baseline';
+  const [vizMode, setVizMode] = useState<VisualizerMode>(() => {
+    return (localStorage.getItem('aideo-fullscreen-viz-mode') as VisualizerMode) || 'baseline';
   });
+
+  const hudRef = useRef<HTMLDivElement>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const activityTimer = useRef<number | null>(null);
@@ -253,13 +295,22 @@ export function FullscreenView() {
         const cur = useStore.getState().theaterModeDesign;
         const next = order[(order.indexOf(cur) + 1) % order.length];
         useStore.getState().setTheaterModeDesign(next);
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Theater Persona: ${THEATER_NAMES[next]}`, type: 'info' } 
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Theater Persona: ${THEATER_NAMES[next]}`, type: 'info' }
+        }));
+      } else if (key === 'h') {
+        e.preventDefault();
+        const hudOrder: TheaterHudStyle[] = ['capsule', 'master', 'minimal', 'analog'];
+        const curHud = useStore.getState().theaterHudStyle;
+        const nextHud = hudOrder[(hudOrder.indexOf(curHud) + 1) % hudOrder.length];
+        useStore.getState().setTheaterHudStyle(nextHud);
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Theater HUD: ${THEATER_HUD_NAMES[nextHud]}`, type: 'info' }
         }));
       } else if (key === 'v') {
         e.preventDefault();
         const modes: ('baseline' | 'circle' | 'wave')[] = ['baseline', 'circle', 'wave'];
-        setVizMode(prev => {
+        setVizMode((prev: 'baseline' | 'circle' | 'wave') => {
           const nextIdx = (modes.indexOf(prev) + 1) % modes.length;
           return modes[nextIdx];
         });
@@ -272,6 +323,12 @@ export function FullscreenView() {
       } else if (key === 'm') {
         e.preventDefault();
         state.toggleMute();
+      } else if (key === 's') {
+        e.preventDefault();
+        state.toggleShuffle();
+      } else if (key === 'p') {
+        e.preventDefault();
+        state.toggleRepeat();
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         state.seek(Math.max(0, state.playback.position_secs - 5));
@@ -432,31 +489,51 @@ export function FullscreenView() {
 
   return (
     <div className={`fullscreen-overlay ${isHUDHidden ? 'hud-hidden' : ''}`}>
-      {/* Immersive backdrop visualizer */}
-      <LiquidBackground />
+      {/* Immersive backdrop visualizer (disabled in pure focus scope mode for edge-to-edge pitch black) */}
+      {theaterModeDesign !== 'scope' && <LiquidBackground />}
 
-      {/* Floating Exit Button */}
-      <button
-        className="fullscreen-exit-btn"
-        onClick={() => setView('nowplaying')}
-        title="Exit Fullscreen Mode"
-      >
-        <X size={20} />
-      </button>
+      {/* Floating Top Actions Bar */}
+      <div className="fullscreen-top-bar">
+        {/* Floating HUD Style Toggle */}
+        <button
+          className="fullscreen-layout-toggle fullscreen-hud-toggle"
+          onClick={() => {
+            const hudOrder: TheaterHudStyle[] = ['capsule', 'master', 'minimal', 'analog'];
+            const nextHud = hudOrder[(hudOrder.indexOf(theaterHudStyle) + 1) % hudOrder.length];
+            setTheaterHudStyle(nextHud);
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: `Theater HUD: ${THEATER_HUD_NAMES[nextHud]}`, type: 'info' }
+            }));
+          }}
+          title={`HUD: ${THEATER_HUD_NAMES[theaterHudStyle]} (Click or press H to cycle style)`}
+        >
+          <Sliders size={16} />
+          <span>{THEATER_HUD_NAMES[theaterHudStyle]}</span>
+        </button>
 
-      {/* Floating Layout Toggle */}
-      <button
-        className="fullscreen-layout-toggle"
-        onClick={() => {
-          const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
-          const next = order[(order.indexOf(theaterModeDesign) + 1) % order.length];
-          setTheaterModeDesign(next);
-        }}
-        title={`Current: ${THEATER_NAMES[theaterModeDesign]} (Click to cycle persona)`}
-      >
-        <LayoutGrid size={16} />
-        <span>{THEATER_NAMES[theaterModeDesign]}</span>
-      </button>
+        {/* Floating Layout Toggle */}
+        <button
+          className="fullscreen-layout-toggle"
+          onClick={() => {
+            const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+            const next = order[(order.indexOf(theaterModeDesign) + 1) % order.length];
+            setTheaterModeDesign(next);
+          }}
+          title={`Current: ${THEATER_NAMES[theaterModeDesign]} (Click or press L to cycle persona)`}
+        >
+          <LayoutGrid size={16} />
+          <span>{THEATER_NAMES[theaterModeDesign]}</span>
+        </button>
+
+        {/* Floating Exit Button */}
+        <button
+          className="fullscreen-exit-btn"
+          onClick={() => setView('nowplaying')}
+          title="Exit Fullscreen Mode"
+        >
+          <X size={20} />
+        </button>
+      </div>
 
       {/* Main Content Pane */}
       <TheaterLayoutSwitch
@@ -484,91 +561,195 @@ export function FullscreenView() {
       />
 
       {/* Sharp Glowing Neon Visualizer Baseline / Wave */}
-      {vizMode !== 'circle' && (
+      {vizMode !== 'circle' && theaterModeDesign !== 'scope' && (
         <div className="fullscreen-visualizer-container">
           <Visualizer mode={vizMode} />
         </div>
       )}
 
       {/* Floating Premium Playback HUD */}
-      <div className="fullscreen-hud">
+      <div
+        ref={hudRef}
+        className={`fullscreen-hud hud-shell hud-${theaterHudStyle}`}
+        data-hud-style={theaterHudStyle}
+      >
+        {/* Master Deck Hardware Screws */}
+        {theaterHudStyle === 'master' && (
+          <>
+            <div className="hud-master-screw top-left" aria-hidden="true" />
+            <div className="hud-master-screw top-right" aria-hidden="true" />
+            <div className="hud-master-screw bottom-left" aria-hidden="true" />
+            <div className="hud-master-screw bottom-right" aria-hidden="true" />
+          </>
+        )}
+
         {/* Progress Bar & Durations */}
-        <div className="fullscreen-hud-progress-wrap">
+        <div className="fullscreen-hud-progress-wrap hud-progress">
           <span className="fullscreen-hud-time">{formatTime(playbackPositionSecs)}</span>
-          <div style={{ flex: 1, position: 'relative', height: 24, display: 'flex', alignItems: 'center' }}>
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, pointerEvents: 'none', padding: '0 2px' }}>
+          <div
+            className="fullscreen-hud-waveform-track"
+            onMouseMove={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              if (rect.width > 0) {
+                const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                const pct = x / rect.width;
+                setHoverSeek({
+                  pct,
+                  secs: pct * (trackDuration || 0),
+                  clientX: x,
+                });
+              }
+            }}
+            onMouseLeave={() => setHoverSeek(null)}
+          >
+            <div className="fullscreen-hud-waveform">
               {waveformPeaks.map((peak, idx) => {
                 const barPct = (idx / waveformPeaks.length) * 100;
                 const isPlayed = barPct <= progressPercent;
+                const isHovered = hoverSeek ? barPct <= hoverSeek.pct * 100 && !isPlayed : false;
                 return (
                   <div
                     key={idx}
+                    className="fullscreen-hud-waveform-bar"
                     style={{
-                      flex: 1,
-                      height: `${Math.max(25, peak * 100)}%`,
-                      background: isPlayed ? accentColor : 'rgba(255, 255, 255, 0.22)',
-                      borderRadius: 1,
-                      transition: 'background 0.1s ease',
+                      height: `${Math.max(16, peak * 100)}%`,
+                      backgroundColor: isPlayed
+                        ? accentColor
+                        : isHovered
+                        ? 'rgba(255, 255, 255, 0.45)'
+                        : 'rgba(255, 255, 255, 0.15)',
                     }}
                   />
                 );
               })}
             </div>
+
+            {/* Hover scrub marker and time preview */}
+            {hoverSeek && (
+              <>
+                <div
+                  className="fullscreen-hud-scrub-tooltip"
+                  style={{ left: hoverSeek.clientX }}
+                >
+                  {formatTime(hoverSeek.secs)}
+                </div>
+                <div
+                  className="fullscreen-hud-scrub-needle"
+                  style={{ left: hoverSeek.clientX }}
+                />
+              </>
+            )}
+
             <input
               type="range"
               min={0}
               max={trackDuration || 100}
+              step={0.1}
               value={playbackPositionSecs}
-              onChange={(e) => seek(parseFloat(e.target.value))}
-              className="fullscreen-hud-progress-bar"
-              style={{
-                width: '100%',
-                opacity: 0,
-                cursor: 'pointer',
-                position: 'relative',
-                zIndex: 2,
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                seek(val);
               }}
+              className="fullscreen-hud-progress-bar"
             />
           </div>
           <span className="fullscreen-hud-time">{formatTime(trackDuration)}</span>
         </div>
 
-        {/* Buttons Controls */}
-        <div className="fullscreen-hud-controls">
-          {/* Metadata Display / Telemetry in control bar */}
+        {/* HUD Controls Row */}
+        <div className="fullscreen-hud-controls hud-controls">
+          {/* Left info snippet & telemetry button */}
           <div className="fullscreen-hud-left">
             <button
-              className="fullscreen-telemetry-badge"
+              className="fullscreen-telemetry-btn"
               onClick={() => setIsSignalPathOpen(true)}
               title="Inspect Audio Signal Path & Telemetry (I)"
-              style={{
-                cursor: 'pointer',
-                background: isSignalPathOpen ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.04)',
-                border: isSignalPathOpen ? `1px solid ${accentColor}` : '1px solid rgba(255, 255, 255, 0.08)',
-                transition: 'all 0.15s ease',
-              }}
+              aria-pressed={isSignalPathOpen}
             >
-              <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor }}></span>
-              <span>{telemetryText}</span>
+              <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor, flexShrink: 0 }}></span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{telemetryText}</span>
             </button>
+
+            {theaterHudStyle === 'master' && (
+              <div className="hud-master-led-meter" title="Precision Output Level">
+                <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot yellow ${playbackStatus === 'Playing' && playbackVolume > 0.35 ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot yellow ${playbackStatus === 'Playing' && playbackVolume > 0.7 ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot red ${playbackStatus === 'Playing' && playbackVolume > 0.9 ? 'lit' : ''}`} />
+              </div>
+            )}
+
+            {theaterHudStyle === 'analog' && (
+              <div className="hud-analog-tube-badge" title="Analog Vacuum Stage Active">
+                <span className="hud-analog-tube-glow" />
+                <span className="hud-analog-badge-text">TUBE STAGE</span>
+              </div>
+            )}
+
+            {currentTrack && (
+              <button
+                className={`fullscreen-hud-btn fullscreen-love-btn ${currentTrack.loved === 1 ? 'loved' : ''}`}
+                onClick={() => toggleLoveTrack(currentTrack.path, currentTrack)}
+                title={currentTrack.loved === 1 ? "Remove from Loved Tracks" : "Add to Loved Tracks"}
+                aria-label={currentTrack.loved === 1 ? "Remove from Loved Tracks" : "Add to Loved Tracks"}
+              >
+                <Heart size={18} fill={currentTrack.loved === 1 ? '#ef4444' : 'transparent'} />
+              </button>
+            )}
           </div>
 
           {/* Central Playback buttons */}
           <div className="fullscreen-hud-center">
-            <button className="fullscreen-hud-btn" onClick={playPrev} title="Previous Track">
-              <SkipBack size={24} />
+            <button
+              className={`fullscreen-hud-btn fullscreen-hud-btn-sub ${shuffle ? 'active' : ''}`}
+              onClick={toggleShuffle}
+              title={`Shuffle: ${shuffle ? 'On' : 'Off'} (S)`}
+              aria-label={`Shuffle: ${shuffle ? 'On' : 'Off'}`}
+            >
+              <Shuffle size={18} />
+            </button>
+
+            <button className="fullscreen-hud-btn" onClick={playPrev} title="Previous Track" aria-label="Previous Track">
+              <SkipBack size={22} fill="currentColor" />
             </button>
 
             <button
               className="fullscreen-hud-btn fullscreen-hud-btn-play"
               onClick={handlePlayPause}
-              title={playbackIsBuffering ? 'Buffering stream...' : playbackStatus === 'Playing' ? 'Pause' : 'Play'}
+              title={playbackIsBuffering ? 'Buffering stream...' : playbackStatus === 'Playing' ? 'Pause (Space)' : 'Play (Space)'}
+              aria-label={playbackIsBuffering ? 'Buffering stream' : playbackStatus === 'Playing' ? 'Pause' : 'Play'}
             >
-              {playbackIsBuffering ? <Loader2 size={24} className="animate-spin" /> : playbackStatus === 'Playing' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 4 }} />}
+              {playbackIsBuffering ? (
+                <Loader2 size={24} className="animate-spin" />
+              ) : playbackStatus === 'Playing' ? (
+                <Pause size={24} fill="currentColor" />
+              ) : (
+                <Play size={24} fill="currentColor" style={{ marginLeft: 3 }} />
+              )}
             </button>
 
-            <button className="fullscreen-hud-btn" onClick={playNext} title="Next Track">
-              <SkipForward size={24} />
+            <button className="fullscreen-hud-btn" onClick={playNext} title="Next Track" aria-label="Next Track">
+              <SkipForward size={22} fill="currentColor" />
+            </button>
+
+            <button
+              className={`fullscreen-hud-btn fullscreen-hud-btn-sub ${repeat !== 'none' ? 'active' : ''}`}
+              onClick={toggleRepeat}
+              title={`Repeat: ${repeat === 'none' ? 'Off' : repeat === 'all' ? 'All' : 'One'} (P)`}
+              aria-label={`Repeat: ${repeat === 'none' ? 'Off' : repeat === 'all' ? 'All' : 'One'}`}
+            >
+              {repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
+            </button>
+
+            <button
+              className={`fullscreen-hud-btn fullscreen-hud-btn-sub ${autoplayEnabled ? 'active' : ''}`}
+              onClick={toggleAutoplay}
+              title={`Endless Radio Autoplay: ${autoplayEnabled ? 'On' : 'Off'}`}
+              aria-label={`Endless Radio Autoplay: ${autoplayEnabled ? 'On' : 'Off'}`}
+            >
+              <InfinityIcon size={18} />
             </button>
           </div>
 
@@ -656,38 +837,21 @@ export function FullscreenView() {
 
             {/* Up Next Queue Drawer Toggle */}
             <button
-              className={`fullscreen-hud-btn ${isQueueDrawerOpen ? 'active' : ''}`}
+              className={`fullscreen-hud-btn fullscreen-hud-queue-btn ${isQueueDrawerOpen ? 'active' : ''}`}
               onClick={() => setIsQueueDrawerOpen(prev => !prev)}
               title="Up Next Queue (Q)"
-              style={{ position: 'relative' }}
             >
               <ListMusic size={18} />
               {queue.length > 0 && (
                 <span
-                  style={{
-                    position: 'absolute',
-                    top: 2,
-                    right: 2,
-                    minWidth: 14,
-                    height: 14,
-                    padding: '0 3px',
-                    borderRadius: 7,
-                    fontSize: 9,
-                    fontWeight: 700,
-                    backgroundColor: accentColor,
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    lineHeight: 1
-                  }}
+                  className="fullscreen-hud-queue-count"
                 >
                   {queue.length > 99 ? '99+' : queue.length}
                 </span>
               )}
             </button>
 
-            {/* Native Fullscreen Toggle Button */}
+            {/* Native OS Fullscreen Toggle */}
             <button
               className="fullscreen-hud-btn"
               onClick={async () => {
@@ -698,7 +862,7 @@ export function FullscreenView() {
               }}
               title="Toggle Native OS Fullscreen"
             >
-              {isNativeFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+              {isNativeFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
           </div>
         </div>
