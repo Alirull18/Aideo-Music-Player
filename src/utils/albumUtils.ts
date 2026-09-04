@@ -52,7 +52,7 @@ export function getTrackNumber(t: Partial<Track> | any): number {
   const path = t?.path || t?.stream_url || '';
   if (path) {
     const filename = path.split(/[\\/]/).pop() || '';
-    
+
     // Pattern 1: "1-02 Track.mp3", "CD1-05 Track.flac"
     const discTrackMatch = filename.match(/^(?:(?:cd|disc|disk)?\d+[-._\s]+)?(\d{1,3})[-._\s]+/i);
     if (discTrackMatch) {
@@ -125,6 +125,16 @@ export function groupTracksByDisc<T extends Partial<Track> | any>(tracks: T[]): 
 }
 
 /**
+ * Extracts the primary artist name by stripping collaborator suffixes
+ * such as "feat.", "ft.", "featuring", "with", "x", "vs.", commas, ampersands, slashes, or semicolons.
+ */
+export function extractPrimaryArtist(artist?: string | null): string {
+  if (!artist || !artist.trim()) return 'Unknown Artist';
+  const primary = artist.split(/\s+(?:feat\.|ft\.|featuring|with|x|vs\.?)\s+|[,/;&]|\s+&\s+/i)[0]?.trim();
+  return primary || artist.trim();
+}
+
+/**
  * Generates a unique, collision-resistant album grouping key for a track.
  */
 export function buildAlbumKey(t: Partial<Track> | any): string {
@@ -144,6 +154,6 @@ export function buildAlbumKey(t: Partial<Track> | any): string {
   }
 
   // 3. Extract primary artist (handling featured collaborators so tracks on the same album stay grouped)
-  const primaryArtist = trackArtist.split(/\s+(?:feat\.|ft\.|featuring|with)\s+/i)[0].trim();
+  const primaryArtist = extractPrimaryArtist(trackArtist);
   return `${primaryArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`;
 }

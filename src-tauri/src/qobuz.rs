@@ -73,7 +73,10 @@ impl Default for QobuzState {
 /// Extract the web-player bundle path from the login page HTML.
 /// The LAST matching script tag wins — Qobuz loads newer bundles after legacy ones.
 pub fn parse_bundle_path(login_html: &str) -> Option<String> {
-    let re = regex::Regex::new(r#"src="(/resources/[^"]+?/client/main\.js)""#).ok()?;
+    let re = regex::Regex::new(
+        r#"src=["'](/resources/[^"']+?/(?:client/main|bundle)\.js(?:\?[^"']*)?)["']"#,
+    )
+    .ok()?;
     let mut found: Option<String> = None;
     for cap in re.captures_iter(login_html) {
         found = Some(cap[1].to_string());
@@ -104,6 +107,22 @@ pub fn parse_bundle(bundle_js: &str) -> Result<(String, Vec<(String, String)>), 
     let mut pairs = Vec::new();
     for cap in secret_re.captures_iter(bundle_js) {
         pairs.push((cap[1].to_string(), cap[2].to_string()));
+    }
+
+    // Current web-player bundles expose one direct production app secret instead
+    // of the older timezone-indexed base64 candidates. Encode it into the same
+    // internal representation so the existing decode/order path remains shared.
+    if pairs.is_empty() {
+        let direct_secret_re = regex::Regex::new(
+            r#"production:\{api:\{appId:"\d{9}",appSecret:"([^"]{8,})""#,
+        )
+        .map_err(|e| e.to_string())?;
+        if let Some(cap) = direct_secret_re.captures(bundle_js) {
+            pairs.push((
+                "production".to_string(),
+                base64::engine::general_purpose::STANDARD.encode(cap[1].as_bytes()),
+            ));
+        }
     }
 
     Ok((app_id, pairs))
@@ -323,11 +342,23 @@ async fn api_get(
 // Commands
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub async fn qobuz_connect(
-    state: State<'_, Arc<QobuzState>>,
-    app_handle: AppHandle,
-    token: String,
+/// Extracts the user authentication token from our synthetic callback URL.
+pub fn extract_token_from_callback_url(url_str: &str) -> Option<String> {
+    let parsed = url::Url::parse(url_str).ok()?;
+    if !parsed.path().contains("aideo-auth-callback") {
+        return None;
+    }
+    parsed
+        .query_pairs()
+        .find(|(k, _)| k == "token")
+        .map(|(_, v)| v.to_string())
+        .filter(|t| !t.trim().is_empty())
+}
+
+pub async fn connect_with_token(
+    state: &QobuzState,
+    app_handle: &AppHandle,
+    token: &str,
 ) -> Result<serde_json::Value, String> {
     let token_trimmed = token.trim().to_string();
     if token_trimmed.is_empty() {
@@ -335,10 +366,10 @@ pub async fn qobuz_connect(
     }
 
     println!("\n{BOLD}{MAGENTA}┌────────────────────────────────────────────────────────┐{RESET}");
-    println!("{BOLD}{MAGENTA}│  [QOBUZ ENGINE] Connecting with pasted auth token...   │{RESET}");
+    println!("{BOLD}{MAGENTA}│  [QOBUZ ENGINE] Connecting with auth token...          │{RESET}");
     println!("{BOLD}{MAGENTA}└────────────────────────────────────────────────────────┘{RESET}");
 
-    let creds = ensure_app_credentials(&state, &app_handle).await?;
+    let creds = ensure_app_credentials(state, app_handle).await?;
 
     let client = get_client();
     let res = client
@@ -376,11 +407,157 @@ pub async fn qobuz_connect(
     };
 
     QobuzState::save_session(&session);
-    QobuzState::apply_session(&state, Some(session));
+    QobuzState::apply_session(state, Some(session));
 
     println!("{BOLD}{GREEN}✔ [QOBUZ ENGINE] Connected as '{}' successfully!{RESET}", display_name);
     let _ = app_handle.emit("qobuz-login-success", ());
     Ok(serde_json::json!({ "displayName": display_name }))
+}
+
+#[tauri::command]
+pub async fn qobuz_connect(
+    state: State<'_, Arc<QobuzState>>,
+    app_handle: AppHandle,
+    token: String,
+) -> Result<serde_json::Value, String> {
+    connect_with_token(&state, &app_handle, &token).await
+}
+
+#[tauri::command]
+pub async fn qobuz_open_login_window(
+    state: State<'_, Arc<QobuzState>>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    const LOGIN_WINDOW_LABEL: &str = "qobuz-login";
+
+    if let Some(window) = app_handle.get_webview_window(LOGIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let login_url = "https://play.qobuz.com/login"
+        .parse::<url::Url>()
+        .map_err(|e| e.to_string())?;
+
+    let init_script = r#"
+        (function() {
+            if (window.__aideo_qobuz_hooked) return;
+            window.__aideo_qobuz_hooked = true;
+
+            function notifyHost(token) {
+                if (!token || typeof token !== 'string' || token.length < 8) return;
+                try {
+                    window.location.href = 'https://play.qobuz.com/aideo-auth-callback?token=' + encodeURIComponent(token);
+                } catch (e) {}
+            }
+
+            const origFetch = window.fetch;
+            if (origFetch) {
+                window.fetch = async function(...args) {
+                    const res = await origFetch.apply(this, args);
+                    try {
+                        const url = (typeof args[0] === 'string') ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+                        if (url.includes('api.json')) {
+                            const clone = res.clone();
+                            clone.json().then(data => {
+                                if (data && data.user_auth_token) {
+                                    notifyHost(data.user_auth_token);
+                                }
+                            }).catch(() => {});
+                        }
+                    } catch (e) {}
+                    return res;
+                };
+            }
+
+            const origOpen = XMLHttpRequest.prototype.open;
+            const origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+            const origSend = XMLHttpRequest.prototype.send;
+
+            XMLHttpRequest.prototype.setRequestHeader = function(header, value) {
+                if (header && header.toLowerCase() === 'x-user-auth-token') {
+                    notifyHost(value);
+                }
+                return origSetHeader.apply(this, arguments);
+            };
+
+            XMLHttpRequest.prototype.send = function() {
+                this.addEventListener('load', function() {
+                    try {
+                        if (this.responseURL && this.responseURL.includes('api.json')) {
+                            const data = JSON.parse(this.responseText);
+                            if (data && data.user_auth_token) {
+                                notifyHost(data.user_auth_token);
+                            }
+                        }
+                    } catch (e) {}
+                });
+                return origSend.apply(this, arguments);
+            };
+
+            setInterval(() => {
+                try {
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        const val = localStorage.getItem(key);
+                        if (val && typeof val === 'string') {
+                            if (key && key.toLowerCase().includes('token') && val.length > 20 && !val.startsWith('{')) {
+                                notifyHost(val);
+                            }
+                            if (val.includes('user_auth_token')) {
+                                try {
+                                    const parsed = JSON.parse(val);
+                                    if (parsed.user_auth_token) notifyHost(parsed.user_auth_token);
+                                    if (parsed.user && parsed.user.user_auth_token) notifyHost(parsed.user.user_auth_token);
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }, 1000);
+        })();
+    "#;
+
+    let app_handle_for_nav = app_handle.clone();
+    let state_arc = state.inner().clone();
+
+    let window_builder = tauri::WebviewWindowBuilder::new(
+        &app_handle,
+        LOGIN_WINDOW_LABEL,
+        tauri::WebviewUrl::External(login_url),
+    )
+    .title("Qobuz Login — Aideo")
+    .inner_size(520.0, 720.0)
+    .center()
+    .resizable(true)
+    .initialization_script(init_script)
+    .on_navigation(move |url| {
+        if let Some(token) = extract_token_from_callback_url(url.as_str()) {
+            let app = app_handle_for_nav.clone();
+            let state_ref = state_arc.clone();
+            tauri::async_runtime::spawn(async move {
+                match connect_with_token(&state_ref, &app, &token).await {
+                    Ok(_) => {
+                        if let Some(win) = app.get_webview_window(LOGIN_WINDOW_LABEL) {
+                            let _ = win.close();
+                        }
+                    }
+                    Err(err) => {
+                        println!("{BOLD}{RED}✘ [QOBUZ ENGINE] Login callback failed: {}{RESET}", err);
+                        let _ = app.emit("qobuz-login-error", err);
+                    }
+                }
+            });
+            return false;
+        }
+        true
+    });
+
+    window_builder.build().map_err(|e| format!("Failed to create Qobuz login window: {:?}", e))?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -816,6 +993,13 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_bundle_path_supports_current_bundle_js_layout() {
+        let html = r#"<script src="/resources/8.2.0-b034/bundle.js"></script>"#;
+        let path = parse_bundle_path(html).expect("current bundle path must be found");
+        assert_eq!(path, "/resources/8.2.0-b034/bundle.js");
+    }
+
+    #[test]
     fn test_parse_bundle_path_returns_none_when_absent() {
         assert!(parse_bundle_path("<html><body>no scripts</body></html>").is_none());
     }
@@ -827,6 +1011,14 @@ mod tests {
         assert_eq!(pairs.len(), 3);
         assert_eq!(pairs[0].0, "America/Argentina/Buenos_Aires");
         assert_eq!(pairs[2].0, "Europe/Paris");
+    }
+
+    #[test]
+    fn test_parse_bundle_extracts_current_direct_production_secret() {
+        let bundle = r#"var c={production:{api:{appId:"123456789",appSecret:"direct-production-secret"}}};"#;
+        let (app_id, pairs) = parse_bundle(bundle).expect("current bundle must parse");
+        assert_eq!(app_id, "123456789");
+        assert_eq!(decode_secrets(&pairs), vec!["direct-production-secret"]);
     }
 
     #[test]
@@ -915,6 +1107,24 @@ mod tests {
     #[test]
     fn test_format_ladder_covers_all_known_qualities() {
         assert_eq!(FORMAT_LADDER, [27, 7, 6, 5]);
+    }
+
+    #[test]
+    fn test_extract_token_from_callback_url() {
+        let valid = "https://play.qobuz.com/aideo-auth-callback?token=my_secret_token_123";
+        assert_eq!(extract_token_from_callback_url(valid), Some("my_secret_token_123".to_string()));
+
+        let encoded = "https://play.qobuz.com/aideo-auth-callback?token=abc%2B123%3D%3D";
+        assert_eq!(extract_token_from_callback_url(encoded), Some("abc+123==".to_string()));
+
+        let missing = "https://play.qobuz.com/aideo-auth-callback";
+        assert_eq!(extract_token_from_callback_url(missing), None);
+
+        let empty = "https://play.qobuz.com/aideo-auth-callback?token=";
+        assert_eq!(extract_token_from_callback_url(empty), None);
+
+        let other_path = "https://play.qobuz.com/discover?token=my_secret_token_123";
+        assert_eq!(extract_token_from_callback_url(other_path), None);
     }
 
     // Env-gated live smoke test — skipped unless a real token is provided:

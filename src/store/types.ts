@@ -231,6 +231,33 @@ export interface DSPState {
 
 
 
+export interface AudioFormatSnapshot {
+  sample_rate: number;
+  channels: number;
+  sample_format?: string | null;
+  bits_per_sample?: number | null;
+  valid_bits_per_sample?: number | null;
+  channel_mask?: number | null;
+}
+
+export interface EffectiveAudioPath {
+  active: boolean;
+  engine: string;
+  share_mode: string;
+  source: AudioFormatSnapshot;
+  pipeline_sample_format: string;
+  output: AudioFormatSnapshot;
+  requested_exclusive: boolean;
+  requested_bit_perfect: boolean;
+  resampling: boolean;
+  volume_applied: boolean;
+  active_transforms: string[];
+  underruns: number;
+  strict_bit_perfect?: boolean;
+  strict_failure_reasons?: string[];
+  fallback_reason?: string | null;
+}
+
 export interface PlaybackState {
   status: 'Playing' | 'Paused' | 'Stopped';
   current_track: string | null;
@@ -251,6 +278,7 @@ export interface PlaybackState {
   file_format?: string | null;
   is_buffering?: boolean;
   backend_position_secs?: number;
+  effective_audio_path?: EffectiveAudioPath | null;
 }
 
 export interface CustomPromptState {
@@ -479,8 +507,9 @@ export interface PlayerState {
   resetProMode: () => void;
   setDSP: (dsp: Partial<DSPState>) => Promise<void>;
   toggleDspAB: () => Promise<void>;
-  toggleExclusive: () => Promise<void>;
-  toggleBitPerfect: () => Promise<void>;
+  toggleExclusive: (enable?: boolean | unknown) => Promise<void>;
+  toggleBitPerfect: (enable?: boolean | unknown) => Promise<void>;
+  restoreAudioModes: () => Promise<void>;
   fetchDevices: () => Promise<void>;
   setAudioDevice: (name: string) => Promise<void>;
   playbackRate: number;
@@ -562,10 +591,14 @@ export interface PlayerState {
   isLoadingRecs: boolean;
   activeDiscoveryTab: string;
   discoveryLayout: 'shelves' | 'unified';
+  discoveryCardSize: number;
+  discoveryViewMode: 'grid' | 'list';
   setDiscoveryData: (data: DiscoveryHubData | null) => void;
   setIsLoadingRecs: (loading: boolean) => void;
   setActiveDiscoveryTab: (tab: string) => void;
   setDiscoveryLayout: (layout: 'shelves' | 'unified') => void;
+  setDiscoveryCardSize: (size: number) => void;
+  setDiscoveryViewMode: (mode: 'grid' | 'list') => void;
   cacheSizeLimit: number;
   setCacheSizeLimit: (limit: number) => void;
 
@@ -629,6 +662,14 @@ export interface PlayerState {
   aideoPageDesign: AideoPageDesign;
   setAideoPageDesign: (design: AideoPageDesign) => void;
 
+  // Theater / Fullscreen Mode Design Layout
+  theaterModeDesign: TheaterModeDesign;
+  setTheaterModeDesign: (design: TheaterModeDesign) => void;
+
+  // Theater Mode Floating Playback HUD Style
+  theaterHudStyle: TheaterHudStyle;
+  setTheaterHudStyle: (style: TheaterHudStyle) => void;
+
   // Player Bar Transparency (Glassmorphism)
   playerBarTransparent: boolean;
   setPlayerBarTransparent: (transparent: boolean) => void;
@@ -637,6 +678,8 @@ export interface PlayerState {
 
 export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 'vinyl';
 export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage';
+export type TheaterModeDesign = 'stage' | 'zen' | 'studio' | 'vinyl' | 'poster' | 'scope';
+export type TheaterHudStyle = 'capsule' | 'master' | 'minimal' | 'analog';
 
 // Design ids that existed before the 2026 home redesign. Stored values from
 // these are migrated to 'classic' on load.

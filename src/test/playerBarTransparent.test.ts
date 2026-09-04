@@ -65,6 +65,13 @@ describe('Player Bar Transparent Mode Contract', () => {
     expect(css).toMatch(/\.player-bar\.design-vinyl\s*\{[^}]*grid-column:\s*2/);
   });
 
+  it('retro vinyl bar permits upward flyout menus without clipping', () => {
+    const vinylRule = css.match(/\.player-bar\.design-vinyl\s*\{[^}]*\}/);
+    expect(vinylRule).not.toBeNull();
+    expect(vinylRule![0]).not.toMatch(/overflow:\s*hidden/);
+    expect(vinylRule![0]).toMatch(/overflow:\s*visible/);
+  });
+
   it('main content spans full height in column 2 for smooth underlap', () => {
     const mainRule = css.match(
       /\.app-main\s*\{[^}]*\}/

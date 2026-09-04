@@ -106,7 +106,7 @@ impl TidalState {
                 }
             }
         }
-        
+
         // Prioritize environment variables if available
         let env_id = std::env::var("TIDAL_CLIENT_ID").ok();
         let env_secret = std::env::var("TIDAL_CLIENT_SECRET").ok();
@@ -135,7 +135,7 @@ impl TidalState {
                 keyring_write(&entry, &content);
             }
         }
-        
+
         // Cleanup old file if it exists
         if let Ok(app_data) = app_handle.path().app_data_dir() {
             let cred_file = app_data.join("tidal_credentials.json");
@@ -336,7 +336,7 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
     let _guard = state.refresh_lock.lock().await;
 
     let current_sess = crate::safe_lock(&state.session).clone();
-    
+
     if let Some(mut sess) = current_sess {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -346,7 +346,7 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
         // If force is true, or the token expires in less than 5 minutes, try to refresh it
         if force || sess.expires_at < now + 300 {
             println!("{BOLD}{YELLOW}[TIDAL ENGINE] Access token refresh triggered (force={})...{RESET}", force);
-            
+
             let creds = TidalState::load_credentials(app_handle);
             let client = get_client();
             let body = [
@@ -359,7 +359,7 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
             match client.post("https://auth.tidal.com/v1/oauth2/token")
                 .form(&body)
                 .send()
-                .await 
+                .await
             {
                 Ok(res) => {
                     let status = res.status();
@@ -368,7 +368,7 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
                             let access_token = token_info["access_token"].as_str().ok_or_else(|| "No access token returned".to_string())?.to_string();
                             let refresh_token = token_info["refresh_token"].as_str().unwrap_or(&sess.refresh_token).to_string();
                             let expires_in = token_info["expires_in"].as_u64().unwrap_or(3600);
-                            
+
                             sess.access_token = access_token.clone();
                             sess.refresh_token = refresh_token;
                             sess.expires_at = now + expires_in;
@@ -400,7 +400,7 @@ async fn ensure_valid_token(app_handle: &AppHandle, state: &TidalState, force: b
             return Ok(sess.access_token);
         }
     }
-    
+
     Err("User is not authenticated with Tidal".to_string())
 }
 
@@ -415,7 +415,7 @@ pub async fn tidal_login_start(
 
     let creds = TidalState::load_credentials(&app_handle);
     let client = get_client();
-    
+
     // Fire TV + legacy Android Auto clients both use the standard Tidal user scopes
     let scope = "r_usr w_usr w_sub";
 
@@ -439,7 +439,7 @@ pub async fn tidal_login_start(
     }
 
     let auth_info = res.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
-    
+
     let device_code = auth_info["deviceCode"].as_str().ok_or("No device code")?.to_string();
     let user_code = auth_info["userCode"].as_str().ok_or("No user code")?.to_string();
     let _verification_uri = auth_info["verificationUri"].as_str().unwrap_or("link.tidal.com").to_string();
@@ -487,7 +487,7 @@ pub async fn tidal_login_start(
                         let refresh_token = token_info["refresh_token"].as_str().unwrap_or("").to_string();
                         let expires_in = token_info["expires_in"].as_u64().unwrap_or(3600);
                         let country_code = token_info["user"]["countryCode"].as_str().map(|s| s.to_string());
-                        
+
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
@@ -623,11 +623,11 @@ pub async fn tidal_search(
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
         println!("{BOLD}{RED}✘ [TIDAL ENGINE] Search failed ({}) — body: {}{RESET}", status, body);
-        
+
         if status.as_u16() == 403 && body.contains("r_usr") {
             return Err("Token missing 'r_usr' scope. If you entered Custom API Credentials, they do not support Lossless downloads. Please clear your custom credentials, Logout, and Login again.".to_string());
         }
-        
+
         return Err(format!("Tidal search failed ({}): {}", status, body));
     }
 
@@ -653,7 +653,7 @@ pub async fn tidal_search(
                 .to_string();
             let album = item["album"]["title"].as_str().unwrap_or("Unknown Album").to_string();
             let duration = item["duration"].as_u64().unwrap_or(0) as u32;
-            
+
             // Format album cover url
             let cover_uuid = item["album"]["cover"].as_str().unwrap_or("");
             let cover_url = if !cover_uuid.is_empty() {
@@ -688,9 +688,49 @@ pub async fn tidal_search(
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
 struct DecodedManifest {
-    #[serde(rename = "mimeType")]
+    #[serde(rename = "mimeType", default)]
     mime_type: String,
+    #[serde(default)]
     urls: Vec<String>,
+}
+
+pub fn parse_manifest_b64(manifest_b64: &str) -> Result<(String, String), String> {
+    let decoded_bytes = base64::engine::general_purpose::STANDARD.decode(manifest_b64)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(manifest_b64))
+        .map_err(|e| format!("Base64 decoding failed: {:?}", e))?;
+
+    let decoded_str = String::from_utf8(decoded_bytes)
+        .map_err(|e| format!("Invalid manifest encoding: {:?}", e))?;
+
+    let direct_url = if decoded_str.trim().starts_with('{') {
+        let manifest_json: DecodedManifest = serde_json::from_str(&decoded_str)
+            .map_err(|e| format!("Parsing decoded JSON manifest failed: {:?}", e))?;
+        if manifest_json.urls.is_empty() {
+            return Err("Decoded JSON manifest contained zero direct audio links".to_string());
+        }
+        manifest_json.urls[0].clone()
+    } else if decoded_str.contains("<BaseURL>") {
+        let start_tag = "<BaseURL>";
+        let end_tag = "</BaseURL>";
+        if let Some(start_idx) = decoded_str.find(start_tag) {
+            if let Some(end_idx) = decoded_str.find(end_tag) {
+                let url_content = &decoded_str[start_idx + start_tag.len()..end_idx];
+                url_content.replace("&amp;", "&").trim().to_string()
+            } else {
+                return Err("Decoded XML manifest was malformed (missing </BaseURL>)".to_string());
+            }
+        } else {
+            return Err("Decoded XML manifest did not contain a <BaseURL>".to_string());
+        }
+    } else {
+        return Err("Manifest does not contain a direct stream URL (neither JSON nor XML with BaseURL)".to_string());
+    };
+
+    if !direct_url.starts_with("http://") && !direct_url.starts_with("https://") {
+        return Err("Decoded manifest contained a relative or non-HTTP URL".to_string());
+    }
+
+    Ok((direct_url, decoded_str))
 }
 
 #[tauri::command]
@@ -707,7 +747,7 @@ pub async fn tidal_download(
 ) -> Result<bool, String> {
     let mut token = ensure_valid_token(&app_handle, &state, false).await?;
     let qualities = stream_quality_ladder();
-    let mut playback_info = None;
+    let mut resolved_stream: Option<(String, String)> = None;
     let mut last_error = "Failed to fetch any stream".to_string();
     let client = get_client();
     let mut token_refreshed = false;
@@ -743,23 +783,32 @@ pub async fn tidal_download(
                     }
                     Err(err) => {
                         last_error = format!("Forced token refresh failed: {}", err);
-                        break;
+                        return Err(last_error);
                     }
                 }
             }
             if res.status().as_u16() == 401 {
-                println!("{BOLD}{RED}✘ [TIDAL ENGINE] Still 401 with fresh/cooldown token at quality {}. Stopping quality ladder.{RESET}", q);
+                println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Download quality {} unauthorized (401). Falling back down quality ladder...{RESET}", q);
                 last_error = SUBSCRIPTION_BLOCKED_ERROR.to_string();
-                break;
+                continue;
             }
         }
 
         let status = res.status();
         if status.is_success() {
             if let Ok(json) = res.json::<serde_json::Value>().await {
-                if json["manifest"].as_str().is_some() {
-                    playback_info = Some(json);
-                    break;
+                if let Some(manifest_b64) = json["manifest"].as_str() {
+                    match parse_manifest_b64(manifest_b64) {
+                        Ok((direct_url, decoded_str)) => {
+                            resolved_stream = Some((direct_url, decoded_str));
+                            break;
+                        }
+                        Err(e) => {
+                            println!("{BOLD}{YELLOW}[TIDAL ENGINE] Quality {} manifest not directly downloadable ({}). Falling back down quality ladder...{RESET}", q, e);
+                            last_error = format!("Quality {} manifest unusable: {}", q, e);
+                            continue;
+                        }
+                    }
                 } else {
                     let err_msg = json["message"].as_str().unwrap_or("No manifest in success payload");
                     last_error = format!("Quality {} rejected: {}", q, err_msg);
@@ -770,51 +819,12 @@ pub async fn tidal_download(
             }
         } else {
             let err_body = res.text().await.unwrap_or_default();
-            last_error = format!("Quality {} returned HTTP {}: {}", q, status, err_body);
+            last_error = format!("Quality {} rejected ({}): {}{RESET}", q, status, err_body);
             println!("{BOLD}{YELLOW}[TIDAL ENGINE] Quality {} rejected ({}): {}{RESET}", q, status, err_body);
         }
     }
 
-    let playback_info = playback_info.ok_or(last_error)?;
-    
-    // 1. Get base64 encoded manifest
-    let manifest_b64 = playback_info["manifest"].as_str()
-        .ok_or_else(|| "Playback info did not contain manifest".to_string())?;
-
-    // 2. Decode base64 manifest robustly (trying both standard and URL-safe encodings)
-    let decoded_bytes = base64::engine::general_purpose::STANDARD.decode(manifest_b64)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(manifest_b64))
-        .map_err(|e| format!("Base64 decoding failed: {:?}", e))?;
-
-    let decoded_str = String::from_utf8(decoded_bytes)
-        .map_err(|e| format!("Invalid manifest encoding: {:?}", e))?;
-
-    // 3. Robustly parse the direct stream URL (supporting both JSON and MPEG-DASH XML formats)
-    let direct_url = if decoded_str.trim().starts_with('{') {
-        // Parse JSON manifest
-        let manifest_json: DecodedManifest = serde_json::from_str(&decoded_str)
-            .map_err(|e| format!("Parsing decoded JSON manifest failed: {:?}", e))?;
-        if manifest_json.urls.is_empty() {
-            return Err("Decoded JSON manifest contained zero direct audio links".to_string());
-        }
-        manifest_json.urls[0].clone()
-    } else if decoded_str.contains("<BaseURL>") {
-        // Parse XML manifest by extracting BaseURL
-        let start_tag = "<BaseURL>";
-        let end_tag = "</BaseURL>";
-        if let Some(start_idx) = decoded_str.find(start_tag) {
-            if let Some(end_idx) = decoded_str.find(end_tag) {
-                let url_content = &decoded_str[start_idx + start_tag.len()..end_idx];
-                url_content.replace("&amp;", "&").trim().to_string()
-            } else {
-                return Err("Decoded XML manifest was malformed (missing </BaseURL>)".to_string());
-            }
-        } else {
-            return Err("Decoded XML manifest did not contain a <BaseURL>".to_string());
-        }
-    } else {
-        return Err("Unknown manifest format (neither JSON nor XML with BaseURL)".to_string());
-    };
+    let (direct_url, decoded_str) = resolved_stream.ok_or(last_error)?;
 
     let is_flac = decoded_str.to_lowercase().contains("flac");
     let is_dolby = decoded_str.to_lowercase().contains("ec-3")
@@ -837,7 +847,7 @@ pub async fn tidal_download(
     let user_music = dirs::audio_dir().unwrap_or_else(|| {
         app_handle.path().audio_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     });
-    
+
     let tidal_dir = user_music.join("Aideo Downloads");
     let _ = std::fs::create_dir_all(&tidal_dir);
 
@@ -978,7 +988,6 @@ pub async fn tidal_get_stream_url(
 ) -> Result<String, String> {
     let mut token = ensure_valid_token(&app_handle, &state, false).await?;
     let qualities = stream_quality_ladder();
-    let mut playback_info = None;
     let mut last_error = "Failed to fetch any stream".to_string();
     let client = get_client();
     let mut token_refreshed = false;
@@ -1014,23 +1023,32 @@ pub async fn tidal_get_stream_url(
                     }
                     Err(err) => {
                         last_error = format!("Forced token refresh failed: {}", err);
-                        break;
+                        return Err(last_error);
                     }
                 }
             }
             if res.status().as_u16() == 401 {
-                println!("{BOLD}{RED}✘ [TIDAL ENGINE] Still 401 with fresh/cooldown token at quality {}. Stopping quality ladder.{RESET}", q);
+                println!("{BOLD}{YELLOW}⚠ [TIDAL ENGINE] Stream quality {} unauthorized (401). Falling back down quality ladder...{RESET}", q);
                 last_error = SUBSCRIPTION_BLOCKED_ERROR.to_string();
-                break;
+                continue;
             }
         }
 
         let status = res.status();
         if status.is_success() {
             if let Ok(json) = res.json::<serde_json::Value>().await {
-                if json["manifest"].as_str().is_some() {
-                    playback_info = Some(json);
-                    break;
+                if let Some(manifest_b64) = json["manifest"].as_str() {
+                    match parse_manifest_b64(manifest_b64) {
+                        Ok((direct_url, _)) => {
+                            println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] Resolved direct stream URL at quality {}{RESET}", q);
+                            return Ok(direct_url);
+                        }
+                        Err(e) => {
+                            println!("{BOLD}{YELLOW}[TIDAL ENGINE] Quality {} manifest not directly playable ({}). Falling back down quality ladder...{RESET}", q, e);
+                            last_error = format!("Quality {} manifest unusable: {}", q, e);
+                            continue;
+                        }
+                    }
                 } else {
                     let err_msg = json["message"].as_str().unwrap_or("No manifest in success payload");
                     last_error = format!("Quality {} rejected: {}", q, err_msg);
@@ -1044,48 +1062,7 @@ pub async fn tidal_get_stream_url(
         }
     }
 
-    let playback_info = playback_info.ok_or(last_error)?;
-    
-    // 1. Get base64 encoded manifest
-    let manifest_b64 = playback_info["manifest"].as_str()
-        .ok_or_else(|| "Playback info did not contain manifest".to_string())?;
-
-    // 2. Decode base64 manifest robustly (trying both standard and URL-safe encodings)
-    let decoded_bytes = base64::engine::general_purpose::STANDARD.decode(manifest_b64)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(manifest_b64))
-        .map_err(|e| format!("Base64 decoding failed: {:?}", e))?;
-
-    let decoded_str = String::from_utf8(decoded_bytes)
-        .map_err(|e| format!("Invalid manifest encoding: {:?}", e))?;
-
-    // 3. Robustly parse the direct stream URL (supporting both JSON and MPEG-DASH XML formats)
-    let direct_url = if decoded_str.trim().starts_with('{') {
-        // Parse JSON manifest
-        let manifest_json: DecodedManifest = serde_json::from_str(&decoded_str)
-            .map_err(|e| format!("Parsing decoded JSON manifest failed: {:?}", e))?;
-        if manifest_json.urls.is_empty() {
-            return Err("Decoded JSON manifest contained zero direct audio links".to_string());
-        }
-        manifest_json.urls[0].clone()
-    } else if decoded_str.contains("<BaseURL>") {
-        // Parse XML manifest by extracting BaseURL
-        let start_tag = "<BaseURL>";
-        let end_tag = "</BaseURL>";
-        if let Some(start_idx) = decoded_str.find(start_tag) {
-            if let Some(end_idx) = decoded_str.find(end_tag) {
-                let url_content = &decoded_str[start_idx + start_tag.len()..end_idx];
-                url_content.replace("&amp;", "&").trim().to_string()
-            } else {
-                return Err("Decoded XML manifest was malformed (missing </BaseURL>)".to_string());
-            }
-        } else {
-            return Err("Decoded XML manifest did not contain a <BaseURL>".to_string());
-        }
-    } else {
-        return Err("Unknown manifest format (neither JSON nor XML with BaseURL)".to_string());
-    };
-
-    Ok(direct_url)
+    Err(last_error)
 }
 
 #[tauri::command]
@@ -1281,7 +1258,7 @@ pub async fn get_tidal_autoplay_recommendations(
     title: String,
 ) -> Result<Vec<TidalTrackResult>, String> {
     println!("[tidal] Aideo Autoplay Engine v2: Resolving Tidal Radio for '{}' by '{}'", title, artist);
-    
+
     let query = if !artist.is_empty() && artist != "Unknown Artist" {
         format!("{} Radio", artist)
     } else if !title.is_empty() && title != "Unknown Title" {
@@ -1596,5 +1573,38 @@ mod tests {
         assert_eq!(out.len(), 1, ">15min and third-party/instrumental entries must be dropped");
         assert_eq!(out[0].id, "3");
     }
-}
 
+    #[test]
+    fn test_parse_manifest_b64_json_bts() {
+        let json_manifest = r#"{"mimeType":"audio/flac","urls":["https://sp-play.tidal.com/stream/track.flac"]}"#;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(json_manifest);
+        let res = parse_manifest_b64(&b64);
+        assert!(res.is_ok());
+        let (url, decoded) = res.unwrap();
+        assert_eq!(url, "https://sp-play.tidal.com/stream/track.flac");
+        assert!(decoded.contains("audio/flac"));
+    }
+
+    #[test]
+    fn test_parse_manifest_b64_xml_base_url() {
+        let xml_manifest = r#"<MPD><Period><AdaptationSet><Representation><BaseURL>https://sp-play.tidal.com/stream/track.m4a?token=abc&amp;expires=123</BaseURL></Representation></AdaptationSet></Period></MPD>"#;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(xml_manifest);
+        let res = parse_manifest_b64(&b64);
+        assert!(res.is_ok());
+        let (url, _) = res.unwrap();
+        assert_eq!(url, "https://sp-play.tidal.com/stream/track.m4a?token=abc&expires=123");
+    }
+
+    #[test]
+    fn test_parse_manifest_b64_segmented_dash_without_base_url_returns_err() {
+        let dash_manifest = r#"<MPD><Period><AdaptationSet><SegmentTemplate media="chunk_$Number$.m4s" initialization="init.mp4"/></AdaptationSet></Period></MPD>"#;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(dash_manifest);
+        let res = parse_manifest_b64(&b64);
+        assert!(res.is_err(), "DASH manifest without direct BaseURL must return Err so ladder can fall back to BTS quality");
+    }
+
+    #[test]
+    fn test_parse_manifest_b64_invalid_data() {
+        assert!(parse_manifest_b64("not_valid_base64!!!").is_err());
+    }
+}

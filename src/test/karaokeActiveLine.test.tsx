@@ -81,5 +81,147 @@ describe('KaraokeActiveLine', () => {
 
     expect(helWord.style.getPropertyValue('--word-progress')).toBe('50%');
   });
-});
 
+  it('handles forward seek jumps during active playback without lag', () => {
+    const { rerender } = render(
+      <KaraokeActiveLine
+        words={mockWords}
+        positionSecs={1.25}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    const helWord = screen.getByText('Hel');
+    const worldWord = screen.getByText('World');
+    expect(helWord.style.getPropertyValue('--word-progress')).toBe('50%');
+
+    // Seek forward to 2.5s (midpoint of "World" which is 2.0 to 3.0)
+    rerender(
+      <KaraokeActiveLine
+        words={mockWords}
+        positionSecs={2.5}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    expect(helWord.style.getPropertyValue('--word-progress')).toBe('100%');
+    expect(worldWord.style.getPropertyValue('--word-progress')).toBe('50%');
+  });
+
+  it('handles backward seek jumps during active playback', () => {
+    const { rerender } = render(
+      <KaraokeActiveLine
+        words={mockWords}
+        positionSecs={2.5}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    const helWord = screen.getByText('Hel');
+    const worldWord = screen.getByText('World');
+    expect(worldWord.style.getPropertyValue('--word-progress')).toBe('50%');
+
+    // Seek backward to 1.25s (midpoint of "Hel")
+    rerender(
+      <KaraokeActiveLine
+        words={mockWords}
+        positionSecs={1.25}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    expect(helWord.style.getPropertyValue('--word-progress')).toBe('50%');
+    expect(worldWord.style.getPropertyValue('--word-progress')).toBe('0%');
+  });
+
+  it('re-anchors timing and resets progress when words array changes', () => {
+    const { rerender } = render(
+      <KaraokeActiveLine
+        words={mockWords}
+        positionSecs={1.8}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    const newWords = [
+      { text: 'Start', time_secs: 5.0, duration_secs: 1.0 },
+      { text: 'End', time_secs: 6.0, duration_secs: 1.0 },
+    ];
+
+    rerender(
+      <KaraokeActiveLine
+        words={newWords}
+        positionSecs={5.5}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    expect(screen.getByText('Start')).toBeInTheDocument();
+    expect(screen.getByText('End')).toBeInTheDocument();
+    const startWord = screen.getByText('Start');
+    expect(startWord.style.getPropertyValue('--word-progress')).toBe('50%');
+  });
+
+  it('separates trailing whitespace into dedicated space elements to prevent gradient freeze', () => {
+    const wordsWithSpaces = [
+      { text: 'Hello ', time_secs: 1.0, duration_secs: 1.0 },
+      { text: 'beautiful ', time_secs: 2.0, duration_secs: 1.0 },
+      { text: 'world', time_secs: 3.0, duration_secs: 1.0 },
+    ];
+
+    const { container } = render(
+      <KaraokeActiveLine
+        words={wordsWithSpaces}
+        positionSecs={1.5}
+        lyricOffset={0}
+        isPlaying={false}
+      />
+    );
+
+    // The core word 'Hello' should have --word-progress: 50%
+    const helloSpan = screen.getByText('Hello');
+    expect(helloSpan.style.getPropertyValue('--word-progress')).toBe('50%');
+
+    // Spaces should be separated into dedicated space elements
+    const spaceSpans = container.querySelectorAll('.lyric-word-space');
+    expect(spaceSpans.length).toBe(2);
+    expect(spaceSpans[0].textContent).toBe(' ');
+  });
+
+  it('skips React re-rendering on sub-0.25s ticks during active playback to prevent clashing with rAF', () => {
+    const trackingWords = [
+      { text: 'Track', time_secs: 1.0, duration_secs: 1.0 },
+    ];
+
+    const { rerender } = render(
+      <KaraokeActiveLine
+        words={trackingWords}
+        positionSecs={1.0}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    const spanBefore = screen.getByText('Track');
+
+    // Simulate standard 100ms playback clock tick (+0.1s)
+    rerender(
+      <KaraokeActiveLine
+        words={trackingWords}
+        positionSecs={1.1}
+        lyricOffset={0}
+        isPlaying={true}
+      />
+    );
+
+    const spanAfter = screen.getByText('Track');
+    // Same DOM element reference preserved without React tearing or recreation
+    expect(spanBefore).toBe(spanAfter);
+  });
+});

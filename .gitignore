@@ -101,6 +101,14 @@ ehthumbs.db
 .kilo/
 .opencode/
 .code-review-graph/
+.uizze/
+graphify-out/
+agy-daemon.cmd
+Aideo_Space.md
+GEMINI.md
+skills-lock.json
+design-test/
+docs/superpowers/
 .cursor/
 .claude/
 .windsurf/
@@ -135,6 +143,7 @@ ytdlp.exe
 scratch/
 temp/
 tmp/
+src-tauri/*.lrc
 test.wav
 *.wav
 *.mp3
@@ -145,6 +154,9 @@ test.wav
 *.aac
 *.alac
 *.m4a
+/public/tauri.svg
+/public/vite.svg
+/src/assets/react.svg
 patch_player.py
 patch_player.ps1
 Untitled-*.txt
