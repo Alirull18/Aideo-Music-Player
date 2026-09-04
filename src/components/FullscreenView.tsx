@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   Play,
   Pause,
@@ -16,7 +16,6 @@ import {
   Minimize2,
   Sparkles,
   LayoutGrid,
-  Music,
   Activity,
   Languages,
   Type,
@@ -30,8 +29,17 @@ import { LiquidBackground } from './LiquidBackground';
 import { Visualizer } from './Visualizer';
 import { generateWaveformPeaks } from '../utils/waveform';
 import { baseName, getStreamName } from '../utils';
-import { LyricsDisplayMode } from '../store/types';
-import { KaraokeActiveLine } from './KaraokeActiveLine';
+import { LyricsDisplayMode, TheaterModeDesign } from '../store/types';
+import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
+
+const THEATER_NAMES: Record<TheaterModeDesign, string> = {
+  stage: 'Stage View',
+  zen: 'Zen View',
+  studio: 'Studio Deck',
+  vinyl: 'Turntable',
+  poster: 'Poster View',
+  scope: 'Pure Scope',
+};
 
 export function FullscreenView() {
   const {
@@ -104,15 +112,24 @@ export function FullscreenView() {
     isTranslating: s.isTranslating,
     getRomaji: s.getRomaji,
     albumArtFit: s.albumArtFit,
+    theaterModeDesign: s.theaterModeDesign,
+    setTheaterModeDesign: s.setTheaterModeDesign,
   })));
 
   const effectiveCover = coverArt || currentTrack?.cover_url || defaultCover;
-
   const trackDuration = currentTrack?.duration || 0;
 
-  const [layout, setLayout] = useState<'stage' | 'zen'>(() => {
-    return (localStorage.getItem('aideo-fullscreen-layout') as 'stage' | 'zen') || 'stage';
-  });
+  const [spectrumBands, setSpectrumBands] = useState<number[]>([]);
+  useEffect(() => {
+    let active = true;
+    const unlistenPromise = listen<number[]>('audio-spectrum', event => {
+      if (active) setSpectrumBands(event.payload);
+    });
+    return () => {
+      active = false;
+      unlistenPromise.then(fn => fn()).catch(() => {});
+    };
+  }, []);
 
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(true);
   const [isHUDHidden, setIsHUDHidden] = useState(false);
@@ -124,11 +141,6 @@ export function FullscreenView() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const activityTimer = useRef<number | null>(null);
-
-  // Sync Layout preference
-  useEffect(() => {
-    localStorage.setItem('aideo-fullscreen-layout', layout);
-  }, [layout]);
 
   // Sync Visualizer preference
   useEffect(() => {
@@ -216,7 +228,13 @@ export function FullscreenView() {
         }
       } else if (key === 'l') {
         e.preventDefault();
-        setLayout(prev => prev === 'stage' ? 'zen' : 'stage');
+        const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+        const cur = useStore.getState().theaterModeDesign;
+        const next = order[(order.indexOf(cur) + 1) % order.length];
+        useStore.getState().setTheaterModeDesign(next);
+        window.dispatchEvent(new CustomEvent('ui-toast', { 
+          detail: { message: `Theater Persona: ${THEATER_NAMES[next]}`, type: 'info' } 
+        }));
       } else if (key === 'v') {
         e.preventDefault();
         const modes: ('baseline' | 'circle' | 'wave')[] = ['baseline', 'circle', 'wave'];
@@ -326,7 +344,7 @@ export function FullscreenView() {
       const targetTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
       container.scrollTo({ top: targetTop, behavior: 'smooth' });
     }
-  }, [activeIdx, layout, lyricsDisplayMode]);
+  }, [activeIdx, theaterModeDesign, lyricsDisplayMode]);
 
   // Play/Pause handler
   const handlePlayPause = () => {
@@ -406,221 +424,41 @@ export function FullscreenView() {
       {/* Floating Layout Toggle */}
       <button
         className="fullscreen-layout-toggle"
-        onClick={() => setLayout(layout === 'stage' ? 'zen' : 'stage')}
-        title={`Switch to ${layout === 'stage' ? 'Zen Mode' : 'Stage Mode'}`}
+        onClick={() => {
+          const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+          const next = order[(order.indexOf(theaterModeDesign) + 1) % order.length];
+          setTheaterModeDesign(next);
+        }}
+        title={`Current: ${THEATER_NAMES[theaterModeDesign]} (Click to cycle persona)`}
       >
         <LayoutGrid size={16} />
-        <span>{layout === 'stage' ? 'Zen View' : 'Stage View'}</span>
+        <span>{THEATER_NAMES[theaterModeDesign]}</span>
       </button>
 
       {/* Main Content Pane */}
-      <AnimatePresence mode="wait">
-        {layout === 'stage' ? (
-          <motion.div
-            key="stage"
-            className="fullscreen-content-stage"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.4 }}
-          >
-            {/* Left Column: Artwork and Meta */}
-            <div className="fullscreen-stage-left">
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 440, height: 440 }}>
-                {/* Dynamic Ambient Glow Aura */}
-                <div 
-                  className="fullscreen-cover-glow-aura" 
-                  style={{
-                    background: `radial-gradient(circle, ${accentColor || 'var(--dynamic-accent)'} 0%, rgba(var(--accent-rgb, 139, 92, 246), 0.35) 45%, transparent 70%)`
-                  }} 
-                />
-                {vizMode === 'circle' && (
-                  <div style={{ position: 'absolute', width: 620, height: 620, zIndex: 1, pointerEvents: 'none' }}>
-                    <Visualizer mode="circle" />
-                  </div>
-                )}
-                <div className={`fullscreen-cover-art-wrap ${albumArtFit === 'contain' ? 'contain-mode' : ''}`} style={{ zIndex: 2, margin: 0 }}>
-                  {albumArtFit === 'contain' && (
-                    <div 
-                      className="fullscreen-cover-ambient-bg" 
-                      style={{ backgroundImage: `url(${effectiveCover})` }} 
-                    />
-                  )}
-                  <img
-                    src={effectiveCover}
-                    alt="Album Artwork"
-                    className={`fullscreen-cover-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
-                  />
-                </div>
-              </div>
-
-              <div className="fullscreen-track-meta">
-                <h1 className="fullscreen-track-title">
-                  {currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''))}
-                </h1>
-                <p className="fullscreen-track-artist">
-                  {currentTrack?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
-                </p>
-
-                {/* Telemetry Badge */}
-                <div className="fullscreen-telemetry-badge">
-                  <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor, boxShadow: `0 0 8px ${accentColor}` }}></span>
-                  <span>{telemetryText}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Synced scrolling lyrics */}
-            <div className="fullscreen-lyrics-column">
-              <div className={`fullscreen-lyrics-fade-wrap ${lyricsDisplayMode === 'static' ? 'plain-mode' : ''}`}>
-                <div className="fullscreen-lyrics-scroll" ref={scrollRef}>
-                  <div className="fullscreen-lyric-spacer" />
-                  {lyrics.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 18, padding: '100px 0' }}>
-                      {lyricStatus === 'loading' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Activity size={32} className="spin" style={{ color: accentColor }} />
-                          <div>Loading Synced Lyrics...</div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Music size={32} style={{ color: 'var(--text-dim)' }} />
-                          <div>Instrumental or No Lyrics Available</div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    lyrics.map((l, i) => (
-                      <div
-                        key={i}
-                        data-idx={i}
-                        className={`fullscreen-lyric-line ${lyricsDisplayMode !== 'static' && i === activeIdx ? 'active' : ''}`}
-                        style={{ cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default' }}
-                        onClick={() => {
-                          if (lyricsDisplayMode !== 'static') {
-                            seek(l.time_secs - lyricOffset / 1000);
-                          }
-                        }}
-                      >
-                        <div>
-                          {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
-                            <KaraokeActiveLine
-                              words={l.words}
-                              positionSecs={playbackPositionSecs}
-                              lyricOffset={lyricOffset}
-                              isPlaying={playbackStatus === 'Playing'}
-                            />
-                          ) : (
-                            l.text || '♪'
-                          )}
-                        </div>
-                        {showRomaji && l.romaji && l.romaji !== l.text && (
-                          <div className="fullscreen-lyric-romaji">{l.romaji}</div>
-                        )}
-                        {showTranslation && l.translation && (
-                          <div className="fullscreen-lyric-translation">{l.translation}</div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                  <div className="fullscreen-lyric-spacer" />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="zen"
-            className="fullscreen-content-zen"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.4 }}
-            style={{ position: 'relative' }}
-          >
-            {/* Centered Circle Visualizer in background for Zen mode */}
-            {vizMode === 'circle' && (
-              <div style={{ position: 'absolute', width: 600, height: 600, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 0, opacity: 0.12, pointerEvents: 'none' }}>
-                <Visualizer mode="circle" />
-              </div>
-            )}
-            {/* Small floating artwork in top-left */}
-            <div className="fullscreen-zen-floating-art">
-              <img
-                src={effectiveCover}
-                alt="Album Cover"
-                className="fullscreen-zen-art-thumb"
-              />
-              <div className="fullscreen-zen-art-info">
-                <span className="fullscreen-zen-art-title">
-                  {currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''))}
-                </span>
-                <span className="fullscreen-zen-art-artist">
-                  {currentTrack?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
-                </span>
-              </div>
-            </div>
-
-            {/* Immersive Centered Lyrics */}
-            <div className="fullscreen-lyrics-column">
-              <div className={`fullscreen-lyrics-fade-wrap ${lyricsDisplayMode === 'static' ? 'plain-mode' : ''}`}>
-                <div className="fullscreen-zen-lyrics-scroll" ref={scrollRef}>
-                  <div className="fullscreen-lyric-spacer" />
-                  {lyrics.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 20, padding: '100px 0' }}>
-                      {lyricStatus === 'loading' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Activity size={32} className="spin" style={{ color: accentColor }} />
-                          <div>Loading Synced Lyrics...</div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Music size={32} style={{ color: 'var(--text-dim)' }} />
-                          <div>Instrumental or No Lyrics Available</div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    lyrics.map((l, i) => (
-                      <div
-                        key={i}
-                        data-idx={i}
-                        className={`fullscreen-zen-lyric-line ${lyricsDisplayMode !== 'static' && i === activeIdx ? 'active' : ''}`}
-                        style={{ cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default' }}
-                        onClick={() => {
-                          if (lyricsDisplayMode !== 'static') {
-                            seek(l.time_secs - lyricOffset / 1000);
-                          }
-                        }}
-                      >
-                        <div>
-                          {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
-                            <KaraokeActiveLine
-                              words={l.words}
-                              positionSecs={playbackPositionSecs}
-                              lyricOffset={lyricOffset}
-                              isPlaying={playbackStatus === 'Playing'}
-                            />
-                          ) : (
-                            l.text || '♪'
-                          )}
-                        </div>
-                        {showRomaji && l.romaji && l.romaji !== l.text && (
-                          <div className="fullscreen-lyric-romaji">{l.romaji}</div>
-                        )}
-                        {showTranslation && l.translation && (
-                          <div className="fullscreen-lyric-translation">{l.translation}</div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                  <div className="fullscreen-lyric-spacer" />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <TheaterLayoutSwitch
+        design={theaterModeDesign}
+        currentTrack={currentTrack}
+        effectiveCover={effectiveCover}
+        playbackCurrentTrack={playbackCurrentTrack}
+        lyrics={lyrics}
+        lyricStatus={lyricStatus}
+        lyricsDisplayMode={lyricsDisplayMode}
+        activeIdx={activeIdx}
+        playbackPositionSecs={playbackPositionSecs}
+        playbackStatus={playbackStatus}
+        lyricOffset={lyricOffset}
+        showRomaji={showRomaji}
+        showTranslation={showTranslation}
+        accentColor={accentColor}
+        telemetryText={telemetryText}
+        albumArtFit={albumArtFit}
+        vizMode={vizMode}
+        seek={seek}
+        scrollRef={scrollRef}
+        spectrumBands={spectrumBands}
+        lowSpecMode={dsp.low_spec_mode}
+      />
 
       {/* Sharp Glowing Neon Visualizer Baseline / Wave */}
       {vizMode !== 'circle' && (
@@ -676,7 +514,7 @@ export function FullscreenView() {
         <div className="fullscreen-hud-controls">
           {/* Metadata Display in control bar */}
           <div className="fullscreen-hud-left">
-            {layout === 'zen' && (
+            {theaterModeDesign === 'zen' && (
               <div className="fullscreen-telemetry-badge">
                 <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor }}></span>
                 <span>{telemetryText}</span>

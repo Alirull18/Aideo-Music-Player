@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
-import { PlayerBarDesign, AideoPageDesign } from '../store/types';
+import { PlayerBarDesign, AideoPageDesign, TheaterModeDesign } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -12,7 +12,8 @@ import {
   Search, Palette, Volume2, Info, ShieldAlert, Laptop, HelpCircle, 
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
   Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3,
-  Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen
+  Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen,
+  Tv2, Sliders, FileText, Type
 } from 'lucide-react';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
@@ -120,6 +121,7 @@ export function SettingsView() {
     globalHotkeys, setGlobalHotkey,
     playerBarDesign, setPlayerBarDesign,
     aideoPageDesign, setAideoPageDesign,
+    theaterModeDesign, setTheaterModeDesign,
     playerBarTransparent, togglePlayerBarTransparent, setPlayerBarTransparent,
     discoveryLayout, setDiscoveryLayout
   } = useStore(useShallow(s => ({
@@ -205,6 +207,8 @@ export function SettingsView() {
     setPlayerBarDesign: s.setPlayerBarDesign,
     aideoPageDesign: s.aideoPageDesign,
     setAideoPageDesign: s.setAideoPageDesign,
+    theaterModeDesign: s.theaterModeDesign,
+    setTheaterModeDesign: s.setTheaterModeDesign,
     playerBarTransparent: s.playerBarTransparent,
     togglePlayerBarTransparent: s.togglePlayerBarTransparent,
     discoveryLayout: s.discoveryLayout,
@@ -390,6 +394,7 @@ export function SettingsView() {
     setSelectedFont('Outfit');
     setFontScale(100);
     setPlayerBarDesign('classic');
+    setTheaterModeDesign('stage');
     setPlayerBarTransparent(false);
     if (!liquidBackgroundEnabled) toggleLiquidBackground();
     if (!sidebarLastfmVisible) toggleSidebarLastfmVisible();
@@ -1144,6 +1149,129 @@ export function SettingsView() {
               <LayoutGrid size={13} />
               Unified Feed
             </button>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'theater-mode-design',
+      title: 'Theater & Fullscreen Style',
+      description: 'Choose your default visual archetype for Theater Fullscreen mode.',
+      keywords: 'theater fullscreen layout style design stage zen studio vinyl turntable poster scope visualizer appearance UI',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+            {[
+              {
+                id: 'stage' as TheaterModeDesign,
+                name: 'Stage View',
+                badge: 'MODERN',
+                badgeColor: '#8b5cf6',
+                icon: <Tv2 size={18} color="#a78bfa" />,
+                desc: 'Balanced 2-column layout with high-contrast album artwork and smooth karaoke word-by-word synced lyrics.',
+              },
+              {
+                id: 'zen' as TheaterModeDesign,
+                name: 'Zen Mode',
+                badge: 'MINIMAL',
+                badgeColor: '#10b981',
+                icon: <Type size={18} color="#34d399" />,
+                desc: 'Typographic focus with generous whitespace, centered lyric typography, and minimal ambient art pill.',
+              },
+              {
+                id: 'studio' as TheaterModeDesign,
+                name: 'Hi-Fi Studio Deck',
+                badge: 'AUDIOPHILE',
+                badgeColor: '#f59e0b',
+                icon: <Sliders size={18} color="#fbbf24" />,
+                desc: 'Vintage analog studio console with dual ballistic needle VU meters, signal path telemetry, and realtime oscilloscope.',
+              },
+              {
+                id: 'vinyl' as TheaterModeDesign,
+                name: 'Vinyl Turntable',
+                badge: 'ANALOG WARMTH',
+                badgeColor: '#ec4899',
+                icon: <Disc size={18} color="#f472b6" />,
+                desc: 'Realistic 33⅓ RPM rotating vinyl with micro-groove sheen, physical tonearm tracking progress, and propped jacket.',
+              },
+              {
+                id: 'poster' as TheaterModeDesign,
+                name: 'Editorial Poster',
+                badge: 'SWISS GRID',
+                badgeColor: '#06b6d4',
+                icon: <FileText size={18} color="#22d3ee" />,
+                desc: 'Swiss broadsheet layout with bold solid-ink typography, asymmetric grid, and album liner notes archive.',
+              },
+              {
+                id: 'scope' as TheaterModeDesign,
+                name: 'Pure Scope',
+                badge: 'IMMERSIVE',
+                badgeColor: '#a855f7',
+                icon: <Activity size={18} color="#c084fc" />,
+                desc: 'Full-bleed 60fps audio reactive vector scope modulated by 64 FFT bands with an ethereal auto-dimming lyric overlay.',
+              },
+            ].map((d) => {
+              const isSelected = theaterModeDesign === d.id;
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => setTheaterModeDesign(d.id)}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    padding: 16,
+                    borderRadius: 12,
+                    border: isSelected ? '1px solid var(--accent, #8b5cf6)' : '1px solid var(--glass-border)',
+                    background: isSelected ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.08)' : 'var(--glass)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    position: 'relative',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {d.icon}
+                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{d.name}</span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          background: `${d.badgeColor}22`,
+                          color: d.badgeColor,
+                          border: `1px solid ${d.badgeColor}44`,
+                          letterSpacing: '0.5px',
+                        }}
+                      >
+                        {d.badge}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.45, margin: 0 }}>
+                      {d.desc}
+                    </p>
+                  </div>
+                  {isSelected && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: 'var(--accent, #8b5cf6)',
+                        letterSpacing: '0.5px',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      ✓ Active Persona
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )
