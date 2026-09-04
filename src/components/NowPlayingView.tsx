@@ -2,11 +2,12 @@ import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2 } from 'lucide-react';
+import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
 import { LiquidBackground } from './LiquidBackground';
+import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
 import { baseName, getStreamName, isStreamTrack, isRadioStream } from '../utils';
 
 export function NowPlayingView() {
@@ -19,7 +20,8 @@ export function NowPlayingView() {
     setMiniPlayerMode,
     playbackCurrentTrack,
     playbackBitPerfect,
-    playbackDevRate
+    playbackDevRate,
+    queue
   } = useStore(useShallow(s => ({
     playbackCurrentTrack: s.playback.current_track,
     playbackBitPerfect: s.playback.bit_perfect,
@@ -43,6 +45,7 @@ export function NowPlayingView() {
     desktopLyricsLocked: s.desktopLyricsLocked,
     toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
     setMiniPlayerMode: s.setMiniPlayerMode,
+    queue: s.queue,
   })));
   const current = currentTrack;
   const effectiveCover = coverArt || current?.cover_url || null;
@@ -54,6 +57,7 @@ export function NowPlayingView() {
   }, [current, cachedCloudHashes]);
 
   const [showLyrics, setShowLyrics] = useState(true);
+  const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
 
   if (!playbackCurrentTrack) {
     return (
@@ -242,6 +246,66 @@ export function NowPlayingView() {
             }}
           >
             <Minimize2 size={16} />
+          </button>
+
+          {/* Up Next Queue Drawer Toggle Button */}
+          <button
+            onClick={() => setIsQueueDrawerOpen(!isQueueDrawerOpen)}
+            title="Open Up Next Queue"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: isQueueDrawerOpen ? '1px solid rgba(var(--accent-rgb), 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+              background: isQueueDrawerOpen ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255, 255, 255, 0.03)',
+              color: isQueueDrawerOpen ? 'var(--accent)' : 'var(--text-dim)',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+              boxShadow: isQueueDrawerOpen ? '0 0 10px rgba(var(--accent-rgb), 0.25)' : 'none',
+              position: 'relative'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.08)';
+              if (!isQueueDrawerOpen) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)';
+                e.currentTarget.style.color = 'white';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              if (!isQueueDrawerOpen) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                e.currentTarget.style.color = 'var(--text-dim)';
+              }
+            }}
+          >
+            <ListMusic size={16} />
+            {queue.length > 0 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  minWidth: 14,
+                  height: 14,
+                  padding: '0 3px',
+                  borderRadius: 7,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  backgroundColor: 'var(--accent)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  lineHeight: 1
+                }}
+              >
+                {queue.length > 99 ? '99+' : queue.length}
+              </span>
+            )}
           </button>
 
           {/* Theater Fullscreen Toggle Button */}
@@ -537,7 +601,11 @@ export function NowPlayingView() {
       {/* Lyrics — Right column */}
       {showLyrics && <LyricsPanel />}
 
-
+      {/* Up Next Queue Drawer */}
+      <TheaterQueueDrawer
+        isOpen={isQueueDrawerOpen}
+        onClose={() => setIsQueueDrawerOpen(false)}
+      />
     </div>
   );
 }

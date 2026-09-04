@@ -22,7 +22,8 @@ import {
   Mic,
   AlignLeft,
   FileText,
-  Loader2
+  Loader2,
+  ListMusic
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
@@ -30,6 +31,7 @@ import { Visualizer } from './Visualizer';
 import { generateWaveformPeaks } from '../utils/waveform';
 import { LyricsDisplayMode, TheaterModeDesign } from '../store/types';
 import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
+import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
 
 const THEATER_NAMES: Record<TheaterModeDesign, string> = {
   stage: 'Stage View',
@@ -77,7 +79,8 @@ export function FullscreenView() {
     playbackVolume,
     playbackBitPerfect,
     playbackDevRate,
-    playbackIsBuffering
+    playbackIsBuffering,
+    queue
   } = useStore(useShallow(s => ({
     playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
@@ -115,7 +118,10 @@ export function FullscreenView() {
     albumArtFit: s.albumArtFit,
     theaterModeDesign: s.theaterModeDesign,
     setTheaterModeDesign: s.setTheaterModeDesign,
+    queue: s.queue,
   })));
+
+  const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
 
   const effectiveCover = coverArt || currentTrack?.cover_url || defaultCover;
   const trackDuration = currentTrack?.duration || 0;
@@ -209,7 +215,14 @@ export function FullscreenView() {
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
         e.preventDefault();
-        setView('nowplaying');
+        if (isQueueDrawerOpen) {
+          setIsQueueDrawerOpen(false);
+        } else {
+          setView('nowplaying');
+        }
+      } else if (key === 'q') {
+        e.preventDefault();
+        setIsQueueDrawerOpen(prev => !prev);
       } else if (key === 'f' || e.key === 'F11') {
         e.preventDefault();
         const appWindow = getCurrentWindow();
@@ -271,7 +284,7 @@ export function FullscreenView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setView]);
+  }, [setView, isQueueDrawerOpen]);
 
   // Autohide HUD timer: 3.5 seconds of inactivity
   useEffect(() => {
@@ -280,9 +293,11 @@ export function FullscreenView() {
       if (activityTimer.current) {
         clearTimeout(activityTimer.current);
       }
-      activityTimer.current = window.setTimeout(() => {
-        setIsHUDHidden(true);
-      }, 3500);
+      if (!isQueueDrawerOpen) {
+        activityTimer.current = window.setTimeout(() => {
+          setIsHUDHidden(true);
+        }, 3500);
+      }
     };
 
     window.addEventListener('mousemove', resetTimer, { passive: true });
@@ -624,6 +639,39 @@ export function FullscreenView() {
               />
             </div>
 
+            {/* Up Next Queue Drawer Toggle */}
+            <button
+              className={`fullscreen-hud-btn ${isQueueDrawerOpen ? 'active' : ''}`}
+              onClick={() => setIsQueueDrawerOpen(prev => !prev)}
+              title="Up Next Queue (Q)"
+              style={{ position: 'relative' }}
+            >
+              <ListMusic size={18} />
+              {queue.length > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 2,
+                    minWidth: 14,
+                    height: 14,
+                    padding: '0 3px',
+                    borderRadius: 7,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    backgroundColor: accentColor,
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    lineHeight: 1
+                  }}
+                >
+                  {queue.length > 99 ? '99+' : queue.length}
+                </span>
+              )}
+            </button>
+
             {/* Native Fullscreen Toggle Button */}
             <button
               className="fullscreen-hud-btn"
@@ -640,6 +688,12 @@ export function FullscreenView() {
           </div>
         </div>
       </div>
+
+      {/* Up Next Queue Drawer */}
+      <TheaterQueueDrawer
+        isOpen={isQueueDrawerOpen}
+        onClose={() => setIsQueueDrawerOpen(false)}
+      />
     </div>
   );
 }
