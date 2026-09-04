@@ -2,19 +2,20 @@ import { useState, useMemo } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic } from 'lucide-react';
+import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic, Sliders } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
 import { LiquidBackground } from './LiquidBackground';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
+import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 import { baseName, getStreamName, isStreamTrack, isRadioStream } from '../utils';
 
 export function NowPlayingView() {
   const { 
     currentDevice, coverArt, dsp, 
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
-    setView, toggleLoveTrack, toggleDislikeTrack, toggleControlCenter,
+    setView, toggleLoveTrack, toggleDislikeTrack,
     albumArtFit, cachedCloudHashes, setLibrarySearchQuery,
     desktopLyricsOpen, toggleDesktopLyrics, desktopLyricsLocked, toggleDesktopLyricsLocked,
     setMiniPlayerMode,
@@ -36,7 +37,6 @@ export function NowPlayingView() {
     setView: s.setView,
     toggleLoveTrack: s.toggleLoveTrack,
     toggleDislikeTrack: s.toggleDislikeTrack,
-    toggleControlCenter: s.toggleControlCenter,
     albumArtFit: s.albumArtFit,
     cachedCloudHashes: s.cachedCloudHashes,
     setLibrarySearchQuery: s.setLibrarySearchQuery,
@@ -58,6 +58,7 @@ export function NowPlayingView() {
 
   const [showLyrics, setShowLyrics] = useState(true);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
+  const [isSignalPathOpen, setIsSignalPathOpen] = useState(false);
 
   if (!playbackCurrentTrack) {
     return (
@@ -308,6 +309,42 @@ export function NowPlayingView() {
             )}
           </button>
 
+          {/* Audio Signal Path & Telemetry Inspector Button */}
+          <button
+            onClick={() => setIsSignalPathOpen(!isSignalPathOpen)}
+            title="Inspect Audio Signal Path & Telemetry"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: isSignalPathOpen ? '1px solid rgba(var(--accent-rgb), 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+              background: isSignalPathOpen ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255, 255, 255, 0.03)',
+              color: isSignalPathOpen ? 'var(--accent)' : 'var(--text-dim)',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+              boxShadow: isSignalPathOpen ? '0 0 10px rgba(var(--accent-rgb), 0.25)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.08)';
+              if (!isSignalPathOpen) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)';
+                e.currentTarget.style.color = 'white';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              if (!isSignalPathOpen) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                e.currentTarget.style.color = 'var(--text-dim)';
+              }
+            }}
+          >
+            <Sliders size={16} />
+          </button>
+
           {/* Theater Fullscreen Toggle Button */}
           <button
             onClick={() => setView('fullscreen')}
@@ -509,14 +546,14 @@ export function NowPlayingView() {
             {playbackBitPerfect && (
               <span 
                 className="bit-badge" 
-                onClick={() => toggleControlCenter()}
+                onClick={() => setIsSignalPathOpen(true)}
                 style={{ 
                   flexShrink: 0, 
                   background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', 
                   boxShadow: '0 0 12px rgba(6, 182, 212, 0.4)',
                   cursor: 'pointer'
                 }}
-                title="View Audio Signal Path"
+                title="Inspect Audio Signal Path & Telemetry"
               >
                 {currentDevice?.startsWith('[ASIO]') ? 'ASIO BIT-PERFECT' : 'BIT-PERFECT'} {playbackDevRate > 0 ? `· ${playbackDevRate / 1000}kHz` : ''} 🎛️
               </span>
@@ -524,14 +561,14 @@ export function NowPlayingView() {
             {dsp.upsample_rate > 0 && !playbackBitPerfect && (
               <span 
                 className="bit-badge" 
-                onClick={() => toggleControlCenter()}
+                onClick={() => setIsSignalPathOpen(true)}
                 style={{ 
                   flexShrink: 0, 
                   background: 'linear-gradient(135deg, #a855f7, #6366f1)', 
                   boxShadow: '0 0 12px rgba(168, 85, 247, 0.4)',
                   cursor: 'pointer'
                 }}
-                title="View Audio Signal Path"
+                title="Inspect Audio Signal Path & Telemetry"
               >
                 HI-RES · {dsp.upsample_rate / 1000}kHz 🎛️
               </span>
@@ -539,7 +576,7 @@ export function NowPlayingView() {
             {!playbackBitPerfect && dsp.upsample_rate <= 0 && (
               <span 
                 className="bit-badge" 
-                onClick={() => toggleControlCenter()}
+                onClick={() => setIsSignalPathOpen(true)}
                 style={{ 
                   flexShrink: 0, 
                   background: 'linear-gradient(135deg, #374151, #4b5563)', 
@@ -605,6 +642,12 @@ export function NowPlayingView() {
       <TheaterQueueDrawer
         isOpen={isQueueDrawerOpen}
         onClose={() => setIsQueueDrawerOpen(false)}
+      />
+
+      {/* Audio Signal Path & Telemetry Inspector */}
+      <TheaterSignalPathModal
+        isOpen={isSignalPathOpen}
+        onClose={() => setIsSignalPathOpen(false)}
       />
     </div>
   );

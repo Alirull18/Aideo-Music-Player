@@ -32,6 +32,7 @@ import { generateWaveformPeaks } from '../utils/waveform';
 import { LyricsDisplayMode, TheaterModeDesign } from '../store/types';
 import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
+import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 
 const THEATER_NAMES: Record<TheaterModeDesign, string> = {
   stage: 'Stage View',
@@ -122,6 +123,7 @@ export function FullscreenView() {
   })));
 
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
+  const [isSignalPathOpen, setIsSignalPathOpen] = useState(false);
 
   const effectiveCover = coverArt || currentTrack?.cover_url || defaultCover;
   const trackDuration = currentTrack?.duration || 0;
@@ -215,11 +217,16 @@ export function FullscreenView() {
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
         e.preventDefault();
-        if (isQueueDrawerOpen) {
+        if (isSignalPathOpen) {
+          setIsSignalPathOpen(false);
+        } else if (isQueueDrawerOpen) {
           setIsQueueDrawerOpen(false);
         } else {
           setView('nowplaying');
         }
+      } else if (key === 'i') {
+        e.preventDefault();
+        setIsSignalPathOpen(prev => !prev);
       } else if (key === 'q') {
         e.preventDefault();
         setIsQueueDrawerOpen(prev => !prev);
@@ -284,7 +291,7 @@ export function FullscreenView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setView, isQueueDrawerOpen]);
+  }, [setView, isQueueDrawerOpen, isSignalPathOpen]);
 
   // Autohide HUD timer: 3.5 seconds of inactivity
   useEffect(() => {
@@ -293,7 +300,7 @@ export function FullscreenView() {
       if (activityTimer.current) {
         clearTimeout(activityTimer.current);
       }
-      if (!isQueueDrawerOpen) {
+      if (!isQueueDrawerOpen && !isSignalPathOpen) {
         activityTimer.current = window.setTimeout(() => {
           setIsHUDHidden(true);
         }, 3500);
@@ -528,14 +535,22 @@ export function FullscreenView() {
 
         {/* Buttons Controls */}
         <div className="fullscreen-hud-controls">
-          {/* Metadata Display in control bar */}
+          {/* Metadata Display / Telemetry in control bar */}
           <div className="fullscreen-hud-left">
-            {theaterModeDesign === 'zen' && (
-              <div className="fullscreen-telemetry-badge">
-                <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor }}></span>
-                <span>{telemetryText}</span>
-              </div>
-            )}
+            <button
+              className="fullscreen-telemetry-badge"
+              onClick={() => setIsSignalPathOpen(true)}
+              title="Inspect Audio Signal Path & Telemetry (I)"
+              style={{
+                cursor: 'pointer',
+                background: isSignalPathOpen ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.04)',
+                border: isSignalPathOpen ? `1px solid ${accentColor}` : '1px solid rgba(255, 255, 255, 0.08)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor }}></span>
+              <span>{telemetryText}</span>
+            </button>
           </div>
 
           {/* Central Playback buttons */}
@@ -693,6 +708,13 @@ export function FullscreenView() {
       <TheaterQueueDrawer
         isOpen={isQueueDrawerOpen}
         onClose={() => setIsQueueDrawerOpen(false)}
+      />
+
+      {/* Audio Signal Path & Telemetry Inspector */}
+      <TheaterSignalPathModal
+        isOpen={isSignalPathOpen}
+        onClose={() => setIsSignalPathOpen(false)}
+        spectrumBands={spectrumBands}
       />
     </div>
   );
