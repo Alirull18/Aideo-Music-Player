@@ -562,10 +562,14 @@ export interface PlayerState {
   isLoadingRecs: boolean;
   activeDiscoveryTab: string;
   discoveryLayout: 'shelves' | 'unified';
+  discoveryCardSize: number;
+  discoveryViewMode: 'grid' | 'list';
   setDiscoveryData: (data: DiscoveryHubData | null) => void;
   setIsLoadingRecs: (loading: boolean) => void;
   setActiveDiscoveryTab: (tab: string) => void;
   setDiscoveryLayout: (layout: 'shelves' | 'unified') => void;
+  setDiscoveryCardSize: (size: number) => void;
+  setDiscoveryViewMode: (mode: 'grid' | 'list') => void;
   cacheSizeLimit: number;
   setCacheSizeLimit: (limit: number) => void;
 
@@ -629,6 +633,10 @@ export interface PlayerState {
   aideoPageDesign: AideoPageDesign;
   setAideoPageDesign: (design: AideoPageDesign) => void;
 
+  // Theater / Fullscreen Mode Design Layout
+  theaterModeDesign: TheaterModeDesign;
+  setTheaterModeDesign: (design: TheaterModeDesign) => void;
+
   // Player Bar Transparency (Glassmorphism)
   playerBarTransparent: boolean;
   setPlayerBarTransparent: (transparent: boolean) => void;
@@ -637,6 +645,7 @@ export interface PlayerState {
 
 export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 'vinyl';
 export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage';
+export type TheaterModeDesign = 'stage' | 'zen' | 'studio' | 'vinyl' | 'poster' | 'scope';
 
 // Design ids that existed before the 2026 home redesign. Stored values from
 // these are migrated to 'classic' on load.

@@ -115,6 +115,12 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   isLoadingRecs: true,
   activeDiscoveryTab: 'all',
   discoveryLayout: (safeGetStorage('aideo-discovery-layout') as 'shelves' | 'unified') || 'shelves',
+  discoveryCardSize: (() => {
+    const raw = safeGetStorage('aideo-discovery-card-size');
+    const parsed = raw ? parseInt(raw, 10) : 185;
+    return isNaN(parsed) ? 185 : Math.max(100, Math.min(360, parsed));
+  })(),
+  discoveryViewMode: (safeGetStorage('aideo-discovery-view-mode') as 'grid' | 'list') || 'grid',
   customPrompt: {
     open: false,
     title: '',
@@ -137,6 +143,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     return LEGACY_AIDEO_PAGE_DESIGNS.includes(stored as any) ? 'classic' as const : stored;
   })(),
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
+  theaterModeDesign: (safeGetStorage('aideo-theater-design') as any) || (safeGetStorage('aideo-fullscreen-layout') as any) || 'stage',
 
   setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }
@@ -194,8 +201,17 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setIsLoadingRecs: (isLoadingRecs: boolean) => set({ isLoadingRecs }),
   setActiveDiscoveryTab: (activeDiscoveryTab: string) => set({ activeDiscoveryTab }),
   setDiscoveryLayout: (discoveryLayout: 'shelves' | 'unified') => {
-    localStorage.setItem('aideo-discovery-layout', discoveryLayout);
+    safeSetStorage('aideo-discovery-layout', discoveryLayout);
     set({ discoveryLayout });
+  },
+  setDiscoveryCardSize: (discoveryCardSize: number) => {
+    const clamped = Math.max(100, Math.min(360, Math.round(discoveryCardSize)));
+    safeSetStorage('aideo-discovery-card-size', String(clamped));
+    set({ discoveryCardSize: clamped });
+  },
+  setDiscoveryViewMode: (discoveryViewMode: 'grid' | 'list') => {
+    safeSetStorage('aideo-discovery-view-mode', discoveryViewMode);
+    set({ discoveryViewMode });
   },
 
   toggleNotificationsEnabled: () => {
@@ -457,6 +473,11 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setAideoPageDesign: (design: any) => {
     safeSetStorage('aideo-page-design', design);
     set({ aideoPageDesign: design });
+  },
+
+  setTheaterModeDesign: (design: any) => {
+    safeSetStorage('aideo-theater-design', design);
+    set({ theaterModeDesign: design });
   },
 
   setPlayerBarTransparent: (transparent: boolean) => {
