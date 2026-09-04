@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aideo Music Player v0.9.7 — Bit-Perfect Audiophile Desktop Console</title>
+  <meta name="description" content="Aideo is an audiophile desktop music player for Windows. Bit-perfect WASAPI Exclusive direct hardware transport, 4,000+ AutoEQ headphone calibrations, 5 Theater Mode archetypes, synchronized 60fps Romaji lyrics, and hybrid lossless streaming.">
+  <meta name="keywords" content="Aideo Music Player, WASAPI Exclusive, Audiophile Windows Player, Bit-Perfect Audio, AutoEQ, Parametric Equalizer, Synced Lyrics Romaji, FLAC DSD256, Hi-Fi Player">
+  
+  <!-- Open Graph / Meta -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Aideo Music Player — Sound Without Compromise">
+  <meta property="og:description" content="Hardware-locked WASAPI Exclusive transport, 4,000+ AutoEQ calibrations, 5 Theater archetypes, and fluid 60fps Romaji lyrics.">
+  <meta property="og:image" content="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461">
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:image" content="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461">
+
+  <!-- Typography: Bricolage Grotesque, Plus Jakarta Sans, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Aideo Music Player",
+    "operatingSystem": "Windows 10, Windows 11",
+    "applicationCategory": "MultimediaApplication",
+    "softwareVersion": "0.9.7",
+    "offers": {
+      "@type": "Offer",
+      "price": "0.00",
+      "priceCurrency": "USD"
+    },
+    "description": "Bit-perfect audiophile desktop music player for Windows with WASAPI Exclusive direct hardware lock, 4,000+ AutoEQ headphone calibrations, 5 Theater Mode archetypes, and synchronized Romaji lyrics.",
+    "downloadUrl": "https://github.com/Alirull18/Aideo-Music-Player/releases/latest"
+  }
+  </script>
+</head>
+<body>
+
+  <!-- Ambient Cinematic Glow Backdrop -->
+  <div class="ambient-mesh-canvas" aria-hidden="true">
+    <div class="mesh-orb orb-primary"></div>
+    <div class="mesh-orb orb-amber"></div>
+    <div class="mesh-orb orb-cyan"></div>
+    <div class="mesh-grid-overlay"></div>
+  </div>
+
+  <!-- Command Top Navigation -->
+  <nav class="cinema-nav" aria-label="Main Navigation">
+    <div class="nav-container">
+      <a href="#top" class="nav-brand">
+        <img src="logo.png" alt="Aideo Logo" class="brand-glyph">
+        <span class="brand-wordmark">AIDEO</span>
+        <span class="brand-tag">v0.9.7</span>
+        <span class="hardware-lock-pill" title="Hardware bit-perfect pipeline locked">
+          <span class="pulse-dot"></span>
+          <span>WASAPI 384kHz</span>
+        </span>
+      </a>
+
+      <div class="nav-links">
+        <a href="#theater" class="nav-anchor">Theater Modes</a>
+        <a href="#signal-path" class="nav-anchor">Signal Path</a>
+        <a href="#dsp-lab" class="nav-anchor">Audio Lab</a>
+        <a href="#lyrics" class="nav-anchor">Romaji Lyrics</a>
+        <a href="#hybrid" class="nav-anchor">Hybrid Vault</a>
+        <a href="#specs" class="nav-anchor">Specs</a>
+        <a href="#faq" class="nav-anchor">FAQ</a>
+      </div>
+
+      <div class="nav-actions">
+        <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn-github" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-github"></i>
+          <span>GitHub</span>
+        </a>
+        <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn-nav-download" target="_blank" rel="noopener noreferrer">
+          <i class="fab fa-windows"></i>
+          <span>Get v0.9.7</span>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main View Content -->
+  <main id="top">
+
+    <!-- HERO SECTION -->
+    <header class="cinema-hero">
+      <div class="hero-container">
+
+        <!-- Engineering Status Eyebrow -->
+        <div class="hero-eyebrow">
+          <span class="eyebrow-dot"></span>
+          <span class="eyebrow-text">VERSION 0.9.7 • WASAPI EXCLUSIVE HARDWARE TRANSPORT • 0% IDLE GPU</span>
+        </div>
+
+        <!-- Master Title -->
+        <h1 class="hero-title">
+          Sound without compromise.<br>
+          <span class="gradient-text">Engineered for pure bits.</span>
+        </h1>
+
+        <p class="hero-lead">
+          Every standard Windows player routes your audio through the shared kernel mixer, forcibly resampling, dithering, and compressing your dynamics. Aideo seizes exclusive hardware control of your DAC, delivering master-tape accuracy directly to your headphones.
+        </p>
+
+        <!-- Hero Actions -->
+        <div class="hero-cta-group">
+          <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn-primary-glow" target="_blank" rel="noopener noreferrer">
+            <i class="fab fa-windows"></i>
+            <span class="btn-text-block">
+              <strong>Download for Windows</strong>
+              <small>v0.9.7 • Free, Open Source (MIT) • x64</small>
+            </span>
+          </a>
+
+          <a href="#dsp-lab" class="btn-secondary-tactile">
+            <i class="fas fa-sliders"></i>
+            <span>Interactive DSP Lab</span>
+          </a>
+        </div>
+
+        <!-- Telemetry Stats Strip -->
+        <div class="telemetry-strip">
+          <div class="telemetry-cell">
+            <span class="telemetry-label">TRANSMISSION MODE</span>
+            <span class="telemetry-value highlight-emerald"><i class="fas fa-shield-halved"></i> WASAPI Exclusive</span>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">SAMPLING CEILING</span>
+            <span class="telemetry-value">384 kHz / 32-bit Float</span>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">HEADPHONE PROFILES</span>
+            <span class="telemetry-value highlight-amber">4,000+ AutoEQ Harman</span>
+          </div>
+          <div class="telemetry-cell">
+            <span class="telemetry-label">MEMORY FOOTPRINT</span>
+            <span class="telemetry-value">~75 MB Resident</span>
+          </div>
+        </div>
+
+        <!-- TACTILE VU METER CONSOLE (Interactive) -->
+        <div class="vu-console-wrapper" id="vu-console">
+          <div class="vu-console-chassis">
+            <div class="chassis-header">
+              <div class="chassis-branding">
+                <span class="chassis-dot"></span>
+                <span>ANALOG BALLISTIC TELEMETRY DECK</span>
+              </div>
+              <div class="chassis-controls">
+                <span class="meter-mode-badge" id="meter-source-label">TEST TONE: 1.0 kHz SINE</span>
+                <button class="btn-chassis-toggle" id="vu-toggle-btn" type="button" title="Toggle audio signal generator">
+                  <i class="fas fa-wave-square"></i> <span>Cycle Generator</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Dual Analog VU Meters -->
+            <div class="meters-duo">
+              <!-- Left Meter -->
+              <div class="meter-frame">
+                <div class="meter-face">
+                  <svg class="meter-svg" viewBox="0 0 260 140" id="meter-svg-l">
+                    <!-- Scale arc and markings -->
+                    <path d="M 35 125 A 105 105 0 0 1 225 125" class="meter-arc-bg" />
+                    <path d="M 175 42 A 105 105 0 0 1 225 125" class="meter-arc-red" />
+                    <!-- Tick markings -->
+                    <g class="meter-ticks">
+                      <line x1="38" y1="120" x2="48" y2="116" />
+                      <line x1="58" y1="92" x2="67" y2="92" />
+                      <line x1="88" y1="68" x2="95" y2="72" />
+                      <line x1="130" y1="52" x2="130" y2="62" />
+                      <line x1="172" y1="68" x2="165" y2="72" />
+                      <line x1="202" y1="92" x2="193" y2="92" />
+                      <line x1="222" y1="120" x2="212" y2="116" />
+                    </g>
+                    <!-- Scale Text -->
+                    <text x="44" y="110" class="meter-txt">-20</text>
+                    <text x="68" y="85" class="meter-txt">-10</text>
+                    <text x="96" y="65" class="meter-txt">-5</text>
+                    <text x="130" y="46" class="meter-txt">0</text>
+                    <text x="164" y="65" class="meter-txt red">+1</text>
+                    <text x="194" y="85" class="meter-txt red">+3</text>
+                    <!-- Needle -->
+                    <line x1="130" y1="132" x2="130" y2="35" class="meter-needle" id="needle-l" />
+                    <circle cx="130" cy="132" r="8" class="needle-pivot" />
+                  </svg>
+                  <div class="meter-channel-tag">CHANNEL L (PEAK)</div>
+                </div>
+              </div>
+
+              <!-- Right Meter -->
+              <div class="meter-frame">
+                <div class="meter-face">
+                  <svg class="meter-svg" viewBox="0 0 260 140" id="meter-svg-r">
+                    <!-- Scale arc and markings -->
+                    <path d="M 35 125 A 105 105 0 0 1 225 125" class="meter-arc-bg" />
+                    <path d="M 175 42 A 105 105 0 0 1 225 125" class="meter-arc-red" />
+                    <!-- Tick markings -->
+                    <g class="meter-ticks">
+                      <line x1="38" y1="120" x2="48" y2="116" />
+                      <line x1="58" y1="92" x2="67" y2="92" />
+                      <line x1="88" y1="68" x2="95" y2="72" />
+                      <line x1="130" y1="52" x2="130" y2="62" />
+                      <line x1="172" y1="68" x2="165" y2="72" />
+                      <line x1="202" y1="92" x2="193" y2="92" />
+                      <line x1="222" y1="120" x2="212" y2="116" />
+                    </g>
+                    <!-- Scale Text -->
+                    <text x="44" y="110" class="meter-txt">-20</text>
+                    <text x="68" y="85" class="meter-txt">-10</text>
+                    <text x="96" y="65" class="meter-txt">-5</text>
+                    <text x="130" y="46" class="meter-txt">0</text>
+                    <text x="164" y="65" class="meter-txt red">+1</text>
+                    <text x="194" y="85" class="meter-txt red">+3</text>
+                    <!-- Needle -->
+                    <line x1="130" y1="132" x2="130" y2="35" class="meter-needle" id="needle-r" />
+                    <circle cx="130" cy="132" r="8" class="needle-pivot" />
+                  </svg>
+                  <div class="meter-channel-tag">CHANNEL R (RMS)</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Meter Footer Telemetry -->
+            <div class="chassis-footer">
+              <span class="telemetry-readout">BALLISTICS: IEC 60268-17 DAMPED</span>
+              <span class="telemetry-readout highlight-cyan">DYNAMIC RANGE: 118.4 dB</span>
+              <span class="telemetry-readout">THD+N: &lt; 0.00012%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3D INTERFACE SHOWCASE (Interactive Viewport) -->
+        <div class="hero-viewport-card" id="showcase">
+          <div class="viewport-mac-bar">
+            <div class="window-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+            </div>
+            <div class="viewport-tab-selector" role="tablist">
+              <button class="view-tab active" data-img="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461" data-title="Cinematic Fullscreen HUD" data-desc="60fps synchronized Romaji lyrics, real-time audio visualizer, and dynamic color-reactive album atmosphere." role="tab">
+                <i class="fas fa-sparkles"></i> Fullscreen HUD
+              </button>
+              <button class="view-tab" data-img="https://github.com/user-attachments/assets/b1035ae9-7ae2-4d26-9fdd-810c5d82d02f" data-title="Aideo Lab Pro DSP & Equalizer" data-desc="10-band parametric biquad equalizer, 4,000+ AutoEQ headphone targets, and zero-clipping pre-gain." role="tab">
+                <i class="fas fa-sliders"></i> Pro DSP Lab
+              </button>
+              <button class="view-tab" data-img="https://github.com/user-attachments/assets/71f7328e-5f57-4783-8df5-47194fc8dd98" data-title="Pristine SQLite Music Vault" data-desc="Instant-index local library, virtualized infinite scrolling, and lossless audio metadata inspection." role="tab">
+                <i class="fas fa-folder-music"></i> Library Vault
+              </button>
+              <button class="view-tab" data-img="https://github.com/user-attachments/assets/0f7f7e51-3ed0-424e-8afe-067b8974faf8" data-title="AI Discovery Hub" data-desc="Personalized taste-weighted recommendations with anti-collision verification and zero video slop." role="tab">
+                <i class="fas fa-compass"></i> Discovery Hub
+              </button>
+              <button class="view-tab" data-img="https://github.com/user-attachments/assets/c92ca717-a53b-421c-a571-b77570c00f7f" data-title="Main Player View" data-desc="Clean obsidian layout, responsive Up Next queue drawer, and lossless format badges." role="tab">
+                <i class="fas fa-play"></i> Main Player
+              </button>
+            </div>
+            <div class="active-badge-live">
+              <span class="chip-status-dot"></span>
+              <span>BIT-PERFECT DIRECT</span>
+            </div>
+          </div>
+
+          <div class="viewport-media-frame">
+            <img id="viewport-img-element" src="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461" alt="Aideo Music Player Interface Screenshot" class="viewport-image-render">
+          </div>
+
+          <div class="viewport-info-bar">
+            <div class="info-text">
+              <strong id="viewport-title-target">Cinematic Fullscreen HUD</strong>
+              <p id="viewport-desc-target">60fps synchronized Romaji lyrics, real-time audio visualizer, and dynamic color-reactive album atmosphere.</p>
+            </div>
+            <span class="info-shortcut"><kbd>H</kbd> to toggle Theater Mode</span>
+          </div>
+        </div>
+
+      </div>
+    </header>
+
+    <!-- SECTION: 5 THEATER MODE ARCHETYPES (v0.9.7 Flagship) -->
+    <section class="section-theater" id="theater">
+      <div class="section-container">
+        <div class="section-header-center">
+          <span class="badge-accent">Flagship v0.9.7 Feature</span>
+          <h2 class="section-headline">5 Theater Mode Archetypes</h2>
+          <p class="section-subtext">
+            Music is more than background noise. Press <kbd>H</kbd> in Aideo to immerse yourself in dedicated visual environments tailored to your listening ritual.
+          </p>
+        </div>
+
+        <!-- Theater Switcher Control Strip -->
+        <div class="archetype-nav-grid" role="tablist">
+          <button class="archetype-btn active" data-archetype="studio" role="tab">
+            <div class="arch-icon"><i class="fas fa-gauge-high"></i></div>
+            <div class="arch-meta">
+              <strong>Hi-Fi Studio Deck</strong>
+              <small>Dual ballistic VU needles & brushed metal</small>
+            </div>
+          </button>
+
+          <button class="archetype-btn" data-archetype="vinyl" role="tab">
+            <div class="arch-icon"><i class="fas fa-record-vinyl"></i></div>
+            <div class="arch-meta">
+              <strong>33⅓ RPM Turntable</strong>
+              <small>Rotating vinyl, groove light & tonearm</small>
+            </div>
+          </button>
+
+          <button class="archetype-btn" data-archetype="stage" role="tab">
+            <div class="arch-icon"><i class="fas fa-lights-holiday"></i></div>
+            <div class="arch-meta">
+              <strong>Stage Lighting</strong>
+              <small>Concert atmosphere & dynamic aura</small>
+            </div>
+          </button>
+
+          <button class="archetype-btn" data-archetype="poster" role="tab">
+            <div class="arch-icon"><i class="fas fa-newspaper"></i></div>
+            <div class="arch-meta">
+              <strong>Editorial Poster</strong>
+              <small>Swiss modernist grid & vinyl sleeve</small>
+            </div>
+          </button>
+
+          <button class="archetype-btn" data-archetype="zen" role="tab">
+            <div class="arch-icon"><i class="fas fa-circle-dot"></i></div>
+            <div class="arch-meta">
+              <strong>Zen Sanctuary</strong>
+              <small>Zero distraction & breathing typography</small>
+            </div>
+          </button>
+        </div>
+
+        <!-- Dynamic Archetype Live Simulation Stage -->
+        <div class="theater-stage-preview" id="theater-stage">
+          <!-- Hi-Fi Deck Preview (Default) -->
+          <div class="archetype-view-panel active" id="panel-studio">
+            <div class="deck-aluminum-card">
+              <div class="deck-screws"><span class="screw"></span><span class="screw"></span></div>
+              <div class="deck-faceplate">
+                <div class="deck-label-row">
+                  <span class="deck-brand">AIDEO REFERENCE STUDIO DECK MK-II</span>
+                  <span class="deck-spec">DIRECT DRIVE • CLASS-A BALANCED</span>
+                </div>
+                <div class="deck-meters-container">
+                  <div class="deck-vu-meter"><div class="mini-needle" id="deck-needle-1"></div><span class="meter-lbl">CH 1 PEAK</span></div>
+                  <div class="deck-vu-meter"><div class="mini-needle" id="deck-needle-2"></div><span class="meter-lbl">CH 2 RMS</span></div>
+                </div>
+                <div class="deck-knobs-row">
+                  <div class="tactile-knob"><div class="knob-dial"></div><span>PRE-GAIN</span></div>
+                  <div class="tactile-knob"><div class="knob-dial"></div><span>CALIBRATION</span></div>
+                  <div class="deck-status-box">
+                    <span class="status-lamp green"></span>
+                    <span>HARDWARE CLOCK LOCK (384kHz)</span>
+                  </div>
+                </div>
+              </div>
+              <div class="deck-screws"><span class="screw"></span><span class="screw"></span></div>
+            </div>
+          </div>
+
+          <!-- Vinyl Turntable Preview -->
+          <div class="archetype-view-panel" id="panel-vinyl">
+            <div class="turntable-card">
+              <div class="turntable-platter">
+                <div class="spinning-vinyl-disc">
+                  <div class="groove-layer"></div>
+                  <div class="vinyl-center-label">
+                    <div class="label-hole"></div>
+                    <span class="label-text">AIDEO 33⅓</span>
+                  </div>
+                </div>
+                <div class="turntable-tonearm">
+                  <div class="tonearm-pivot"></div>
+                  <div class="tonearm-wand"></div>
+                  <div class="tonearm-cartridge"></div>
+                </div>
+              </div>
+              <div class="turntable-badge">
+                <i class="fas fa-circle-play"></i>
+                <span>33⅓ RPM MOTOR ACTIVE • STYLUS TRACKING 1.8g</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stage Mode Preview -->
+          <div class="archetype-view-panel" id="panel-stage">
+            <div class="stage-lighting-card">
+              <div class="stage-spotlights">
+                <div class="spotlight spot-left"></div>
+                <div class="spotlight spot-center"></div>
+                <div class="spotlight spot-right"></div>
+              </div>
+              <div class="stage-artist-focus">
+                <div class="artist-silhouette"><i class="fas fa-microphone-lines"></i></div>
+                <div class="stage-haze"></div>
+              </div>
+              <div class="stage-tag">CONCERT LIGHTING & REAL-TIME STAGE AURA</div>
+            </div>
+          </div>
+
+          <!-- Editorial Poster Preview -->
+          <div class="archetype-view-panel" id="panel-poster">
+            <div class="editorial-poster-card">
+              <div class="poster-layout-swiss">
+                <div class="poster-col-meta">
+                  <span class="swiss-num">01 / SIDE A</span>
+                  <h3 class="swiss-title">MIDNIGHT FLIGHT</h3>
+                  <p class="swiss-desc">MASTER TAPE 96kHz / 24-bit PCM • STUDIO MONITORS CALIBRATED</p>
+                </div>
+                <div class="poster-col-art">
+                  <div class="poster-art-box">
+                    <div class="art-circle"></div>
+                    <span class="art-tag">AIDEO ARCHIVE</span>
+                  </div>
+                </div>
+              </div>
+              <div class="poster-footer-spec">SWISS TYPOGRAPHIC LAYOUT • PALETTE EXTRACTION</div>
+            </div>
+          </div>
+
+          <!-- Zen Minimalist Preview -->
+          <div class="archetype-view-panel" id="panel-zen">
+            <div class="zen-card">
+              <div class="zen-breathe-glow"></div>
+              <div class="zen-content">
+                <span class="zen-now">NOW BREATHING</span>
+                <h3 class="zen-track">Clair de Lune</h3>
+                <p class="zen-artist">Claude Debussy • Suite bergamasque</p>
+              </div>
+              <div class="zen-footer">DISTRACTION-FREE SANCTUARY • HOVER TELEMETRY</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION: SIGNAL PATH TELEMETRY LAB (Interactive A/B Test) -->
+    <section class="section-signal" id="signal-path">
+      <div class="section-container">
+        <div class="section-header-center">
+          <span class="badge-accent">Acoustic Purity</span>
+          <h2 class="section-headline">Why WASAPI Exclusive Is Non-Negotiable</h2>
+          <p class="section-subtext">
+            Compare what happens to your audio before it reaches your ear. Standard Windows audio processing degrades bitstream integrity. Aideo locks the DAC hardware directly.
+          </p>
+        </div>
+
+        <!-- Interactive A/B Comparison Grid -->
+        <div class="signal-comparator-grid">
+          <!-- Windows Shared Engine (Degraded) -->
+          <div class="signal-card danger">
+            <div class="signal-card-header">
+              <div class="header-titles">
+                <span class="sub-label">STANDARD PLAYERS</span>
+                <h3>Windows Shared Audio Engine</h3>
+              </div>
+              <span class="pill-danger"><i class="fas fa-triangle-exclamation"></i> Resampled & Compressed</span>
+            </div>
+
+            <p class="signal-summary">
+              Music is routed through the Windows kernel mixer, triggering mandatory sample rate conversion, triangular dithering, and the CAudioLimiter brickwall compressor.
+            </p>
+
+            <div class="signal-step-flow">
+              <div class="flow-node">
+                <span class="step-idx">01</span>
+                <span class="step-name">Master File</span>
+                <span class="step-meta">96kHz / 24-bit Lossless</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node warning-node">
+                <span class="step-idx">02</span>
+                <span class="step-name">Windows Resampler</span>
+                <span class="step-meta highlight-red">Forced 48kHz interpolation</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node warning-node">
+                <span class="step-idx">03</span>
+                <span class="step-name">Shared Software Mixer</span>
+                <span class="step-meta highlight-red">Dither & System sounds mix</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node warning-node">
+                <span class="step-idx">04</span>
+                <span class="step-name">CAudioLimiter</span>
+                <span class="step-meta highlight-red">Dynamic range squashed</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node">
+                <span class="step-idx">05</span>
+                <span class="step-name">DAC Endpoint</span>
+                <span class="step-meta">Degraded Waveform</span>
+              </div>
+            </div>
+
+            <div class="signal-impact-box">
+              <strong>Audible Consequence:</strong> Jitter noise, high-frequency phase smearing, lost micro-dynamics, and altered soundstage.
+            </div>
+          </div>
+
+          <!-- Aideo WASAPI Exclusive (Bit-Perfect) -->
+          <div class="signal-card success">
+            <div class="signal-card-header">
+              <div class="header-titles">
+                <span class="sub-label">AIDEO AUDIO CORE</span>
+                <h3>WASAPI Exclusive Direct Transport</h3>
+              </div>
+              <span class="pill-success"><i class="fas fa-shield-check"></i> Bit-Perfect Locked</span>
+            </div>
+
+            <p class="signal-summary">
+              Aideo acquires an exclusive hardware lock on your DAC via Rust and CPAL. Zero OS interpolation, zero shared mixing, and exact bitstream integrity.
+            </p>
+
+            <div class="signal-step-flow">
+              <div class="flow-node">
+                <span class="step-idx">01</span>
+                <span class="step-name">Master File</span>
+                <span class="step-meta">384kHz / 32-bit or DSD256</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node success-node">
+                <span class="step-idx">02</span>
+                <span class="step-name">Rust Symphonia Decoder</span>
+                <span class="step-meta highlight-emerald">Lossless zero-copy unpack</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node success-node">
+                <span class="step-idx">03</span>
+                <span class="step-name">Optional AutoEQ DSP</span>
+                <span class="step-meta highlight-emerald">Float64 biquad IIR filters</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node success-node">
+                <span class="step-idx">04</span>
+                <span class="step-name">WASAPI Exclusive Buffer</span>
+                <span class="step-meta highlight-emerald">Direct DMA ring buffer</span>
+              </div>
+              <div class="flow-arrow"><i class="fas fa-arrow-down"></i></div>
+              <div class="flow-node success-node">
+                <span class="step-idx">05</span>
+                <span class="step-name">DAC Hardware</span>
+                <span class="step-meta">100% Bit-Perfect Master</span>
+              </div>
+            </div>
+
+            <div class="signal-impact-box success-impact">
+              <strong>Guaranteed Result:</strong> True 118+ dB dynamic range, razor-sharp transient attacks, zero clock jitter, and black backgrounds.
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Signal Oscilloscope Sandbox -->
+        <div class="oscilloscope-chassis">
+          <div class="scope-header">
+            <div class="scope-title">
+              <span class="scope-led"></span>
+              <span>LIVE SIGNAL TELEMETRY MONITOR (SIMULATION)</span>
+            </div>
+            <div class="scope-switches">
+              <button class="btn-scope-mode active" id="btn-mode-aideo">AIDEO BIT-PERFECT (384kHz)</button>
+              <button class="btn-scope-mode" id="btn-mode-shared">WINDOWS MIXER (48kHz RESAMPLED)</button>
+            </div>
+          </div>
+
+          <div class="canvas-container">
+            <canvas id="scope-canvas" width="900" height="200"></canvas>
+          </div>
+
+          <div class="scope-footer">
+            <span id="scope-info-label">MODE: BIT-PERFECT DIRECT • ZERO PHASE JITTER • THD: 0.0001%</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION: REAL-TIME WEB AUDIO PARAMETRIC DSP & AUTOEQ -->
+    <section class="section-dsp" id="dsp-lab">
+      <div class="section-container">
+        <div class="section-header-center">
+          <span class="badge-accent">Studio Precision</span>
+          <h2 class="section-headline">Interactive DSP & 4,000+ AutoEQ Lab</h2>
+          <p class="section-subtext">
+            Test Aideo's real-time parametric equalizer in your browser right now. Select calibrated headphone curves or sculpt your own response curve with zero clipping.
+          </p>
+        </div>
+
+        <!-- DSP Studio Interactive Box -->
+        <div class="dsp-studio-card">
+          <!-- Preset Profiles Selector -->
+          <div class="dsp-preset-strip">
+            <span class="preset-label"><i class="fas fa-headphones"></i> AUTOEQ CALIBRATIONS:</span>
+            <div class="preset-pills">
+              <button class="preset-btn active" data-profile="flat">Flat Reference</button>
+              <button class="preset-btn" data-profile="hd600">Sennheiser HD 600 (Harman)</button>
+              <button class="preset-btn" data-profile="xm5">Sony WH-1000XM5 (Clarity)</button>
+              <button class="preset-btn" data-profile="blessing2">Moondrop Blessing 2 (IEM Target)</button>
+              <button class="preset-btn" data-profile="warm">Warm Vacuum Tube</button>
+            </div>
+          </div>
+
+          <!-- Dynamic SVG Response Curve Canvas -->
+          <div class="dsp-curve-display">
+            <svg viewBox="0 0 800 180" class="curve-svg" id="dsp-curve-svg">
+              <defs>
+                <linearGradient id="curveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="var(--color-emerald)" stop-opacity="0.35" />
+                  <stop offset="100%" stop-color="var(--color-emerald)" stop-opacity="0.0" />
+                </linearGradient>
+              </defs>
+              <!-- Grid Lines -->
+              <line x1="0" y1="90" x2="800" y2="90" class="curve-grid-center" />
+              <line x1="0" y1="45" x2="800" y2="45" class="curve-grid-line" />
+              <line x1="0" y1="135" x2="800" y2="135" class="curve-grid-line" />
+              <!-- Curve Fill and Line -->
+              <path d="M 0 90 L 800 90" class="curve-fill" id="curve-fill-path" />
+              <path d="M 0 90 L 800 90" class="curve-stroke" id="curve-stroke-path" />
+            </svg>
+            <div class="curve-axis-labels">
+              <span>31 Hz</span>
+              <span>125 Hz</span>
+              <span>500 Hz</span>
+              <span>2 kHz</span>
+              <span>8 kHz</span>
+              <span>16 kHz</span>
+            </div>
+          </div>
+
+          <!-- 10-Band EQ Sliders -->
+          <div class="eq-sliders-cluster">
+            <div class="slider-band" data-freq="31">
+              <span class="gain-val" id="val-0">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-0">
+              <span class="freq-lbl">31Hz</span>
+            </div>
+            <div class="slider-band" data-freq="63">
+              <span class="gain-val" id="val-1">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-1">
+              <span class="freq-lbl">63Hz</span>
+            </div>
+            <div class="slider-band" data-freq="125">
+              <span class="gain-val" id="val-2">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-2">
+              <span class="freq-lbl">125Hz</span>
+            </div>
+            <div class="slider-band" data-freq="250">
+              <span class="gain-val" id="val-3">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-3">
+              <span class="freq-lbl">250Hz</span>
+            </div>
+            <div class="slider-band" data-freq="500">
+              <span class="gain-val" id="val-4">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-4">
+              <span class="freq-lbl">500Hz</span>
+            </div>
+            <div class="slider-band" data-freq="1000">
+              <span class="gain-val" id="val-5">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-5">
+              <span class="freq-lbl">1kHz</span>
+            </div>
+            <div class="slider-band" data-freq="2000">
+              <span class="gain-val" id="val-6">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-6">
+              <span class="freq-lbl">2kHz</span>
+            </div>
+            <div class="slider-band" data-freq="4000">
+              <span class="gain-val" id="val-7">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-7">
+              <span class="freq-lbl">4kHz</span>
+            </div>
+            <div class="slider-band" data-freq="8000">
+              <span class="gain-val" id="val-8">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-8">
+              <span class="freq-lbl">8kHz</span>
+            </div>
+            <div class="slider-band" data-freq="16000">
+              <span class="gain-val" id="val-9">0 dB</span>
+              <input type="range" min="-12" max="12" value="0" step="0.5" class="eq-range" id="slider-9">
+              <span class="freq-lbl">16kHz</span>
+            </div>
+          </div>
+
+          <!-- DSP Footer Actions -->
+          <div class="dsp-footer-row">
+            <div class="auto-preamp-badge">
+              <i class="fas fa-shield-halved"></i>
+              <span>AUTO PRE-GAIN HEADROOM: -2.4 dB (CLIPPING GUARD ACTIVE)</span>
+            </div>
+            <div class="dsp-action-btns">
+              <button class="btn-sm-tactile" id="btn-reset-eq"><i class="fas fa-rotate-left"></i> Reset Flat</button>
+              <button class="btn-sm-tactile" id="btn-export-apo"><i class="fas fa-copy"></i> Copy Equalizer APO</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION: SILKY 60FPS ROMAJI & KARAOKE LYRICS -->
+    <section class="section-lyrics" id="lyrics">
+      <div class="section-container">
+        <div class="section-header-center">
+          <span class="badge-accent">Visual Mastery</span>
+          <h2 class="section-headline">60fps Synchronized Romaji Lyrics</h2>
+          <p class="section-subtext">
+            Sing along to your favorite J-Pop, Anime OSTs, and international music with fluid syllable-by-syllable karaoke wipe, 1-click Romaji transliteration, and live translations.
+          </p>
+        </div>
+
+        <div class="lyrics-showcase-card">
+          <!-- Lyric Controls Bar -->
+          <div class="lyric-nav-header">
+            <div class="track-playing-info">
+              <div class="track-artwork-thumb">
+                <i class="fas fa-music"></i>
+              </div>
+              <div>
+                <strong>夜に駆ける (Racing into the night)</strong>
+                <span>YOASOBI • THE BOOK • 96kHz / 24-bit FLAC</span>
+              </div>
+            </div>
+
+            <!-- 3-Way Language Toggle -->
+            <div class="lang-switch-capsule">
+              <button class="lang-btn active" data-lang="kanji">Kanji / Original</button>
+              <button class="lang-btn" data-lang="romaji">Romaji (Transliterated)</button>
+              <button class="lang-btn" data-lang="translation">English Translation</button>
+            </div>
+          </div>
+
+          <!-- Interactive Live Karaoke Display -->
+          <div class="karaoke-scroll-viewport">
+            <div class="lyric-line passed" id="line-1">
+              沈むように溶けてゆくように
+            </div>
+            <div class="lyric-line active-wipe" id="line-2">
+              <span class="syllable-fill">二人だけの空が広がる夜に</span>
+            </div>
+            <div class="lyric-line upcoming" id="line-3">
+              「さよなら」だけだった
+            </div>
+            <div class="lyric-line upcoming" id="line-4">
+              その一言で全てが伝わった
+            </div>
+          </div>
+
+          <!-- Karaoke Progress Control -->
+          <div class="karaoke-progress-bar">
+            <div class="progress-track"><div class="progress-fill" id="karaoke-progress"></div></div>
+            <div class="progress-time">
+              <span>01:14</span>
+              <span>04:21</span>
+            </div>
+          </div>
+
+          <!-- Desktop HUD Feature Banner -->
+          <div class="hud-feature-banner">
+            <div class="hud-icon"><i class="fas fa-desktop"></i></div>
+            <div class="hud-text">
+              <strong>Floating Desktop Lyrics HUD with Click-Through Gaming Mode</strong>
+              <p>Pin transparent karaoke lyrics over any game, code editor, or browser window with zero click interference.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION: HYBRID STREAMING & UNIFIED VAULT BENTO -->
+    <section class="section-hybrid" id="hybrid">
+      <div class="section-container">
+        <div class="section-header-center">
+          <span class="badge-accent">Unified Sound</span>
+          <h2 class="section-headline">One Player. Your Entire Universe of Music.</h2>
+          <p class="section-subtext">
+            No more switching between separate apps for your offline FLAC rips and cloud streaming. Aideo merges them into a single, cohesive queue with AutoEQ applied everywhere.
+          </p>
+        </div>
+
+        <div class="bento-grid">
+          <!-- Bento 1: Bit-Perfect Local Vault -->
+          <div class="bento-card bento-wide">
+            <div class="bento-icon-tag"><i class="fas fa-database"></i> Local Vault</div>
+            <h3>High-Performance SQLite Indexer</h3>
+            <p>
+              Scans tens of thousands of local tracks in seconds. Instant search with zero UI freeze, embedded tag editing, and support for FLAC, ALAC, WAV, AIFF, DSD256 (DoP), and MP3.
+            </p>
+            <div class="format-badges-row">
+              <span class="fmt-pill">FLAC 24/192</span>
+              <span class="fmt-pill">DSD256</span>
+              <span class="fmt-pill">ALAC</span>
+              <span class="fmt-pill">WAV 32-bit</span>
+              <span class="fmt-pill">AIFF</span>
+            </div>
+          </div>
+
+          <!-- Bento 2: Lossless Streaming Integration -->
+          <div class="bento-card">
+            <div class="bento-icon-tag"><i class="fas fa-cloud-arrow-down"></i> Streaming</div>
+            <h3>Tidal, Qobuz & YouTube Music</h3>
+            <p>
+              Native integration with Tidal Hi-Fi, Qobuz high-res catalogs, Subsonic/Navidrome servers, and YouTube Music streams through the exact same audio DSP pipeline.
+            </p>
+            <div class="services-list">
+              <span><i class="fab fa-youtube"></i> YouTube Music</span>
+              <span><i class="fas fa-wave-pulse"></i> Tidal Lossless</span>
+              <span><i class="fas fa-compact-disc"></i> Qobuz Hi-Res</span>
+              <span><i class="fas fa-server"></i> Subsonic / Jellyfin</span>
+            </div>
+          </div>
+
+          <!-- Bento 3: Aideo Connect Mobile LAN Remote -->
+          <div class="bento-card" id="remote">
+            <div class="bento-icon-tag"><i class="fas fa-mobile-screen"></i> Aideo Connect</div>
+            <h3>Wi-Fi Remote on Any Smartphone</h3>
+            <p>
+              Control playback from your couch with zero app downloads. Enable Aideo Connect, scan the generated QR code, and control queue, volume, and playback in any mobile browser.
+            </p>
+            <div class="phone-mockup-sim">
+              <div class="phone-top-bar">
+                <span class="signal-dot"></span>
+                <span>AIDEO CONNECT LAN</span>
+              </div>
+              <div class="phone-now-playing">
+                <i class="fas fa-circle-play"></i>
+                <span>Connected over Wi-Fi</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bento 4: Offline Privacy & Wrapped -->
+          <div class="bento-card bento-wide">
+            <div class="bento-icon-tag"><i class="fas fa-user-shield"></i> 100% Private</div>
+            <h3>Local Listening Analytics & Wrapped Presentation</h3>
+            <p>
+              Your listening habits belong to you. Aideo computes all scrobbles, top tracks, and year-end Wrapped presentations 100% locally on your machine without transmitting private data to remote servers.
+            </p>
+            <div class="privacy-pills">
+              <span><i class="fas fa-check"></i> Zero Trackers</span>
+              <span><i class="fas fa-check"></i> Zero Forced Accounts</span>
+              <span><i class="fas fa-check"></i> Completely Open Source</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION: PERFORMANCE & SYSTEM ARCHITECTURE -->
+    <section class="section-specs" id="specs">
+      <div class="section-container">
+        <div class="section-header-center">
+          <span class="badge-accent">Engineered in Rust</span>
+          <h2 class="section-headline">Performance Without Compromise</h2>
+          <p class="section-subtext">
+            Built on Tauri v2 and native Rust. No heavy Chromium bloat, no battery-draining CPU loops, and zero memory leaks.
+          </p>
+        </div>
+
+        <div class="specs-matrix-grid">
+          <div class="spec-card">
+            <div class="spec-num highlight-emerald">~75 MB</div>
+            <strong class="spec-title">Resident RAM Footprint</strong>
+            <p class="spec-desc">Compare to 600MB+ for Spotify or Electron-based desktop players. Lightweight and snappy.</p>
+          </div>
+
+          <div class="spec-card">
+            <div class="spec-num highlight-cyan">0.0%</div>
+            <strong class="spec-title">Idle GPU Resource Usage</strong>
+            <p class="spec-desc">Smart sleep algorithms suspend visualizer animations and render loops when minimized or idle.</p>
+          </div>
+
+          <div class="spec-card">
+            <div class="spec-num highlight-amber">&lt; 1 ms</div>
+            <strong class="spec-title">Audio Pipeline Latency</strong>
+            <p class="spec-desc">WASAPI Exclusive direct DMA buffers with monotonic clock smoothing and gapless pre-buffering.</p>
+          </div>
+
+          <div class="spec-card">
+            <div class="spec-num">100%</div>
+            <strong class="spec-title">Offline Native Execution</strong>
+            <p class="spec-desc">Runs without internet access. Local SQLite caching, native Windows taskbar integration, and global hotkeys.</p>
+          </div>
+        </div>
+
+        <!-- Architecture Technical Table -->
+        <div class="arch-table-card">
+          <div class="table-header-title">
+            <i class="fas fa-microchip"></i>
+            <span>TECHNICAL SPECIFICATIONS MATRIX</span>
+          </div>
+          <table class="arch-table">
+            <tbody>
+              <tr>
+                <td>Audio Output Backends</td>
+                <td>WASAPI Exclusive (Bit-Perfect Direct), WASAPI Shared (DirectSound Fallback)</td>
+              </tr>
+              <tr>
+                <td>Supported Formats</td>
+                <td>FLAC, ALAC, WAV, AIFF, DSD256 (DoP / Direct), MP3, AAC, OGG Vorbis, Opus</td>
+              </tr>
+              <tr>
+                <td>Equalizer & DSP Engine</td>
+                <td>10-Band Parametric Biquad IIR, 4,000+ AutoEQ Profiles, Equalizer APO Export</td>
+              </tr>
+              <tr>
+                <td>Karaoke & Lyrics</td>
+                <td>LRC Timed Syllable Wipe, Romaji Transliteration, English Translation, Desktop HUD</td>
+              </tr>
+              <tr>
+                <td>Operating System</td>
+                <td>Windows 10 (1903+) & Windows 11 (64-bit x86_64)</td>
+              </tr>
+              <tr>
+                <td>License & Security</td>
+                <td>MIT Open Source License • 100% Free • Verified Release Signatures</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION: INTERACTIVE FAQ ACCORDION -->
+    <section class="section-faq" id="faq">
+      <div class="section-container">
+        <div class="section-header-center">
+          <span class="badge-accent">Knowledge Base</span>
+          <h2 class="section-headline">Frequently Asked Questions</h2>
+          <p class="section-subtext">Everything you need to know about setting up and using Aideo Music Player.</p>
+        </div>
+
+        <div class="faq-accordion-list">
+          <details class="faq-item" open>
+            <summary class="faq-question">
+              <span>What is WASAPI Exclusive mode and why is it superior to standard playback?</span>
+              <i class="fas fa-chevron-down faq-chevron"></i>
+            </summary>
+            <div class="faq-answer">
+              <p>
+                Standard Windows music players send audio to the Windows Shared Audio Engine. The operating system forces all streams into a common sample rate (usually 48kHz), applies software dithering, and routes audio through the CAudioLimiter compressor to prevent system sounds from clipping.
+              </p>
+              <p>
+                Aideo locks your DAC in <strong>WASAPI Exclusive mode</strong>, completely bypassing the Windows mixer. The exact bits contained in your high-resolution files are transferred directly to the audio hardware, maintaining bit-perfect fidelity, uncompressed dynamic range, and accurate stereo imaging.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary class="faq-question">
+              <span>What is AutoEQ and how does it improve my headphones?</span>
+              <i class="fas fa-chevron-down faq-chevron"></i>
+            </summary>
+            <div class="faq-answer">
+              <p>
+                AutoEQ is an open-source database of precision acoustic measurements for over 4,000 headphone and in-ear monitor models. Every headphone has physical acoustic peaks and resonances that color sound.
+              </p>
+              <p>
+                Aideo integrates AutoEQ natively. You simply select your headphone model, and Aideo automatically applies compensatory parametric biquad equalizer filters to tune your headphones to the acoustic Harman target curve, restoring natural timbre and balanced bass.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary class="faq-question">
+              <span>How does Aideo compare to foobar2000 and MusicBee?</span>
+              <i class="fas fa-chevron-down faq-chevron"></i>
+            </summary>
+            <div class="faq-answer">
+              <p>
+                While foobar2000 and MusicBee are legendary tools, configuring bit-perfect output, modern visualizers, and lyrics often requires searching for third-party DLL plugins and navigating complex configuration dialogs.
+              </p>
+              <p>
+                Aideo delivers audiophile sound out of the box with modern craftsmanship: a fluid liquid-glass interface, 5 immersive Theater Mode archetypes, synchronized Romaji karaoke lyrics, native AutoEQ without plugins, and Aideo Connect for wireless smartphone control.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary class="faq-question">
+              <span>How do I control playback from my smartphone using Aideo Connect?</span>
+              <i class="fas fa-chevron-down faq-chevron"></i>
+            </summary>
+            <div class="faq-answer">
+              <p>
+                Aideo includes a built-in LAN web remote server. When enabled in Settings, Aideo generates a local QR code and URL on your home Wi-Fi network. Scanning the QR code opens a lightweight responsive web remote on your smartphone with instant access to track playback, volume, and queue management without installing any phone app.
+              </p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary class="faq-question">
+              <span>Is Aideo really 100% free and open source?</span>
+              <i class="fas fa-chevron-down faq-chevron"></i>
+            </summary>
+            <div class="faq-answer">
+              <p>
+                Yes. Aideo is released under the permissive MIT license. There are no subscriptions, no ads, no feature paywalls, and no telemetry tracking. The full source code is publicly inspectable and auditable on GitHub.
+              </p>
+            </div>
+          </details>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SECTION: CINEMATIC DOWNLOAD MASTHEAD -->
+    <section class="section-download">
+      <div class="section-container">
+        <div class="download-chassis">
+          <div class="download-content">
+            <div class="download-pill">
+              <span class="pulse-dot"></span>
+              <span>LATEST STABLE RELEASE: v0.9.7</span>
+            </div>
+            <h2 class="download-title">Experience Absolute Fidelity Today</h2>
+            <p class="download-lead">
+              Download Aideo for Windows 10 and 11. Free, open source, and ready to play your library the way it was meant to be heard.
+            </p>
+            <div class="download-actions">
+              <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn-primary-glow btn-download-lg" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-windows"></i>
+                <span>Download Installer (.msi / .exe)</span>
+              </a>
+              <a href="https://github.com/Alirull18/Aideo-Music-Player" class="btn-github-lg" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-github"></i>
+                <span>Browse Source on GitHub</span>
+              </a>
+            </div>
+            <div class="download-specs-note">
+              <span>Windows 10 / 11 64-bit</span> &bull; 
+              <span>Direct WASAPI Exclusive Output</span> &bull; 
+              <span>MIT License</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- CINEMATIC FOOTER -->
+  <footer class="cinema-footer">
+    <div class="footer-container">
+      <div class="footer-brand-col">
+        <div class="brand-row">
+          <img src="logo.png" alt="Aideo Logo" class="brand-glyph">
+          <span class="brand-wordmark">AIDEO</span>
+        </div>
+        <p class="footer-tagline">
+          The audiophile desktop music player engineered for Windows. Bit-perfect WASAPI direct transport, 4,000+ AutoEQ calibrations, 5 Theater archetypes, and fluid Romaji lyrics.
+        </p>
+        <div class="footer-meta-pill">
+          <span>Crafted with Rust & Tauri v2 by Alirul</span>
+        </div>
+      </div>
+
+      <div class="footer-nav-col">
+        <h4>Navigation</h4>
+        <a href="#theater">Theater Modes</a>
+        <a href="#signal-path">Signal Path</a>
+        <a href="#dsp-lab">Audio Lab</a>
+        <a href="#lyrics">Romaji Lyrics</a>
+        <a href="#hybrid">Hybrid Vault</a>
+        <a href="#specs">Specifications</a>
+        <a href="#faq">FAQ</a>
+      </div>
+
+      <div class="footer-nav-col">
+        <h4>Ecosystem</h4>
+        <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" target="_blank" rel="noopener noreferrer">Download v0.9.7</a>
+        <a href="https://github.com/Alirull18/Aideo-Music-Player/blob/main/README.md" target="_blank" rel="noopener noreferrer">Release Documentation</a>
+        <a href="https://github.com/Alirull18/Aideo-Music-Player" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+        <a href="https://www.producthunt.com/products/aideo-music-player" target="_blank" rel="noopener noreferrer">Product Hunt</a>
+      </div>
+
+      <div class="footer-nav-col">
+        <h4>Auditing & Integrity</h4>
+        <div class="integrity-badge">
+          <i class="fas fa-check-double highlight-emerald"></i>
+          <span>100% Offline Privacy</span>
+        </div>
+        <div class="integrity-badge">
+          <i class="fas fa-shield-check highlight-cyan"></i>
+          <span>Bit-Perfect Pipeline</span>
+        </div>
+        <div class="integrity-badge">
+          <i class="fas fa-code highlight-amber"></i>
+          <span>MIT Open Source</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom-strip">
+      <p>&copy; 2026 Aideo Music Player. All rights reserved. Open source under the MIT License.</p>
+      <a href="#top" class="back-to-top"><i class="fas fa-arrow-up"></i> Back to Top</a>
+    </div>
+  </footer>
+
+  <!-- Interactive JavaScript Engine -->
+  <script src="app.js"></script>
+</body>
+</html>
