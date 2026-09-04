@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { LyricWord } from '../store/types';
 
 interface KaraokeActiveLineProps {
@@ -9,6 +9,10 @@ interface KaraokeActiveLineProps {
   className?: string;
 }
 
+const formatProgress = (val: number): string => {
+  return Number.isInteger(val) ? `${val}%` : `${val.toFixed(2)}%`;
+};
+
 function KaraokeActiveLineComponent({
   words,
   positionSecs,
@@ -16,14 +20,65 @@ function KaraokeActiveLineComponent({
   isPlaying,
   className,
 }: KaraokeActiveLineProps) {
-  const spanRefs = useRef<(HTMLSpanElement | null)[]>([]);
-  const basePosRef = useRef(positionSecs);
-  const baseTimeRef = useRef(performance.now());
-  const lyricOffsetRef = useRef(lyricOffset);
-  const wordsRef = useRef(words);
+  const [smoothedTime, setSmoothedTime] = useState(positionSecs);
+  const lastPositionRef = useRef(positionSecs);
+  const lastTimeRef = useRef(performance.now());
+  const prevWordsRef = useRef(words);
+  const prevPlayingRef = useRef(isPlaying);
 
-  lyricOffsetRef.current = lyricOffset;
-  wordsRef.current = words;
+  // When words change (line transition), re-anchor immediately
+  if (prevWordsRef.current !== words) {
+    prevWordsRef.current = words;
+    lastPositionRef.current = positionSecs;
+    lastTimeRef.current = performance.now();
+    if (smoothedTime !== positionSecs) {
+      setSmoothedTime(positionSecs);
+    }
+  }
+
+  // Handle play/pause transitions and external seek jumps
+  useEffect(() => {
+    const isPlayingTransition = prevPlayingRef.current !== isPlaying;
+    prevPlayingRef.current = isPlaying;
+
+    if (!isPlaying || isPlayingTransition) {
+      lastPositionRef.current = positionSecs;
+      lastTimeRef.current = performance.now();
+      setSmoothedTime(positionSecs);
+      return;
+    }
+
+    // During active playback, calculate extrapolated time from continuous monotonic clock
+    const now = performance.now();
+    const elapsed = Math.max(0, (now - lastTimeRef.current) / 1000);
+    const currentExtrapolated = lastPositionRef.current + elapsed;
+    const diff = positionSecs - currentExtrapolated;
+
+    // Only re-anchor if there is a real external seek/skip (diff >= 0.8s)
+    // Routine 100ms clock ticks and 2s backend reconciliations (< 0.8s) are ignored so rAF is completely smooth
+    if (Math.abs(diff) >= 0.8) {
+      lastPositionRef.current = positionSecs;
+      lastTimeRef.current = now;
+      setSmoothedTime(positionSecs);
+    }
+  }, [positionSecs, isPlaying]);
+
+  // RequestAnimationFrame loop: exact v0.9.6 continuous 60fps/120fps/144fps interpolation
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    let frameId: number;
+    const update = () => {
+      const now = performance.now();
+      const delta = Math.max(0, (now - lastTimeRef.current) / 1000);
+      const interpolated = lastPositionRef.current + delta;
+      setSmoothedTime(interpolated);
+      frameId = requestAnimationFrame(update);
+    };
+
+    frameId = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(frameId);
+  }, [isPlaying]);
 
   const calculateWordProgress = useCallback((word: LyricWord, nextWord: LyricWord | undefined, currentTime: number) => {
     const duration =
@@ -51,54 +106,66 @@ function KaraokeActiveLineComponent({
     return Math.min(100, Math.max(0, ((currentTime - word.time_secs) / duration) * 100));
   }, []);
 
-  const updateDomProgress = useCallback((currentTime: number) => {
-    const currentWords = wordsRef.current;
-    for (let i = 0; i < currentWords.length; i++) {
-      const span = spanRefs.current[i];
-      if (!span) continue;
-      const progress = calculateWordProgress(currentWords[i], currentWords[i + 1], currentTime);
-      span.style.setProperty('--word-progress', `${progress}%`);
-    }
-  }, [calculateWordProgress]);
-
-  useEffect(() => {
-    basePosRef.current = positionSecs;
-    baseTimeRef.current = performance.now();
-    updateDomProgress(positionSecs + lyricOffsetRef.current / 1000);
-  }, [positionSecs, updateDomProgress]);
-
-  useEffect(() => {
-    if (!isPlaying) return;
-    let frameId: number;
-    const update = () => {
-      const elapsed = (performance.now() - baseTimeRef.current) / 1000;
-      const currentTime = basePosRef.current + Math.max(0, elapsed) + lyricOffsetRef.current / 1000;
-      updateDomProgress(currentTime);
-      frameId = requestAnimationFrame(update);
-    };
-    frameId = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frameId);
-  }, [isPlaying, updateDomProgress]);
-
-  const initialTime = positionSecs + lyricOffset / 1000;
+  const currentTime = smoothedTime + lyricOffset / 1000;
 
   return (
     <>
       {words.map((word, wordIdx) => {
         const nextWord = words[wordIdx + 1];
-        const progress = calculateWordProgress(word, nextWord, initialTime);
+        const progress = calculateWordProgress(word, nextWord, currentTime);
+        const progressStr = formatProgress(progress);
+
+        const rawText = word.text || '';
+        const trimmed = rawText.trim();
+        let leadingSpace = '';
+        let coreText = rawText;
+        let trailingSpace = '';
+
+        if (trimmed.length === 0) {
+          coreText = '';
+        } else {
+          const firstNonSpace = rawText.indexOf(trimmed);
+          leadingSpace = rawText.slice(0, firstNonSpace);
+          trailingSpace = rawText.slice(firstNonSpace + trimmed.length);
+          coreText = trimmed;
+        }
+
+        if (!coreText) {
+          return (
+            <span
+              key={wordIdx}
+              className={className || 'lyric-word'}
+              style={{
+                '--word-progress': progressStr,
+                whiteSpace: 'pre',
+              } as React.CSSProperties}
+            >
+              {rawText}
+            </span>
+          );
+        }
 
         return (
-          <span
-            key={wordIdx}
-            ref={(el) => {
-              spanRefs.current[wordIdx] = el;
-            }}
-            className={className || 'lyric-word'}
-            style={{ '--word-progress': `${progress}%` } as React.CSSProperties}
-          >
-            {word.text}
-          </span>
+          <React.Fragment key={wordIdx}>
+            {leadingSpace && (
+              <span className="lyric-word-space" style={{ whiteSpace: 'pre' }}>
+                {leadingSpace}
+              </span>
+            )}
+            <span
+              className={className || 'lyric-word'}
+              style={{
+                '--word-progress': progressStr,
+              } as React.CSSProperties}
+            >
+              {coreText}
+            </span>
+            {trailingSpace && (
+              <span className="lyric-word-space" style={{ whiteSpace: 'pre' }}>
+                {trailingSpace}
+              </span>
+            )}
+          </React.Fragment>
         );
       })}
     </>
@@ -110,10 +177,16 @@ export const KaraokeActiveLine = React.memo(KaraokeActiveLineComponent, (prev, n
   if (prev.isPlaying !== next.isPlaying) return false;
   if (prev.lyricOffset !== next.lyricOffset) return false;
   if (prev.className !== next.className) return false;
-  // External seek jumps (> 0.35s) trigger re-render & re-sync
-  if (Math.abs(prev.positionSecs - next.positionSecs) > 0.35) return false;
-  // During normal playback, skip re-renders so RequestAnimationFrame drives 60fps DOM styles uninterrupted
-  if (next.isPlaying) return true;
-  return prev.positionSecs === next.positionSecs;
+  // If paused or stopped, re-render when position changes so scrub/step reflects immediately
+  if (!next.isPlaying) {
+    return prev.positionSecs === next.positionSecs;
+  }
+  // During active playback:
+  // Normal 100ms clock ticks and backend status reconciliations (< 0.8s) must NOT trigger React re-renders from parent!
+  // The internal requestAnimationFrame loop drives continuous 60fps/120fps/144fps state updates directly.
+  // Only re-render if there is an explicit external seek jump (diff >= 0.8s).
+  if (Math.abs(prev.positionSecs - next.positionSecs) < 0.8) {
+    return true; // Skip React re-render from parent during normal continuous playback!
+  }
+  return false; // Substantial seek jump: allow re-render to resync.
 });
-

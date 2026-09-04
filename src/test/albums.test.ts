@@ -10,9 +10,9 @@ function groupTracksIntoAlbums(tracks: any[]) {
     const albumTitle = t.album?.trim() || 'Unknown Album';
     const albumArtist = t.album_artist?.trim() || t.albumArtist?.trim();
     const trackArtist = t.artist?.trim() || 'Unknown Artist';
-    
+
     const effectiveArtist = albumArtist || trackArtist;
-    const key = albumArtist 
+    const key = albumArtist
       ? `${albumArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`
       : `album:::${albumTitle.toLowerCase()}`;
 
@@ -119,7 +119,7 @@ describe('Albums View Edge Cases & Crash Prevention (What-If Study Cases)', () =
     ];
 
     const albums = groupTracksIntoAlbums(tracks);
-    
+
     // Sort by recent
     const sorted = [...albums].sort((a, b) => {
       const maxIdA = Math.max(...a.tracks.map((t: any) => (typeof t.id === 'number' ? t.id : (Number(t.id) || 0))), 0);
@@ -166,7 +166,7 @@ describe('Albums View Edge Cases & Crash Prevention (What-If Study Cases)', () =
 
     const keys = flatFolderTracks.map(t => buildAlbumKey(t));
     const uniqueKeys = new Set(keys);
-    
+
     // Each distinct artist must get their own unique album key even in the same folder
     expect(uniqueKeys.size).toBe(5);
     expect(keys[0]).not.toBe(keys[1]);
@@ -184,5 +184,22 @@ describe('Albums View Edge Cases & Crash Prevention (What-If Study Cases)', () =
     const key2 = buildAlbumKey(multiDiscTracks[1]);
     expect(key1).toBe(key2);
   });
-});
 
+  it('Groups tracks with comma-separated, ampersand, slash, semicolon, or x collaborators on the same album', () => {
+    const tracks: any[] = [
+      { id: 1, path: 'C:/Music/Puting Beliung/01.mp3', title: 'Song 1', artist: 'tenxi,dia', album: 'puting beliung' },
+      { id: 2, path: 'C:/Music/Puting Beliung/02.mp3', title: 'Song 2', artist: 'tenxi', album: 'puting beliung' },
+      { id: 3, path: 'C:/Music/Puting Beliung/03.mp3', title: 'Song 3', artist: 'tenxi & another', album: 'puting beliung' },
+      { id: 4, path: 'C:/Music/Puting Beliung/04.mp3', title: 'Song 4', artist: 'tenxi / guest', album: 'puting beliung' },
+      { id: 5, path: 'C:/Music/Puting Beliung/05.mp3', title: 'Song 5', artist: 'tenxi; co-artist', album: 'puting beliung' },
+      { id: 6, path: 'C:/Music/Puting Beliung/06.mp3', title: 'Song 6', artist: 'tenxi x producer', album: 'puting beliung' },
+    ];
+
+    const keys = tracks.map(t => buildAlbumKey(t));
+    const uniqueKeys = new Set(keys);
+
+    expect(uniqueKeys.size).toBe(1);
+    expect(keys[0]).toBe('tenxi:::puting beliung');
+    expect(keys[1]).toBe('tenxi:::puting beliung');
+  });
+});

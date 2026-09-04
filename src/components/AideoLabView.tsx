@@ -21,6 +21,8 @@ import {
   Trash2,
   Save,
   SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   GRAPHIC_EQ_FREQUENCIES,
@@ -113,8 +115,47 @@ export function AideoLabView() {
   const [activeDragNode, setActiveDragNode] = useState<number | null>(null);
   const [hoveredNode, setHoveredNode] = useState<number | null>(null);
   const graphRef = useRef<SVGSVGElement>(null);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(840);
+  const svgWidth = Math.max(480, containerWidth);
+  const svgHeight = eqViewMode === 'graph' ? 260 : 130;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const spectrumRef = useRef<number[]>(new Array(64).fill(0));
+
+  // AutoEQ Dock Collapsed State with LocalStorage Persistence
+  const [autoEqCollapsed, setAutoEqCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('aideo_autoeq_collapsed') === 'true';
+  });
+
+  const toggleAutoEqCollapsed = () => {
+    setAutoEqCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('aideo_autoeq_collapsed', String(next));
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const el = graphContainerRef.current;
+    if (!el) return;
+    const updateWidth = () => {
+      if (el.clientWidth > 0 && Math.abs(el.clientWidth - containerWidth) >= 2) {
+        setContainerWidth(el.clientWidth);
+      }
+    };
+    if (el.clientWidth > 0) setContainerWidth(el.clientWidth);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(updateWidth);
+      ro.observe(el);
+    }
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [containerWidth]);
 
   // Custom Presets
   const [customPresets, setCustomPresets] = useState<{ name: string; dsp: typeof dsp }[]>(() => {
@@ -202,7 +243,7 @@ export function AideoLabView() {
       render();
     }
     return () => cancelAnimationFrame(animId);
-  }, [activeTab, eqViewMode, lowSpecMode, playbackStatus]);
+  }, [activeTab, eqViewMode, lowSpecMode, playbackStatus, svgWidth, svgHeight]);
 
   // AutoEQ Database Fetcher
   const fetchAutoEqDb = useCallback(async () => {
@@ -359,9 +400,6 @@ export function AideoLabView() {
   }, [dsp.eq_enabled, dsp.eq_parametric, dsp.eq_parametric_bands, dsp.eq_graphic_gains, dsp.preamp_gain, sampleRate]);
 
   // Coordinate Helpers
-  const svgWidth = 840;
-  const svgHeight = eqViewMode === 'graph' ? 220 : 130;
-
   const getFreqFromX = (x: number, width: number) => {
     const minF = 20;
     const maxF = 20000;
@@ -512,7 +550,19 @@ export function AideoLabView() {
       onMouseMove={handleGraphMouseMove}
       onMouseUp={handleGraphMouseUp}
     >
-      {/* Master Studio Header */}
+      <div
+        className="aideo-lab-workspace-container"
+        style={{
+          width: '100%',
+          maxWidth: 1600,
+          margin: '0 auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 18,
+          flex: 1,
+        }}
+      >
+        {/* Master Studio Header */}
       <div
         style={{
           display: 'flex',
@@ -985,11 +1035,11 @@ export function AideoLabView() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Equalizer Spline Graph & Real-Time Waterfall Canvas */}
               <div
+                ref={graphContainerRef}
                 style={{
                   background: '#090a10',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
                   borderRadius: 12,
-                  padding: '16px',
                   position: 'relative',
                   overflow: 'hidden',
                   height: svgHeight,
@@ -1015,7 +1065,7 @@ export function AideoLabView() {
                 <svg
                   ref={graphRef}
                   viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-                  preserveAspectRatio="none"
+                  preserveAspectRatio="xMidYMid meet"
                   style={{
                     position: 'absolute',
                     top: 0,
@@ -1573,64 +1623,133 @@ export function AideoLabView() {
               background: 'rgba(255, 255, 255, 0.02)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
               borderRadius: 12,
-              padding: '16px 20px',
+              padding: autoEqCollapsed ? '12px 18px' : '16px 20px',
               display: 'flex',
               flexDirection: 'column',
-              gap: 14,
+              gap: autoEqCollapsed ? 0 : 14,
+              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
-            {/* Dock Header & Search Strip */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* Dock Header & Toggle */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              onClick={toggleAutoEqCollapsed}
+              title={autoEqCollapsed ? 'Click to expand AutoEQ' : 'Click to collapse AutoEQ'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Headphones size={16} color="var(--accent)" />
                 <span style={{ fontSize: 13, fontWeight: 700 }}>AutoEQ Headphone Calibration</span>
                 <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
                   ({isFetchingDb ? 'Fetching index...' : `${filteredHeadphones.length} models ready`})
                 </span>
+                {activeCalibratedHeadphone && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      borderRadius: 10,
+                      background: 'rgba(16, 185, 129, 0.12)',
+                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      color: '#34d399',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Check size={10} /> Active: {activeCalibratedHeadphone}
+                  </span>
+                )}
               </div>
 
-              {/* Compact Search Input */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  background: 'rgba(0, 0, 0, 0.4)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  minWidth: 280,
-                  maxWidth: 380,
-                  flex: 1,
-                }}
-              >
-                <Search size={14} color="var(--text-dim)" />
-                <input
-                  type="text"
-                  placeholder="Search model (HD 600, WH-1000XM4, DT 990)..."
-                  value={dbSearchQuery}
-                  onChange={e => setDbSearchQuery(e.target.value)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    outline: 'none',
-                    color: 'var(--text)',
-                    fontSize: 12,
-                    width: '100%',
-                  }}
-                />
-                {dbSearchQuery && (
-                  <button
-                    onClick={() => setDbSearchQuery('')}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 0 }}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* Compact Search Input (when expanded) */}
+                {!autoEqCollapsed && (
+                  <div
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      background: 'rgba(0, 0, 0, 0.4)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      minWidth: 260,
+                      maxWidth: 380,
+                      flex: 1,
+                    }}
                   >
-                    <X size={12} />
-                  </button>
+                    <Search size={14} color="var(--text-dim)" />
+                    <input
+                      type="text"
+                      placeholder="Search model (HD 600, WH-1000XM4, DT 990)..."
+                      value={dbSearchQuery}
+                      onChange={e => setDbSearchQuery(e.target.value)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        outline: 'none',
+                        color: 'var(--text)',
+                        fontSize: 12,
+                        width: '100%',
+                      }}
+                    />
+                    {dbSearchQuery && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          setDbSearchQuery('');
+                        }}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 0 }}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
                 )}
+
+                {/* Collapse / Expand Button */}
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleAutoEqCollapsed();
+                  }}
+                  className="autoeq-collapse-btn"
+                  title={autoEqCollapsed ? 'Expand AutoEQ Calibration' : 'Collapse AutoEQ Calibration'}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '5px 10px',
+                    borderRadius: 6,
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    color: 'var(--text-dim)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <span>{autoEqCollapsed ? 'Expand' : 'Collapse'}</span>
+                  {autoEqCollapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+                </button>
               </div>
             </div>
 
-            {/* Brand Filter Chips Strip */}
+            {!autoEqCollapsed && (
+              <>
+                {/* Brand Filter Chips Strip */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
               {BRAND_FILTERS.map(brand => {
                 const isSelected = selectedBrand === brand;
@@ -1752,9 +1871,11 @@ export function AideoLabView() {
                 );
               })}
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
+    </div>
+  )}
 
       {/* TAB 2: Spatial Acoustics & DSP Rack */}
       {activeTab === 'spatial_acoustics' && (
@@ -2209,6 +2330,7 @@ export function AideoLabView() {
           </motion.div>
         </div>
       )}
+      </div>
     </div>
   );
 }

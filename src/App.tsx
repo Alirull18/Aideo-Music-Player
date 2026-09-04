@@ -25,6 +25,7 @@ const ChartsView = lazy(() => import('./components/ChartsView').then(m => ({ def
 const DownloadedView = lazy(() => import('./components/DownloadedView').then(m => ({ default: m.DownloadedView })));
 
 import { PlayerBar } from './components/PlayerBar';
+import { ScrollToTopButton } from './components/ScrollToTopButton';
 import { AudioControlCenter } from './components/AudioControlCenter';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
@@ -137,6 +138,18 @@ function AideoApp() {
 
   const isLightTheme = colorScheme === 'light' || (colorScheme === 'system' && systemIsLight);
 
+  useEffect(() => {
+    if (isLightTheme) {
+      document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.classList.add('light-theme');
+      document.documentElement.style.colorScheme = 'light';
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.classList.remove('light-theme');
+      document.documentElement.style.colorScheme = 'dark';
+    }
+  }, [isLightTheme]);
+
   const [updateInfo, setUpdateInfo] = useState<any>(null);
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -169,6 +182,11 @@ function AideoApp() {
     // EQ, spatial, crossfeed, etc. survive app restarts
     invoke('set_dsp_state', { dsp: useStore.getState().dsp })
       .catch(e => console.error("set_dsp_state on startup error:", e));
+
+    // Restore the user's selected output path after the backend's process-local
+    // Exclusive/Bit-Perfect flags have been initialized.
+    useStore.getState().restoreAudioModes()
+      .catch(e => console.error("restoreAudioModes error:", e));
 
     // Synchronize close to tray setting with backend on startup
     const initialCloseToTray = localStorage.getItem('aideo_close_to_tray') === 'true';
@@ -711,7 +729,10 @@ function AideoApp() {
           )}
           {view === 'nowplaying' && (
             <motion.div key="np" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.06 }}
+              transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
               <ErrorBoundary name="Now Playing">
                 <NowPlayingView />
               </ErrorBoundary>
@@ -823,7 +844,10 @@ function AideoApp() {
 
           {view === 'fullscreen' && (
             <motion.div key="fullscreen" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              initial={{ opacity: 0, scale: 1.06 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}>
               <Suspense fallback={
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
                   <span>Loading Fullscreen...</span>
@@ -837,7 +861,8 @@ function AideoApp() {
           )}
         </AnimatePresence>
       </main>
-      <PlayerBar />
+      {view !== 'fullscreen' && <PlayerBar />}
+      <ScrollToTopButton />
       <ToastContainer />
       <AnimatePresence>
         <QueueView key="queue" />

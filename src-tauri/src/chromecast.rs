@@ -101,6 +101,7 @@ pub async fn ensure_local_stream_server(app_state: &crate::AppState) -> Option<u
     let app_state_inner = crate::AppState {
         player: app_state.player.clone(),
         db: app_state.db.clone(),
+        db_pool: app_state.db_pool.clone(),
         media_controls: app_state.media_controls.clone(),
         cached_devices: app_state.cached_devices.clone(),
     };
@@ -122,8 +123,7 @@ lazy_static! {
         std::sync::Mutex::new((0, std::collections::HashSet::new()));
 }
 
-fn build_safe_path_set(app_state: &crate::AppState) -> std::collections::HashSet<std::path::PathBuf> {
-    let conn = crate::safe_lock(&app_state.db);
+fn build_safe_path_set(conn: &rusqlite::Connection) -> std::collections::HashSet<std::path::PathBuf> {
     let mut stmt = match conn.prepare("SELECT path, cover_url FROM tracks") {
         Ok(s) => s,
         Err(_) => return std::collections::HashSet::new(),
@@ -148,8 +148,7 @@ fn build_safe_path_set(app_state: &crate::AppState) -> std::collections::HashSet
     set
 }
 
-// Local HTTP server task to stream audio files to Chromecast devices
-fn is_path_safe(app_state: &crate::AppState, filepath: &str) -> bool {
+pub fn is_path_safe_with_db(conn: &rusqlite::Connection, filepath: &str) -> bool {
     let path = Path::new(filepath);
     let canonical = match path.canonicalize() {
         Ok(p) => p,
@@ -169,21 +168,24 @@ fn is_path_safe(app_state: &crate::AppState, filepath: &str) -> bool {
         }
     }
 
-    let track_count: i64 = {
-        let conn = crate::safe_lock(&app_state.db);
-        conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(-1)
-    };
+    let track_count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(-1);
 
     if let Ok(mut cache) = SAFE_PATH_CACHE.lock() {
         if cache.0 != track_count {
-            cache.1 = build_safe_path_set(app_state);
+            cache.1 = build_safe_path_set(conn);
             cache.0 = track_count;
         }
         return cache.1.contains(&canonical);
     }
 
     // Cache lock poisoned — fall back to a direct scan
-    build_safe_path_set(app_state).contains(&canonical)
+    build_safe_path_set(conn).contains(&canonical)
+}
+
+// Local HTTP server task to stream audio files to Chromecast devices
+fn is_path_safe(app_state: &crate::AppState, filepath: &str) -> bool {
+    let conn = crate::safe_lock(&app_state.db);
+    is_path_safe_with_db(&conn, filepath)
 }
 
 // Local HTTP server task to stream audio files to Chromecast devices
@@ -196,6 +198,7 @@ async fn run_http_server(listener: TcpListener, mut shutdown_rx: watch::Receiver
                     let app_state_clone = crate::AppState {
                         player: app_state.player.clone(),
                         db: app_state.db.clone(),
+                        db_pool: app_state.db_pool.clone(),
                         media_controls: app_state.media_controls.clone(),
                         cached_devices: app_state.cached_devices.clone(),
                     };
@@ -456,6 +459,7 @@ pub async fn chromecast_connect(ip: String, port: u16, state: tauri::State<'_, c
         let app_state_inner = crate::AppState {
             player: state.player.clone(),
             db: state.db.clone(),
+            db_pool: state.db_pool.clone(),
             media_controls: state.media_controls.clone(),
             cached_devices: state.cached_devices.clone(),
         };
@@ -760,5 +764,29 @@ mod tests {
     fn test_parse_http_range_missing_or_invalid() {
         assert_eq!(parse_http_range("User-Agent: Mozilla", 1000), HttpRange::None);
         assert_eq!(parse_http_range("Range: chars=0-100", 1000), HttpRange::None);
+    }
+
+    #[test]
+    fn test_is_path_safe_rejects_unauthorized_and_validates_library_files() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+
+        // 1. Non-existent file must fail
+        assert!(!is_path_safe_with_db(&conn, "definitely_non_existent_track_xyz.flac"));
+
+        // 2. Directory must fail
+        assert!(!is_path_safe_with_db(&conn, "."));
+
+        // 3. Existing file on disk but not in library tracks must fail
+        let cargo_path = std::path::Path::new("Cargo.toml").canonicalize().unwrap();
+        let cargo_str = cargo_path.to_str().unwrap();
+        assert!(!is_path_safe_with_db(&conn, cargo_str));
+
+        // 4. File inserted into library tracks must pass
+        conn.execute(
+            "INSERT INTO tracks (path, title, artist, album, duration, format) VALUES (?1, 'Test', 'Artist', 'Album', 120, 'FLAC')",
+            rusqlite::params![cargo_str],
+        ).unwrap();
+
+        assert!(is_path_safe_with_db(&conn, cargo_str));
     }
 }

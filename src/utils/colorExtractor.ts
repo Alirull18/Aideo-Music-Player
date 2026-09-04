@@ -163,7 +163,7 @@ export function extractAccentColor(dataUrl: string | null | undefined): Promise<
         if (!ctx) { resolve('#8b5cf6'); return; }
         ctx.drawImage(img, 0, 0, 10, 10);
         const data = ctx.getImageData(0, 0, 10, 10).data;
-        
+
         const bins: Record<string, { r: number, g: number, b: number, count: number }> = {};
         for (let i = 0; i < data.length; i += 4) {
           const pr = data[i];
@@ -171,10 +171,10 @@ export function extractAccentColor(dataUrl: string | null | undefined): Promise<
           const pb = data[i+2];
           const pa = data[i+3];
           if (pa < 128) continue;
-          
+
           const l = (Math.max(pr, pg, pb) + Math.min(pr, pg, pb)) / 2;
           if (l > 240 || l < 20) continue;
-          
+
           const binKey = `${pr >> 5},${pg >> 5},${pb >> 5}`;
           if (!bins[binKey]) {
             bins[binKey] = { r: pr, g: pg, b: pb, count: 1 };
@@ -185,7 +185,7 @@ export function extractAccentColor(dataUrl: string | null | undefined): Promise<
             bins[binKey].count++;
           }
         }
-        
+
         let dominantColor = '#8b5cf6';
         let maxCount = 0;
         for (const key in bins) {
@@ -195,11 +195,11 @@ export function extractAccentColor(dataUrl: string | null | undefined): Promise<
             const avgR = Math.round(bin.r / bin.count);
             const avgG = Math.round(bin.g / bin.count);
             const avgB = Math.round(bin.b / bin.count);
-            
+
             const hsl = rgbToHsl(avgR, avgG, avgB);
             const targetL = Math.max(50, Math.min(75, hsl.l));
             const targetS = hsl.s < 10 ? 0 : Math.max(55, Math.min(95, hsl.s));
-            
+
             const adjustedRgb = hslToRgb(hsl.h, targetS, targetL);
             dominantColor = `rgb(${adjustedRgb.r},${adjustedRgb.g},${adjustedRgb.b})`;
           }
@@ -212,5 +212,122 @@ export function extractAccentColor(dataUrl: string | null | undefined): Promise<
     };
     img.onerror = () => resolve('#8b5cf6');
     img.src = dataUrl;
+  });
+}
+
+export function extractTopColors(imageUrl: string | null | undefined, count = 3): Promise<string[]> {
+  const fallback = ['#8b5cf6', '#6366f1', '#a855f7'];
+  if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.trim()) {
+    return Promise.resolve(fallback.slice(0, count));
+  }
+
+  const cacheKey = `topColors:${count}:${imageUrl}`;
+  if (colorCache.has(cacheKey)) {
+    try {
+      return Promise.resolve(JSON.parse(colorCache.get(cacheKey)!));
+    } catch {
+      // ignore
+    }
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (!imageUrl.startsWith('data:')) {
+      img.crossOrigin = 'anonymous';
+    }
+
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 32;
+        canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(fallback.slice(0, count));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, 32, 32);
+        const data = ctx.getImageData(0, 0, 32, 32).data;
+
+        const bins: Record<string, { r: number; g: number; b: number; count: number; h: number; s: number; l: number }> = {};
+        for (let i = 0; i < data.length; i += 4) {
+          const pr = data[i];
+          const pg = data[i + 1];
+          const pb = data[i + 2];
+          const pa = data[i + 3];
+          if (pa < 128) continue;
+
+          const hsl = rgbToHsl(pr, pg, pb);
+          // Filter out near black and near white
+          if (hsl.l < 15 || hsl.l > 92) continue;
+
+          // Quantize hue into 12 sectors (30 deg each), saturation into 2, lightness into 2
+          const hBin = Math.floor(hsl.h / 30);
+          const sBin = hsl.s > 45 ? 1 : 0;
+          const lBin = hsl.l > 50 ? 1 : 0;
+          const binKey = `${hBin}_${sBin}_${lBin}`;
+
+          if (!bins[binKey]) {
+            bins[binKey] = { r: pr, g: pg, b: pb, count: 1, h: hsl.h, s: hsl.s, l: hsl.l };
+          } else {
+            bins[binKey].r += pr;
+            bins[binKey].g += pg;
+            bins[binKey].b += pb;
+            bins[binKey].count++;
+          }
+        }
+
+        const sortedBins = Object.values(bins).sort((a, b) => b.count - a.count);
+        const selectedColors: string[] = [];
+        const selectedHues: number[] = [];
+
+        for (const bin of sortedBins) {
+          const avgR = Math.round(bin.r / bin.count);
+          const avgG = Math.round(bin.g / bin.count);
+          const avgB = Math.round(bin.b / bin.count);
+          const hsl = rgbToHsl(avgR, avgG, avgB);
+
+          // Check if hue is sufficiently distinct from already selected hues
+          const isDistinct = selectedHues.every(h => {
+            const diff = Math.abs(h - hsl.h);
+            const dist = Math.min(diff, 360 - diff);
+            return dist >= 35;
+          });
+
+          if (isDistinct || selectedColors.length === 0) {
+            const targetL = Math.max(45, Math.min(70, hsl.l));
+            const targetS = Math.max(55, Math.min(95, hsl.s));
+            const tuned = hslToRgb(hsl.h, targetS, targetL);
+            selectedColors.push(`rgb(${tuned.r},${tuned.g},${tuned.b})`);
+            selectedHues.push(hsl.h);
+            if (selectedColors.length >= count) break;
+          }
+        }
+
+        // If we don't have enough distinct colors, generate harmonious analogous/triad stops
+        if (selectedColors.length === 0) {
+          resolve(fallback.slice(0, count));
+          return;
+        }
+
+        const firstRgb = selectedColors[0].match(/\d+/g);
+        const primaryHsl = firstRgb ? rgbToHsl(parseInt(firstRgb[0]), parseInt(firstRgb[1]), parseInt(firstRgb[2])) : { h: 260, s: 70, l: 60 };
+
+        while (selectedColors.length < count) {
+          const offset = selectedColors.length === 1 ? 55 : -55;
+          const harmonizedHue = (primaryHsl.h + offset + 360) % 360;
+          const tuned = hslToRgb(harmonizedHue, Math.max(60, primaryHsl.s), Math.max(50, primaryHsl.l));
+          selectedColors.push(`rgb(${tuned.r},${tuned.g},${tuned.b})`);
+        }
+
+        colorCache.set(cacheKey, JSON.stringify(selectedColors));
+        resolve(selectedColors);
+      } catch (_) {
+        resolve(fallback.slice(0, count));
+      }
+    };
+
+    img.onerror = () => resolve(fallback.slice(0, count));
+    img.src = imageUrl;
   });
 }

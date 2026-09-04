@@ -14,6 +14,11 @@ let lastDspInvokeTime = 0;
 let pendingDspState: any = null;
 let chromecastTickCount = 0;
 let queueOperationPromise = Promise.resolve();
+let audioModesRestored = false;
+
+const EXCLUSIVE_MODE_STORAGE_KEY = 'aideo_exclusive_mode';
+const BIT_PERFECT_MODE_STORAGE_KEY = 'aideo_bit_perfect_mode';
+
 export const chainQueueOperation = (op: () => Promise<any>): Promise<any> => {
   queueOperationPromise = queueOperationPromise.then(() => op().catch((err) => {
     console.error('Queue operation error:', err);
@@ -31,6 +36,9 @@ const performDspInvoke = async (dsp: any) => {
     console.error('set_dsp_state error:', e);
   }
 };
+
+const initialBitPerfectMode = safeGetStorage(BIT_PERFECT_MODE_STORAGE_KEY) === 'true';
+const initialExclusiveMode = initialBitPerfectMode || safeGetStorage(EXCLUSIVE_MODE_STORAGE_KEY) === 'true';
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   networkTelemetry: null,
@@ -55,10 +63,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       } catch {}
       return 1.0;
     })(),
-    exclusive: false,
-    bit_perfect: false,
+    exclusive: initialExclusiveMode,
+    bit_perfect: initialBitPerfectMode,
     dev_rate: 0,
     driver_type: 'WASAPI',
+    effective_audio_path: null,
     is_buffering: false,
   },
   isMuted: false,
@@ -356,7 +365,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       } else {
         await invoke('stop_track');
       }
-      
+
       localStorage.removeItem('aideo_current_track');
       localStorage.removeItem('aideo_resume_position');
       set({
@@ -438,7 +447,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (get().chromecast_connected) {
       chromecastTickCount++;
       const currentStatus = get().playback.status;
-      
+
       // Eager local estimation for smooth progress bar updates
       if (currentStatus === 'Playing') {
         const currentTrack = get().currentTrack;
@@ -465,7 +474,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         const lastSeekTime = get().playback.last_seek_time || 0;
         const lastSkipTime = get().playback.last_skip_time || 0;
         const now = Date.now();
-        
+
         // If we recently seeked or skipped (within the last 2 seconds), don't overwrite position with stale Chromecast status
         const isTransitioning = (now - lastSeekTime < 2000) || (now - lastSkipTime < 2500);
 
@@ -475,14 +484,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
             set(s => {
               const nextStatus = status.status;
               const nextPos = isTransitioning ? s.playback.position_secs : status.position_secs;
-              
+
               // If the song finished naturally, transition to next track
               if (nextStatus === 'Stopped' && status.idle_reason === 'Finished' && s.playback.status === 'Playing' && !isTransitioning) {
                 setTimeout(() => {
                   get().playNext();
                 }, 100);
               }
-              
+
               const nextVol = typeof status.volume === 'number' && !isNaN(status.volume)
                 ? Math.max(0, Math.min(1, status.volume))
                 : s.playback.volume;
@@ -549,7 +558,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
 
       // Strict Anti-Bounce: The frontend is the source of truth for track selections.
-      // If the backend reports a different track, it means the Rust audio pipeline 
+      // If the backend reports a different track, it means the Rust audio pipeline
       // is still processing previous skip commands and lagging behind the UI.
       if (prevTrack && newTrack && !pathsEqual(newTrack, prevTrack)) {
         const timeSinceSkip = Date.now() - (get().playback.last_skip_time || 0);
@@ -602,8 +611,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       status.backend_position_secs = rawBackendPos;
 
       const statusChanged = currentPlayback.status !== status.status;
+      const audioPathChanged = JSON.stringify(currentPlayback.effective_audio_path)
+        !== JSON.stringify(status.effective_audio_path ?? null);
       if (
         statusChanged ||
+        audioPathChanged ||
         Math.abs((currentPlayback.position_secs || 0) - (status.position_secs || 0)) >= 0.1 ||
         currentPlayback.volume !== status.volume
       ) {
@@ -649,10 +661,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       // Auto Scrobble Logic
       const { current_track, position_secs } = status;
-      const { 
-        scrobbleEnabled, lastfmSessionKey, 
-        listenbrainzEnabled, listenbrainzToken, 
-        scrobbledCurrent, tracks, scrobbleThreshold 
+      const {
+        scrobbleEnabled, lastfmSessionKey,
+        listenbrainzEnabled, listenbrainzToken,
+        scrobbledCurrent, tracks, scrobbleThreshold
       } = get();
 
       const canLfm = scrobbleEnabled && lastfmSessionKey;
@@ -739,15 +751,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     // 🛡️ Bit-Perfect vs. DSP Coexistence: If the user interacts with any Aideo Lab DSP/equalizer controls
     // while Bit-Perfect is active, automatically turn Bit-Perfect OFF so their audio adjustments take effect immediately.
     const dspKeys = [
-      'enabled', 'eq_enabled', 'eq_parametric', 'eq_graphic_gains', 
-      'eq_parametric_bands', 'crossfeed_enabled', 'crossfeed_level', 
-      'crossfeed_corner', 'spatial_enabled', 'spatial_haas_delay', 
+      'enabled', 'eq_enabled', 'eq_parametric', 'eq_graphic_gains',
+      'eq_parametric_bands', 'crossfeed_enabled', 'crossfeed_level',
+      'crossfeed_corner', 'spatial_enabled', 'spatial_haas_delay',
       'spatial_wet', 'convolution_enabled', 'convolution_ir_path', 'convolution_wet',
-      'subsonic_enabled', 'night_mode_enabled', 
+      'subsonic_enabled', 'night_mode_enabled',
       'r128_enabled', 'width', 'upsample_rate', 'dither',
-      'aideo_filter_enabled', 'aideo_filter_room_size', 'aideo_filter_bass_thump', 
+      'aideo_filter_enabled', 'aideo_filter_room_size', 'aideo_filter_bass_thump',
       'aideo_filter_dampening', 'preamp_gain', 'limiter_threshold', 'resampler_phase_mode',
-      'auto_headroom', 'saturation_enabled', 'saturation_drive', 
+      'auto_headroom', 'saturation_enabled', 'saturation_drive',
       'crossfade_transition_enabled', 'crossfade_transition_duration',
       'stream_engine', 'lookahead_prebuffer_enabled'
     ];
@@ -800,7 +812,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         full.resampler_oversampling = 512;
         full.ffmpeg_transcode_quality = 'hires';
       }
-    } 
+    }
     // B. If they changed an individual parameter, auto-detect the matching preset
     else if (
       newDSP.resampler_interpolation !== undefined ||
@@ -862,12 +874,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
     // 1. Update React Zustand state instantly for fluid 60fps UI
     set({ dsp: full });
-    
+
     // 2. Manage throttled IPC dispatching to prevent channel flooding
     pendingDspState = full;
     const now = Date.now();
     const timeSinceLast = now - lastDspInvokeTime;
-    
+
     if (timeSinceLast >= THROTTLE_MS) {
       if (dspThrottleTimeout) {
         clearTimeout(dspThrottleTimeout);
@@ -935,11 +947,22 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }));
   },
 
-  toggleExclusive: async () => {
+  toggleExclusive: async (enable?: boolean | unknown) => {
     try {
-      const res = await invoke<boolean>('toggle_exclusive_mode');
-      const nextMode = typeof res === 'boolean' ? res : !get().playback.exclusive;
-      set(s => ({ playback: { ...s.playback, exclusive: nextMode } }));
+      const target = typeof enable === 'boolean' ? enable : undefined;
+      const res = await invoke<boolean>('toggle_exclusive_mode', { enable: target });
+      const nextMode = typeof res === 'boolean' ? res : (target !== undefined ? target : !get().playback.exclusive);
+      set(s => ({
+        playback: {
+          ...s.playback,
+          exclusive: nextMode,
+          bit_perfect: nextMode ? s.playback.bit_perfect : false,
+        }
+      }));
+      safeSetStorage(EXCLUSIVE_MODE_STORAGE_KEY, String(nextMode));
+      if (!nextMode) {
+        safeSetStorage(BIT_PERFECT_MODE_STORAGE_KEY, 'false');
+      }
       if (nextMode) {
         toast.success('WASAPI Exclusive Mode Enabled — Outputting bit-perfect audio directly to your DAC (bypasses Windows Mixer).', {
           title: 'Exclusive Mode',
@@ -955,15 +978,26 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
   },
 
-  toggleBitPerfect: async () => {
+  toggleBitPerfect: async (enable?: boolean | unknown) => {
     try {
-      const res = await invoke<boolean>('toggle_bit_perfect_mode');
-      const nextMode = typeof res === 'boolean' ? res : !get().playback.bit_perfect;
+      const target = typeof enable === 'boolean' ? enable : undefined;
+      const res = await invoke<boolean>('toggle_bit_perfect_mode', { enable: target });
+      const nextMode = typeof res === 'boolean' ? res : (target !== undefined ? target : !get().playback.bit_perfect);
       if (nextMode) {
         await get().setDSP({ enabled: false, upsample_rate: 0 });
         await get().setVolume(1.0);
       }
-      set(s => ({ playback: { ...s.playback, bit_perfect: nextMode } }));
+      set(s => ({
+        playback: {
+          ...s.playback,
+          bit_perfect: nextMode,
+          exclusive: nextMode ? true : s.playback.exclusive,
+        }
+      }));
+      safeSetStorage(BIT_PERFECT_MODE_STORAGE_KEY, String(nextMode));
+      if (nextMode) {
+        safeSetStorage(EXCLUSIVE_MODE_STORAGE_KEY, 'true');
+      }
       if (nextMode) {
         toast.success('Bit-Perfect Mode Active — Volume is fixed at 100% and DSP effects are bypassed for pure bit-exact output.', {
           title: 'Bit-Perfect Mode',
@@ -979,8 +1013,62 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
   },
 
+  restoreAudioModes: async () => {
+    if (audioModesRestored) return;
+
+    const wantsBitPerfect = safeGetStorage(BIT_PERFECT_MODE_STORAGE_KEY) === 'true';
+    const wantsExclusive = wantsBitPerfect || safeGetStorage(EXCLUSIVE_MODE_STORAGE_KEY) === 'true';
+
+    if (!wantsExclusive) {
+      audioModesRestored = true;
+      return;
+    }
+
+    try {
+      let exclusiveEnabled = false;
+      let bitPerfectEnabled = false;
+
+      if (wantsBitPerfect) {
+        const bitPerfectResult = await invoke<boolean>('toggle_bit_perfect_mode', { enable: true });
+        bitPerfectEnabled = typeof bitPerfectResult === 'boolean' ? bitPerfectResult : true;
+        // The backend's bit-perfect command atomically enables Exclusive Mode.
+        exclusiveEnabled = bitPerfectEnabled;
+
+        if (bitPerfectEnabled) {
+          // Keep the same safety invariants as the interactive toggle: no DSP
+          // transforms and unity software volume while bit-perfect is requested.
+          await get().setDSP({ enabled: false, upsample_rate: 0 });
+          await get().setVolume(1.0);
+        }
+
+        set(s => ({
+          playback: {
+            ...s.playback,
+            exclusive: exclusiveEnabled,
+            bit_perfect: bitPerfectEnabled,
+          }
+        }));
+      } else {
+        const exclusiveResult = await invoke<boolean>('toggle_exclusive_mode', { enable: true });
+        exclusiveEnabled = typeof exclusiveResult === 'boolean' ? exclusiveResult : true;
+
+        set(s => ({
+          playback: {
+            ...s.playback,
+            exclusive: exclusiveEnabled,
+            bit_perfect: false,
+          }
+        }));
+      }
+
+      audioModesRestored = true;
+    } catch (e) {
+      console.error('Failed to restore audio output modes:', e);
+    }
+  },
+
   keepAwake: localStorage.getItem('aideo_keep_awake') === 'true',
-  
+
   toggleKeepAwake: async () => {
     const nextState = !get().keepAwake;
     set({ keepAwake: nextState });
@@ -1095,11 +1183,37 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   playStream: async (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }, triggerAutoplay = true) => {
+    // If this URL matches an owned local library track or is a local file path, play via playTrack
+    const allTracks = get().tracks || [];
+    const localMatch = allTracks.find(t =>
+      pathsEqual(t.path, url) ||
+      (Boolean(metadata?.title && metadata?.artist) &&
+       Boolean(t.title && t.artist) &&
+       (t.title ?? '').trim().toLowerCase() === metadata!.title!.trim().toLowerCase() &&
+       (t.artist ?? '').trim().toLowerCase() === metadata!.artist!.trim().toLowerCase())
+    );
+    if (localMatch) {
+      return get().playTrack(localMatch);
+    }
+
+    const isOnline = url.startsWith('http://') || url.startsWith('https://');
+    if (!isOnline) {
+      const ext = url.split('.').pop()?.split('?')[0].toUpperCase();
+      const localVirtualTrack: Track = {
+        id: -9999,
+        path: url,
+        title: metadata?.title || baseName(url),
+        artist: metadata?.artist || 'Unknown Artist',
+        duration: metadata?.duration || null,
+        format: ext || 'Local File',
+        lyric_offset: 0,
+        cover_url: metadata?.cover_url || null,
+      };
+      return get().playTrack(localVirtualTrack);
+    }
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
-      }));
-      return;
+      console.warn('[stream] navigator.onLine reported false; continuing playback attempt via native backend.');
     }
     try {
       // De-duplicate / consume track from queue when starting playback
@@ -1115,7 +1229,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         const newQueue = currentQueue.filter(t => !pathsEqual(t.path, url));
         set({ queue: newQueue });
         localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
-        
+
         // Remove from the Rust backend queue in reverse order
         for (let i = matchingIndices.length - 1; i >= 0; i--) {
           const indexToRemove = matchingIndices[i];
@@ -1125,8 +1239,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       const streamName = metadata?.title || getStreamName(url);
       const isYoutube = url.includes('youtube.com') || url.includes('youtu.be') || url.includes('googlevideo.com');
-      const formatStr = isYoutube ? 'YouTube Direct' : 'URL';
-      
+      const formatStr = isYoutube ? 'YouTube Direct' : 'Web Stream';
+
       const virtualTrack: Track = {
         id: -9999,
         path: url,
@@ -1288,9 +1402,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           setOnlineTrackCache(finalPath, track);
         } catch (err) {
           console.error('Failed to resolve stream in addToQueue:', err);
-          notifyTidalAuthFailure(err);
-          notifyQobuzAuthFailure(err);
+          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
+                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
+          if (!notified) {
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: `Cannot queue track: ${err}`, type: 'error' }
+            }));
+          }
+          return;
         }
+      }
+
+      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !finalPath.startsWith('http://') && !finalPath.startsWith('https://')) {
+        return;
       }
 
       await chainQueueOperation(async () => {
@@ -1328,9 +1452,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           setOnlineTrackCache(finalPath, track);
         } catch (err) {
           console.error('Failed to resolve stream in playNextInQueue:', err);
-          notifyTidalAuthFailure(err);
-          notifyQobuzAuthFailure(err);
+          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
+                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
+          if (!notified) {
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: `Cannot queue next: ${err}`, type: 'error' }
+            }));
+          }
+          return;
         }
+      }
+
+      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !finalPath.startsWith('http://') && !finalPath.startsWith('https://')) {
+        return;
       }
 
       await chainQueueOperation(async () => {
@@ -1346,26 +1480,26 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   playFromQueue: async (index: number) => {
     const { queue } = get();
     if (index < 0 || index >= queue.length) return;
-    
+
     const trackToPlay = queue[index];
     const newQueue = [...queue];
     newQueue.splice(index, 1);
-    
+
     // SSOT: Update React state immediately so rapid clicks don't double-pop
     set({ queue: newQueue });
     localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
-    
+
     await chainQueueOperation(async () => {
         await invoke('remove_from_queue', { index }).catch(() => {});
     });
-    
+
     await get().playTrack(trackToPlay, undefined, false);
   },
 
   removeFromQueue: async (index: number) => {
     const { queue } = get();
     if (index < 0 || index >= queue.length) return;
-    
+
     const newQueue = [...queue];
     newQueue.splice(index, 1);
     set({ queue: newQueue });
@@ -1420,7 +1554,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   reorderQueue: async (from: number, to: number) => {
     const { queue } = get();
     if (from < 0 || from >= queue.length || to < 0 || to >= queue.length) return;
-    
+
     try {
       await chainQueueOperation(async () => {
         await invoke('reorder_queue', { from, to });
@@ -1442,7 +1576,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         if (parsed.length > 0) {
           const localTracks = parsed.filter(t => !t.path.startsWith('http://') && !t.path.startsWith('https://') && t.format !== 'Tidal FLAC' && t.format !== 'Qobuz FLAC');
           let validTracks = parsed;
-          
+
           const isAutoplayEnabled = localStorage.getItem('aideo_autoplay') !== 'false';
           if (!isAutoplayEnabled) {
             validTracks = validTracks.filter(t => !t.is_autoplay);
@@ -1460,7 +1594,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
             }
             return t;
           });
-          
+
           if (localTracks.length > 0) {
             const localPaths = localTracks.map(t => t.path);
             const existence: boolean[] = await invoke('check_files_exist', { paths: localPaths });
@@ -1470,12 +1604,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
                 missingPaths.add(p);
               }
             });
-            
+
             if (missingPaths.size > 0) {
               validTracks = parsed.filter(t => !missingPaths.has(t.path));
             }
           }
-          
+
           await invoke('clear_queue');
           if (validTracks.length > 0) {
             // Resolve Tidal/Qobuz track IDs to stream URLs first — the backend queue
@@ -1499,7 +1633,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
                   console.error('Failed to resolve stream in initializeQueue:', err);
                   notifyTidalAuthFailure(err);
                   notifyQobuzAuthFailure(err);
+                  continue;
                 }
+              }
+              if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
+                continue;
               }
               paths.push(p);
             }
@@ -1584,24 +1722,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (get().chromecast_connected) {
         await get().disconnectCastDevice();
       }
-      
+
       // Capture currently playing track and position before connecting and stopping local
       const activeTrack = get().currentTrack;
       const startPos = get().playback.position_secs;
-      
+
       await invoke('chromecast_connect', { ip: device.ip, port: device.port });
-      
+
       await invoke('stop_track').catch(() => {});
-      
+
       set({
         chromecast_active_device: device.ip,
         chromecast_connected: true,
       });
 
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Connected to ${device.name}`, type: 'success' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Connected to ${device.name}`, type: 'success' }
       }));
-      
+
       // Seamlessly transfer playback if a song was active
       if (activeTrack) {
         await get().playTrack(activeTrack, true, false, undefined, startPos);
@@ -1619,8 +1757,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
     } catch (e) {
       console.error('Failed to connect to Chromecast:', e);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: 'Failed to connect to Chromecast', type: 'error' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: 'Failed to connect to Chromecast', type: 'error' }
       }));
     }
   },
@@ -1639,8 +1777,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         chromecast_active_device: null,
         chromecast_connected: false,
       });
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: 'Disconnected from Chromecast', type: 'info' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: 'Disconnected from Chromecast', type: 'info' }
       }));
 
       // Seamlessly transfer playback back to local player
@@ -1674,7 +1812,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (get().chromecast_connected) {
         await get().disconnectCastDevice();
       }
-      
+
       const activeTrack = get().currentTrack;
       const startPos = get().playback.position_secs;
 
@@ -1686,8 +1824,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         upnp_connected: true,
       });
 
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Connected to ${device.name} [Hi-Res Lossless DLNA]`, type: 'success' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Connected to ${device.name} [Hi-Res Lossless DLNA]`, type: 'success' }
       }));
 
       if (activeTrack) {
@@ -1695,8 +1833,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
     } catch (e) {
       console.error('Failed to connect to UPnP device:', e);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Failed to connect to ${device.name}: ${e}`, type: 'error' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Failed to connect to ${device.name}: ${e}`, type: 'error' }
       }));
     }
   },
@@ -1712,8 +1850,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         upnp_active_device: null,
         upnp_connected: false,
       });
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: 'Disconnected from UPnP MediaRenderer', type: 'info' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: 'Disconnected from UPnP MediaRenderer', type: 'info' }
       }));
 
       if (activeTrack) {

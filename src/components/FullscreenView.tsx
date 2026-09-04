@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { motion, AnimatePresence } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   Play,
   Pause,
@@ -16,22 +16,47 @@ import {
   Minimize2,
   Sparkles,
   LayoutGrid,
-  Music,
-  Activity,
   Languages,
   Type,
   Mic,
   AlignLeft,
   FileText,
-  Loader2
+  Loader2,
+  ListMusic,
+  Sliders,
+  Shuffle,
+  Repeat,
+  Repeat1,
+  Heart,
+  Activity,
+  Infinity as InfinityIcon
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
-import { Visualizer } from './Visualizer';
+import { Visualizer, VisualizerMode } from './Visualizer';
+
 import { generateWaveformPeaks } from '../utils/waveform';
-import { baseName, getStreamName } from '../utils';
-import { LyricsDisplayMode } from '../store/types';
-import { KaraokeActiveLine } from './KaraokeActiveLine';
+import { TheaterModeDesign, TheaterHudStyle, LyricsDisplayMode } from '../store/types';
+
+import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
+import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
+import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
+
+const THEATER_NAMES: Record<TheaterModeDesign, string> = {
+  stage: 'Stage View',
+  zen: 'Zen View',
+  studio: 'Studio Deck',
+  vinyl: 'Turntable',
+  poster: 'Poster View',
+  scope: 'Pure Scope',
+};
+
+export const THEATER_HUD_NAMES: Record<TheaterHudStyle, string> = {
+  capsule: 'Floating Capsule',
+  master: 'Master Deck',
+  minimal: 'Zen Minimal',
+  analog: 'Vintage Analog',
+};
 
 export function FullscreenView() {
   const {
@@ -62,13 +87,25 @@ export function FullscreenView() {
     isTranslating,
     getRomaji,
     albumArtFit,
+    theaterModeDesign,
+    setTheaterModeDesign,
+    theaterHudStyle,
+    setTheaterHudStyle,
     playbackPositionSecs,
     playbackCurrentTrack,
     playbackStatus,
     playbackVolume,
     playbackBitPerfect,
     playbackDevRate,
-    playbackIsBuffering
+    playbackIsBuffering,
+    queue,
+    shuffle,
+    toggleShuffle,
+    repeat,
+    toggleRepeat,
+    autoplayEnabled,
+    toggleAutoplay,
+    toggleLoveTrack,
   } = useStore(useShallow(s => ({
     playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
@@ -104,31 +141,56 @@ export function FullscreenView() {
     isTranslating: s.isTranslating,
     getRomaji: s.getRomaji,
     albumArtFit: s.albumArtFit,
+    theaterModeDesign: s.theaterModeDesign,
+    setTheaterModeDesign: s.setTheaterModeDesign,
+    theaterHudStyle: s.theaterHudStyle,
+    setTheaterHudStyle: s.setTheaterHudStyle,
+    queue: s.queue,
+    shuffle: s.shuffle,
+    toggleShuffle: s.toggleShuffle,
+    repeat: s.repeat,
+    toggleRepeat: s.toggleRepeat,
+    autoplayEnabled: s.autoplayEnabled,
+    toggleAutoplay: s.toggleAutoplay,
+    toggleLoveTrack: s.toggleLoveTrack,
   })));
 
-  const effectiveCover = coverArt || currentTrack?.cover_url || defaultCover;
+  const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
+  const [isSignalPathOpen, setIsSignalPathOpen] = useState(false);
 
+  const effectiveCover = coverArt || currentTrack?.cover_url || defaultCover;
   const trackDuration = currentTrack?.duration || 0;
 
-  const [layout, setLayout] = useState<'stage' | 'zen'>(() => {
-    return (localStorage.getItem('aideo-fullscreen-layout') as 'stage' | 'zen') || 'stage';
-  });
+  const [spectrumBands, setSpectrumBands] = useState<number[]>([]);
+  useEffect(() => {
+    let active = true;
+    let lastUpdate = 0;
+    const unlistenPromise = listen<number[]>('audio-spectrum', event => {
+      const now = performance.now();
+      // Throttle telemetry/meter state updates to ~15fps to eliminate React render thrashing
+      if (active && now - lastUpdate >= 65) {
+        lastUpdate = now;
+        setSpectrumBands(event.payload);
+      }
+    });
+    return () => {
+      active = false;
+      unlistenPromise.then(fn => fn()).catch(() => {});
+    };
+  }, []);
 
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(true);
   const [isHUDHidden, setIsHUDHidden] = useState(false);
 
   // Persistent Visualizer Mode Preference
-  const [vizMode, setVizMode] = useState<'baseline' | 'circle' | 'wave'>(() => {
-    return (localStorage.getItem('aideo-fullscreen-viz-mode') as 'baseline' | 'circle' | 'wave') || 'baseline';
+  const [vizMode, setVizMode] = useState<VisualizerMode>(() => {
+    return (localStorage.getItem('aideo-fullscreen-viz-mode') as VisualizerMode) || 'baseline';
   });
+
+  const hudRef = useRef<HTMLDivElement>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const activityTimer = useRef<number | null>(null);
-
-  // Sync Layout preference
-  useEffect(() => {
-    localStorage.setItem('aideo-fullscreen-layout', layout);
-  }, [layout]);
 
   // Sync Visualizer preference
   useEffect(() => {
@@ -196,7 +258,19 @@ export function FullscreenView() {
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
         e.preventDefault();
-        setView('nowplaying');
+        if (isSignalPathOpen) {
+          setIsSignalPathOpen(false);
+        } else if (isQueueDrawerOpen) {
+          setIsQueueDrawerOpen(false);
+        } else {
+          setView('nowplaying');
+        }
+      } else if (key === 'i') {
+        e.preventDefault();
+        setIsSignalPathOpen(prev => !prev);
+      } else if (key === 'q') {
+        e.preventDefault();
+        setIsQueueDrawerOpen(prev => !prev);
       } else if (key === 'f' || e.key === 'F11') {
         e.preventDefault();
         const appWindow = getCurrentWindow();
@@ -216,11 +290,26 @@ export function FullscreenView() {
         }
       } else if (key === 'l') {
         e.preventDefault();
-        setLayout(prev => prev === 'stage' ? 'zen' : 'stage');
+        const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+        const cur = useStore.getState().theaterModeDesign;
+        const next = order[(order.indexOf(cur) + 1) % order.length];
+        useStore.getState().setTheaterModeDesign(next);
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Theater Persona: ${THEATER_NAMES[next]}`, type: 'info' }
+        }));
+      } else if (key === 'h') {
+        e.preventDefault();
+        const hudOrder: TheaterHudStyle[] = ['capsule', 'master', 'minimal', 'analog'];
+        const curHud = useStore.getState().theaterHudStyle;
+        const nextHud = hudOrder[(hudOrder.indexOf(curHud) + 1) % hudOrder.length];
+        useStore.getState().setTheaterHudStyle(nextHud);
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Theater HUD: ${THEATER_HUD_NAMES[nextHud]}`, type: 'info' }
+        }));
       } else if (key === 'v') {
         e.preventDefault();
         const modes: ('baseline' | 'circle' | 'wave')[] = ['baseline', 'circle', 'wave'];
-        setVizMode(prev => {
+        setVizMode((prev: 'baseline' | 'circle' | 'wave') => {
           const nextIdx = (modes.indexOf(prev) + 1) % modes.length;
           return modes[nextIdx];
         });
@@ -233,6 +322,12 @@ export function FullscreenView() {
       } else if (key === 'm') {
         e.preventDefault();
         state.toggleMute();
+      } else if (key === 's') {
+        e.preventDefault();
+        state.toggleShuffle();
+      } else if (key === 'p') {
+        e.preventDefault();
+        state.toggleRepeat();
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         state.seek(Math.max(0, state.playback.position_secs - 5));
@@ -252,7 +347,7 @@ export function FullscreenView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setView]);
+  }, [setView, isQueueDrawerOpen, isSignalPathOpen]);
 
   // Autohide HUD timer: 3.5 seconds of inactivity
   useEffect(() => {
@@ -261,9 +356,11 @@ export function FullscreenView() {
       if (activityTimer.current) {
         clearTimeout(activityTimer.current);
       }
-      activityTimer.current = window.setTimeout(() => {
-        setIsHUDHidden(true);
-      }, 3500);
+      if (!isQueueDrawerOpen && !isSignalPathOpen) {
+        activityTimer.current = window.setTimeout(() => {
+          setIsHUDHidden(true);
+        }, 3500);
+      }
     };
 
     window.addEventListener('mousemove', resetTimer, { passive: true });
@@ -326,7 +423,7 @@ export function FullscreenView() {
       const targetTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
       container.scrollTo({ top: targetTop, behavior: 'smooth' });
     }
-  }, [activeIdx, layout, lyricsDisplayMode]);
+  }, [activeIdx, theaterModeDesign, lyricsDisplayMode]);
 
   // Play/Pause handler
   const handlePlayPause = () => {
@@ -391,246 +488,96 @@ export function FullscreenView() {
 
   return (
     <div className={`fullscreen-overlay ${isHUDHidden ? 'hud-hidden' : ''}`}>
-      {/* Immersive backdrop visualizer */}
-      <LiquidBackground />
+      {/* Immersive backdrop visualizer (disabled in pure focus scope mode for edge-to-edge pitch black) */}
+      {theaterModeDesign !== 'scope' && <LiquidBackground />}
 
-      {/* Floating Exit Button */}
-      <button
-        className="fullscreen-exit-btn"
-        onClick={() => setView('nowplaying')}
-        title="Exit Fullscreen Mode"
-      >
-        <X size={20} />
-      </button>
+      {/* Floating Top Actions Bar */}
+      <div className="fullscreen-top-bar">
+        {/* Floating HUD Style Toggle */}
+        <button
+          className="fullscreen-layout-toggle fullscreen-hud-toggle"
+          onClick={() => {
+            const hudOrder: TheaterHudStyle[] = ['capsule', 'master', 'minimal', 'analog'];
+            const nextHud = hudOrder[(hudOrder.indexOf(theaterHudStyle) + 1) % hudOrder.length];
+            setTheaterHudStyle(nextHud);
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: `Theater HUD: ${THEATER_HUD_NAMES[nextHud]}`, type: 'info' }
+            }));
+          }}
+          title={`HUD: ${THEATER_HUD_NAMES[theaterHudStyle]} (Click or press H to cycle style)`}
+        >
+          <Sliders size={16} />
+          <span>{THEATER_HUD_NAMES[theaterHudStyle]}</span>
+        </button>
 
-      {/* Floating Layout Toggle */}
-      <button
-        className="fullscreen-layout-toggle"
-        onClick={() => setLayout(layout === 'stage' ? 'zen' : 'stage')}
-        title={`Switch to ${layout === 'stage' ? 'Zen Mode' : 'Stage Mode'}`}
-      >
-        <LayoutGrid size={16} />
-        <span>{layout === 'stage' ? 'Zen View' : 'Stage View'}</span>
-      </button>
+        {/* Floating Layout Toggle */}
+        <button
+          className="fullscreen-layout-toggle"
+          onClick={() => {
+            const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+            const next = order[(order.indexOf(theaterModeDesign) + 1) % order.length];
+            setTheaterModeDesign(next);
+          }}
+          title={`Current: ${THEATER_NAMES[theaterModeDesign]} (Click or press L to cycle persona)`}
+        >
+          <LayoutGrid size={16} />
+          <span>{THEATER_NAMES[theaterModeDesign]}</span>
+        </button>
+
+        {/* Floating Exit Button */}
+        <button
+          className="fullscreen-exit-btn"
+          onClick={() => setView('nowplaying')}
+          title="Exit Fullscreen Mode"
+        >
+          <X size={20} />
+        </button>
+      </div>
 
       {/* Main Content Pane */}
-      <AnimatePresence mode="wait">
-        {layout === 'stage' ? (
-          <motion.div
-            key="stage"
-            className="fullscreen-content-stage"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.4 }}
-          >
-            {/* Left Column: Artwork and Meta */}
-            <div className="fullscreen-stage-left">
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 440, height: 440 }}>
-                {/* Dynamic Ambient Glow Aura */}
-                <div 
-                  className="fullscreen-cover-glow-aura" 
-                  style={{
-                    background: `radial-gradient(circle, ${accentColor || 'var(--dynamic-accent)'} 0%, rgba(var(--accent-rgb, 139, 92, 246), 0.35) 45%, transparent 70%)`
-                  }} 
-                />
-                {vizMode === 'circle' && (
-                  <div style={{ position: 'absolute', width: 620, height: 620, zIndex: 1, pointerEvents: 'none' }}>
-                    <Visualizer mode="circle" />
-                  </div>
-                )}
-                <div className={`fullscreen-cover-art-wrap ${albumArtFit === 'contain' ? 'contain-mode' : ''}`} style={{ zIndex: 2, margin: 0 }}>
-                  {albumArtFit === 'contain' && (
-                    <div 
-                      className="fullscreen-cover-ambient-bg" 
-                      style={{ backgroundImage: `url(${effectiveCover})` }} 
-                    />
-                  )}
-                  <img
-                    src={effectiveCover}
-                    alt="Album Artwork"
-                    className={`fullscreen-cover-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
-                  />
-                </div>
-              </div>
-
-              <div className="fullscreen-track-meta">
-                <h1 className="fullscreen-track-title">
-                  {currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''))}
-                </h1>
-                <p className="fullscreen-track-artist">
-                  {currentTrack?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
-                </p>
-
-                {/* Telemetry Badge */}
-                <div className="fullscreen-telemetry-badge">
-                  <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor, boxShadow: `0 0 8px ${accentColor}` }}></span>
-                  <span>{telemetryText}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Synced scrolling lyrics */}
-            <div className="fullscreen-lyrics-column">
-              <div className={`fullscreen-lyrics-fade-wrap ${lyricsDisplayMode === 'static' ? 'plain-mode' : ''}`}>
-                <div className="fullscreen-lyrics-scroll" ref={scrollRef}>
-                  <div className="fullscreen-lyric-spacer" />
-                  {lyrics.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 18, padding: '100px 0' }}>
-                      {lyricStatus === 'loading' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Activity size={32} className="spin" style={{ color: accentColor }} />
-                          <div>Loading Synced Lyrics...</div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Music size={32} style={{ color: 'var(--text-dim)' }} />
-                          <div>Instrumental or No Lyrics Available</div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    lyrics.map((l, i) => (
-                      <div
-                        key={i}
-                        data-idx={i}
-                        className={`fullscreen-lyric-line ${lyricsDisplayMode !== 'static' && i === activeIdx ? 'active' : ''}`}
-                        style={{ cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default' }}
-                        onClick={() => {
-                          if (lyricsDisplayMode !== 'static') {
-                            seek(l.time_secs - lyricOffset / 1000);
-                          }
-                        }}
-                      >
-                        <div>
-                          {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
-                            <KaraokeActiveLine
-                              words={l.words}
-                              positionSecs={playbackPositionSecs}
-                              lyricOffset={lyricOffset}
-                              isPlaying={playbackStatus === 'Playing'}
-                            />
-                          ) : (
-                            l.text || '♪'
-                          )}
-                        </div>
-                        {showRomaji && l.romaji && l.romaji !== l.text && (
-                          <div className="fullscreen-lyric-romaji">{l.romaji}</div>
-                        )}
-                        {showTranslation && l.translation && (
-                          <div className="fullscreen-lyric-translation">{l.translation}</div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                  <div className="fullscreen-lyric-spacer" />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="zen"
-            className="fullscreen-content-zen"
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            transition={{ duration: 0.4 }}
-            style={{ position: 'relative' }}
-          >
-            {/* Centered Circle Visualizer in background for Zen mode */}
-            {vizMode === 'circle' && (
-              <div style={{ position: 'absolute', width: 600, height: 600, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 0, opacity: 0.12, pointerEvents: 'none' }}>
-                <Visualizer mode="circle" />
-              </div>
-            )}
-            {/* Small floating artwork in top-left */}
-            <div className="fullscreen-zen-floating-art">
-              <img
-                src={effectiveCover}
-                alt="Album Cover"
-                className="fullscreen-zen-art-thumb"
-              />
-              <div className="fullscreen-zen-art-info">
-                <span className="fullscreen-zen-art-title">
-                  {currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''))}
-                </span>
-                <span className="fullscreen-zen-art-artist">
-                  {currentTrack?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
-                </span>
-              </div>
-            </div>
-
-            {/* Immersive Centered Lyrics */}
-            <div className="fullscreen-lyrics-column">
-              <div className={`fullscreen-lyrics-fade-wrap ${lyricsDisplayMode === 'static' ? 'plain-mode' : ''}`}>
-                <div className="fullscreen-zen-lyrics-scroll" ref={scrollRef}>
-                  <div className="fullscreen-lyric-spacer" />
-                  {lyrics.length === 0 ? (
-                    <div style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 20, padding: '100px 0' }}>
-                      {lyricStatus === 'loading' ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Activity size={32} className="spin" style={{ color: accentColor }} />
-                          <div>Loading Synced Lyrics...</div>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                          <Music size={32} style={{ color: 'var(--text-dim)' }} />
-                          <div>Instrumental or No Lyrics Available</div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    lyrics.map((l, i) => (
-                      <div
-                        key={i}
-                        data-idx={i}
-                        className={`fullscreen-zen-lyric-line ${lyricsDisplayMode !== 'static' && i === activeIdx ? 'active' : ''}`}
-                        style={{ cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default' }}
-                        onClick={() => {
-                          if (lyricsDisplayMode !== 'static') {
-                            seek(l.time_secs - lyricOffset / 1000);
-                          }
-                        }}
-                      >
-                        <div>
-                          {lyricsDisplayMode === 'karaoke' && i === activeIdx && l.words && l.words.length > 0 ? (
-                            <KaraokeActiveLine
-                              words={l.words}
-                              positionSecs={playbackPositionSecs}
-                              lyricOffset={lyricOffset}
-                              isPlaying={playbackStatus === 'Playing'}
-                            />
-                          ) : (
-                            l.text || '♪'
-                          )}
-                        </div>
-                        {showRomaji && l.romaji && l.romaji !== l.text && (
-                          <div className="fullscreen-lyric-romaji">{l.romaji}</div>
-                        )}
-                        {showTranslation && l.translation && (
-                          <div className="fullscreen-lyric-translation">{l.translation}</div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                  <div className="fullscreen-lyric-spacer" />
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <TheaterLayoutSwitch
+        design={theaterModeDesign}
+        currentTrack={currentTrack}
+        effectiveCover={effectiveCover}
+        playbackCurrentTrack={playbackCurrentTrack}
+        lyrics={lyrics}
+        lyricStatus={lyricStatus}
+        lyricsDisplayMode={lyricsDisplayMode}
+        activeIdx={activeIdx}
+        playbackPositionSecs={playbackPositionSecs}
+        playbackStatus={playbackStatus}
+        lyricOffset={lyricOffset}
+        showRomaji={showRomaji}
+        showTranslation={showTranslation}
+        accentColor={accentColor}
+        telemetryText={telemetryText}
+        albumArtFit={albumArtFit}
+        vizMode={vizMode}
+        seek={seek}
+        scrollRef={scrollRef}
+        spectrumBands={spectrumBands}
+        lowSpecMode={dsp.low_spec_mode}
+      />
 
       {/* Sharp Glowing Neon Visualizer Baseline / Wave */}
-      {vizMode !== 'circle' && (
+      {vizMode !== 'circle' && theaterModeDesign !== 'scope' && (
         <div className="fullscreen-visualizer-container">
           <Visualizer mode={vizMode} />
         </div>
       )}
 
       {/* Floating Premium Playback HUD */}
-      <div className="fullscreen-hud">
+      <div ref={hudRef} className={`fullscreen-hud hud-${theaterHudStyle}`}>
+        {/* Master Deck Hardware Screws */}
+        {theaterHudStyle === 'master' && (
+          <>
+            <div className="hud-master-screw top-left" aria-hidden="true" />
+            <div className="hud-master-screw top-right" aria-hidden="true" />
+            <div className="hud-master-screw bottom-left" aria-hidden="true" />
+            <div className="hud-master-screw bottom-right" aria-hidden="true" />
+          </>
+        )}
+
         {/* Progress Bar & Durations */}
         <div className="fullscreen-hud-progress-wrap">
           <span className="fullscreen-hud-time">{formatTime(playbackPositionSecs)}</span>
@@ -644,10 +591,10 @@ export function FullscreenView() {
                     key={idx}
                     style={{
                       flex: 1,
-                      height: `${Math.max(25, peak * 100)}%`,
-                      background: isPlayed ? accentColor : 'rgba(255, 255, 255, 0.22)',
+                      height: `${Math.max(15, peak * 100)}%`,
+                      backgroundColor: isPlayed ? accentColor : 'rgba(255, 255, 255, 0.15)',
                       borderRadius: 1,
-                      transition: 'background 0.1s ease',
+                      transition: 'background-color 0.1s ease'
                     }}
                   />
                 );
@@ -657,49 +604,141 @@ export function FullscreenView() {
               type="range"
               min={0}
               max={trackDuration || 100}
+              step={0.1}
               value={playbackPositionSecs}
-              onChange={(e) => seek(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                seek(val);
+              }}
               className="fullscreen-hud-progress-bar"
               style={{
-                width: '100%',
-                opacity: 0,
-                cursor: 'pointer',
-                position: 'relative',
+                background: 'transparent',
                 zIndex: 2,
+                opacity: 0,
+                position: 'relative'
               }}
             />
           </div>
           <span className="fullscreen-hud-time">{formatTime(trackDuration)}</span>
         </div>
 
-        {/* Buttons Controls */}
+        {/* HUD Controls Row */}
         <div className="fullscreen-hud-controls">
-          {/* Metadata Display in control bar */}
+          {/* Left info snippet & telemetry button */}
           <div className="fullscreen-hud-left">
-            {layout === 'zen' && (
-              <div className="fullscreen-telemetry-badge">
-                <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor }}></span>
-                <span>{telemetryText}</span>
+            <button
+              className="fullscreen-telemetry-btn"
+              onClick={() => setIsSignalPathOpen(true)}
+              title="Inspect Audio Signal Path & Telemetry (I)"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                padding: '6px 12px',
+                borderRadius: 20,
+                color: '#ffffff',
+                fontSize: 12,
+                cursor: 'pointer',
+                maxWidth: 200,
+                minWidth: 0,
+                flexShrink: 1,
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.borderColor = accentColor;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+              }}
+            >
+              <span className="fullscreen-telemetry-dot" style={{ backgroundColor: accentColor, flexShrink: 0 }}></span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{telemetryText}</span>
+            </button>
+
+            {theaterHudStyle === 'master' && (
+              <div className="hud-master-led-meter" title="Precision Output Level">
+                <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot yellow ${playbackStatus === 'Playing' && playbackVolume > 0.35 ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot yellow ${playbackStatus === 'Playing' && playbackVolume > 0.7 ? 'lit' : ''}`} />
+                <span className={`hud-meter-dot red ${playbackStatus === 'Playing' && playbackVolume > 0.9 ? 'lit' : ''}`} />
               </div>
+            )}
+
+            {theaterHudStyle === 'analog' && (
+              <div className="hud-analog-tube-badge" title="Analog Vacuum Stage Active">
+                <span className="hud-analog-tube-glow" />
+                <span className="hud-analog-badge-text">TUBE STAGE</span>
+              </div>
+            )}
+
+            {currentTrack && (
+              <button
+                className={`fullscreen-hud-btn fullscreen-love-btn ${currentTrack.loved === 1 ? 'loved' : ''}`}
+                onClick={() => toggleLoveTrack(currentTrack.path, currentTrack)}
+                title={currentTrack.loved === 1 ? "Remove from Loved Tracks" : "Add to Loved Tracks"}
+                aria-label={currentTrack.loved === 1 ? "Remove from Loved Tracks" : "Add to Loved Tracks"}
+              >
+                <Heart size={18} fill={currentTrack.loved === 1 ? '#ef4444' : 'transparent'} />
+              </button>
             )}
           </div>
 
           {/* Central Playback buttons */}
           <div className="fullscreen-hud-center">
-            <button className="fullscreen-hud-btn" onClick={playPrev} title="Previous Track">
-              <SkipBack size={24} />
+            <button
+              className={`fullscreen-hud-btn fullscreen-hud-btn-sub ${shuffle ? 'active' : ''}`}
+              onClick={toggleShuffle}
+              title={`Shuffle: ${shuffle ? 'On' : 'Off'} (S)`}
+              aria-label={`Shuffle: ${shuffle ? 'On' : 'Off'}`}
+            >
+              <Shuffle size={18} />
+            </button>
+
+            <button className="fullscreen-hud-btn" onClick={playPrev} title="Previous Track" aria-label="Previous Track">
+              <SkipBack size={22} fill="currentColor" />
             </button>
 
             <button
               className="fullscreen-hud-btn fullscreen-hud-btn-play"
               onClick={handlePlayPause}
-              title={playbackIsBuffering ? 'Buffering stream...' : playbackStatus === 'Playing' ? 'Pause' : 'Play'}
+              title={playbackIsBuffering ? 'Buffering stream...' : playbackStatus === 'Playing' ? 'Pause (Space)' : 'Play (Space)'}
+              aria-label={playbackIsBuffering ? 'Buffering stream' : playbackStatus === 'Playing' ? 'Pause' : 'Play'}
             >
-              {playbackIsBuffering ? <Loader2 size={24} className="animate-spin" /> : playbackStatus === 'Playing' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" style={{ marginLeft: 4 }} />}
+              {playbackIsBuffering ? (
+                <Loader2 size={24} className="animate-spin" />
+              ) : playbackStatus === 'Playing' ? (
+                <Pause size={24} fill="currentColor" />
+              ) : (
+                <Play size={24} fill="currentColor" style={{ marginLeft: 3 }} />
+              )}
             </button>
 
-            <button className="fullscreen-hud-btn" onClick={playNext} title="Next Track">
-              <SkipForward size={24} />
+            <button className="fullscreen-hud-btn" onClick={playNext} title="Next Track" aria-label="Next Track">
+              <SkipForward size={22} fill="currentColor" />
+            </button>
+
+            <button
+              className={`fullscreen-hud-btn fullscreen-hud-btn-sub ${repeat !== 'none' ? 'active' : ''}`}
+              onClick={toggleRepeat}
+              title={`Repeat: ${repeat === 'none' ? 'Off' : repeat === 'all' ? 'All' : 'One'} (P)`}
+              aria-label={`Repeat: ${repeat === 'none' ? 'Off' : repeat === 'all' ? 'All' : 'One'}`}
+            >
+              {repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
+            </button>
+
+            <button
+              className={`fullscreen-hud-btn fullscreen-hud-btn-sub ${autoplayEnabled ? 'active' : ''}`}
+              onClick={toggleAutoplay}
+              title={`Endless Radio Autoplay: ${autoplayEnabled ? 'On' : 'Off'}`}
+              aria-label={`Endless Radio Autoplay: ${autoplayEnabled ? 'On' : 'Off'}`}
+            >
+              <InfinityIcon size={18} />
             </button>
           </div>
 
@@ -785,7 +824,44 @@ export function FullscreenView() {
               />
             </div>
 
-            {/* Native Fullscreen Toggle Button */}
+            {/* Up Next Queue Drawer Toggle */}
+            <button
+              className={`fullscreen-hud-btn ${isQueueDrawerOpen ? 'active' : ''}`}
+              onClick={() => setIsQueueDrawerOpen(prev => !prev)}
+              title="Up Next Queue (Q)"
+              style={{ position: 'relative' }}
+            >
+              <ListMusic size={18} />
+              {queue.length > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -4,
+                    right: -6,
+                    minWidth: 16,
+                    height: 16,
+                    padding: '0 4px',
+                    borderRadius: 8,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    backgroundColor: accentColor,
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    lineHeight: 1,
+                    border: '1.5px solid rgba(14, 14, 22, 0.9)',
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.4)',
+                    pointerEvents: 'none',
+                    zIndex: 3,
+                  }}
+                >
+                  {queue.length > 99 ? '99+' : queue.length}
+                </span>
+              )}
+            </button>
+
+            {/* Native OS Fullscreen Toggle */}
             <button
               className="fullscreen-hud-btn"
               onClick={async () => {
@@ -796,11 +872,24 @@ export function FullscreenView() {
               }}
               title="Toggle Native OS Fullscreen"
             >
-              {isNativeFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+              {isNativeFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Up Next Queue Drawer */}
+      <TheaterQueueDrawer
+        isOpen={isQueueDrawerOpen}
+        onClose={() => setIsQueueDrawerOpen(false)}
+      />
+
+      {/* Audio Signal Path & Telemetry Inspector */}
+      <TheaterSignalPathModal
+        isOpen={isSignalPathOpen}
+        onClose={() => setIsSignalPathOpen(false)}
+        spectrumBands={spectrumBands}
+      />
     </div>
   );
 }

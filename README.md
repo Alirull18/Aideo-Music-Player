@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.9.6
+# 💎 Aideo Music Player v0.9.7
 
 **A beautiful, crystal-clear desktop music player built for pure sound, real-time karaoke lyrics, and a listening experience that looks as good as it feels.**
 
@@ -66,9 +66,39 @@ Aideo is a modern, lightweight desktop music player designed for music lovers wh
 
 ---
 
-## ✨ What's New in v0.9.6
+## ✨ What's New in v0.9.7
 
-Version **0.9.6** brings huge improvements to sound quality, visual customization, and everyday speed:
+Version **0.9.7** introduces 5 immersive Theater Mode archetypes, an interactive signal path inspector, fluid 60fps karaoke lyrics rendering, lossless streaming upgrades, and major audio engine hardening:
+
+* 🎭 **5 Theater Mode Visual Archetypes**: Experience music with dedicated visual themes in Theater Mode or switch via the HUD / `H` key:
+  * **Stage Mode**: Immersive concert lighting and ambient stage glow.
+  * **Hi-Fi Studio Deck**: Dual-needle ballistic VU meters (peak + RMS) and brushed anodized aluminum faceplate.
+  * **Vinyl Turntable**: 33⅓ RPM rotating vinyl record with groove reflections, animated tonearm tracking, and needle drop/lift.
+  * **Editorial Poster**: High-contrast Swiss typography, dominant color extraction, and vinyl sleeve artwork.
+  * **Zen Minimalist**: Distraction-free sanctuary with breathing typography and hover controls.
+* 🎛️ **Audio Telemetry & Live Signal Path Inspector**: Inspect the exact end-to-end signal chain (file container, bit depth, sample rate, DSP nodes, and active output backend) with a real-time Bit-Perfect badge.
+* 📋 **Immersive Up Next Queue Drawer**: Slide-out glassmorphic drawer for seamless queue management directly inside Theater and Now Playing views.
+* 🌊 **PureScope Visualizer Overhaul**: Zero-crossing oscilloscope and calibrated phosphor decay FFT spectrum analyzer with jitter-free RequestAnimationFrame rendering.
+* 🎤 **Silky-Smooth Karaoke Lyrics Engine**: Fluid 60fps word-by-word syllable wipe animations with zero micro-stuttering or font jitter.
+* 🎵 **Lossless Streaming Hub (Qobuz & Tidal)**: Native Qobuz catalog browsing & streaming, persistent Tidal bootstrap on launch via OS keyring, and dedicated connection cards.
+* 📊 **Top Charts Explorer**: Redesigned charts browser with regional top ranks, trend indicators, genre filters, and automatic library matching for instant local playback.
+* 🧭 **3 Custom Discovery Hub Layouts**: Choose between **Command Deck**, **Editorial Home**, and **Stage Home** to tailor your music discovery experience.
+* 🔊 **Audio Engine & Bit-Perfect Hardening**:
+  * **WASAPI Exclusive Buffer Drain Sync**: Eliminates premature track progression at the end of songs in exclusive mode.
+  * **True Bit-Perfect Pipeline**: Guaranteed complete DSP bypass, unity volume, and triangular dither suppression.
+  * **True Gapless Stream Sessions**: Encoder delay and padding trimming (iTunSMPB) for zero-gap album playback.
+  * **Clock Smoothing**: Eliminated 1:53 playback stutter and snap-back via monotonic clock smoothing and proactive pre-buffering.
+  * **EcoQoS / Windows Crash Guard**: Opted audio threads out of Windows EcoQoS power throttling and enforced 1ms multimedia timer resolution.
+
+> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.7 Release Notes**](docs/RELEASE_NOTES_v0.9.7.md).*
+
+---
+
+## 📜 Previous Release Highlights
+
+<details>
+<summary><strong>✨ What Was New in v0.9.6 (Click to expand)</strong></summary>
+<br />
 
 * 🎨 **4 Choose-Your-Own Home Page Looks**: Pick how your home screen looks under *Settings > Appearance* — choose between **Classic Studio**, modern **Bento Grid**, minimalist **Audiophile Deck**, or full-screen **Cinematic Flow**.
 * 🎛️ **5 Bottom Player Bar Styles**: Customize the playback bar at the bottom with options like **Floating Pill**, **Sleek Minimalist**, **Soundwave Deck**, or a fun **Retro Vinyl Turntable** with a spinning record that lights up with your album colors!
@@ -86,11 +116,9 @@ Version **0.9.6** brings huge improvements to sound quality, visual customizatio
 * 🔋 **Battery & Laptop Friendly**: Animations and visualizers automatically sleep when Aideo is minimized, keeping your laptop cool and quiet.
 * 🚀 **Faster & Lighter**: Starts up in a flash and uses very little computer memory (~75MB RAM).
 
-> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.6 Release Notes**](docs/RELEASE_NOTES_v0.9.6.md).*
+> 📖 *Read the [**v0.9.6 Release Notes**](docs/RELEASE_NOTES_v0.9.6.md) for more details.*
 
----
-
-## 📜 Previous Release Highlights
+</details>
 
 <details>
 <summary><strong>✨ What Was New in v0.9.5 (Click to expand)</strong></summary>

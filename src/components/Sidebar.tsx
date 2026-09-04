@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3, Download, DownloadCloud, Upload, Wand2 } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3, TrendingUp, Download, DownloadCloud, Upload, Wand2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { SmartPlaylistBuilderModal } from './SmartPlaylistBuilderModal';
@@ -160,7 +160,7 @@ export function Sidebar() {
             onClick = () => setView('aideo');
             break;
           case 'charts':
-            icon = <BarChart3 size={18} style={{ color: '#f59e0b' }} />;
+            icon = <TrendingUp size={18} />;
             isActive = view === 'charts';
             onClick = () => setView('charts');
             break;

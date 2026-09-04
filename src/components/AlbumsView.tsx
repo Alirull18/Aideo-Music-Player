@@ -11,7 +11,7 @@ import { extractDominantColor } from '../utils/colorExtractor';
 import { fmt } from '../utils';
 import { shuffleArray } from '../utils/shuffle';
 import { ArtistDiscographyDrawer } from './ArtistDiscographyDrawer';
-import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey } from '../utils/albumUtils';
+import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey, extractPrimaryArtist } from '../utils/albumUtils';
 import { SimpleLRU } from '../utils/lruCache';
 
 interface AlbumGroup {
@@ -576,10 +576,12 @@ export function AlbumsView({
         // If no explicit album_artist was set and track artists differ within the same album,
         // mark album artist as 'Various Artists' unless they all share the main primary artist name.
         if (!albumArtist && group.artist !== 'Various Artists' && group.artist !== trackArtist) {
-          const firstArtistMain = group.artist.split(/ feat\.| ft\.|,/i)[0].trim().toLowerCase();
-          const currArtistMain = trackArtist.split(/ feat\.| ft\.|,/i)[0].trim().toLowerCase();
+          const firstArtistMain = extractPrimaryArtist(group.artist).toLowerCase();
+          const currArtistMain = extractPrimaryArtist(trackArtist).toLowerCase();
           if (firstArtistMain !== currArtistMain) {
             group.artist = 'Various Artists';
+          } else if (trackArtist.trim().toLowerCase() === currArtistMain && group.artist.trim().toLowerCase() !== currArtistMain) {
+            group.artist = trackArtist.trim();
           }
         }
       }

@@ -400,10 +400,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
 
     if (isOnline && !isCached && typeof navigator !== 'undefined' && !navigator.onLine) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: 'You are offline. Cannot stream online tracks.', type: 'warning' } 
-      }));
-      return;
+      console.warn('[stream] navigator.onLine reported false; continuing playback attempt via native backend.');
     }
 
     try {
@@ -500,9 +497,36 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           rememberResolvedPath(finalPath, track.path);
         } catch (e) {
           console.error('Failed to resolve streaming URL in playTrack:', e);
-          notifyTidalAuthFailure(e);
-          notifyQobuzAuthFailure(e);
+          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(e)) ||
+                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(e));
+          if (!notified) {
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: `Failed to load ${track.format} stream: ${e}`, type: 'error' }
+            }));
+          }
+          set(s => ({
+            playback: {
+              ...s.playback,
+              status: 'Stopped',
+              is_buffering: false,
+              current_track: null,
+            }
+          }));
+          return;
         }
+      }
+
+      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !finalPath.startsWith('http://') && !finalPath.startsWith('https://')) {
+        console.error('Aborting playback: stream URL unresolved for', track.title);
+        set(s => ({
+          playback: {
+            ...s.playback,
+            status: 'Stopped',
+            is_buffering: false,
+            current_track: null,
+          }
+        }));
+        return;
       }
       // Persist real title/artist under the resolved URL so queue rebuilds and
       // track transitions after a restart show the track, not the raw hostname.
@@ -1302,7 +1326,11 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
             console.error(`Failed to resolve ${t.format} autoplay recommended stream:`, err);
             notifyTidalAuthFailure(err);
             notifyQobuzAuthFailure(err);
+            continue;
           }
+        }
+        if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
+          continue;
         }
         // Keep real titles recoverable when the queue is later rebuilt from backend URLs
         if (p.startsWith('http://') || p.startsWith('https://')) {

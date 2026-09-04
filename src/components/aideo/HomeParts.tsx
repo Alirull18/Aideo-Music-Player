@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, memo } from 'react';
 import { Search, X, History, Music, Play, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { useStore } from '../../store';
+import { pathsEqual } from '../../utils';
 import { DiscoveryHubData, YoutubeTrack, LEGACY_AIDEO_PAGE_DESIGNS } from '../../store/types';
 import { SimpleLRU } from '../../utils/lruCache';
 
@@ -69,15 +71,25 @@ export function tracksForShelf(data: DiscoveryHubData | null, shelf: ShelfId): Y
 // outline (no text tags, no legend, per design decision).
 
 export function sourceTypeColor(track: any): string {
-  const p = String(track?.path || track?.url || '').toLowerCase();
-  if (track?.format === 'Tidal FLAC') return '#22d3ee';
-  if (track?.format === 'Qobuz FLAC') {
+  const allTracks = useStore.getState().tracks || [];
+  const localMatch = allTracks.find(t =>
+    (track?.path && pathsEqual(t.path, track.path)) ||
+    (track?.url && pathsEqual(t.path, track.url)) ||
+    (Boolean(track?.title && track?.artist) &&
+     Boolean(t.title && t.artist) &&
+     (t.title ?? '').trim().toLowerCase() === String(track.title).trim().toLowerCase() &&
+     (t.artist ?? '').trim().toLowerCase() === String(track.artist).trim().toLowerCase())
+  );
+  const p = String(localMatch?.path || track?.path || track?.url || '').toLowerCase();
+  const fmt = String(localMatch?.format || track?.format || '').toLowerCase();
+  if (fmt === 'tidal flac') return '#22d3ee';
+  if (fmt === 'qobuz flac') {
     const q = String(track?.quality || '').toUpperCase();
     if (q === 'HI_RES_192' || q === 'HI_RES') return '#a78bfa';
     return '#7fb8e6';
   }
-  if (p.startsWith('http://') || p.startsWith('https://')) return '#f87171';
-  if (/\.(flac|wav|alac|aiff|dsd)$/.test(p)) return '#c084fc';
+  if (!localMatch && (p.startsWith('http://') || p.startsWith('https://'))) return '#f87171';
+  if (fmt === 'flac' || fmt === 'wav' || /\.(flac|wav|alac|aiff|dsd)$/.test(p)) return '#c084fc';
   return '#34d399';
 }
 
@@ -89,10 +101,41 @@ export function sourceTypeColor(track: any): string {
 const coverArtCache = new SimpleLRU<string, string | null>(300);
 const pendingArtRequests = new SimpleLRU<string, Promise<string | null>>(300);
 
-export const TrackCover = memo(({ src, path, size, radius = 8, outline }: { src?: string | null; path?: string | null; size: number; radius?: number; outline?: string }) => {
+export const TrackCover = memo(({
+  src,
+  path,
+  title,
+  artist,
+  size,
+  radius = 8,
+  outline
+}: {
+  src?: string | null;
+  path?: string | null;
+  title?: string;
+  artist?: string;
+  size: number;
+  radius?: number;
+  outline?: string;
+}) => {
   const isDirectWebUrl = Boolean(src && (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')));
-  const targetPath = isDirectWebUrl ? src! : (src || path || '');
-  const isOnlinePath = targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:');
+  let targetPath = isDirectWebUrl ? src! : (src || path || '');
+  let isOnlinePath = targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:');
+
+  if (!isDirectWebUrl && (!targetPath || isOnlinePath)) {
+    const allTracks = useStore.getState().tracks || [];
+    const localMatch = allTracks.find(t =>
+      (path && pathsEqual(t.path, path)) ||
+      (Boolean(title && artist) &&
+       Boolean(t.title && t.artist) &&
+       (t.title ?? '').trim().toLowerCase() === String(title).trim().toLowerCase() &&
+       (t.artist ?? '').trim().toLowerCase() === String(artist).trim().toLowerCase())
+    );
+    if (localMatch) {
+      targetPath = localMatch.cover_url || localMatch.path;
+      isOnlinePath = targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:');
+    }
+  }
 
   const [art, setArt] = useState<string | null>(() => {
     if (!targetPath) return null;

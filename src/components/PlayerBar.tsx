@@ -12,10 +12,11 @@ import defaultCover from '../assets/default_cover.png';
 import { CastSelector } from './CastSelector';
 import { fmt, parseDuration, baseName, getStreamName, isRadioStream } from '../utils';
 import { generateWaveformPeaks } from '../utils/waveform';
+import { getAudioPathPresentation } from '../utils/audioPath';
 
 export function PlayerBar() {
   const {
-    view, playback, isMuted, toggleMute, currentDevice, coverArt, lyrics, lyricOffset,
+    view, playback, isMuted, toggleMute, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
     dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
@@ -28,7 +29,6 @@ export function PlayerBar() {
     playback: s.playback,
     isMuted: s.isMuted,
     toggleMute: s.toggleMute,
-    currentDevice: s.currentDevice,
     coverArt: s.coverArt,
     lyrics: s.lyrics,
     lyricOffset: s.lyricOffset,
@@ -62,6 +62,7 @@ export function PlayerBar() {
   })));
 
   const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
+  const audioPathPresentation = getAudioPathPresentation(playback);
 
   const activeLyric = useMemo(() => {
     if (!lyrics.length) return null;
@@ -223,17 +224,22 @@ export function PlayerBar() {
 
   // Render Audio Badges Helper
   const renderAudioBadges = () => {
+    const { badge } = audioPathPresentation;
     return (
       <>
-        {playback.bit_perfect && (
-          <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)' }}>
-            {currentDevice?.startsWith('[ASIO]') ? 'ASIO' : 'BIT-PERFECT'} {playback.dev_rate > 0 ? `· ${playback.dev_rate / 1000}kHz` : ''}
+        {badge && (
+          <span
+            className="bit-badge"
+            style={badge.kind === 'bit-perfect'
+              ? { transform: 'none', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)' }
+              : { transform: 'none' }}
+          >
+            {badge.label}
           </span>
         )}
-        {playback.exclusive && !playback.bit_perfect && !dsp.upsample_rate && <span className="bit-badge" style={{ transform: 'none' }}>EXCLUSIVE</span>}
-        {dsp.upsample_rate > 0 && !playback.bit_perfect && (
+        {!badge && playback.effective_audio_path?.active && playback.effective_audio_path.resampling && dsp.upsample_rate > 0 && (
           <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #a855f7, #6366f1)' }}>
-            HI-RES · {dsp.upsample_rate / 1000}kHz
+            HI-RES · {audioPathPresentation.outputRate / 1000}kHz
           </span>
         )}
       </>
@@ -608,8 +614,8 @@ export function PlayerBar() {
           <div className="waveform-deck-right">
             <div className="audiophile-hud-chip" title="Audio Stream Hardware Readout">
               <Activity size={12} color="var(--accent)" />
-              <span>{playback.bit_perfect ? 'ASIO / BIT-PERFECT' : playback.exclusive ? 'WASAPI EXCLUSIVE' : 'SHARED ENGINE'}</span>
-              {playback.dev_rate > 0 && <span>· {playback.dev_rate / 1000}kHz</span>}
+              <span>{audioPathPresentation.hudLabel}</span>
+              {audioPathPresentation.outputRate > 0 && <span>· {audioPathPresentation.outputRate / 1000}kHz</span>}
             </div>
             {renderVolume()}
             {renderQuickTools()}
@@ -791,7 +797,7 @@ export function PlayerBar() {
         {/* RIGHT: Warm Analog LED Badges & Vintage Master Dial */}
         <div className="vinyl-deck-right">
           <div className="vinyl-led-bank">
-            <div className={`vinyl-led-item ${playback.bit_perfect ? 'lit-cyan' : ''}`}>
+            <div className={`vinyl-led-item ${audioPathPresentation.isBitPerfect ? 'lit-cyan' : ''}`}>
               <div className="led-dot" />
               <span>BIT-PERFECT</span>
             </div>
@@ -799,7 +805,7 @@ export function PlayerBar() {
               <div className="led-dot" />
               <span>HI-RES</span>
             </div>
-            <div className={`vinyl-led-item ${playback.exclusive ? 'lit-emerald' : ''}`}>
+            <div className={`vinyl-led-item ${audioPathPresentation.isExclusive ? 'lit-emerald' : ''}`}>
               <div className="led-dot" />
               <span>EXCLUSIVE</span>
             </div>

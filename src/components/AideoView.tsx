@@ -12,6 +12,7 @@ import { EditorialHome } from './aideo/EditorialHome';
 import { CommandDeckHome } from './aideo/CommandDeckHome';
 import { StageHome } from './aideo/StageHome';
 import { AideoHomeProps, SearchBarProps, HomeResumeInfo } from './aideo/HomeParts';
+import { classifyDiscoveryPlayback, pathsEqual } from '../utils';
 
 // Format track duration
 function fmt(s: number | null) {
@@ -80,14 +81,14 @@ const ArtistLink = memo(({ name, onClick }: { name: string; onClick: () => void 
 });
 
 // Row for rendering a popular track with resolved cover art via iTunes
-const PopularTrackRow = memo(({ 
-  track, 
-  artistName, 
-  idx, 
-  resolvingTrackId, 
-  downloadingIds, 
-  downloadedIds, 
-  handlePlayPopularTrack, 
+const PopularTrackRow = memo(({
+  track,
+  artistName,
+  idx,
+  resolvingTrackId,
+  downloadingIds,
+  downloadedIds,
+  handlePlayPopularTrack,
   handleDownloadPopularTrack,
   formatNumber,
   totalTracks
@@ -123,7 +124,7 @@ const PopularTrackRow = memo(({
   const isDownloaded = downloadedIds.has(`${artistName}-${track.name}`);
 
   return (
-    <div 
+    <div
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -202,7 +203,7 @@ const PopularTrackRow = memo(({
 
         {/* Download Button */}
         {isDownloaded ? (
-          <div 
+          <div
             style={{
               background: 'rgba(16, 185, 129, 0.1)',
               border: '1px solid rgba(16, 185, 129, 0.2)',
@@ -219,7 +220,7 @@ const PopularTrackRow = memo(({
             <Check size={14} />
           </div>
         ) : isDownloading ? (
-          <div 
+          <div
             style={{
               background: 'rgba(16, 185, 129, 0.1)',
               border: '1px solid rgba(16, 185, 129, 0.2)',
@@ -286,16 +287,26 @@ function getBadgeClass(source: string) {
 
 // Colored source-type indicator: one color per music source / quality tier
 function getSourceType(track: any): { color: string; label: string } {
-  const p = String(track.path || track.url || '').toLowerCase();
-  if (track.format === 'Tidal FLAC') return { color: '#22d3ee', label: 'Tidal HiFi Â· Lossless' };
-  if (track.format === 'Qobuz FLAC') {
-    const q = String(track.quality || '').toUpperCase();
-    if (q === 'HI_RES_192') return { color: '#a78bfa', label: 'Qobuz Studio Â· Hi-Res 192k' };
-    if (q === 'HI_RES') return { color: '#c4b5fd', label: 'Qobuz Studio Â· Hi-Res' };
-    return { color: '#7fb8e6', label: 'Qobuz Studio Â· Lossless' };
+  const allTracks = useStore.getState().tracks || [];
+  const localMatch = allTracks.find(t =>
+    (track?.path && pathsEqual(t.path, track.path)) ||
+    (track?.url && pathsEqual(t.path, track.url)) ||
+    (Boolean(track?.title && track?.artist) &&
+     Boolean(t.title && t.artist) &&
+     (t.title ?? '').trim().toLowerCase() === String(track.title).trim().toLowerCase() &&
+     (t.artist ?? '').trim().toLowerCase() === String(track.artist).trim().toLowerCase())
+  );
+  const p = String(localMatch?.path || track?.path || track?.url || '').toLowerCase();
+  const fmt = String(localMatch?.format || track?.format || '').toLowerCase();
+  if (fmt === 'tidal flac') return { color: '#22d3ee', label: 'Tidal HiFi · Lossless' };
+  if (fmt === 'qobuz flac') {
+    const q = String(track?.quality || '').toUpperCase();
+    if (q === 'HI_RES_192') return { color: '#a78bfa', label: 'Qobuz Studio · Hi-Res 192k' };
+    if (q === 'HI_RES') return { color: '#c4b5fd', label: 'Qobuz Studio · Hi-Res' };
+    return { color: '#7fb8e6', label: 'Qobuz Studio · Lossless' };
   }
-  if (p.startsWith('http://') || p.startsWith('https://')) return { color: '#f87171', label: 'YouTube Stream' };
-  if (/\.(flac|wav|alac|aiff|dsd)$/.test(p)) return { color: '#c084fc', label: 'Local Hi-Res Â· Lossless' };
+  if (!localMatch && (p.startsWith('http://') || p.startsWith('https://'))) return { color: '#f87171', label: 'YouTube Stream' };
+  if (fmt === 'flac' || fmt === 'wav' || /\.(flac|wav|alac|aiff|dsd)$/.test(p)) return { color: '#c084fc', label: 'Local Hi-Res · Lossless' };
   return { color: '#34d399', label: 'Local File' };
 }
 
@@ -306,20 +317,39 @@ const coverOutlineStyle = (track: any): React.CSSProperties => ({
   boxShadow: `0 0 0 2px ${getSourceType(track).color}`,
 });
 
-const TrackCardThumbnail = memo(({ 
-  path, 
-  coverUrl, 
-  className, 
-  fallbackIconSize = 22 
-}: { 
-  path?: string | null, 
-  coverUrl?: string | null, 
-  className?: string, 
-  fallbackIconSize?: number 
+const TrackCardThumbnail = memo(({
+  path,
+  coverUrl,
+  title,
+  artist,
+  className,
+  fallbackIconSize = 22
+}: {
+  path?: string | null,
+  coverUrl?: string | null,
+  title?: string,
+  artist?: string,
+  className?: string,
+  fallbackIconSize?: number
 }) => {
   const isDirectWebUrl = Boolean(coverUrl && (coverUrl.startsWith('http://') || coverUrl.startsWith('https://') || coverUrl.startsWith('data:')));
-  const targetPath = isDirectWebUrl ? coverUrl! : (coverUrl || path || '');
-  const isOnlinePath = targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:');
+  let targetPath = isDirectWebUrl ? coverUrl! : (coverUrl || path || '');
+  let isOnlinePath = targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:');
+
+  if (!isDirectWebUrl && (!targetPath || isOnlinePath)) {
+    const allTracks = useStore.getState().tracks || [];
+    const localMatch = allTracks.find(t =>
+      (path && pathsEqual(t.path, path)) ||
+      (Boolean(title && artist) &&
+       Boolean(t.title && t.artist) &&
+       (t.title ?? '').trim().toLowerCase() === String(title).trim().toLowerCase() &&
+       (t.artist ?? '').trim().toLowerCase() === String(artist).trim().toLowerCase())
+    );
+    if (localMatch) {
+      targetPath = localMatch.cover_url || localMatch.path;
+      isOnlinePath = targetPath.startsWith('http://') || targetPath.startsWith('https://') || targetPath.startsWith('data:');
+    }
+  }
 
   const [art, setArt] = useState<string | null>(() => {
     if (!targetPath) return null;
@@ -358,7 +388,7 @@ const TrackCardThumbnail = memo(({
       });
       pendingArtRequests.set(targetPath, req);
     }
-    
+
     pendingArtRequests.get(targetPath)?.then(resolvedArt => {
       if (active) {
         setArt(resolvedArt || null);
@@ -379,27 +409,27 @@ const TrackCardThumbnail = memo(({
   }
 
   return (
-    <img 
-      src={art} 
-      alt="" 
-      referrerPolicy="no-referrer" 
-      loading="lazy" 
+    <img
+      src={art}
+      alt=""
+      referrerPolicy="no-referrer"
+      loading="lazy"
       className={className || "aideo-track-img"}
       onError={() => {
         if (targetPath) coverArtCache.set(targetPath, null);
         setArt(null);
-      }} 
+      }}
     />
   );
 });
 
 export function AideoView() {
-  const { 
-    tracks, 
-    playHistory, 
-    playCounts, 
-    playTrack, 
-    setView, 
+  const {
+    tracks,
+    playHistory,
+    playCounts,
+    playTrack,
+    setView,
     playStream,
     playbackCurrentTrack,
     playbackStatus,
@@ -422,6 +452,10 @@ export function AideoView() {
     dismissResumePrompt,
     discoveryLayout,
     setDiscoveryLayout,
+    discoveryCardSize,
+    setDiscoveryCardSize,
+    discoveryViewMode,
+    setDiscoveryViewMode,
     aideoPageDesign,
     tidalConnected,
     tidalSearching,
@@ -465,6 +499,10 @@ export function AideoView() {
     dismissResumePrompt: s.dismissResumePrompt,
     discoveryLayout: s.discoveryLayout,
     setDiscoveryLayout: s.setDiscoveryLayout,
+    discoveryCardSize: s.discoveryCardSize,
+    setDiscoveryCardSize: s.setDiscoveryCardSize,
+    discoveryViewMode: s.discoveryViewMode,
+    setDiscoveryViewMode: s.setDiscoveryViewMode,
     aideoPageDesign: s.aideoPageDesign,
     tidalConnected: s.tidalConnected,
     tidalSearching: s.tidalSearching,
@@ -482,7 +520,6 @@ export function AideoView() {
     downloadBatchPlaylist: s.downloadBatchPlaylist,
   })));
   const [greeting, setGreeting] = useState('Good morning');
-  const [discoveryViewMode, setDiscoveryViewMode] = useState<'list' | 'grid'>('grid');
   const isFetchingRef = useRef(false);
   const tidalHubPoolRef = useRef<any[]>([]);
   const tidalRefreshCountRef = useRef(0);
@@ -495,8 +532,7 @@ export function AideoView() {
   const [activeSource, setActiveSource] = useState('Library History');
   const [generatingMix, setGeneratingMix] = useState(false);
   const [visibleRecsCount, setVisibleRecsCount] = useState(15);
-  const [discoveryCardSize, setDiscoveryCardSize] = useState<number>(185);
-  
+
   // YouTube Music / Web Search states
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
@@ -720,9 +756,28 @@ export function AideoView() {
     });
   };
 
+  const resolveLocalMatch = (track: any): Track | undefined => {
+    if (!track) return undefined;
+    const cleanTitle = (track.title || '').trim().toLowerCase();
+    const cleanArtist = (track.artist || '').trim().toLowerCase();
+
+    return tracks.find(lt => {
+      if (track.path && pathsEqual(lt.path, track.path)) return true;
+      if (track.url && pathsEqual(lt.path, track.url)) return true;
+      if (cleanTitle && cleanArtist && cleanArtist !== 'unknown artist' && cleanArtist !== 'youtube audio' && cleanArtist !== 'online stream' && cleanArtist !== '—') {
+        const ltTitle = (lt.title || '').trim().toLowerCase();
+        const ltArtist = (lt.artist || '').trim().toLowerCase();
+        return ltTitle === cleanTitle && ltArtist === cleanArtist;
+      }
+      return false;
+    });
+  };
+
   const handlePlayQuickTrack = async (track: any) => {
     setSearchFocused(false);
-    if (track.format === 'Tidal FLAC') {
+    const localMatch = resolveLocalMatch(track);
+    const playbackRoute = classifyDiscoveryPlayback(track, Boolean(localMatch));
+    if (playbackRoute === 'tidal') {
       try {
         await playTidalResult(track);
       } catch (e) {
@@ -730,7 +785,7 @@ export function AideoView() {
       }
       return;
     }
-    if (track.format === 'Qobuz FLAC') {
+    if (playbackRoute === 'qobuz') {
       try {
         await playQobuzResult(track);
       } catch (e) {
@@ -738,8 +793,31 @@ export function AideoView() {
       }
       return;
     }
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `Playing: ${track.title}...`, type: 'info' } 
+    if (playbackRoute === 'local') {
+      const ext = (track.url || track.path || '').split('.').pop()?.split('?')[0].toUpperCase();
+      const trackToPlay: Track = localMatch || {
+        id: parseInt(String(track.id).replace('local_', '')) || Date.now(),
+        path: track.url || track.path,
+        title: track.title || 'Unknown Title',
+        artist: track.artist || 'Unknown Artist',
+        album: (track as any).album || 'Local Library',
+        duration: parseDuration(track.duration_raw),
+        format: ext || 'Local File',
+        cover_url: track.cover_url || null,
+        loved: (track as any).loved || 0,
+      } as Track;
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Playing from library: ${trackToPlay.title}`, type: 'success' }
+      }));
+      try {
+        await playTrack(trackToPlay);
+      } catch (e) {
+        console.error('Failed to play local quick track:', e);
+      }
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('ui-toast', {
+      detail: { message: `Playing: ${track.title}...`, type: 'info' }
     }));
     try {
       const parsedSeconds = parseDuration(track.duration_raw);
@@ -749,7 +827,7 @@ export function AideoView() {
         cover_url: track.cover_url,
         duration: parsedSeconds
       });
-      
+
       invoke('update_media_metadata', {
         title: track.title,
         artist: track.artist,
@@ -961,7 +1039,7 @@ export function AideoView() {
       // Fired in parallel with everything below; first manual refresh reuses the session
       // pool, repeated refreshes escalate to a fresh search.
       const latestStore = useStore.getState();
-      const tidalEligible = !!latestStore.tidalConnected && navigator.onLine;
+      const tidalEligible = !!latestStore.tidalConnected;
       const wantFreshTidalSearch = forceRefresh
         ? tidalRefreshCountRef.current > 0 || tidalHubPoolRef.current.length === 0
         : tidalHubPoolRef.current.length === 0;
@@ -1018,7 +1096,7 @@ export function AideoView() {
         listenbrainzConnected: isLbConnected,
         listenbrainzRecs: lbTracks,
         appMode,
-        isOnline: navigator.onLine,
+        isOnline: typeof navigator !== 'undefined' ? (navigator.onLine ?? true) : true,
       });
 
       setDiscoveryData(resolved);
@@ -1066,8 +1144,8 @@ export function AideoView() {
       next.add(track.id);
       return next;
     });
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `Downloading high-fidelity stream: ${track.title}...`, type: 'info' } 
+    window.dispatchEvent(new CustomEvent('ui-toast', {
+      detail: { message: `Downloading high-fidelity stream: ${track.title}...`, type: 'info' }
     }));
     try {
       await invoke('download_track', {
@@ -1086,13 +1164,13 @@ export function AideoView() {
       await useStore.getState().loadLibrary();
       // Immediately refresh recommendations list to filter out the downloaded track
       await fetchRecommendations();
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Successfully added to offline library: ${track.title}!`, type: 'success' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Successfully added to offline library: ${track.title}!`, type: 'success' }
       }));
     } catch (err) {
       console.error("Download error", err);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Web stream download failed: ${err}`, type: 'error' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Web stream download failed: ${err}`, type: 'error' }
       }));
     } finally {
       setDownloadingIds(prev => {
@@ -1148,14 +1226,20 @@ export function AideoView() {
   };
 
   const handleTogglePreview = async (track: any) => {
-    const trackPath = track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC' ? track.path : track.url;
-    const isCurrentTrack = playbackCurrentTrack === trackPath;
+    const localMatch = resolveLocalMatch(track);
+    const playbackRoute = classifyDiscoveryPlayback(track, Boolean(localMatch));
+    const isLocal = playbackRoute === 'local';
+    const effectivePath = localMatch
+      ? localMatch.path
+      : ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') ? track.path : (track.url || track.path));
+
+    const isCurrentTrack = pathsEqual(playbackCurrentTrack, effectivePath);
     const isPlaying = isCurrentTrack && playbackStatus === 'Playing';
     const isPaused = isCurrentTrack && playbackStatus === 'Paused';
 
     if (isPlaying) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Pausing preview: ${track.title}`, type: 'info' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Pausing: ${track.title}`, type: 'info' }
       }));
       try {
         await pauseTrack();
@@ -1163,16 +1247,39 @@ export function AideoView() {
         console.error('Failed to pause track:', e);
       }
     } else if (isPaused) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Resuming preview: ${track.title}...`, type: 'info' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Resuming: ${track.title}...`, type: 'info' }
       }));
       try {
         await resumeTrack();
       } catch (e) {
         console.error('Failed to resume track:', e);
       }
+    } else if (isLocal) {
+      const ext = (track.url || track.path || '').split('.').pop()?.split('?')[0].toUpperCase();
+      const trackToPlay: Track = localMatch || {
+        id: parseInt(String(track.id).replace('local_', '')) || Date.now(),
+        path: track.url || track.path,
+        title: track.title || 'Unknown Title',
+        artist: track.artist || 'Unknown Artist',
+        album: (track as any).album || 'Local Library',
+        duration: parseDuration(track.duration_raw),
+        format: ext || 'Local File',
+        cover_url: track.cover_url || null,
+        loved: (track as any).loved || 0,
+      } as Track;
+
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Playing from library: ${trackToPlay.title}`, type: 'success' }
+      }));
+
+      try {
+        await playTrack(trackToPlay);
+      } catch (e) {
+        console.error('Failed to play local track from discovery hub:', e);
+      }
     } else {
-      if (track.format === 'Tidal FLAC') {
+      if (playbackRoute === 'tidal') {
         try {
           await playTidalResult(track);
         } catch (e) {
@@ -1180,7 +1287,7 @@ export function AideoView() {
         }
         return;
       }
-      if (track.format === 'Qobuz FLAC') {
+      if (playbackRoute === 'qobuz') {
         try {
           await playQobuzResult(track);
         } catch (e) {
@@ -1188,8 +1295,8 @@ export function AideoView() {
         }
         return;
       }
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Streaming preview: ${track.title}...`, type: 'info' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Streaming preview: ${track.title}...`, type: 'info' }
       }));
       try {
         const parsedSeconds = parseDuration(track.duration_raw);
@@ -1199,7 +1306,7 @@ export function AideoView() {
           cover_url: track.cover_url || null,
           duration: parsedSeconds
         });
-        
+
         // Update OS media metadata specifically for this stream with its title and artist info
         invoke('update_media_metadata', {
           title: track.title,
@@ -1215,20 +1322,23 @@ export function AideoView() {
 
   const handlePlayDiscoveryMix = async (mix: any) => {
     if (!mix.tracks || mix.tracks.length === 0) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: "This mix has no tracks.", type: 'warning' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: "This mix has no tracks.", type: 'warning' }
       }));
       return;
     }
 
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `âœ¨ Loading Mix: ${mix.title}...`, type: 'info' } 
+    window.dispatchEvent(new CustomEvent('ui-toast', {
+      detail: { message: `✨ Loading Mix: ${mix.title}...`, type: 'info' }
     }));
 
     try {
       const parsedSeconds = (track: any): number => parseDuration(track.duration_raw);
 
       const tracksToQueue: Track[] = mix.tracks.map((t: any) => {
+        const localMatch = resolveLocalMatch(t);
+        if (localMatch) return localMatch;
+
         const isOnline = t.url.startsWith('http://') || t.url.startsWith('https://');
         if (isOnline) {
           return {
@@ -1241,15 +1351,13 @@ export function AideoView() {
             cover_url: t.cover_url || null,
           } as Track;
         } else {
-          const existing = tracks.find(lt => lt.path === t.url);
-          if (existing) return existing;
           return {
             id: parseInt(t.id.replace('local_', '')) || -9999,
             path: t.url,
             title: t.title,
             artist: t.artist,
             duration: parsedSeconds(t),
-            format: 'Local File',
+            format: t.url.split('.').pop()?.toUpperCase() || 'Local File',
             cover_url: t.cover_url || null,
           } as Track;
         }
@@ -1278,14 +1386,14 @@ export function AideoView() {
         await playTrack(first);
       }
 
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Playing ${mix.title}!`, type: 'success' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Playing ${mix.title}!`, type: 'success' }
       }));
       setView('nowplaying');
     } catch (err) {
       console.error("Failed to play discovery mix:", err);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Failed to load mix: ${err}`, type: 'error' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Failed to load mix: ${err}`, type: 'error' }
       }));
     }
   };
@@ -1310,7 +1418,7 @@ export function AideoView() {
           cover_url: match.cover_url,
           duration: parsedSeconds
         });
-        
+
         invoke('update_media_metadata', {
           title: match.title,
           artist: match.artist,
@@ -1318,14 +1426,14 @@ export function AideoView() {
           duration: parsedSeconds,
         }).catch(() => {});
       } else {
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Could not resolve stream for "${trackName}"`, type: 'error' } 
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Could not resolve stream for "${trackName}"`, type: 'error' }
         }));
       }
     } catch (err) {
       console.error("Failed to resolve and play popular track:", err);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Resolution error: ${err}`, type: 'error' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Resolution error: ${err}`, type: 'error' }
       }));
     } finally {
       setResolvingTrackId(null);
@@ -1336,15 +1444,15 @@ export function AideoView() {
     if (!artistProfile) return;
     const trackId = `${artistProfile.name}-${trackName}`;
     if (downloadingIds.has(trackId) || downloadedIds.has(trackId)) return;
-    
+
     setDownloadingIds(prev => {
       const next = new Set(prev);
       next.add(trackId);
       return next;
     });
 
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `Resolving stream to download: ${trackName}...`, type: 'info' } 
+    window.dispatchEvent(new CustomEvent('ui-toast', {
+      detail: { message: `Resolving stream to download: ${trackName}...`, type: 'info' }
     }));
 
     try {
@@ -1356,8 +1464,8 @@ export function AideoView() {
           const rTitle = (r.title || '').toLowerCase().replace(/[\(\[][^\)\]]+[\)\]]/g, '').trim();
           return rTitle.includes(cleanTarget) || cleanTarget.includes(rTitle);
         }) || results[0];
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Downloading high-fidelity stream: ${match.title}...`, type: 'info' } 
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Downloading high-fidelity stream: ${match.title}...`, type: 'info' }
         }));
         await invoke('download_track', {
           url: match.url,
@@ -1366,7 +1474,7 @@ export function AideoView() {
           artist: match.artist,
           coverUrl: match.cover_url
         });
-        
+
         setDownloadedIds(prev => {
           const next = new Set(prev);
           next.add(trackId);
@@ -1375,18 +1483,18 @@ export function AideoView() {
 
         await useStore.getState().loadLibrary();
         await fetchRecommendations();
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Successfully added to offline library: ${match.title}!`, type: 'success' } 
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Successfully added to offline library: ${match.title}!`, type: 'success' }
         }));
       } else {
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Could not resolve stream for "${trackName}" to download`, type: 'error' } 
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Could not resolve stream for "${trackName}" to download`, type: 'error' }
         }));
       }
     } catch (err) {
       console.error("Download error for popular track:", err);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Download failed: ${err}`, type: 'error' } 
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Download failed: ${err}`, type: 'error' }
       }));
     } finally {
       setDownloadingIds(prev => {
@@ -1399,9 +1507,9 @@ export function AideoView() {
 
   const handlePlayArtistTopTracks = async (shuffle = false) => {
     if (!artistProfile || !artistProfile.top_tracks || artistProfile.top_tracks.length === 0) return;
-    
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `Resolving tracks for ${artistProfile.name}...`, type: 'info' } 
+
+    window.dispatchEvent(new CustomEvent('ui-toast', {
+      detail: { message: `Resolving tracks for ${artistProfile.name}...`, type: 'info' }
     }));
 
     let tracksToPlay = [...artistProfile.top_tracks];
@@ -1436,7 +1544,7 @@ export function AideoView() {
         }, false);
 
         const remainingTracks = tracksToPlay.slice(1);
-        
+
         (async () => {
           for (const t of remainingTracks) {
             try {
@@ -1460,7 +1568,7 @@ export function AideoView() {
               console.error("Failed to background resolve track for queue:", err);
             }
           }
-          
+
           // Once all remaining tracks are queued, trigger autoplay radio to append recommendations at the end
           const currentTrack = useStore.getState().currentTrack;
           if (currentTrack) {
@@ -1469,8 +1577,8 @@ export function AideoView() {
         })();
 
       } else {
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Could not resolve stream for "${trackName}"`, type: 'error' } 
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Could not resolve stream for "${trackName}"`, type: 'error' }
         }));
       }
     } catch (err) {
@@ -1506,8 +1614,8 @@ export function AideoView() {
           duration: parsedSeconds
         }, false);
         await triggerAutoplayRadio(virtualTrack, true);
-        window.dispatchEvent(new CustomEvent('ui-toast', { 
-          detail: { message: `Started ${artistProfile.name} Radio!`, type: 'success' } 
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Started ${artistProfile.name} Radio!`, type: 'success' }
         }));
       }
     } catch (err) {
@@ -1574,26 +1682,30 @@ export function AideoView() {
   const renderTrackCarousel = (tracksList: any[]) => {
     if (!tracksList || tracksList.length === 0) return null;
     const isGrid = discoveryViewMode === 'grid';
-    
+
     return (
-      <div 
+      <div
         className={isGrid ? "aideo-discovery-grid-layout" : "aideo-discovery-grid"}
         style={isGrid ? { gridTemplateColumns: `repeat(auto-fill, minmax(${discoveryCardSize}px, 1fr))` } : undefined}
       >
         {tracksList.map((track) => {
-          const isPlaying = playbackCurrentTrack === ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') ? track.path : track.url) && playbackStatus === 'Playing';
+          const localMatch = resolveLocalMatch(track);
+          const effectiveTrackPath = localMatch ? localMatch.path : ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') ? track.path : track.url);
+          const isPlaying = pathsEqual(playbackCurrentTrack, effectiveTrackPath) && playbackStatus === 'Playing';
           if (isGrid) {
             return (
-              <div 
-                key={track.id} 
+              <div
+                key={track.id}
                 className={`aideo-discovery-grid-card ${isPlaying ? 'is-playing' : ''}`}
               >
                 <div className="discovery-grid-cover-wrap" style={coverOutlineStyle(track)}>
-                  <TrackCardThumbnail 
-                    path={track.url} 
-                    coverUrl={track.cover_url} 
-                    className="discovery-grid-cover-img" 
-                    fallbackIconSize={24} 
+                  <TrackCardThumbnail
+                    path={localMatch ? localMatch.path : track.url}
+                    coverUrl={localMatch?.cover_url || track.cover_url}
+                    title={track.title}
+                    artist={track.artist}
+                    className="discovery-grid-cover-img"
+                    fallbackIconSize={24}
                   />
 
                   {isPlaying && (
@@ -1605,7 +1717,7 @@ export function AideoView() {
                   )}
 
                   <div className="discovery-grid-overlay">
-                    <div 
+                    <div
                       className="discovery-grid-play-circle"
                       onClick={() => handleTogglePreview(track)}
                       title={
@@ -1652,22 +1764,22 @@ export function AideoView() {
                       <Check size={12} />
                     </div>
                   ) : downloadingIds.has(track.id) ? (
-                    <div 
-                      className="discovery-download-btn downloading" 
+                    <div
+                      className="discovery-download-btn downloading"
                       title="Downloading stream offline..."
                     >
                       {downloadProgress[track.url] && (
-                        <div 
-                          style={{ 
-                            position: 'absolute', 
-                            left: 0, 
-                            top: 0, 
-                            bottom: 0, 
-                            width: `${downloadProgress[track.url].percent}%`, 
-                            background: 'rgba(16, 185, 129, 0.25)', 
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: `${downloadProgress[track.url].percent}%`,
+                            background: 'rgba(16, 185, 129, 0.25)',
                             zIndex: 0,
                             transition: 'width 0.2s ease-out'
-                          }} 
+                          }}
                         />
                       )}
                       <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', fontSize: 9, fontWeight: 700 }}>
@@ -1675,7 +1787,7 @@ export function AideoView() {
                       </span>
                     </div>
                   ) : (
-                    <button 
+                    <button
                       onClick={() => handleDownloadTrack(track)}
                       className="discovery-download-btn"
                       title="Download stream offline"
@@ -1688,16 +1800,18 @@ export function AideoView() {
             );
           } else {
             return (
-              <div 
+              <div
                 key={track.id}
                 className={`aideo-discovery-list-item ${isPlaying ? 'is-playing' : ''}`}
               >
                 <div className="discovery-cover-wrap" style={coverOutlineStyle(track)}>
-                  <TrackCardThumbnail 
-                    path={track.url} 
-                    coverUrl={track.cover_url} 
-                    className="discovery-cover-img" 
-                    fallbackIconSize={20} 
+                  <TrackCardThumbnail
+                    path={localMatch ? localMatch.path : track.url}
+                    coverUrl={localMatch?.cover_url || track.cover_url}
+                    title={track.title}
+                    artist={track.artist}
+                    className="discovery-cover-img"
+                    fallbackIconSize={20}
                   />
 
                   {isPlaying && (
@@ -1709,7 +1823,7 @@ export function AideoView() {
                   )}
 
                   <div className="discovery-overlay">
-                    <div 
+                    <div
                       className="discovery-play-circle"
                       onClick={() => handleTogglePreview(track)}
                       title={
@@ -1756,22 +1870,22 @@ export function AideoView() {
                       <Check size={12} />
                     </div>
                   ) : downloadingIds.has(track.id) ? (
-                    <div 
-                      className="discovery-download-btn downloading" 
+                    <div
+                      className="discovery-download-btn downloading"
                       title="Downloading stream offline..."
                     >
                       {downloadProgress[track.url] && (
-                        <div 
-                          style={{ 
-                            position: 'absolute', 
-                            left: 0, 
-                            top: 0, 
-                            bottom: 0, 
-                            width: `${downloadProgress[track.url].percent}%`, 
-                            background: 'rgba(16, 185, 129, 0.25)', 
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: `${downloadProgress[track.url].percent}%`,
+                            background: 'rgba(16, 185, 129, 0.25)',
                             zIndex: 0,
                             transition: 'width 0.2s ease-out'
-                          }} 
+                          }}
                         />
                       )}
                       <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', fontSize: 9, fontWeight: 700 }}>
@@ -1779,7 +1893,7 @@ export function AideoView() {
                       </span>
                     </div>
                   ) : (
-                    <button 
+                    <button
                       onClick={() => handleDownloadTrack(track)}
                       className="discovery-download-btn"
                       title="Download high-fidelity stream offline"
@@ -1807,7 +1921,19 @@ export function AideoView() {
           let iconType = 'sparkles';
           let iconColorClass = 'sm';
 
-          if (idLower.includes('energy') || titleLower.includes('energy') || titleLower.includes('workout')) {
+          if (idLower.includes('supermix') || titleLower.includes('supermix')) {
+            iconType = 'supermix';
+            iconColorClass = 'sm';
+          } else if (idLower.includes('spotlight') || titleLower.includes('spotlight') || idLower.includes('artist')) {
+            iconType = 'spotlight';
+            iconColorClass = 'rc';
+          } else if (idLower.includes('forgotten') || titleLower.includes('forgotten') || idLower.includes('capsule')) {
+            iconType = 'forgotten';
+            iconColorClass = 'ch';
+          } else if (idLower.includes('repeat') || titleLower.includes('repeat') || idLower.includes('heavy') || titleLower.includes('rotation') || idLower.includes('top_now') || titleLower.includes('top song')) {
+            iconType = 'on_repeat';
+            iconColorClass = 'dc';
+          } else if (idLower.includes('energy') || titleLower.includes('energy') || titleLower.includes('workout')) {
             iconType = 'energy';
             iconColorClass = 'dc';
           } else if (idLower.includes('focus') || titleLower.includes('focus') || titleLower.includes('flow')) {
@@ -1819,9 +1945,6 @@ export function AideoView() {
           } else if (idLower.includes('melancholy') || titleLower.includes('reflections') || titleLower.includes('moody') || titleLower.includes('sad')) {
             iconType = 'melancholy';
             iconColorClass = 'rc';
-          } else if (idLower.includes('spotlight') || titleLower.includes('spotlight') || idLower.includes('artist')) {
-            iconType = 'spotlight';
-            iconColorClass = 'sm';
           } else if (idLower.includes('recap') || titleLower.includes('recap')) {
             iconType = 'recap';
             iconColorClass = 'rc';
@@ -1835,11 +1958,14 @@ export function AideoView() {
 
           const renderIcon = () => {
             switch (iconType) {
+              case 'supermix': return <Sparkles size={20} className="pulse" />;
+              case 'spotlight': return <Star size={20} />;
+              case 'forgotten': return <Clock size={20} />;
+              case 'on_repeat': return <Flame size={20} />;
               case 'energy': return <Zap size={20} />;
               case 'focus': return <Target size={20} />;
               case 'chill': return <Moon size={20} />;
               case 'melancholy': return <CloudRain size={20} />;
-              case 'spotlight': return <Star size={20} />;
               case 'recap': return <History size={20} />;
               case 'discovery': return <Compass size={20} />;
               case 'playlist': return <ListMusic size={20} />;
@@ -1848,7 +1974,7 @@ export function AideoView() {
           };
 
           return (
-            <motion.div 
+            <motion.div
               key={mix.id}
               whileTap={{ scale: 0.98 }}
               onClick={() => handlePlayDiscoveryMix(mix)}
@@ -1927,7 +2053,7 @@ export function AideoView() {
           <div className="aideo-discovery-toolbar">
             {/* Layout Selector: Multi-Shelf vs Unified Feed */}
             <div className="discovery-layout-toggle" title={`Layout: ${discoveryLayout === 'shelves' ? 'Multi-Shelf View' : 'Unified Feed'}`}>
-              <button 
+              <button
                 onClick={() => setDiscoveryLayout('shelves')}
                 className={`discovery-layout-btn ${discoveryLayout === 'shelves' ? 'active' : ''}`}
                 title="Multi-Shelf View"
@@ -1935,7 +2061,7 @@ export function AideoView() {
                 <Layers size={13} />
                 <span>Shelves</span>
               </button>
-              <button 
+              <button
                 onClick={() => setDiscoveryLayout('unified')}
                 className={`discovery-layout-btn ${discoveryLayout === 'unified' ? 'active' : ''}`}
                 title="Unified Feed View"
@@ -1945,34 +2071,34 @@ export function AideoView() {
               </button>
             </div>
 
-            {/* Size Slider (Square Small / Big) */}
+            {/* Size Slider (Square Small / Huge) */}
             {discoveryViewMode === 'grid' && (
-              <div className="discovery-size-slider-wrap" title={`Grid Card Size: ${discoveryCardSize}px`}>
+              <div className="discovery-size-slider-wrap" title={`Grid Card Size: ${discoveryCardSize}px (100px - 340px)`}>
                 <LayoutGrid size={11} className="discovery-size-icon-small" />
-                <input 
+                <input
                   type="range"
-                  min={130}
-                  max={280}
+                  min={100}
+                  max={340}
                   step={5}
                   value={discoveryCardSize}
                   onChange={(e) => setDiscoveryCardSize(Number(e.target.value))}
                   className="discovery-size-slider"
-                  style={{ '--slider-pct': `${Math.round(((discoveryCardSize - 130) / (280 - 130)) * 100)}%` } as React.CSSProperties}
-                  aria-label="Adjust square card size"
+                  style={{ '--slider-pct': `${Math.round(((discoveryCardSize - 100) / (340 - 100)) * 100)}%` } as React.CSSProperties}
+                  aria-label="Adjust square card size from small to huge"
                 />
                 <LayoutGrid size={15} className="discovery-size-icon-large" />
               </div>
             )}
 
             <div className="discovery-view-toggle">
-              <button 
+              <button
                 onClick={() => setDiscoveryViewMode('grid')}
                 className={`discovery-view-btn ${discoveryViewMode === 'grid' ? 'active' : ''}`}
                 title="Grid View"
               >
                 <LayoutGrid size={14} />
               </button>
-              <button 
+              <button
                 onClick={() => setDiscoveryViewMode('list')}
                 className={`discovery-view-btn ${discoveryViewMode === 'list' ? 'active' : ''}`}
                 title="List View"
@@ -1981,8 +2107,8 @@ export function AideoView() {
               </button>
             </div>
 
-            <button 
-              onClick={() => fetchRecommendations(true)} 
+            <button
+              onClick={() => fetchRecommendations(true)}
               disabled={isRefreshingRecs || isLoadingRecs}
               className="discovery-refresh-btn"
               title="Re-run discovery algorithm"
@@ -1999,7 +2125,7 @@ export function AideoView() {
               <Loader2 className="spin" size={14} style={{ color: 'var(--accent)' }} />
               <span>Curating personalized recommendations from your listening habits...</span>
             </div>
-            <div 
+            <div
               className="discovery-skeleton-grid"
               style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${discoveryCardSize}px, 1fr))` }}
             >
@@ -2226,8 +2352,8 @@ export function AideoView() {
         {recapTracks.length > 0 ? (
           <div className="aideo-recap-grid">
             {recapTracks.map((t) => (
-              <div 
-                key={t.id || t.path} 
+              <div
+                key={t.id || t.path}
                 className="aideo-recap-item"
                 onClick={() => { playTrack(t); setView('nowplaying'); }}
               >
@@ -2275,7 +2401,7 @@ export function AideoView() {
         {recentTracks.length > 0 ? (
           <div className="aideo-carousel">
             {recentTracks.map(t => (
-              <motion.div 
+              <motion.div
                 key={t.id || t.path}
                 whileHover={{ scale: 1.03 }}
                 className="aideo-carousel-card"
@@ -2315,7 +2441,7 @@ export function AideoView() {
       <section className="aideo-section" style={{ marginBottom: 32 }}>
         <h2 className="aideo-sec-title">Smart Mix Builder</h2>
         <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline playlists custom-tailored to your listening trends, habits, and mood.</p>
-        
+
         <div style={{
           background: 'var(--glass)',
           border: '1px solid var(--glass-border)',
@@ -2498,7 +2624,8 @@ export function AideoView() {
       {/* Background tint overlay */}
       <div className="aideo-bg-tint"></div>
 
-      {/* Premium Web Search Bar (classic design only; the other designs embed their own) */}
+      <div className="aideo-home-content-container">
+        {/* Premium Web Search Bar (classic design only; the other designs embed their own) */}
       {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage'].includes(aideoPageDesign)) && (
       <div style={{ marginBottom: 36, maxWidth: 640, position: 'relative' }} ref={dropdownRef}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -2546,8 +2673,8 @@ export function AideoView() {
             <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
               <Search size={18} />
             </div>
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="Search web stream..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
@@ -2671,7 +2798,7 @@ export function AideoView() {
           }}>
             {/* History Items */}
             {searchHistory.slice(0, 5).map(q => (
-              <div 
+              <div
                 key={`hist-${q}`}
                 onClick={() => triggerSearch(q)}
                 style={{
@@ -2717,7 +2844,7 @@ export function AideoView() {
 
             {/* Autocomplete Suggestion Items */}
             {suggestions.map(q => (
-              <div 
+              <div
                 key={`sugg-${q}`}
                 onClick={() => triggerSearch(q)}
                 style={{
@@ -2754,7 +2881,7 @@ export function AideoView() {
                   Songs
                 </div>
                 {quickResults.map(track => (
-                  <div 
+                  <div
                     key={`quick-${track.id}`}
                     onClick={() => handlePlayQuickTrack(track)}
                     style={{
@@ -2770,11 +2897,11 @@ export function AideoView() {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
                       <div style={coverOutlineStyle(track)}>
-                        <TrackCardThumbnail 
-                          path={track.url} 
-                          coverUrl={track.cover_url} 
-                          className="aideo-search-thumb" 
-                          fallbackIconSize={16} 
+                        <TrackCardThumbnail
+                          path={track.url}
+                          coverUrl={track.cover_url}
+                          className="aideo-search-thumb"
+                          fallbackIconSize={16}
                         />
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
@@ -2962,7 +3089,7 @@ export function AideoView() {
                     transform: 'scale(1.1)'
                   }} />
                 )}
-                
+
                 {/* Artist Artwork / Thumbnail */}
                 <div style={{
                   position: 'relative',
@@ -2980,9 +3107,9 @@ export function AideoView() {
                   justifyContent: 'center'
                 }}>
                   {artistHeroImage ? (
-                    <img 
-                      src={artistHeroImage} 
-                      alt={artistProfile.name} 
+                    <img
+                      src={artistHeroImage}
+                      alt={artistProfile.name}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       referrerPolicy="no-referrer"
                     />
@@ -3201,7 +3328,7 @@ export function AideoView() {
 
                     <button
                       onClick={async () => {
-                        const targetTracks = artistActiveTab === 'popular' 
+                        const targetTracks = artistActiveTab === 'popular'
                           ? (artistProfile.top_tracks || [])
                           : (artistDiscography || []);
                         if (!targetTracks || targetTracks.length === 0) return;
@@ -3429,9 +3556,9 @@ export function AideoView() {
               {/* Greeting Header */}
               <div className="aideo-greeting-header">
                 <div className="aideo-header-info">
-                  <motion.h1 
-                    initial={{ opacity: 0, y: -15 }} 
-                    animate={{ opacity: 1, y: 0 }} 
+                  <motion.h1
+                    initial={{ opacity: 0, y: -15 }}
+                    animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
                     className="aideo-title"
                   >
@@ -3460,6 +3587,7 @@ export function AideoView() {
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

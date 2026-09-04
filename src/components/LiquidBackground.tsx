@@ -1,21 +1,36 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../store';
-import { hexToHsl } from '../utils/colorExtractor';
-
+import { hexToHsl, extractTopColors } from '../utils/colorExtractor';
 
 export function LiquidBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const accentColor = useStore(s => s.accentColor);
+  const currentTrack = useStore(s => s.currentTrack);
+  const coverArt = useStore(s => s.coverArt);
   const playbackStatus = useStore(s => s.playback.status);
   const lowSpecMode = useStore(s => s.lowSpecMode);
   const liquidBackgroundEnabled = useStore(s => s.liquidBackgroundEnabled);
   const spectrumRef = useRef<number[]>(new Array(64).fill(0));
 
+  const effectiveCover = coverArt || currentTrack?.cover_url || null;
+  const [paletteColors, setPaletteColors] = useState<string[]>([]);
+
   const smoothedBass = useRef(0);
   const smoothedMids = useRef(0);
   const smoothedTreble = useRef(0);
   const timeRef = useRef(0);
+
+  // Extract top 3 dominant colors whenever track cover changes
+  useEffect(() => {
+    let cancelled = false;
+    extractTopColors(effectiveCover, 3).then(colors => {
+      if (!cancelled && colors && colors.length > 0) {
+        setPaletteColors(colors);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [effectiveCover]);
 
   useEffect(() => {
     const unlisten = listen<number[]>('audio-spectrum', (event) => {
@@ -33,35 +48,31 @@ export function LiquidBackground() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Small internal resolution stretched via CSS gives gorgeous blending and 0% CPU overhead
-    canvas.width = 250;
-    canvas.height = 250;
+    // Small internal resolution stretched via CSS gives gorgeous blending and ultra-low CPU overhead
+    canvas.width = 280;
+    canvas.height = 280;
 
     const render = () => {
       const w = canvas.width;
       const h = canvas.height;
 
       // Deep premium base dark backdrop
-      ctx.fillStyle = 'rgba(9, 9, 14, 0.08)';
+      ctx.fillStyle = 'rgba(7, 7, 11, 0.12)';
       ctx.fillRect(0, 0, w, h);
 
       if (playbackStatus !== 'Playing' || document.visibilityState === 'hidden') {
         return;
       }
 
+      // Determine top 3 dominant mesh colors
       const hsl = hexToHsl(accentColor);
-      
-      // Calculate slow continuous hue drift (1 full cycle every 9 minutes)
-      const hueShift = (Date.now() / 1500) % 360;
-      const baseHue = (hsl.h + hueShift) % 360;
-      
-      const s = Math.max(hsl.s, 55); // ensure rich, premium saturation
-      const l = Math.min(Math.max(hsl.l, 30), 65); // keep lightness in check
+      const fallbackCol1 = `hsl(${hsl.h}, ${Math.max(hsl.s, 60)}%, 32%)`;
+      const fallbackCol2 = `hsl(${(hsl.h + 50) % 360}, ${Math.max(hsl.s, 55)}%, 28%)`;
+      const fallbackCol3 = `hsl(${(hsl.h + 290) % 360}, ${Math.max(hsl.s, 55)}%, 26%)`;
 
-      const color1 = `hsl(${baseHue}, ${s}%, ${Math.min(l * 0.45, 25)}%)`;
-      const color2 = `hsl(${(baseHue + 75) % 360}, ${s}%, ${Math.min(l * 0.45, 25)}%)`;
-      const color3 = `hsl(${(baseHue - 75) % 360}, ${s}%, ${Math.min(l * 0.45, 25)}%)`;
-      const colors = [color1, color2, color3];
+      const c1 = paletteColors[0] || fallbackCol1;
+      const c2 = paletteColors[1] || fallbackCol2;
+      const c3 = paletteColors[2] || fallbackCol3;
 
       // Calculate audio energy from specific frequency bands
       const bands = spectrumRef.current;
@@ -91,49 +102,65 @@ export function LiquidBackground() {
       smoothedMids.current += (midEnergy - smoothedMids.current) * 0.15;
       smoothedTreble.current += (trebleEnergy - smoothedTreble.current) * 0.15;
 
-      // Time variables updated dynamically by audio energy
-      timeRef.current += 0.002 + smoothedBass.current * 0.008;
-
+      // Time variables updated dynamically by audio energy for natural breathing
+      timeRef.current += 0.003 + smoothedBass.current * 0.007;
       const t = timeRef.current;
 
-      // Render 3 audio-reactive, orbiting blobs with Lissajous trajectories
-      // Blob 0: Bass (Reacts to low frequencies, orbits in a small central circle)
+      // ── Organic Flowing Multi-Stop Mesh Aura Nodes ──
+      // Node 1: Dominant Primary Hue (Anchors Bass & Core Pulsing, Center-Left)
       {
-        const cx = w / 2 + Math.cos(t * 1.2) * (w * 0.15);
-        const cy = h / 2 + Math.sin(t * 1.2) * (h * 0.15);
-        const rad = 70 * (1.0 + smoothedBass.current * 0.8);
-        const radial = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad);
-        radial.addColorStop(0, colors[0]);
-        radial.addColorStop(1, 'transparent');
-        ctx.fillStyle = radial;
+        const cx = w * 0.38 + Math.cos(t * 1.1) * (w * 0.18) + Math.sin(t * 0.4) * 10;
+        const cy = h * 0.42 + Math.sin(t * 1.3) * (h * 0.16);
+        const rad = 85 * (1.0 + smoothedBass.current * 0.85);
+        const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, rad);
+        grad.addColorStop(0, c1);
+        grad.addColorStop(0.65, c1);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(cx, cy, rad, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Blob 1: Midrange (Reacts to vocal/mid frequencies, horizontal figure-8 pattern)
+      // Node 2: Dominant Secondary Hue (Mid Vocal Energy, Sweeping Right Arc)
       {
-        const cx = w / 2 + Math.cos(t * 0.8) * (w * 0.28);
-        const cy = h / 2 + Math.sin(t * 1.6) * (h * 0.12);
-        const rad = 90 * (1.0 + smoothedMids.current * 0.5);
-        const radial = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad);
-        radial.addColorStop(0, colors[1]);
-        radial.addColorStop(1, 'transparent');
-        ctx.fillStyle = radial;
+        const cx = w * 0.65 + Math.cos(t * 0.85 + 1.6) * (w * 0.22);
+        const cy = h * 0.52 + Math.sin(t * 1.5 + 0.8) * (h * 0.18);
+        const rad = 100 * (1.0 + smoothedMids.current * 0.65);
+        const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, rad);
+        grad.addColorStop(0, c2);
+        grad.addColorStop(0.7, c2);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(cx, cy, rad, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Blob 2: Treble (Reacts to hi-hats/detail, vertical figure-8 pattern)
+      // Node 3: Dominant Tertiary Hue (Treble Shimmer, Orbital Lissajous Path)
       {
-        const cx = w / 2 + Math.sin(t * 1.4) * (w * 0.12);
-        const cy = h / 2 + Math.cos(t * 0.7) * (h * 0.28);
-        const rad = 80 * (1.0 + smoothedTreble.current * 0.4);
-        const radial = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad);
-        radial.addColorStop(0, colors[2]);
-        radial.addColorStop(1, 'transparent');
-        ctx.fillStyle = radial;
+        const cx = w * 0.5 + Math.sin(t * 1.25 + 3.14) * (w * 0.24);
+        const cy = h * 0.68 + Math.cos(t * 0.95) * (h * 0.15);
+        const rad = 90 * (1.0 + smoothedTreble.current * 0.55);
+        const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, rad);
+        grad.addColorStop(0, c3);
+        grad.addColorStop(0.65, c3);
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Node 4: Obsidian Core Anchor (Keeps background deep, cinematic & perfectly readable)
+      {
+        const cx = w * 0.5 + Math.sin(t * 0.5) * (w * 0.1);
+        const cy = h * 0.5 + Math.cos(t * 0.6) * (h * 0.1);
+        const rad = 75;
+        const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, rad);
+        grad.addColorStop(0, 'rgba(6, 6, 10, 0.7)');
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(cx, cy, rad, 0, Math.PI * 2);
         ctx.fill();
@@ -168,7 +195,7 @@ export function LiquidBackground() {
       }
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [accentColor, playbackStatus, lowSpecMode, liquidBackgroundEnabled]);
+  }, [accentColor, paletteColors, playbackStatus, lowSpecMode, liquidBackgroundEnabled]);
 
   if (lowSpecMode || !liquidBackgroundEnabled) return null;
 
@@ -179,16 +206,16 @@ export function LiquidBackground() {
       zIndex: -1,
       overflow: 'hidden',
       pointerEvents: 'none',
-      background: 'rgba(9, 9, 14, 0.95)'
+      background: 'radial-gradient(ellipse at 50% 50%, #0d0d15 0%, #060609 100%)'
     }}>
       <canvas
         ref={canvasRef}
         style={{
           width: '100%',
           height: '100%',
-          opacity: 0.42,
-          filter: 'blur(55px) saturate(1.8)',
-          transform: 'scale(1.2)', // prevent edge clipping
+          opacity: 0.5,
+          filter: 'blur(58px) saturate(1.85)',
+          transform: 'scale(1.22)', // prevent edge clipping
           display: 'block'
         }}
       />

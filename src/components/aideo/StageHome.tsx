@@ -56,7 +56,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                 <div className="ah-grid2">
                   {g.items.map(item => (
                     <div key={item.track.id} className="ah-row" onClick={() => onPlayTrack(item.track)}>
-                      <TrackCover src={item.track.cover_url} path={item.track.url} size={46} outline={sourceTypeColor(item.track)} />
+                      <TrackCover src={item.track.cover_url} path={item.track.url} title={item.track.title} artist={item.track.artist} size={46} outline={sourceTypeColor(item.track)} />
                       <div className="ah-row-meta">
                         <div className="ah-row-title" title={item.track.title}>{item.track.title}</div>
                         <div className="ah-row-artist" title={item.track.artist}>{item.track.artist}</div>
@@ -81,7 +81,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
             <div className="ah-strip">
               {history.map(t => (
                 <div key={t.id} className="ah-hist" onClick={() => onPlayTrack(t)}>
-                  <TrackCover src={t.cover_url} path={t.url} size={128} radius={10} outline={sourceTypeColor(t)} />
+                  <TrackCover src={t.cover_url} path={t.url} title={t.title} artist={t.artist} size={128} radius={10} outline={sourceTypeColor(t)} />
                   <div className="ah-card-title" title={t.title}>{t.title}</div>
                   <div className="ah-card-artist" title={t.artist}>{t.artist}</div>
                 </div>
