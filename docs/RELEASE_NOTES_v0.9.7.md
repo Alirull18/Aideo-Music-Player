@@ -1,10 +1,33 @@
-# 💎 Aideo Music Player v0.9.7 — Theater Mode Archetypes, Audio Signal Path & Engine Hardening
+# 💎 Aideo Music Player v0.9.7 — Studio Visualizer Engine, Gapless Transport & Theater Mode Archetypes
 
-Welcome to **Aideo v0.9.7**! This release marks a major evolution of Aideo Music Player beyond the v0.9.6 baseline, introducing five bespoke **Theater Mode Visual Archetypes**, an interactive **Audio Telemetry & Signal Path Inspector**, a silky-smooth overhaul of the **PureScope Visualizer**, de-stuttered **Karaoke Lyrics Rendering**, **WASAPI Exclusive Mode buffer drain synchronization**, a full **Top Charts Overhaul**, official **Qobuz Lossless Streaming**, local-first playback routing, and an expanded verification suite of **533 frontend tests** and **274 backend tests**.
+Welcome to **Aideo v0.9.7**! This release marks a major evolution of Aideo Music Player beyond the v0.9.6 baseline, introducing an overhauled **Studio Audio Visualizer Engine** with 5 ballistic modes and idle breathing physics, **True Gapless Stream Sessions** with sample-accurate delay trimming, **True Bit-Perfect Mode** with complete DSP bypass, five bespoke **Theater Mode Visual Archetypes**, an interactive **Audio Telemetry & Signal Path Inspector**, a silky-smooth overhaul of the **PureScope Visualizer**, de-stuttered **Karaoke Lyrics Rendering**, **WASAPI Exclusive Mode buffer drain synchronization**, a full **Top Charts Overhaul**, official **Qobuz Lossless Streaming**, local-first playback routing, and an expanded verification suite of **533 frontend tests** and **274 backend tests**.
 
 ---
 
 ## 🌟 Highlights & Key Additions
+
+### 🌊 Studio Audio Visualizer Overhaul & Ballistic Physics Engine
+The visualizer engine across Now Playing and Theater Mode has been thoroughly upgraded to adhere to Aideo's "Dark Obsidian Studio" hardware aesthetic, featuring 5 distinct visualizer modes, real-time physics, and ambient state transitions:
+* **5 Hardware-Inspired Visual Styles (`src/components/Visualizer.tsx`)**:
+  * **Studio Peak-Decay Bars (`bars`)**: 64 high-resolution vertical frequency bars with independent floating peak caps governed by realistic gravity physics (`velocity += 0.15px/frame`) and a 12-frame peak hold duration.
+  * **Bilateral Mirror Spectrum (`mirror`)**: Symmetrical stereo frequency analyzer radiating outward from center, mirrored across the horizontal centerline for a studio mastering console aesthetic.
+  * **Analog Oscilloscope Silk Ribbon (`wave`)**: Continuous smooth Bezier spline passing through audio wave points with glowing bloom stroke, area gradient fill, and analog drift simulation.
+  * **Radial Halo Orbit (`circle`)**: Circular halo ring reacting dynamically to bass kick and frequency spokes, cleanly scaling between compact (32 spokes) and expanded (64 spokes) dimensions.
+  * **Phosphor LED Dot-Matrix (`dots`)**: Vintage Japanese audiophile rack equipment (Pioneer/Technics fluorescent spectrum displays) with discrete stacked glowing pill dots and peak hold LEDs.
+* **Ballistic Physics & Smooth Idle Decay**:
+  * Exponential audio level decay (`smoothedBands[i] *= 0.88`) toward 0 over ~200–300ms on pause, preventing jarring canvas blackouts.
+  * Ambient resting state: subtle 1px breathing baseline or minimalist concentric circle when audio is paused or stopped, maintaining visual elegance while dropping CPU/GPU consumption to 0%.
+* **Adaptive 64px / 140px Container & Quick Toggle (`src/components/NowPlayingView.tsx`)**:
+  * Compact 64px docked height in Now Playing with 1-click hover expander toggle to 140px panoramic stage view.
+  * Dedicated toggle button in the player bar to quickly hide or reveal the visualizer on the fly.
+* **Dedicated Audio Visualizer Settings (`src/components/SettingsView.tsx`, `src/store/uiSlice.ts`)**:
+  * Direct style selector chips, decay profile selector (Snappy / Balanced / Silky), 30/60/120 FPS limiter, and player bar toggle visibility controls.
+  * High-DPI canvas scaling with `window.devicePixelRatio` auto-detection and low-spec performance safeguards.
+
+### ⚡ True Gapless Stream Sessions & Bit-Perfect Transport
+* **Encoder Delay & Padding Trimming (`src-tauri/src/player/stream_session.rs`)**: Integrated sample-accurate trimming of encoder preroll and trailing padding frames (e.g. iTunSMPB metadata), eliminating audible clicks, pops, and micro-pauses between consecutive tracks on live albums and classical movements.
+* **True Bit-Perfect Transport (`feat(audio): commit 31425b1`)**: Enforced strict bit-perfect execution with complete DSP bypass (EQ, crossfeed, pitch, limiter), unity 1.0 digital volume, and dither suppression when input format matches output hardware. Output-mode preferences persist across sessions; disabling Exclusive Mode also clears Bit-Perfect Mode.
+* **1:53 Stutter & Snap-Back Elimination (`fix(audio): commit 412caad`)**: Resolved playback micro-stutters and position jump-backs using monotonic clock smoothing and proactive stream pre-buffering.
 
 ### 🎭 Theater Mode Visual Archetypes & Floating Playback HUD
 Instead of a generic fullscreen player bar, Theater Mode now features 5 handcrafted visual designs selectable in **Settings → Appearance** (`theaterModeDesign`) or cyclable on the fly with the HUD switch button and `H` keyboard shortcut:
