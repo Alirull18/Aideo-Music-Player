@@ -7,8 +7,11 @@ Aideo Music Player is an open-source desktop audio engine engineered for audioph
 
 ## Core Features & Capabilities
 
-### 1. Bit-Perfect Hardware Transport
+### 1. Bit-Perfect Hardware Transport & Gapless Pipeline
 - **WASAPI Exclusive Mode**: Direct hardware transport locking DAC clock rates, bypassing Windows mixer sample rate conversion (SRC) and CAudioLimiter compression.
+- **True Bit-Perfect Mode**: Complete DSP bypass (EQ, crossfeed, pitch, limiter), unity 1.0 digital volume, and triangular dither suppression when input format matches output hardware.
+- **True Gapless Stream Sessions**: Sample-accurate trimming of encoder delay and trailing padding frames (e.g. iTunSMPB metadata), eliminating audible clicks and gaps between consecutive album tracks.
+- **Monotonic Clock Smoothing**: Proactive pre-buffering and clock smoothing eliminating playback micro-stutter and timeline snap-back.
 - **Pure 32-Bit Decoding**: Native audio decoding via Symphonia in pure Rust for FLAC, WAV, ALAC, AAC, MP3, and Vorbis.
 - **Ultra-Low Latency Jitter**: Sub-0.3ms buffer jitter via dedicated audio polling thread.
 - **Anti-Pop Soft Ramping**: 256-frame soft volume ramping preventing audible pops and transients during track switching.
@@ -36,6 +39,13 @@ Aideo Music Player is an open-source desktop audio engine engineered for audioph
 - **Discord Status Sync**: Real-time rich presence displaying current song, artist, and elapsed duration.
 - **Aideo Insights & Offline Wrapped**: 100% private offline listening analytics and interactive Spotify-style Wrapped slide presentation.
 
+### 5. Studio Audio Visualizer Engine
+- **5 Hardware-Inspired Visual Styles**: Studio Peak-Decay Bars (`bars`), Bilateral Mirror Spectrum (`mirror`), Analog Oscilloscope Silk Ribbon (`wave`), Radial Halo Orbit (`circle`), and Phosphor LED Dot-Matrix (`dots`).
+- **Ballistic Gravity Physics**: Independent falling peak caps with 12-frame hold duration and quadratic gravity drop (`velocity += 0.15px/frame`).
+- **Smooth Idle State Transitions**: Exponential audio decay on pause transitioning to an ambient breathing resting baseline/ring with 0% CPU/GPU usage.
+- **Adaptive Canvas Container**: 64px compact docked mode and 140px expanded stage mode with quick player bar toggle.
+- **Customization Settings**: Dedicated style selector, response physics profiles (Snappy, Balanced, Silky), 30/60/120 FPS limiter, and High-DPI canvas auto-scaling.
+
 ## Technical Specifications
 - **Operating System**: Windows 10 (64-bit), Windows 11 (64-bit)
 - **Frontend Architecture**: React 19, TypeScript, Framer Motion, Zustand
@@ -50,4 +60,4 @@ Aideo Music Player is an open-source desktop audio engine engineered for audioph
 - Product Hunt: https://www.producthunt.com/products/aideo-music-player
 - GitHub Repository: https://github.com/Alirull18/Aideo-Music-Player
 - Latest Releases: https://github.com/Alirull18/Aideo-Music-Player/releases/latest
-- Release Notes: https://github.com/Alirull18/Aideo-Music-Player/blob/main/README.md
+- Release Notes: https://github.com/Alirull18/Aideo-Music-Player/blob/main/docs/RELEASE_NOTES_v0.9.7.md
