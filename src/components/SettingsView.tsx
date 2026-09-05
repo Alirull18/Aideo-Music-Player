@@ -124,7 +124,10 @@ export function SettingsView() {
     theaterModeDesign, setTheaterModeDesign,
     theaterHudStyle, setTheaterHudStyle,
     playerBarTransparent, togglePlayerBarTransparent, setPlayerBarTransparent,
-    discoveryLayout, setDiscoveryLayout
+    discoveryLayout, setDiscoveryLayout,
+    visualizerMode, setVisualizerMode,
+    visualizerDecayRate, setVisualizerDecayRate,
+    visualizerExpanded, setVisualizerExpanded
   } = useStore(useShallow(s => ({
     scanDirs: s.scanDirs,
     addScanDir: s.addScanDir,
@@ -217,6 +220,12 @@ export function SettingsView() {
     discoveryLayout: s.discoveryLayout,
     setDiscoveryLayout: s.setDiscoveryLayout,
     setPlayerBarTransparent: s.setPlayerBarTransparent,
+    visualizerMode: s.visualizerMode,
+    setVisualizerMode: s.setVisualizerMode,
+    visualizerDecayRate: s.visualizerDecayRate,
+    setVisualizerDecayRate: s.setVisualizerDecayRate,
+    visualizerExpanded: s.visualizerExpanded,
+    setVisualizerExpanded: s.setVisualizerExpanded,
   })));
 
   // Tab navigation State
@@ -1933,6 +1942,95 @@ export function SettingsView() {
                 />
               </div>
             </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'audio-visualizer-config',
+      title: 'Audio Spectrum Visualizer',
+      description: 'Customize visualizer rendering styles, decay kinetics, and display height in the player.',
+      keywords: 'visualizer spectrum audio style bars wave circle mirror dots decay height now playing',
+      tab: 'appearance',
+      element: (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Style selector chips */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, marginBottom: 8 }}>
+              Rendering Style
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
+              {[
+                { id: 'bars', name: 'Studio Bars', desc: 'Floating peak caps' },
+                { id: 'mirror', name: 'Bilateral Mirror', desc: 'Center-out stereo' },
+                { id: 'wave', name: 'Silk Wave', desc: 'Analog oscilloscope' },
+                { id: 'circle', name: 'Radial Halo', desc: 'Orbital burst' },
+                { id: 'dots', name: 'Dot Matrix', desc: 'Phosphor LED grid' },
+              ].map(style => (
+                <button
+                  key={style.id}
+                  type="button"
+                  onClick={() => setVisualizerMode(style.id as any)}
+                  className={`btn-style-chip ${visualizerMode === style.id ? 'active' : ''}`}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    textAlign: 'left',
+                    background: visualizerMode === style.id ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${visualizerMode === style.id ? 'var(--accent)' : 'var(--glass-border)'}`,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                  aria-label={style.name}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: visualizerMode === style.id ? 'var(--accent)' : 'var(--text)' }}>
+                    {style.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                    {style.desc}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Decay Profile Pills */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, marginBottom: 8 }}>
+              Decay Kinetics
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[
+                { id: 'snappy', label: 'Snappy', desc: 'Fast & punchy' },
+                { id: 'balanced', label: 'Balanced', desc: 'Natural studio response' },
+                { id: 'silky', label: 'Silky', desc: 'Liquid smooth transitions' },
+              ].map(decay => (
+                <button
+                  key={decay.id}
+                  type="button"
+                  onClick={() => setVisualizerDecayRate(decay.id as any)}
+                  className={`btn ${visualizerDecayRate === decay.id ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: 11, padding: '6px 14px' }}
+                  aria-label={decay.label}
+                >
+                  {decay.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Default Height Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--glass-border)' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Expanded Now Playing Canvas</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Use taller 140px view instead of compact 64px
+              </div>
+            </div>
+            <SlidingSwitch 
+              checked={visualizerExpanded} 
+              onChange={() => setVisualizerExpanded(!visualizerExpanded)} 
+            />
           </div>
         </div>
       )
