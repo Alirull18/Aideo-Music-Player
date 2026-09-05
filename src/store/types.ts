@@ -104,8 +104,10 @@ export interface AudioTagData {
   cover_data_url?: string | null;
   format?: string | null;
   duration_secs?: number | null;
+  file_size_bytes?: number | null;
   bitrate?: number | null;
   sample_rate?: number | null;
+  bit_depth?: number | null;
   channels?: number | null;
 }
 
@@ -320,6 +322,9 @@ export interface SidebarNavItemConfig {
   requiresAuth?: 'lastfm' | 'listenbrainz';
 }
 
+export type VisualizerMode = 'bars' | 'mirror' | 'wave' | 'circle' | 'dots' | 'baseline';
+export type VisualizerDecayRate = 'snappy' | 'balanced' | 'silky';
+
 export interface PlayerState {
   view: ViewMode;
   networkTelemetry: NetworkTelemetry | null;
@@ -344,6 +349,12 @@ export interface PlayerState {
   showControlCenter: boolean;
   showSettings: boolean;
   showQueue: boolean;
+  visualizerMode: VisualizerMode;
+  visualizerDecayRate: VisualizerDecayRate;
+  visualizerExpanded: boolean;
+  setVisualizerMode: (mode: VisualizerMode) => void;
+  setVisualizerDecayRate: (decay: VisualizerDecayRate) => void;
+  setVisualizerExpanded: (expanded: boolean) => void;
   dsp: DSPState;
   devices: string[];
   currentDevice: string | null;

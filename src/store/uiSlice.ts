@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId } from './types';
+import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId, VisualizerMode, VisualizerDecayRate } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 
@@ -91,12 +91,36 @@ const getSavedGlobalHotkeys = (): Record<string, string | null> => {
   return defaults;
 };
 
+const getSavedVisualizerMode = (): VisualizerMode => {
+  const saved = safeGetStorage('aideo_visualizer_mode');
+  if (saved === 'baseline') return 'bars';
+  if (saved === 'bars' || saved === 'mirror' || saved === 'wave' || saved === 'circle' || saved === 'dots') {
+    return saved;
+  }
+  return 'bars';
+};
+
+const getSavedVisualizerDecay = (): VisualizerDecayRate => {
+  const saved = safeGetStorage('aideo_visualizer_decay');
+  if (saved === 'snappy' || saved === 'balanced' || saved === 'silky') {
+    return saved;
+  }
+  return 'balanced';
+};
+
+const getSavedVisualizerExpanded = (): boolean => {
+  return safeGetStorage('aideo_visualizer_expanded') === 'true';
+};
+
 export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   view: (safeGetStorage('aideo-last-view') as any) || 'aideo',
   accentColor: '#8b5cf6',
   showProMode: false,
   showControlCenter: false,
   showSettings: false,
+  visualizerMode: getSavedVisualizerMode(),
+  visualizerDecayRate: getSavedVisualizerDecay(),
+  visualizerExpanded: getSavedVisualizerExpanded(),
   sidebarNavItems: getSavedSidebarNavItems(),
   sidebarLastfmVisible: safeGetStorage('aideo-sidebar-lastfm') !== 'false',
   sidebarListenbrainzVisible: safeGetStorage('aideo-sidebar-listenbrainz') !== 'false',
@@ -495,6 +519,19 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     const next = !get().playerBarTransparent;
     safeSetStorage('aideo-playerbar-transparent', String(next));
     set({ playerBarTransparent: next });
+  },
+
+  setVisualizerMode: (mode: VisualizerMode) => {
+    safeSetStorage('aideo_visualizer_mode', mode);
+    set({ visualizerMode: mode });
+  },
+  setVisualizerDecayRate: (decay: VisualizerDecayRate) => {
+    safeSetStorage('aideo_visualizer_decay', decay);
+    set({ visualizerDecayRate: decay });
+  },
+  setVisualizerExpanded: (expanded: boolean) => {
+    safeSetStorage('aideo_visualizer_expanded', String(expanded));
+    set({ visualizerExpanded: expanded });
   },
 
   setGlobalHotkey: (action: string, binding: string | null) => {
