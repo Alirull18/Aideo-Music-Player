@@ -833,7 +833,16 @@ fn run_stream_downloader(
                         return;
                     }
                 } else {
-                    eprintln!("[player-stream] HTTP status error: {}. Retrying...", status);
+                    eprintln!("[player-stream] HTTP status error: {}", status);
+                    if status == reqwest::StatusCode::FORBIDDEN
+                        || status == reqwest::StatusCode::UNAUTHORIZED
+                        || status == reqwest::StatusCode::GONE
+                    {
+                        eprintln!("[player-stream] Stream URL expired or unauthorized (HTTP {}). Aborting stream downloader immediately.", status);
+                        abort.store(true, Ordering::SeqCst);
+                        break;
+                    }
+                    eprintln!("[player-stream] Retrying...");
                 }
             }
             Err(e) => {
@@ -6022,40 +6031,43 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
         if dsp_now.crossfade_transition_enabled && duration_secs > dsp_now.crossfade_transition_duration as f64 {
             let crossfade_trigger_pos = duration_secs - dsp_now.crossfade_transition_duration as f64;
             if true_pos >= crossfade_trigger_pos && !crossfade_triggered {
-                crossfade_triggered = true;
-                let next_path_opt = {
-                    let mut q = safe_lock(&queue);
-                    q.pop_front()
-                };
-                if let Some(next_path) = next_path_opt {
-                    println!("[player-crossfade] Triggering crossfade to next track: {}", next_path);
-                    let app_h = app_handle.clone();
-                    let ffmpeg_p = ffmpeg_path.to_string();
-                    let process_c = Arc::clone(&next_child_process);
-                    let quality = last_ffmpeg_quality.clone();
-                    let dsp_c = dsp_now.clone();
-                    let next_path_c = next_path.clone();
+                let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
+                if !is_stream_next {
+                    crossfade_triggered = true;
+                    let next_path_opt = {
+                        let mut q = safe_lock(&queue);
+                        q.pop_front()
+                    };
+                    if let Some(next_path) = next_path_opt {
+                        println!("[player-crossfade] Triggering crossfade to next track: {}", next_path);
+                        let app_h = app_handle.clone();
+                        let ffmpeg_p = ffmpeg_path.to_string();
+                        let process_c = Arc::clone(&next_child_process);
+                        let quality = last_ffmpeg_quality.clone();
+                        let dsp_c = dsp_now.clone();
+                        let next_path_c = next_path.clone();
 
-                    let (tx, rx_next_decoder) = std::sync::mpsc::channel();
-                    let next_cancel_token = Arc::new(AtomicBool::new(false));
-                    let next_cancel_clone = Arc::clone(&next_cancel_token);
-                    let next_gen = PLAYBACK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-                    std::thread::spawn(move || {
-                        let res = prepare_decoder(
-                            &next_path_c,
-                            0.0,
-                            &app_h,
-                            &ffmpeg_p,
-                            &process_c,
-                            &quality,
-                            &dsp_c,
-                            &next_cancel_clone,
-                            next_gen,
-                        );
-                        let _ = tx.send(res);
-                    });
-                    next_decoder_rx = Some(rx_next_decoder);
-                    next_track_path = Some(next_path);
+                        let (tx, rx_next_decoder) = std::sync::mpsc::channel();
+                        let next_cancel_token = Arc::new(AtomicBool::new(false));
+                        let next_cancel_clone = Arc::clone(&next_cancel_token);
+                        let next_gen = PLAYBACK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+                        std::thread::spawn(move || {
+                            let res = prepare_decoder(
+                                &next_path_c,
+                                0.0,
+                                &app_h,
+                                &ffmpeg_p,
+                                &process_c,
+                                &quality,
+                                &dsp_c,
+                                &next_cancel_clone,
+                                next_gen,
+                            );
+                            let _ = tx.send(res);
+                        });
+                        next_decoder_rx = Some(rx_next_decoder);
+                        next_track_path = Some(next_path);
+                    }
                 }
             }
         }
@@ -6132,9 +6144,12 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                             next_track_info = Some((next_track_path.take().unwrap(), played_secs));
                             running = false;
                         } else {
-                            let next_queued = safe_lock(&queue).pop_front();
-                            if let Some(npath) = next_queued {
-                                next_track_info = Some((npath, 0.0));
+                            let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
+                            if !is_stream_next {
+                                let next_queued = safe_lock(&queue).pop_front();
+                                if let Some(npath) = next_queued {
+                                    next_track_info = Some((npath, 0.0));
+                                }
                             }
                         }
                         break;
@@ -6161,9 +6176,12 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                                 next_track_info = Some((next_track_path.take().unwrap(), played_secs));
                                 running = false;
                             } else {
-                                let next_queued = safe_lock(&queue).pop_front();
-                                if let Some(npath) = next_queued {
-                                    next_track_info = Some((npath, 0.0));
+                                let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
+                                if !is_stream_next {
+                                    let next_queued = safe_lock(&queue).pop_front();
+                                    if let Some(npath) = next_queued {
+                                        next_track_info = Some((npath, 0.0));
+                                    }
                                 }
                             }
                             break;
@@ -6618,9 +6636,12 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
     }
 
     if running && next_track_info.is_none() {
-        let next_queued = safe_lock(&queue).pop_front();
-        if let Some(npath) = next_queued {
-            next_track_info = Some((npath, 0.0));
+        let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
+        if !is_stream_next {
+            let next_queued = safe_lock(&queue).pop_front();
+            if let Some(npath) = next_queued {
+                next_track_info = Some((npath, 0.0));
+            }
         }
     }
 

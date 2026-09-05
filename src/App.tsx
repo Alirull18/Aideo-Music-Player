@@ -32,7 +32,7 @@ import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { toggleOsFullscreen } from './utils/windowFullscreen';
-import { isStreamTrack } from './utils';
+import { isStreamTrack, trackIdToStreamUrl, resolvedPathMap } from './utils';
 import { CoverArtModal } from './components/CoverArtModal';
 import { TagEditorModal } from './components/TagEditorModal';
 import { DesktopLyricBar } from './components/DesktopLyricBar';
@@ -374,9 +374,12 @@ function AideoApp() {
 
       const uPlaybackError = await listen<string>('playback-error', (event) => {
         if (isCancelled) return;
-        const { currentTrack, queue, playNext } = useStore.getState();
-        if (currentTrack && queue.length > 0) {
-          console.warn('[playback] Stream decode failed, auto-advancing to next queued track:', event.payload);
+        const { currentTrack, playNext } = useStore.getState();
+        console.warn('[playback] Stream decode failed, auto-advancing:', event.payload);
+        if (currentTrack) {
+          trackIdToStreamUrl.delete(currentTrack.path);
+          const orig = resolvedPathMap.get(currentTrack.path);
+          if (orig) trackIdToStreamUrl.delete(orig);
           playNext();
         }
       });

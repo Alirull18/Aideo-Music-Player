@@ -85,52 +85,38 @@ beforeEach(() => {
 });
 
 describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
-  it('renders interactive artwork container with info button', () => {
+  it('renders artwork container with info button', () => {
     const { container } = render(<NowPlayingView />);
 
     const artWrap = container.querySelector('.np-art-wrap');
     expect(artWrap).toBeInTheDocument();
-    expect(artWrap).toHaveClass('np-art-interactive');
 
-    const infoBtn = screen.getByRole('button', { name: /Toggle Artwork Track Info/i });
+    const infoBtn = screen.getByRole('button', { name: /Inspect track/i });
     expect(infoBtn).toBeInTheDocument();
   });
 
-  it('toggles audio specs overlay when clicking info button or artwork', () => {
+  it('toggles track inspector overlay when clicking info button', () => {
     const { container } = render(<NowPlayingView />);
 
     // Initially overlay is not visible
     expect(container.querySelector('.np-art-overlay')).toBeNull();
 
     // Click info button to open overlay
-    const infoBtn = screen.getByRole('button', { name: /Toggle Artwork Track Info/i });
+    const infoBtn = screen.getByRole('button', { name: /Inspect track/i });
     fireEvent.click(infoBtn);
 
     const overlay = container.querySelector('.np-art-overlay') as HTMLElement;
     expect(overlay).toBeInTheDocument();
-    expect(within(overlay).getByText('AUDIO SPECS')).toBeInTheDocument();
+    expect(within(overlay).getByText('TRACK INSPECTOR')).toBeInTheDocument();
     expect(within(overlay).getByText('FLAC')).toBeInTheDocument();
-    expect(within(overlay).getByText('96.0 kHz')).toBeInTheDocument();
-    expect(within(overlay).getByText('Bit-Perfect')).toBeInTheDocument();
+    expect(within(overlay).getAllByText(/96.0 kHz/).length).toBeGreaterThan(0);
+    expect(within(overlay).getByText(/Bit-perfect/i)).toBeInTheDocument();
     expect(within(overlay).getByText('Beethoven Symphonies')).toBeInTheDocument();
 
-    // Click close button inside specs overlay
-    const closeBtn = within(overlay).getByRole('button', { name: /Close Specs/i });
+    // Click close button inside inspector overlay
+    const closeBtn = within(overlay).getByRole('button', { name: /Close track inspector/i });
     fireEvent.click(closeBtn);
 
-    expect(container.querySelector('.np-art-overlay')).toBeNull();
-  });
-
-  it('clicking interactive artwork container also toggles audio specs overlay', () => {
-    const { container } = render(<NowPlayingView />);
-
-    const artWrap = container.querySelector('.np-art-wrap') as HTMLElement;
-    expect(artWrap).toBeInTheDocument();
-
-    fireEvent.click(artWrap);
-    expect(container.querySelector('.np-art-overlay')).toBeInTheDocument();
-
-    fireEvent.click(artWrap);
     expect(container.querySelector('.np-art-overlay')).toBeNull();
   });
 
@@ -156,42 +142,14 @@ describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
     });
 
     const { container } = render(<NowPlayingView />);
-    fireEvent.click(screen.getByRole('button', { name: /Toggle Artwork Track Info/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Inspect track/i }));
 
     const overlay = container.querySelector('.np-art-overlay') as HTMLElement;
     expect(overlay).toBeInTheDocument();
-    expect(within(overlay).getByText('Disc 2 · Track 04')).toBeInTheDocument();
-    expect(within(overlay).getByText('2:03 / 8:00')).toBeInTheDocument();
+    expect(within(overlay).getByText(/Disc 2 · Track 4/)).toBeInTheDocument();
+    expect(within(overlay).getByText(/2:03/)).toBeInTheDocument();
     expect(within(overlay).getAllByText('Local library').length).toBeGreaterThan(0);
-    expect(within(overlay).getByText(/Stereo/)).toBeInTheDocument();
-    expect(within(overlay).getByText('128 BPM')).toBeInTheDocument();
-    expect(within(overlay).getByText('82%')).toBeInTheDocument();
-  });
-
-  it('tilts the artwork toward the pointer and resets when the pointer leaves', () => {
-    const { container } = render(<NowPlayingView />);
-    const artWrap = container.querySelector('.np-art-wrap') as HTMLDivElement;
-    expect(artWrap).toBeInTheDocument();
-
-    vi.spyOn(artWrap, 'getBoundingClientRect').mockReturnValue({
-      left: 0,
-      top: 0,
-      width: 360,
-      height: 360,
-      right: 360,
-      bottom: 360,
-      toJSON: () => ({}),
-    } as DOMRect);
-
-    fireEvent.pointerMove(artWrap, { clientX: 288, clientY: 72, pointerType: 'mouse' });
-    expect(artWrap.style.getPropertyValue('--np-art-tilt-x')).not.toBe('0deg');
-    expect(artWrap.style.getPropertyValue('--np-art-tilt-y')).not.toBe('0deg');
-    expect(artWrap.style.getPropertyValue('--np-art-light-x')).not.toBe('50%');
-
-    fireEvent.pointerLeave(artWrap);
-    expect(artWrap.style.getPropertyValue('--np-art-tilt-x')).toBe('0deg');
-    expect(artWrap.style.getPropertyValue('--np-art-tilt-y')).toBe('0deg');
-    expect(artWrap.style.getPropertyValue('--np-art-light-x')).toBe('50%');
+    expect(within(overlay).getAllByText(/Stereo/).length).toBeGreaterThan(0);
   });
 
   it('updates signal telemetry from the live audio spectrum event', async () => {

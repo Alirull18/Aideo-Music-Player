@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, sortLyricLines } from '../utils';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, sortLyricLines, isStreamTrack } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { toast } from '../utils/toast';
 import { notifyTidalAuthFailure } from './tidalSlice';
@@ -1390,7 +1390,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
           const cachedResolved = trackIdToStreamUrl.get(track.path);
-          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
             finalPath = cachedResolved.url;
             console.log('[Streaming] Using pre-resolved stream URL for track in addToQueue:', track.title);
           } else {
@@ -1401,6 +1401,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           rememberResolvedPath(finalPath, track.path);
           setOnlineTrackCache(finalPath, track);
         } catch (err) {
+          trackIdToStreamUrl.delete(track.path);
           console.error('Failed to resolve stream in addToQueue:', err);
           const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
                            (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
@@ -1440,7 +1441,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
           const cachedResolved = trackIdToStreamUrl.get(track.path);
-          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
             finalPath = cachedResolved.url;
             console.log('[Streaming] Using pre-resolved stream URL for track in playNextInQueue:', track.title);
           } else {
@@ -1451,6 +1452,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           rememberResolvedPath(finalPath, track.path);
           setOnlineTrackCache(finalPath, track);
         } catch (err) {
+          trackIdToStreamUrl.delete(track.path);
           console.error('Failed to resolve stream in playNextInQueue:', err);
           const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
                            (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
@@ -1620,7 +1622,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
               if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
                 try {
                   const cachedResolved = trackIdToStreamUrl.get(t.path);
-                  if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+                  if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
                     p = cachedResolved.url;
                   } else {
                     const resolver = t.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
@@ -1630,6 +1632,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
                   rememberResolvedPath(p, t.path);
                   setOnlineTrackCache(p, t);
                 } catch (err) {
+                  trackIdToStreamUrl.delete(t.path);
                   console.error('Failed to resolve stream in initializeQueue:', err);
                   notifyTidalAuthFailure(err);
                   notifyQobuzAuthFailure(err);
@@ -1656,8 +1659,16 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // otherwise a concurrent clear_queue could execute AFTER this read and its
       // result would resurrect the just-cleared items into state + localStorage.
       const queueTracks = await chainQueueOperation(async () => {
-        const paths: string[] = await invoke('get_queue');
-        const { tracks, queue: currentQueue } = get();
+        const rawPaths = await invoke<string[]>('get_queue');
+        const paths: string[] = Array.isArray(rawPaths) ? rawPaths : [];
+        const { tracks, queue: currentQueue = [] } = get();
+
+        // If backend returned empty, but frontend already has streaming tracks in the queue,
+        // preserve the frontend queue (streaming tracks are managed on frontend to prevent token expiry).
+        const streamTracksInQueue = (currentQueue || []).filter(t => isStreamTrack(t.path, t.format));
+        if (paths.length === 0 && streamTracksInQueue.length > 0) {
+          return currentQueue;
+        }
 
         return paths.map((p, idx) => {
           // 1. Check if the track exists in local library tracks
@@ -1670,11 +1681,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
           // 3. Fallback: Construct a high-fidelity virtual Track object for online/streaming paths
           const isOnline = p.startsWith('http://') || p.startsWith('https://');
-          const cachedMeta = onlineTrackCache.get(p) || onlineTrackCache.get(resolvedPathMap.get(p) || '');
+          const originalId = resolvedPathMap.get(p);
+          const cachedMeta = onlineTrackCache.get(p) || (originalId ? onlineTrackCache.get(originalId) : null);
           const meta = isOnline ? parseStreamMetadata(p) : { title: baseName(p), artist: 'Web Stream' };
           const virtualTrack: Track = {
             id: -1000 - idx, // ensure a unique negative ID to prevent conflicts with database IDs
-            path: p,
+            path: originalId || p,
             title: cachedMeta?.title || meta.title,
             artist: cachedMeta?.artist || meta.artist,
             duration: cachedMeta?.duration ?? null,

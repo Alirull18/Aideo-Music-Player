@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
+import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
@@ -483,19 +483,24 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
 
       let finalPath = track.path;
-      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+      const isCloudProvider = track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC';
+      const originalTrackId = resolvedPathMap.get(track.path);
+      const effectiveTrackId = (!track.path.startsWith('http://') && !track.path.startsWith('https://')) ? track.path : originalTrackId;
+      if (isCloudProvider && effectiveTrackId) {
         try {
-          const cachedResolved = trackIdToStreamUrl.get(track.path);
-          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+          const cachedResolved = trackIdToStreamUrl.get(effectiveTrackId);
+          // Only reuse cached stream URL if resolved within 30 seconds (prevent using expired CDN tokens)
+          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
             finalPath = cachedResolved.url;
-            console.log('[Streaming] Using pre-resolved stream URL for track:', track.title);
+            console.log('[Streaming] Using fresh pre-resolved stream URL for track:', track.title);
           } else {
             const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            finalPath = await invoke<string>(resolver, { trackId: track.path });
-            trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
+            finalPath = await invoke<string>(resolver, { trackId: effectiveTrackId });
+            trackIdToStreamUrl.set(effectiveTrackId, { url: finalPath, resolvedAt: Date.now() });
           }
-          rememberResolvedPath(finalPath, track.path);
+          rememberResolvedPath(finalPath, effectiveTrackId);
         } catch (e) {
+          trackIdToStreamUrl.delete(effectiveTrackId);
           console.error('Failed to resolve streaming URL in playTrack:', e);
           const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(e)) ||
                            (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(e));
@@ -683,25 +688,33 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
 
     const state = get();
-    // Only auto-queue from library if the user's manual queue is empty
+    // Only auto-queue from library if the user's manual queue is empty (local files only)
     if (state.queue.length === 0 && state.tracks.length > 0 && state.currentTrackIndex >= 0) {
       if (state.repeat === 'one') {
-        // Repeat One: re-queue the same track so the backend loops it
-        try { await invoke('add_to_queue', { path: track.path }); } catch (e) { }
+        // Repeat One: re-queue the same track so the backend loops it (local only)
+        if (!isStreamTrack(track.path, track.format)) {
+          try { await invoke('add_to_queue', { path: track.path }); } catch (e) { }
+        }
       } else if (state.repeat === 'none') {
         // Repeat None: don't queue if we're at the last track
         const nextIndex = state.shuffle
           ? pickShuffleIndex(state.tracks.map(t => t.path), state.currentTrackIndex)
           : state.currentTrackIndex + 1;
         if (nextIndex < state.tracks.length) {
-          try { await invoke('add_to_queue', { path: state.tracks[nextIndex].path }); } catch (e) { }
+          const nextTrack = state.tracks[nextIndex];
+          if (!isStreamTrack(nextTrack.path, nextTrack.format)) {
+            try { await invoke('add_to_queue', { path: nextTrack.path }); } catch (e) { }
+          }
         }
       } else {
         // Repeat All: wrap around
         const nextIndex = state.shuffle
           ? pickShuffleIndex(state.tracks.map(t => t.path), state.currentTrackIndex)
           : (state.currentTrackIndex + 1) % state.tracks.length;
-        try { await invoke('add_to_queue', { path: state.tracks[nextIndex].path }); } catch (e) { }
+        const nextTrack = state.tracks[nextIndex];
+        if (!isStreamTrack(nextTrack.path, nextTrack.format)) {
+          try { await invoke('add_to_queue', { path: nextTrack.path }); } catch (e) { }
+        }
       }
     }
     get().updateDiscordPresence();
@@ -833,22 +846,30 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const newState = get();
       if (newState.queue.length === 0 && activeTracks.length > 0) {
         if (newState.repeat === 'one' && track) {
-          // Repeat One: re-queue the same track
-          try { await invoke('add_to_queue', { path: track.path }); } catch (e) { }
+          // Repeat One: re-queue the same track (local only)
+          if (!isStreamTrack(track.path, track.format)) {
+            try { await invoke('add_to_queue', { path: track.path }); } catch (e) { }
+          }
         } else if (newState.repeat === 'none') {
           // Repeat None: don't queue past the last track
           const nextIndex = newState.shuffle
             ? pickShuffleIndex(activeTracks.map(t => t.path), index)
             : index + 1;
           if (nextIndex < activeTracks.length) {
-            try { await invoke('add_to_queue', { path: activeTracks[nextIndex].path }); } catch (e) { }
+            const nextTrack = activeTracks[nextIndex];
+            if (!isStreamTrack(nextTrack.path, nextTrack.format)) {
+              try { await invoke('add_to_queue', { path: nextTrack.path }); } catch (e) { }
+            }
           }
         } else {
           // Repeat All: wrap around
           const nextIndex = newState.shuffle
             ? pickShuffleIndex(activeTracks.map(t => t.path), index)
             : (index + 1) % activeTracks.length;
-          try { await invoke('add_to_queue', { path: activeTracks[nextIndex].path }); } catch (e) { }
+          const nextTrack = activeTracks[nextIndex];
+          if (!isStreamTrack(nextTrack.path, nextTrack.format)) {
+            try { await invoke('add_to_queue', { path: nextTrack.path }); } catch (e) { }
+          }
         }
       }
     } finally {
@@ -1032,7 +1053,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           try {
             const cachedResolved = trackIdToStreamUrl.get(track.path);
             let finalUrl = '';
-            if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 15 * 60 * 1000)) {
+            if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
               finalUrl = cachedResolved.url;
             } else {
               const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
@@ -1044,6 +1065,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
               invoke('cache_cloud_track', { streamUrl: finalUrl }).catch(() => {});
             }
           } catch (e) {
+            trackIdToStreamUrl.delete(track.path);
             console.error(`[Pre-Cache] Failed to pre-cache ${providerName} track:`, e);
             notifyTidalAuthFailure(e);
             notifyQobuzAuthFailure(e);
@@ -1311,33 +1333,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
 
-      // Resolve all stream URLs BEFORE touching the backend queue: clearing first left the
-      // backend queue empty for the whole (slow, per-track network) resolution window, during
-      // which a concurrent fetchQueue() would wipe the frontend queue state.
-      const paths: string[] = [];
-      for (const t of newQueue) {
-        let p = t.path;
-        if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !t.path.startsWith('http://') && !t.path.startsWith('https://')) {
-          try {
-            const resolver = t.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            p = await invoke<string>(resolver, { trackId: t.path });
-            rememberResolvedPath(p, t.path);
-          } catch (err) {
-            console.error(`Failed to resolve ${t.format} autoplay recommended stream:`, err);
-            notifyTidalAuthFailure(err);
-            notifyQobuzAuthFailure(err);
-            continue;
-          }
-        }
-        if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
-          continue;
-        }
-        // Keep real titles recoverable when the queue is later rebuilt from backend URLs
-        if (p.startsWith('http://') || p.startsWith('https://')) {
-          setOnlineTrackCache(p, t);
-        }
-        paths.push(p);
-      }
+      // Only queue local files to the backend queue for gapless handoff.
+      // Online stream tracks (Tidal, Qobuz, etc.) must NOT be pushed to the
+      // backend queue with short-lived tokens. The frontend's track-ended handler
+      // will pop them from React state and resolve fresh stream URLs when they play.
+      const localPaths = newQueue
+        .filter(t => !isStreamTrack(t.path, t.format))
+        .map(t => t.path);
 
       // Discard stale rebuilds issued before a newer autoplay request started
       if (currentReqSeq !== autoplayReqSeq) {
@@ -1345,12 +1347,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         return;
       }
 
-      // Swap the backend queue atomically: clear + bulk add chained together so overlapping
-      // rebuilds cannot interleave their phases and append both batches (duplicate entries).
       await chainQueueOperation(async () => {
         await invoke('clear_queue');
-        if (paths.length > 0) {
-          await invoke('add_to_queue_bulk', { paths });
+        if (localPaths.length > 0) {
+          await invoke('add_to_queue_bulk', { paths: localPaths });
         }
       });
 

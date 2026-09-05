@@ -4,8 +4,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useStore } from '../store';
+import type { Track } from '../store/types';
 import { notifyTidalAuthFailure } from '../store/tidalSlice';
-import { trackIdToStreamUrl } from '../utils';
+import { trackIdToStreamUrl, rememberResolvedPath } from '../utils';
 
 const tauriListeners: Record<string, Array<(event: { payload: any }) => void>> = {};
 
@@ -397,5 +398,122 @@ describe('TidalConnectCard', () => {
       expect(invoke).not.toHaveBeenCalledWith('add_to_queue', expect.anything());
       expect(useStore.getState().queue).toEqual([]);
     });
+
+    it('should not push raw Tidal track ID to backend queue when playing from library/album', async () => {
+      const cdnUrl = 'https://sp-play.tidal.com/stream/455738980.flac?token=mock';
+      const track2 = { ...tidalTrack, id: -30002, path: '455738981', title: 'Next Song' };
+
+      useStore.setState({
+        tracks: [tidalTrack, track2],
+        currentTrackIndex: 0,
+        queue: [],
+        repeat: 'all',
+      });
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'tidal_get_stream_url') return cdnUrl;
+        if (cmd === 'play_track') return null;
+        if (cmd === 'check_url_is_cached') return false;
+        return null;
+      });
+
+      await useStore.getState().playTrack(tidalTrack);
+
+      // Verify that add_to_queue was never called with raw track ID '455738981'
+      expect(invoke).not.toHaveBeenCalledWith('add_to_queue', { path: '455738981' });
+      expect(invoke).not.toHaveBeenCalledWith('add_to_queue', expect.anything());
+    });
+
+    it('should request a fresh stream URL if pre-resolved cached URL is older than 30s', async () => {
+      const staleUrl = 'https://sp-play.tidal.com/stream/old.flac?token=expired';
+      const freshUrl = 'https://sp-play.tidal.com/stream/fresh.flac?token=new';
+
+      // Seed cache with a 2-minute-old URL (older than 30s)
+      trackIdToStreamUrl.set(tidalTrack.path, { url: staleUrl, resolvedAt: Date.now() - 120_000 });
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'tidal_get_stream_url') return freshUrl;
+        if (cmd === 'play_track') return null;
+        if (cmd === 'check_url_is_cached') return false;
+        return null;
+      });
+
+      await useStore.getState().playTrack(tidalTrack);
+
+      // Verify tidal_get_stream_url was called and play_track received freshUrl
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: freshUrl, startPos: 0 });
+    });
+
+    it('triggerAutoplayRadio should not push stream URLs to backend queue in bulk', async () => {
+      const recTracks = [
+        { id: '1001', title: 'Rec 1', artist: 'Artist 1', duration: 180, cover_url: null },
+        { id: '1002', title: 'Rec 2', artist: 'Artist 2', duration: 200, cover_url: null },
+      ];
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_tidal_autoplay_recommendations') return recTracks;
+        if (cmd === 'clear_queue') return null;
+        if (cmd === 'add_to_queue_bulk') return null;
+        return null;
+      });
+
+      useStore.setState({ autoplayEnabled: true, queue: [] });
+
+      await useStore.getState().triggerAutoplayRadio(tidalTrack, true);
+
+      // Queue state should contain the recommended tracks with provider IDs
+      const queue = useStore.getState().queue;
+      expect(queue.length).toBe(2);
+      expect(queue[0].path).toBe('1001');
+      expect(queue[0].format).toBe('Tidal FLAC');
+
+      // Backend bulk add should not be called with stream URLs
+      expect(invoke).not.toHaveBeenCalledWith('add_to_queue_bulk', expect.anything());
+    });
+
+    it('playTrack should recover track ID from resolvedPathMap if track.path is an HTTP URL', async () => {
+      const oldCdnUrl = 'https://sp-play.tidal.com/stream/expired.flac?token=old';
+      const freshCdnUrl = 'https://sp-play.tidal.com/stream/fresh.flac?token=new';
+
+      rememberResolvedPath(oldCdnUrl, tidalTrack.path);
+
+      const trackWithUrlPath: Track = {
+        ...tidalTrack,
+        path: oldCdnUrl,
+      };
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'tidal_get_stream_url') return freshCdnUrl;
+        if (cmd === 'play_track') return null;
+        if (cmd === 'check_url_is_cached') return false;
+        return null;
+      });
+
+      await useStore.getState().playTrack(trackWithUrlPath);
+
+      // Should have recovered original track ID and fetched fresh URL
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: freshCdnUrl, startPos: 0 });
+    });
+
+    it('fetchQueue should preserve upcoming stream tracks when backend queue is empty', async () => {
+      useStore.setState({
+        queue: [tidalTrack],
+      });
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_queue') return []; // Backend queue is empty
+        return null;
+      });
+
+      await useStore.getState().fetchQueue();
+
+      // Frontend queue should NOT have been wiped
+      expect(useStore.getState().queue.length).toBe(1);
+      expect(useStore.getState().queue[0].path).toBe(tidalTrack.path);
+    });
   });
 });
+
+
