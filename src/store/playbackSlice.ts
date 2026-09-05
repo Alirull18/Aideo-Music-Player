@@ -550,7 +550,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           set(s => ({ playback: { ...s.playback, backend_stop_detected_at: Date.now() } }));
           return;
         }
-        if (Date.now() - detectedAt < 5000) {
+        if (Date.now() - detectedAt < 3000) {
+          return;
+        }
+        // Fallback recovery: If backend transitioned to Stopped with null track, but queue has tracks or autoplay is on,
+        // trigger playNext() to ensure continuous playback.
+        if (get().queue.length > 0 || (get().autoplayEnabled && get().currentTrack)) {
+          console.log('[playback] Stopped status recovery: upcoming tracks available, calling playNext()...');
+          set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
+          await get().playNext();
           return;
         }
       } else if (get().playback.backend_stop_detected_at) {

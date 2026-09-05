@@ -513,6 +513,92 @@ describe('TidalConnectCard', () => {
       expect(useStore.getState().queue.length).toBe(1);
       expect(useStore.getState().queue[0].path).toBe(tidalTrack.path);
     });
+
+    it('playNext should advance to queued Tidal track and resolve its stream URL', async () => {
+      const nextTidalTrack: Track = {
+        id: -20002,
+        path: '99887766',
+        title: 'Next Tidal Track',
+        artist: 'Next Artist',
+        duration: 210,
+        format: 'Tidal FLAC',
+        lyric_offset: 0,
+      };
+
+      const resolvedStreamUrl = 'https://sp-play.tidal.com/stream/next_track.flac?token=valid';
+
+      useStore.setState({
+        queue: [nextTidalTrack],
+        currentTrack: tidalTrack,
+      });
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'tidal_get_stream_url') return resolvedStreamUrl;
+        if (cmd === 'play_track') return null;
+        if (cmd === 'remove_from_queue') return null;
+        if (cmd === 'check_url_is_cached') return false;
+        return null;
+      });
+
+      await useStore.getState().playNext();
+
+      // Should have resolved the stream URL for the queued track
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: nextTidalTrack.path });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedStreamUrl, startPos: 0 });
+
+      // Queue should have popped the played track
+      expect(useStore.getState().queue.length).toBe(0);
+      expect(useStore.getState().currentTrack?.title).toBe('Next Tidal Track');
+    });
+
+    it('pollStatus should trigger fallback playNext if backend stays Stopped while queue has tracks', async () => {
+      const queuedTrack: Track = {
+        id: -20003,
+        path: '33445566',
+        title: 'Queued Track',
+        artist: 'Queued Artist',
+        duration: 190,
+        format: 'Tidal FLAC',
+        lyric_offset: 0,
+      };
+
+      await new Promise(r => setTimeout(r, 400));
+      const resolvedUrl = 'https://sp-play.tidal.com/stream/fallback_track.flac?token=valid';
+
+      useStore.setState({
+        queue: [queuedTrack],
+        currentTrack: tidalTrack,
+        playback: {
+          ...useStore.getState().playback,
+          status: 'Playing',
+          current_track: 'https://lgf.audio.tidal.com/prev.flac',
+          backend_stop_detected_at: Date.now() - 4000, // 4 seconds ago (> 3000ms threshold)
+          last_skip_time: Date.now() - 5000,
+        },
+      });
+
+      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+        if (cmd === 'get_playback_status') {
+          return {
+            status: 'Stopped',
+            current_track: null,
+            position_secs: 0,
+            volume: 1.0,
+          };
+        }
+        if (cmd === 'tidal_get_stream_url') return resolvedUrl;
+        if (cmd === 'play_track') return null;
+        if (cmd === 'remove_from_queue') return null;
+        if (cmd === 'check_url_is_cached') return false;
+        return null;
+      });
+
+      await useStore.getState().pollStatus();
+
+      // Poll status should have triggered fallback playNext
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: queuedTrack.path });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedUrl, startPos: 0 });
+    });
   });
 });
 

@@ -1826,4 +1826,31 @@ mod dsp_tests {
             assert!(chunk_slice.iter().all(|&b| b == i as u8), "Data chunk {} must match produced content", i);
         }
     }
+
+    #[test]
+    fn test_is_playable_local_path() {
+        use crate::player::is_playable_local_path;
+        assert!(!is_playable_local_path("https://lgf.audio.tidal.com/stream.flac"));
+        assert!(!is_playable_local_path("http://localhost:8000/stream.mp3"));
+        assert!(!is_playable_local_path("455738981"));
+        assert!(!is_playable_local_path("non_existent_file_path_xyz.flac"));
+        assert!(!is_playable_local_path(""));
+
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("aideo_test_playable.flac");
+        std::fs::write(&test_file, b"test").unwrap();
+        let path_str = test_file.to_str().unwrap();
+        assert!(is_playable_local_path(path_str));
+        let _ = std::fs::remove_file(&test_file);
+    }
+
+    #[test]
+    fn test_calculate_stream_eof_padding() {
+        use crate::player::calculate_stream_eof_padding;
+        assert_eq!(calculate_stream_eof_padding(0, 1024), 0);
+        assert_eq!(calculate_stream_eof_padding(1024, 1024), 0);
+        assert_eq!(calculate_stream_eof_padding(2500, 1024), 0);
+        assert_eq!(calculate_stream_eof_padding(500, 1024), 524);
+        assert_eq!(calculate_stream_eof_padding(1023, 1024), 1);
+    }
 }

@@ -4323,6 +4323,18 @@ pub fn can_reuse_cached_track(
     decode_shutdown_active
 }
 
+pub fn is_playable_local_path(path: &str) -> bool {
+    !path.starts_with("http://") && !path.starts_with("https://") && std::path::Path::new(path).is_file()
+}
+
+pub fn calculate_stream_eof_padding(pending_len: usize, chunk_size: usize) -> usize {
+    if pending_len == 0 || pending_len >= chunk_size {
+        0
+    } else {
+        chunk_size - pending_len
+    }
+}
+
 pub fn is_stream_prebuffer_ready(
     samples_len: usize,
     min_watermark: usize,
@@ -5894,7 +5906,8 @@ fn play_file(
     let last_oversampling = current_dsp.resampler_oversampling;
     let last_ffmpeg_quality = current_dsp.ffmpeg_transcode_quality.clone();
     let last_exclusive_timing = current_dsp.exclusive_mode_timing.clone();
-let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
+    let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_with("https://");
+    let mut stream_eof = false;
 
     // RAM BUFFER CURSOR
     let mut ram_cursor = (start_pos * file_rate as f64) as usize;
@@ -6031,8 +6044,8 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
         if dsp_now.crossfade_transition_enabled && duration_secs > dsp_now.crossfade_transition_duration as f64 {
             let crossfade_trigger_pos = duration_secs - dsp_now.crossfade_transition_duration as f64;
             if true_pos >= crossfade_trigger_pos && !crossfade_triggered {
-                let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
-                if !is_stream_next {
+                let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                if is_local_next {
                     crossfade_triggered = true;
                     let next_path_opt = {
                         let mut q = safe_lock(&queue);
@@ -6144,8 +6157,8 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                             next_track_info = Some((next_track_path.take().unwrap(), played_secs));
                             running = false;
                         } else {
-                            let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
-                            if !is_stream_next {
+                            let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                            if is_local_next {
                                 let next_queued = safe_lock(&queue).pop_front();
                                 if let Some(npath) = next_queued {
                                     next_track_info = Some((npath, 0.0));
@@ -6167,52 +6180,58 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
                 }
             } else {
                 // FALLBACK TO CHUNKED (STREAMS)
-                let packet = match format.next_packet() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        if pending[0].is_empty() {
-                            if crossfade_triggered && next_track_path.is_some() {
-                                let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
-                                next_track_info = Some((next_track_path.take().unwrap(), played_secs));
-                                running = false;
-                            } else {
-                                let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
-                                if !is_stream_next {
-                                    let next_queued = safe_lock(&queue).pop_front();
-                                    if let Some(npath) = next_queued {
-                                        next_track_info = Some((npath, 0.0));
-                                    }
+                if !stream_eof {
+                    while pending[0].len() < chunk_size * 4 {
+                        let packet = match format.next_packet() {
+                            Ok(p) => p,
+                            Err(_) => {
+                                println!("[player] Stream decoder reached EOF.");
+                                stream_eof = true;
+                                break;
+                            }
+                        };
+                        if packet.track_id() == track_id {
+                            if let Ok(decoded) = decoder.decode(&packet) {
+                                let frames = decoded_frames(&decoded);
+                                ram_cursor += frames;
+                                for (ch, buf) in pending.iter_mut().enumerate().take(file_ch) {
+                                    let src: Vec<f32> = match &decoded {
+                                         AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
+                                         AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| s as f32 / i16::MAX as f32).collect(),
+                                         AudioBufferRef::S32(b) => b.chan(ch).iter().map(|&s| s as f32 / i32::MAX as f32).collect(),
+                                         AudioBufferRef::U8(b)  => b.chan(ch).iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
+                                         AudioBufferRef::S24(b) => b.chan(ch).iter().map(|&s| s.inner() as f32 / 8_388_607.0).collect(),
+                                         AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
+                                         _ => vec![0.0; decoded_frames(&decoded)],
+                                     };
+                                    buf.extend(src);
                                 }
                             }
-                            break;
-                        } else {
-                            let pad = chunk_size - pending[0].len();
-                            for ch in 0..file_ch {
-                                pending[ch].extend(std::iter::repeat(0.0).take(pad));
-                            }
-                            // Allow loop to process the final padded chunk through resampler
-                            continue;
                         }
                     }
-                };
-                if packet.track_id() == track_id {
-                    if let Some(_tb) = time_base {
-                        // Position update moved to end of loop
-                    }
-                    if let Ok(decoded) = decoder.decode(&packet) {
-                        let frames = decoded_frames(&decoded);
-                        ram_cursor += frames;
-                        for (ch, buf) in pending.iter_mut().enumerate().take(file_ch) {
-                            let src: Vec<f32> = match &decoded {
-                                 AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
-                                 AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| s as f32 / i16::MAX as f32).collect(),
-                                 AudioBufferRef::S32(b) => b.chan(ch).iter().map(|&s| s as f32 / i32::MAX as f32).collect(),
-                                 AudioBufferRef::U8(b)  => b.chan(ch).iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
-                                 AudioBufferRef::S24(b) => b.chan(ch).iter().map(|&s| s.inner() as f32 / 8_388_607.0).collect(),
-                                 AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
-                                 _ => vec![0.0; decoded_frames(&decoded)],
-                             };
-                            buf.extend(src);
+                }
+
+                if stream_eof {
+                    if pending[0].is_empty() {
+                        println!("[player] Stream pending samples drained completely at EOF. Exiting decode loop.");
+                        if crossfade_triggered && next_track_path.is_some() {
+                            let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
+                            next_track_info = Some((next_track_path.take().unwrap(), played_secs));
+                            running = false;
+                        } else {
+                            let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                            if is_local_next {
+                                let next_queued = safe_lock(&queue).pop_front();
+                                if let Some(npath) = next_queued {
+                                    next_track_info = Some((npath, 0.0));
+                                }
+                            }
+                        }
+                        break;
+                    } else if pending[0].len() < chunk_size {
+                        let pad = calculate_stream_eof_padding(pending[0].len(), chunk_size);
+                        for ch in 0..file_ch {
+                            pending[ch].extend(std::iter::repeat(0.0).take(pad));
                         }
                     }
                 }
@@ -6636,8 +6655,8 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
     }
 
     if running && next_track_info.is_none() {
-        let is_stream_next = safe_lock(&queue).front().map(|p| p.starts_with("http://") || p.starts_with("https://")).unwrap_or(false);
-        if !is_stream_next {
+        let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+        if is_local_next {
             let next_queued = safe_lock(&queue).pop_front();
             if let Some(npath) = next_queued {
                 next_track_info = Some((npath, 0.0));
@@ -6646,6 +6665,7 @@ let is_stream = resolved_path.starts_with("http://") || resolved_path.starts_wit
     }
 
     if running && next_track_info.is_none() {
+        println!("[player] Track ended naturally with no local track queued. Emitting track-ended event to frontend.");
         let _ = app_handle.emit("track-ended", ());
     }
 

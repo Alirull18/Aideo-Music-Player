@@ -367,6 +367,7 @@ function AideoApp() {
 
       const uEnded = await listen('track-ended', () => {
         if (isCancelled) return;
+        console.log('[App] Received track-ended event from backend. Calling playNext()...');
         useStore.getState().playNext();
       });
       if (isCancelled) { uEnded(); return; }
