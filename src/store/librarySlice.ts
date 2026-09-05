@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
+import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
@@ -732,26 +732,27 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     isTransitioning = true;
     try {
       const state = get();
-      const isCurrentOnline = path.startsWith('http://') || path.startsWith('https://');
+      const origPath = resolvedPathMap.get(path) || path;
+      const isCurrentOnline = path.startsWith('http://') || path.startsWith('https://') || origPath !== path;
       const activeTracks = isCurrentOnline
         ? state.tracks.filter(t => isStreamTrack(t.path, t.format))
         : state.tracks.filter(t => !isStreamTrack(t.path, t.format));
-      const index = activeTracks.findIndex(t => pathsEqual(t.path, path));
+      const index = activeTracks.findIndex(t => pathsEqual(t.path, path) || pathsEqual(t.path, origPath));
       let track = index !== -1 ? activeTracks[index] : null;
 
       // Check active queue for metadata if it is an online track
       if (!track) {
-        track = state.queue.find(t => pathsEqual(t.path, path)) || null;
+        track = state.queue.find(t => pathsEqual(t.path, path) || pathsEqual(t.path, origPath)) || null;
       }
 
       // Check currentTrack first if it matches
-      if (!track && state.currentTrack && pathsEqual(state.currentTrack.path, path)) {
+      if (!track && state.currentTrack && (pathsEqual(state.currentTrack.path, path) || pathsEqual(state.currentTrack.path, origPath))) {
         track = { ...state.currentTrack, path };
       }
 
       // Check playHistory
       if (!track) {
-        track = state.playHistory.slice().reverse().find(t => t && pathsEqual(t.path, path) && t.title && t.title !== 'Web Audio Stream') || null;
+        track = state.playHistory.slice().reverse().find(t => t && (pathsEqual(t.path, path) || pathsEqual(t.path, origPath)) && t.title && t.title !== 'Web Audio Stream') || null;
       }
 
       // Construct high-fidelity virtual Track object as fallback to ensure seek bar work
@@ -1318,21 +1319,11 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       for (const t of newQueue) {
         let p = t.path;
         if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !t.path.startsWith('http://') && !t.path.startsWith('https://')) {
-          try {
-            const resolver = t.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            p = await invoke<string>(resolver, { trackId: t.path });
-            rememberResolvedPath(p, t.path);
-          } catch (err) {
-            console.error(`Failed to resolve ${t.format} autoplay recommended stream:`, err);
-            notifyTidalAuthFailure(err);
-            notifyQobuzAuthFailure(err);
-            continue;
-          }
-        }
-        if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
+          // Do not pre-resolve expiring streaming URLs into the Rust backend queue.
+          // Direct CDN URLs expire in 3-15 minutes, causing decoder errors and stopping playback.
+          // The frontend queue preserves persistent track IDs and resolves URLs just-in-time via playNext()/playTrack().
           continue;
         }
-        // Keep real titles recoverable when the queue is later rebuilt from backend URLs
         if (p.startsWith('http://') || p.startsWith('https://')) {
           setOnlineTrackCache(p, t);
         }

@@ -33,6 +33,11 @@ jobs:
         uses: step-security/setup-protoc@v3
         with:
           version: '25.1'
+      - name: Configure Protoc
+        run: |
+          $protoc = (Get-Command protoc).Source
+          Write-Host "Found protoc at $protoc"
+          "PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
       - name: Rust cache

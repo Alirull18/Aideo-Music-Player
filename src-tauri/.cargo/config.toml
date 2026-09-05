@@ -1,2 +1,2 @@
 [env]
-PROTOC = { value = "bin/bin/protoc.exe", relative = true }
+PROTOC = { value = "bin/bin/protoc.exe", relative = true, force = false }

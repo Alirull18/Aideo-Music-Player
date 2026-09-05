@@ -227,7 +227,7 @@ export interface AideoHomeProps {
   isLoadingRecs: boolean;
   isRefreshingRecs: boolean;
   onRefreshRecs: () => void;
-  onPlayTrack: (track: any) => void;
+  onPlayTrack: (track: any, contextList?: any[]) => void;
   renderDownloadAction: (track: any) => React.ReactNode;
   resume: HomeResumeInfo | null;
   search: SearchBarProps;

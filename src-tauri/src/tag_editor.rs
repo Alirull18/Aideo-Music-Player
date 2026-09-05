@@ -25,8 +25,10 @@ pub struct AudioTagData {
     pub cover_data_url: Option<String>,
     pub format: Option<String>,
     pub duration_secs: Option<f64>,
+    pub file_size_bytes: Option<u64>,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u8>,
     pub channels: Option<u8>,
 }
 
@@ -74,8 +76,10 @@ pub fn read_tags(file_path: &str) -> Result<AudioTagData, String> {
 
     let properties = tagged_file.properties();
     let duration_secs = Some(properties.duration().as_secs_f64());
+    let file_size_bytes = std::fs::metadata(path).ok().map(|metadata| metadata.len());
     let bitrate = properties.audio_bitrate();
     let sample_rate = properties.sample_rate();
+    let bit_depth = properties.bit_depth();
     let channels = properties.channels();
 
     let format = path.extension()
@@ -86,8 +90,10 @@ pub fn read_tags(file_path: &str) -> Result<AudioTagData, String> {
         path: file_path.to_string(),
         format,
         duration_secs,
+        file_size_bytes,
         bitrate,
         sample_rate,
+        bit_depth,
         channels,
         ..Default::default()
     };
@@ -352,5 +358,42 @@ mod tests {
         assert_eq!(update.artist.as_deref(), Some("Test Artist"));
         assert_eq!(update.track_number, Some(3));
         assert!(update.album.is_none());
+    }
+
+    #[test]
+    fn test_read_tags_reports_pcm_bit_depth() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "aideo-tag-editor-{}-{unique}.wav",
+            std::process::id(),
+        ));
+
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&42u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&96_000u32.to_le_bytes());
+        wav.extend_from_slice(&576_000u32.to_le_bytes());
+        wav.extend_from_slice(&6u16.to_le_bytes());
+        wav.extend_from_slice(&24u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&6u32.to_le_bytes());
+        wav.extend_from_slice(&[0u8; 6]);
+        std::fs::write(&path, wav).expect("test WAV should be written");
+
+        let result = read_tags(path.to_str().expect("temp path should be UTF-8"));
+        let _ = std::fs::remove_file(&path);
+        let data = result.expect("test WAV should be readable");
+
+        assert_eq!(data.file_size_bytes, Some(50));
+        assert_eq!(data.bit_depth, Some(24));
+        assert_eq!(data.sample_rate, Some(96_000));
+        assert_eq!(data.channels, Some(2));
     }
 }

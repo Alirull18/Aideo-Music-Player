@@ -773,8 +773,55 @@ export function AideoView() {
     });
   };
 
+  const queueSubsequentTracks = (track: any, explicitList?: any[]) => {
+    let sourceList = explicitList;
+    if (!sourceList || sourceList.length <= 1) {
+      if (quickResults && quickResults.some((t: any) => String(t.id) === String(track.id) || (t.url && t.url === track.url))) {
+        sourceList = quickResults;
+      } else if (discoveryData?.tidal_hifi && discoveryData.tidal_hifi.some((t: any) => String(t.id) === String(track.id))) {
+        sourceList = discoveryData.tidal_hifi;
+      } else if (discoveryData?.recommendations && discoveryData.recommendations.some((t: any) => String(t.id) === String(track.id))) {
+        sourceList = discoveryData.recommendations;
+      }
+    }
+
+    if (!sourceList || sourceList.length <= 1) return;
+
+    const trackIdx = sourceList.findIndex((t: any) =>
+      String(t.id) === String(track.id) ||
+      (t.url && (t.url === track.url || t.url === track.path)) ||
+      (t.path && (t.path === track.path || t.path === track.url))
+    );
+
+    if (trackIdx !== -1 && trackIdx < sourceList.length - 1) {
+      const restTracks: Track[] = sourceList.slice(trackIdx + 1).map((t: any, idx: number) => {
+        const localMatch = resolveLocalMatch(t);
+        if (localMatch) return localMatch;
+        const route = classifyDiscoveryPlayback(t, false);
+        const dur = t.duration || parseDuration(t.duration_raw) || 180;
+        return {
+          id: route === 'tidal' ? -20000 - Number(t.id || 0) : (route === 'qobuz' ? -50000 - Number(t.id || 0) : -30000 - idx),
+          path: String(t.id || t.url || t.path),
+          title: t.title || 'Unknown Title',
+          artist: t.artist || 'Unknown Artist',
+          album: (t as any).album || '',
+          duration: dur,
+          format: route === 'tidal' ? 'Tidal FLAC' : (route === 'qobuz' ? 'Qobuz FLAC' : 'YouTube Direct'),
+          cover_url: t.cover_url || null,
+          lyric_offset: 0,
+        } as Track;
+      });
+
+      if (restTracks.length > 0) {
+        useStore.setState({ queue: restTracks });
+        localStorage.setItem('aideo_queue', JSON.stringify(restTracks));
+      }
+    }
+  };
+
   const handlePlayQuickTrack = async (track: any) => {
     setSearchFocused(false);
+    queueSubsequentTracks(track, quickResults);
     const localMatch = resolveLocalMatch(track);
     const playbackRoute = classifyDiscoveryPlayback(track, Boolean(localMatch));
     if (playbackRoute === 'tidal') {
@@ -1225,7 +1272,7 @@ export function AideoView() {
     );
   };
 
-  const handleTogglePreview = async (track: any) => {
+  const handleTogglePreview = async (track: any, contextList?: any[]) => {
     const localMatch = resolveLocalMatch(track);
     const playbackRoute = classifyDiscoveryPlayback(track, Boolean(localMatch));
     const isLocal = playbackRoute === 'local';
@@ -1256,6 +1303,7 @@ export function AideoView() {
         console.error('Failed to resume track:', e);
       }
     } else if (isLocal) {
+      queueSubsequentTracks(track, contextList);
       const ext = (track.url || track.path || '').split('.').pop()?.split('?')[0].toUpperCase();
       const trackToPlay: Track = localMatch || {
         id: parseInt(String(track.id).replace('local_', '')) || Date.now(),
@@ -1279,6 +1327,7 @@ export function AideoView() {
         console.error('Failed to play local track from discovery hub:', e);
       }
     } else {
+      queueSubsequentTracks(track, contextList);
       if (playbackRoute === 'tidal') {
         try {
           await playTidalResult(track);
@@ -1719,7 +1768,7 @@ export function AideoView() {
                   <div className="discovery-grid-overlay">
                     <div
                       className="discovery-grid-play-circle"
-                      onClick={() => handleTogglePreview(track)}
+                      onClick={() => handleTogglePreview(track, tracksList)}
                       title={
                         isPlaying
                           ? "Pause stream preview"
@@ -1825,7 +1874,7 @@ export function AideoView() {
                   <div className="discovery-overlay">
                     <div
                       className="discovery-play-circle"
-                      onClick={() => handleTogglePreview(track)}
+                      onClick={() => handleTogglePreview(track, tracksList)}
                       title={
                         isPlaying
                           ? "Pause preview"

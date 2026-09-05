@@ -2,7 +2,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, sortLyricLines } from '../utils';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, sortLyricLines, isStreamTrack } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { toast } from '../utils/toast';
 import { notifyTidalAuthFailure } from './tidalSlice';
@@ -17,12 +17,15 @@ let queueOperationPromise = Promise.resolve();
 let audioModesRestored = false;
 
 const NATURAL_END_TOLERANCE_SECS = 1.5;
+const STREAM_NATURAL_END_TOLERANCE_SECS = 4.5;
 
 const isAtNaturalEnd = (track: Track | null, position: unknown): boolean => {
   const duration = track?.duration;
-  return typeof duration === 'number' && Number.isFinite(duration) && duration > 0
-    && typeof position === 'number' && Number.isFinite(position)
-    && position >= Math.max(0, duration - NATURAL_END_TOLERANCE_SECS);
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) return false;
+  if (typeof position !== 'number' || !Number.isFinite(position)) return false;
+  const isOnline = track ? isStreamTrack(track.path, track.format) : false;
+  const tolerance = isOnline ? STREAM_NATURAL_END_TOLERANCE_SECS : NATURAL_END_TOLERANCE_SECS;
+  return position >= Math.max(0, duration - tolerance);
 };
 
 const EXCLUSIVE_MODE_STORAGE_KEY = 'aideo_exclusive_mode';
@@ -1700,8 +1703,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // otherwise a concurrent clear_queue could execute AFTER this read and its
       // result would resurrect the just-cleared items into state + localStorage.
       const queueTracks = await chainQueueOperation(async () => {
-        const paths: string[] = await invoke('get_queue');
+        const rawPaths: string[] = await invoke('get_queue');
+        const paths = Array.isArray(rawPaths) ? rawPaths : [];
         const { tracks, queue: currentQueue } = get();
+        if (paths.length === 0 && currentQueue.some(t => isStreamTrack(t.path, t.format))) {
+          return currentQueue;
+        }
 
         return paths.map((p, idx) => {
           // 1. Check if the track exists in local library tracks
