@@ -1,8 +1,9 @@
-import { useEffect, useState, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
-import type { Track } from '../store/types';
+import type { AudioTagData, Track } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic, Sliders, Info, X } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
@@ -39,6 +40,50 @@ function formatArtworkChannels(channels: number | null | undefined): string {
 function formatArtworkRatio(value: number | null | undefined): string | null {
   if (value == null || !Number.isFinite(value)) return null;
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+}
+
+function formatArtworkFileSize(bytes: number | null | undefined): string | null {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatArtworkBitDepth(
+  validBits: number | null | undefined,
+  containerBits?: number | null,
+): string | null {
+  if (validBits == null || !Number.isFinite(validBits) || validBits <= 0) return null;
+  if (containerBits != null && Number.isFinite(containerBits) && containerBits > validBits) {
+    return `${validBits}-bit in ${containerBits}-bit`;
+  }
+  return `${validBits}-bit`;
+}
+
+function formatArtworkResolution(
+  sampleRate: number | null | undefined,
+  validBits: number | null | undefined,
+  containerBits?: number | null,
+): string {
+  const depth = formatArtworkBitDepth(validBits, containerBits);
+  const rate = formatArtworkRate(sampleRate);
+  if (!depth) return rate;
+  if (rate === 'Unknown') return depth;
+  return `${depth} / ${rate}`;
+}
+
+function titleCaseTechnicalValue(value: string): string {
+  return value
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map(part => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
+    .join(' ');
 }
 
 function getArtworkSourceLabel(format: string | null | undefined, path: string, duration: number | null | undefined): string {
@@ -78,7 +123,10 @@ export function NowPlayingView() {
     playbackFileFormat,
     playbackExclusive,
     playbackDriverType,
-    queue
+    playbackEffectiveAudioPath,
+    queue,
+    visualizerExpanded,
+    setVisualizerExpanded,
   } = useStore(useShallow(s => ({
     playbackCurrentTrack: s.playback.current_track,
     playbackBitPerfect: s.playback.bit_perfect,
@@ -89,6 +137,7 @@ export function NowPlayingView() {
     playbackFileFormat: s.playback.file_format,
     playbackExclusive: s.playback.exclusive,
     playbackDriverType: s.playback.driver_type,
+    playbackEffectiveAudioPath: s.playback.effective_audio_path,
     currentDevice: s.currentDevice,
     coverArt: s.coverArt,
     dsp: s.dsp,
@@ -108,12 +157,18 @@ export function NowPlayingView() {
     toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
     setMiniPlayerMode: s.setMiniPlayerMode,
     queue: s.queue,
+    visualizerExpanded: s.visualizerExpanded,
+    setVisualizerExpanded: s.setVisualizerExpanded,
   })));
   const current = currentTrack;
   const effectiveCover = coverArt || current?.cover_url || null;
+  const [showArtInfo, setShowArtInfo] = useState(false);
+  const [artworkTagDetails, setArtworkTagDetails] = useState<AudioTagData | null>(null);
+  const [artworkTagLoading, setArtworkTagLoading] = useState(false);
+  const [artworkTagError, setArtworkTagError] = useState(false);
   const artworkMetadata = current as ArtworkTrackMetadata | null;
   const artworkPath = artworkMetadata?.path || playbackCurrentTrack || '';
-  const artworkFormat = artworkMetadata?.format || playbackFileFormat || null;
+  const artworkFormat = artworkTagDetails?.format || artworkMetadata?.format || playbackFileFormat || null;
   const artworkSource = getArtworkSourceLabel(artworkFormat, artworkPath, artworkMetadata?.duration);
   const artworkSourceDetail = artworkPath
     ? artworkSource === 'Local library' ? baseName(artworkPath) : getStreamName(artworkPath)
@@ -121,28 +176,63 @@ export function NowPlayingView() {
   const artworkDisplayFormat = artworkFormat?.trim()
     ? artworkFormat.toUpperCase()
     : isStreamTrack(artworkPath, artworkFormat) ? 'STREAM' : 'PCM';
-  const artworkSourceRate = playbackFileRate || artworkMetadata?.sample_rate || playbackDevRate || null;
-  const artworkOutputRate = playbackDevRate || artworkSourceRate;
-  const artworkChannels = playbackFileChannels || artworkMetadata?.channels || null;
-  const artworkBitrate = artworkMetadata?.bitrate != null && Number.isFinite(artworkMetadata.bitrate)
-    ? `${artworkMetadata.bitrate} kbps`
-    : 'Lossless';
-  const artworkTrackNumber = artworkMetadata?.track_number != null && Number(artworkMetadata.track_number) > 0
-    ? Number(artworkMetadata.track_number)
+  const liveAudioPath = playbackEffectiveAudioPath?.active ? playbackEffectiveAudioPath : null;
+  const artworkSourceRate = liveAudioPath?.source.sample_rate
+    || playbackFileRate
+    || artworkTagDetails?.sample_rate
+    || artworkMetadata?.sample_rate
+    || playbackDevRate
+    || null;
+  const artworkOutputRate = liveAudioPath?.output.sample_rate || playbackDevRate || artworkSourceRate;
+  const artworkSourceChannels = liveAudioPath?.source.channels
+    || playbackFileChannels
+    || artworkTagDetails?.channels
+    || artworkMetadata?.channels
+    || null;
+  const artworkOutputChannels = liveAudioPath?.output.channels || artworkSourceChannels;
+  const artworkSourceBits = liveAudioPath?.source.valid_bits_per_sample
+    || liveAudioPath?.source.bits_per_sample
+    || artworkTagDetails?.bit_depth
+    || null;
+  const artworkOutputBits = liveAudioPath?.output.valid_bits_per_sample || liveAudioPath?.output.bits_per_sample || null;
+  const artworkOutputContainerBits = liveAudioPath?.output.bits_per_sample || null;
+  const rawArtworkBitrate = artworkTagDetails?.bitrate ?? artworkMetadata?.bitrate;
+  const artworkBitrate = rawArtworkBitrate != null && Number.isFinite(rawArtworkBitrate) && rawArtworkBitrate > 0
+    ? `${Math.round(rawArtworkBitrate).toLocaleString()} kbps`
+    : 'Unknown';
+  const artworkTrackNumber = artworkTagDetails?.track_number ?? artworkMetadata?.track_number;
+  const artworkDiscNumber = artworkTagDetails?.disc_number ?? artworkMetadata?.disc_number;
+  const normalizedTrackNumber = artworkTrackNumber != null && Number(artworkTrackNumber) > 0
+    ? Number(artworkTrackNumber)
     : null;
-  const artworkDiscNumber = artworkMetadata?.disc_number != null && Number(artworkMetadata.disc_number) > 0
-    ? Number(artworkMetadata.disc_number)
+  const normalizedDiscNumber = artworkDiscNumber != null && Number(artworkDiscNumber) > 0
+    ? Number(artworkDiscNumber)
     : null;
-  const artworkReleasePosition = artworkTrackNumber
-    ? `${artworkDiscNumber ? `Disc ${artworkDiscNumber} · ` : ''}Track ${String(artworkTrackNumber).padStart(2, '0')}`
-    : artworkDiscNumber ? `Disc ${artworkDiscNumber}` : 'Album track';
+  const trackPosition = normalizedTrackNumber
+    ? `Track ${normalizedTrackNumber}${artworkTagDetails?.track_total ? ` of ${artworkTagDetails.track_total}` : ''}`
+    : null;
+  const discPosition = normalizedDiscNumber
+    ? `Disc ${normalizedDiscNumber}${artworkTagDetails?.disc_total ? ` of ${artworkTagDetails.disc_total}` : ''}`
+    : null;
+  const artworkReleasePosition = [discPosition, trackPosition].filter(Boolean).join(' · ') || 'Album track';
   const artworkAnalysis = [
     artworkMetadata?.bpm != null ? `${Math.round(artworkMetadata.bpm)} BPM` : null,
     formatArtworkRatio(artworkMetadata?.energy),
   ].filter((value): value is string => Boolean(value));
-  const artworkDevice = currentDevice || playbackDriverType || 'WASAPI';
-  const artworkRoute = `${artworkDevice} · ${playbackExclusive ? 'Exclusive' : 'Shared'}`;
-  const artworkProcessing = playbackBitPerfect ? 'Bit-Perfect' : dsp.enabled ? 'DSP active' : 'Direct output';
+  const artworkDevice = liveAudioPath?.engine?.toUpperCase() || currentDevice || playbackDriverType || 'WASAPI';
+  const artworkShareMode = liveAudioPath?.share_mode
+    ? titleCaseTechnicalValue(liveAudioPath.share_mode)
+    : playbackExclusive ? 'Exclusive' : 'Shared';
+  const artworkRoute = `${artworkDevice} · ${artworkShareMode}`;
+  const artworkBitPerfect = liveAudioPath ? Boolean(liveAudioPath.strict_bit_perfect) : playbackBitPerfect;
+  const artworkProcessing = artworkBitPerfect
+    ? 'Bit-perfect'
+    : liveAudioPath?.resampling
+      ? 'Resampled'
+      : (liveAudioPath?.active_transforms.length || dsp.enabled) ? 'Processed' : 'Direct output';
+  const artworkOutput = `${formatArtworkResolution(artworkOutputRate, artworkOutputBits, artworkOutputContainerBits)} · ${formatArtworkChannels(artworkOutputChannels)}`;
+  const artworkRelease = [artworkTagDetails?.genre, artworkTagDetails?.year].filter(Boolean).join(' · ');
+  const artworkFileSize = formatArtworkFileSize(artworkTagDetails?.file_size_bytes);
 
   const isCurrentCached = useMemo(() => {
     if (!current || !isStreamTrack(current.path, current.format)) return false;
@@ -156,8 +246,40 @@ export function NowPlayingView() {
   const [showLyrics, setShowLyrics] = useState(true);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
   const [isSignalPathOpen, setIsSignalPathOpen] = useState(false);
-  const [showArtInfo, setShowArtInfo] = useState(false);
   const [spectrumBands, setSpectrumBands] = useState<number[]>([]);
+
+  useEffect(() => {
+    const isOnlineSource = isStreamTrack(
+      artworkPath,
+      artworkMetadata?.format || playbackFileFormat,
+    );
+
+    if (!showArtInfo || !artworkPath || isOnlineSource) {
+      setArtworkTagDetails(null);
+      setArtworkTagLoading(false);
+      setArtworkTagError(false);
+      return;
+    }
+
+    let active = true;
+    setArtworkTagLoading(true);
+    setArtworkTagError(false);
+
+    invoke<AudioTagData>('read_audio_tags', { path: artworkPath })
+      .then(data => {
+        if (active && data) setArtworkTagDetails(data);
+      })
+      .catch(() => {
+        if (active) setArtworkTagError(true);
+      })
+      .finally(() => {
+        if (active) setArtworkTagLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [showArtInfo, artworkPath, artworkMetadata?.format, playbackFileFormat]);
 
   useEffect(() => {
     let active = true;
@@ -190,33 +312,6 @@ export function NowPlayingView() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  const handleArtworkPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (showArtInfo || dsp.low_spec_mode) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-
-    const pointerX = Math.max(-1, Math.min(1, ((e.clientX - rect.left) / rect.width) * 2 - 1));
-    const pointerY = Math.max(-1, Math.min(1, ((e.clientY - rect.top) / rect.height) * 2 - 1));
-    const style = e.currentTarget.style;
-
-    style.setProperty('--np-art-tilt-x', `${(-pointerY * 7).toFixed(2)}deg`);
-    style.setProperty('--np-art-tilt-y', `${(pointerX * 9).toFixed(2)}deg`);
-    style.setProperty('--np-art-shift-x', `${(pointerX * 4).toFixed(2)}px`);
-    style.setProperty('--np-art-shift-y', `${(pointerY * 4).toFixed(2)}px`);
-    style.setProperty('--np-art-light-x', `${((pointerX + 1) * 50).toFixed(1)}%`);
-    style.setProperty('--np-art-light-y', `${((pointerY + 1) * 50).toFixed(1)}%`);
-  };
-
-  const handleArtworkPointerLeave = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const style = e.currentTarget.style;
-    style.setProperty('--np-art-tilt-x', '0deg');
-    style.setProperty('--np-art-tilt-y', '0deg');
-    style.setProperty('--np-art-shift-x', '0px');
-    style.setProperty('--np-art-shift-y', '0px');
-    style.setProperty('--np-art-light-x', '50%');
-    style.setProperty('--np-art-light-y', '50%');
-  };
 
   if (!playbackCurrentTrack) {
     return (
@@ -536,22 +631,7 @@ export function NowPlayingView() {
         </div>
 
         <div
-          className={`np-art-wrap${effectiveCover ? ' has-art' : ''} ${albumArtFit === 'contain' ? 'contain-mode' : ''} np-art-interactive${showArtInfo ? ' np-art-info-open' : ''}${dsp.low_spec_mode ? ' np-art-motion-disabled' : ''}`}
-          onClick={() => setShowArtInfo(prev => !prev)}
-          title={showArtInfo ? "Click to show artwork" : "Move pointer to explore · click for track details"}
-          role="button"
-          aria-label={showArtInfo ? 'Hide artwork details' : 'Show artwork details'}
-          aria-pressed={showArtInfo}
-          tabIndex={0}
-          onPointerMove={handleArtworkPointerMove}
-          onPointerLeave={handleArtworkPointerLeave}
-          onKeyDown={(e) => {
-            if (e.target !== e.currentTarget) return;
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setShowArtInfo(prev => !prev);
-            }
-          }}
+          className={`np-art-wrap${effectiveCover ? ' has-art' : ''} ${albumArtFit === 'contain' ? 'contain-mode' : ''}${showArtInfo ? ' np-art-info-open' : ''}`}
         >
           {albumArtFit === 'contain' && (
             <div
@@ -565,38 +645,38 @@ export function NowPlayingView() {
             className={`np-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
           />
 
-          {/* Floating Info Button on Artwork */}
           <button
             className={`np-art-info-btn ${showArtInfo ? 'active' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowArtInfo(prev => !prev);
-            }}
-            title={showArtInfo ? "Show Album Artwork" : "Show Audio Specs & Track Info"}
-            aria-label="Toggle Artwork Track Info"
+            onClick={() => setShowArtInfo(prev => !prev)}
+            title={showArtInfo ? 'Show album artwork' : 'Inspect track details'}
+            aria-label={showArtInfo ? 'Show album artwork' : 'Inspect track'}
+            aria-expanded={showArtInfo}
+            aria-controls="now-playing-track-inspector"
           >
             {showArtInfo ? <X size={15} /> : <Info size={15} />}
+            <span>{showArtInfo ? 'Artwork' : 'Inspect'}</span>
           </button>
 
-          {/* Interactive Liner Notes / Audio Specs Overlay */}
           {showArtInfo && (
             <div
+              id="now-playing-track-inspector"
               className="np-art-overlay"
-              onClick={(e) => e.stopPropagation()}
+              role="region"
+              aria-label="Track inspector"
             >
               <div className="np-art-overlay-header">
                 <div className="np-art-overlay-heading">
                   <div className="np-art-overlay-badge">
                     <span className="np-art-dot" />
-                    <span>AUDIO SPECS</span>
+                    <span>TRACK INSPECTOR</span>
                   </div>
                   <span className="np-art-source-pill">{artworkSource}</span>
                 </div>
                 <button
                   className="np-art-overlay-close"
                   onClick={() => setShowArtInfo(false)}
-                  title="Close Specs"
-                  aria-label="Close Specs"
+                  title="Close track inspector"
+                  aria-label="Close track inspector"
                 >
                   <X size={14} />
                 </button>
@@ -605,23 +685,44 @@ export function NowPlayingView() {
               <div className="np-art-overlay-body">
                 <div className="np-art-overlay-title-group">
                   <h3 className="np-art-overlay-title">
-                    {current?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack))}
+                    {artworkTagDetails?.title || current?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack))}
                   </h3>
-                  <p className="np-art-overlay-artist">{current?.artist || 'Unknown Artist'}</p>
-                  {current?.album && <p className="np-art-overlay-album">{current.album}</p>}
+                  <p className="np-art-overlay-artist">{artworkTagDetails?.artist || current?.artist || 'Unknown artist'}</p>
+                  {(artworkTagDetails?.album || current?.album) && (
+                    <p className="np-art-overlay-album">{artworkTagDetails?.album || current?.album}</p>
+                  )}
                 </div>
 
                 <div className="np-art-progress-row">
                   <span>Track progress</span>
-                  <strong>{formatArtworkTime(playbackPosition)} / {formatArtworkTime(artworkMetadata?.duration)}</strong>
+                  <strong>{formatArtworkTime(playbackPosition)} / {formatArtworkTime(artworkTagDetails?.duration_secs ?? artworkMetadata?.duration)}</strong>
                 </div>
+
+                {artworkTagLoading && (
+                  <div className="np-art-detail-status" role="status">Reading file tags…</div>
+                )}
+                {artworkTagError && (
+                  <div className="np-art-detail-status is-warning">Native file tags are unavailable. Playback data is still shown.</div>
+                )}
 
                 <section className="np-art-detail-section" aria-label="Track details">
                   <div className="np-art-detail-heading">
-                    <span>Track details</span>
+                    <span>Metadata</span>
                     <strong>{artworkReleasePosition}</strong>
                   </div>
                   <div className="np-art-detail-list">
+                    {artworkRelease && (
+                      <div className="np-art-detail-row">
+                        <span>Release</span>
+                        <strong>{artworkRelease}</strong>
+                      </div>
+                    )}
+                    {artworkTagDetails?.album_artist && artworkTagDetails.album_artist !== artworkTagDetails.artist && (
+                      <div className="np-art-detail-row">
+                        <span>Album artist</span>
+                        <strong title={artworkTagDetails.album_artist}>{artworkTagDetails.album_artist}</strong>
+                      </div>
+                    )}
                     <div className="np-art-detail-row">
                       <span>Source</span>
                       <strong title={artworkSource}>{artworkSource}</strong>
@@ -630,6 +731,18 @@ export function NowPlayingView() {
                       <span>File</span>
                       <strong title={artworkSourceDetail}>{artworkSourceDetail}</strong>
                     </div>
+                    {artworkSource === 'Local library' && (
+                      <div className="np-art-detail-row">
+                        <span>Location</span>
+                        <strong title={artworkPath}>{artworkPath}</strong>
+                      </div>
+                    )}
+                    {artworkFileSize && (
+                      <div className="np-art-detail-row">
+                        <span>Size</span>
+                        <strong>{artworkFileSize}</strong>
+                      </div>
+                    )}
                     <div className="np-art-detail-row">
                       <span>Availability</span>
                       <strong>{artworkAvailability}</strong>
@@ -637,32 +750,59 @@ export function NowPlayingView() {
                   </div>
                 </section>
 
-                <section className="np-art-detail-section" aria-label="Audio details">
+                <section className="np-art-detail-section" aria-label="Source audio details">
                   <div className="np-art-detail-heading">
-                    <span>Audio</span>
-                    <strong className={playbackBitPerfect ? 'is-good' : ''}>{artworkProcessing}</strong>
+                    <span>Source audio</span>
+                    <strong>{artworkDisplayFormat}</strong>
                   </div>
                   <div className="np-art-detail-list">
                     <div className="np-art-detail-row">
-                      <span>Format</span>
-                      <strong>{artworkDisplayFormat}</strong>
+                      <span>Resolution</span>
+                      <strong>{formatArtworkResolution(artworkSourceRate, artworkSourceBits)}</strong>
                     </div>
                     <div className="np-art-detail-row">
-                      <span>Source rate</span>
-                      <strong>{formatArtworkRate(artworkSourceRate)}</strong>
-                    </div>
-                    <div className="np-art-detail-row">
-                      <span>Output</span>
-                      <strong>{formatArtworkRate(artworkOutputRate)} · {formatArtworkChannels(artworkChannels)}</strong>
-                    </div>
-                    <div className="np-art-detail-row">
-                      <span>Route</span>
-                      <strong title={artworkRoute}>{artworkRoute}</strong>
+                      <span>Channels</span>
+                      <strong>{formatArtworkChannels(artworkSourceChannels)}</strong>
                     </div>
                     <div className="np-art-detail-row">
                       <span>Bitrate</span>
                       <strong>{artworkBitrate}</strong>
                     </div>
+                  </div>
+                </section>
+
+                <section className="np-art-detail-section" aria-label="Playback path details">
+                  <div className="np-art-detail-heading">
+                    <span>Playback path</span>
+                    <strong className={artworkBitPerfect ? 'is-good' : ''}>{artworkProcessing}</strong>
+                  </div>
+                  <div className="np-art-detail-list">
+                    <div className="np-art-detail-row">
+                      <span>Output</span>
+                      <strong>{artworkOutput}</strong>
+                    </div>
+                    <div className="np-art-detail-row">
+                      <span>Route</span>
+                      <strong title={artworkRoute}>{artworkRoute}</strong>
+                    </div>
+                    {liveAudioPath?.pipeline_sample_format && (
+                      <div className="np-art-detail-row">
+                        <span>Pipeline</span>
+                        <strong>{liveAudioPath.pipeline_sample_format.toUpperCase()}</strong>
+                      </div>
+                    )}
+                    {liveAudioPath && (
+                      <>
+                        <div className="np-art-detail-row">
+                          <span>Transforms</span>
+                          <strong>{liveAudioPath.active_transforms.join(', ') || 'None'}</strong>
+                        </div>
+                        <div className="np-art-detail-row">
+                          <span>Underruns</span>
+                          <strong className={liveAudioPath.underruns === 0 ? 'is-good' : 'is-warning'}>{liveAudioPath.underruns}</strong>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </section>
 
@@ -701,7 +841,7 @@ export function NowPlayingView() {
                   title="Inspect Full Signal Path (I)"
                 >
                   <Activity size={13} />
-                  <span>Signal Path & Telemetry</span>
+                  <span>Inspect signal path</span>
                 </button>
               </div>
             </div>
@@ -947,8 +1087,30 @@ export function NowPlayingView() {
             {current?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—')}
           </div>
         </div>
-        <div style={{ height: 60, width: '100%', flexShrink: 0, marginTop: 8 }}>
+        <div 
+          className="np-visualizer-container relative group transition-all duration-200 ease-out" 
+          style={{ 
+            height: visualizerExpanded ? 140 : 64, 
+            width: '100%', 
+            flexShrink: 0, 
+            marginTop: 8,
+            borderRadius: 8,
+            overflow: 'hidden'
+          }}
+        >
           <Visualizer />
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setVisualizerExpanded(!visualizerExpanded);
+            }}
+            className="absolute top-1 right-1 opacity-0 group-hover:opacity-75 hover:!opacity-100 p-1 rounded bg-black/40 text-white/80 hover:text-white transition-opacity z-10"
+            title={visualizerExpanded ? "Collapse Visualizer" : "Expand Visualizer"}
+            aria-label={visualizerExpanded ? "Collapse visualizer" : "Expand visualizer"}
+          >
+            {visualizerExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          </button>
         </div>
       </div>
 
