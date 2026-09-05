@@ -698,34 +698,40 @@ export function SettingsView() {
         <div className="settings-ctrl-card">
           <div className="settings-ctrl-header-row">
             <div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Theme Mode</span>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+              <div className="settings-ctrl-title">Theme Mode</div>
+              <div className="settings-ctrl-desc">
                 Switch between high-contrast Dark mode, crisp Light mode, or follow OS system preference.
               </div>
             </div>
-            <div className="theme-mode-segmented">
+            <div className="theme-mode-segmented" role="radiogroup" aria-label="Theme Mode">
               <button 
                 type="button"
+                role="radio"
+                aria-checked={colorScheme === 'dark'}
                 className={`theme-mode-option ${colorScheme === 'dark' ? 'active' : ''}`}
                 onClick={() => setColorScheme('dark')}
               >
-                <Moon size={13} />
+                <Moon size={14} strokeWidth={colorScheme === 'dark' ? 2 : 1.75} />
                 <span>Dark</span>
               </button>
               <button 
                 type="button"
+                role="radio"
+                aria-checked={colorScheme === 'light'}
                 className={`theme-mode-option ${colorScheme === 'light' ? 'active' : ''}`}
                 onClick={() => setColorScheme('light')}
               >
-                <Sun size={13} />
+                <Sun size={14} strokeWidth={colorScheme === 'light' ? 2 : 1.75} />
                 <span>Light</span>
               </button>
               <button 
                 type="button"
+                role="radio"
+                aria-checked={colorScheme === 'system'}
                 className={`theme-mode-option ${colorScheme === 'system' ? 'active' : ''}`}
                 onClick={() => setColorScheme('system')}
               >
-                <Laptop size={13} />
+                <Laptop size={14} strokeWidth={colorScheme === 'system' ? 2 : 1.75} />
                 <span>System</span>
               </button>
             </div>
