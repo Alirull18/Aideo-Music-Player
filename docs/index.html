@@ -26,10 +26,15 @@
           },
           "description": "A high-performance audiophile desktop music player for Windows. Features bit-perfect WASAPI Exclusive direct hardware output, 4,000+ AutoEQ headphone calibrations, real-time parametric biquad DSP, synchronized Romaji lyrics, and hybrid local/streaming playback.",
           "downloadUrl": "https://github.com/Alirull18/Aideo-Music-Player/releases/latest",
-          "releaseNotes": "https://github.com/Alirull18/Aideo-Music-Player/blob/main/README.md",
-          "softwareVersion": "0.9.6",
+          "releaseNotes": "https://github.com/Alirull18/Aideo-Music-Player/blob/main/docs/RELEASE_NOTES_v0.9.7.md",
+          "softwareVersion": "0.9.7",
           "featureList": [
             "WASAPI Exclusive bit-perfect audio output bypassing Windows mixer",
+            "True bit-perfect mode with complete DSP bypass, unity volume, and dither suppression",
+            "True gapless stream session pipeline with encoder delay and padding frame trimming",
+            "Studio Audio Visualizer Engine with 5 ballistic modes (Peak-decay bars, bilateral mirror, oscilloscope wave ribbon, radial orbit, phosphor LED dot-matrix)",
+            "Ballistic gravity physics for falling peak caps and ambient idle breathing resting waveform",
+            "Adaptive 64px compact and 140px panoramic visualizer stage with quick player bar toggle",
             "4,000+ AutoEQ headphone target curve calibrations",
             "5 & 10-Band real-time parametric biquad equalizer with Equalizer APO export",
             "Synchronized lyrics with 1-click Japanese Romaji transliteration and live translation",
@@ -136,13 +141,14 @@
         <a href="#top" class="brand-wrap">
             <img src="logo.png" alt="Aideo Logo" class="brand-icon">
             <span class="brand-text">AIDEO</span>
-            <span class="brand-version-pill">v0.9.6</span>
+            <span class="brand-version-pill">v0.9.7</span>
         </a>
         
         <div class="nav-links-cluster">
             <a href="#showcase" class="nav-item">Interface</a>
             <a href="#signal-path" class="nav-item">Signal Path</a>
             <a href="#features" class="nav-item">Features</a>
+            <a href="#visualizer" class="nav-item">Visualizer</a>
             <a href="#compare" class="nav-item">Comparison</a>
             <a href="#dsp-console" class="nav-item">Interactive EQ</a>
             <a href="#specs" class="nav-item">Specs</a>
@@ -162,7 +168,7 @@
         <header class="hero-wrapper">
             <div class="hero-chip-badge">
                 <span class="chip-status-dot"></span>
-                <span>Version 0.9.6 Released &bull; Bit-Perfect WASAPI Core</span>
+                <span>Version 0.9.7 &bull; Studio Visualizer Engine &bull; True Gapless Transport &bull; Bit-Perfect WASAPI</span>
             </div>
 
             <h1 class="hero-title-big">
@@ -171,13 +177,17 @@
             </h1>
 
             <p class="hero-tagline-text">
-                An audiophile desktop player engineered for Windows. Hardware-locked WASAPI Exclusive transport, 4,000+ AutoEQ headphone calibrations, real-time parametric DSP, synchronized Romaji lyrics, and hybrid lossless streaming.
+                An audiophile desktop player engineered for Windows. Hardware-locked WASAPI Exclusive transport, 5-mode studio visualizer with ballistic physics, 4,000+ AutoEQ headphone calibrations, real-time parametric DSP, and true gapless streaming.
             </p>
 
             <div class="hero-button-group">
                 <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn-glow-primary" id="hero-download-btn">
                     <i class="fab fa-windows"></i>
                     <span>Download for Windows (Free)</span>
+                </a>
+                <a href="#visualizer" class="btn-glass-secondary">
+                    <i class="fas fa-chart-simple"></i>
+                    <span>Test Live Visualizer</span>
                 </a>
                 <a href="#dsp-console" class="btn-glass-secondary">
                     <i class="fas fa-sliders"></i>
@@ -196,6 +206,7 @@
                         <div class="tab-pill-list">
                             <button class="mockup-tab-btn active" data-img="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461" data-name="Cinematic Fullscreen HUD" data-desc="Real-time timed LRC karaoke scrolling, Japanese Romaji transliteration, and ambient liquid backdrops.">✨ Fullscreen HUD</button>
                             <button class="mockup-tab-btn" data-img="https://github.com/user-attachments/assets/b1035ae9-7ae2-4d26-9fdd-810c5d82d02f" data-name="Aideo Lab: Pro DSP & EQ" data-desc="10-band parametric equalizer with 4,000+ AutoEQ headphone calibrations and gain protection.">🎛️ Pro DSP & EQ</button>
+                            <button class="mockup-tab-btn" data-img="https://github.com/user-attachments/assets/b9fd5154-604e-4538-8f22-9a19e0497461" data-name="Studio Audio Visualizer" data-desc="5 ballistic modes: Peak-decay bars, bilateral mirror, oscilloscope wave ribbon, radial orbit, and phosphor LED dots with idle breathing physics.">🌊 Studio Visualizer</button>
                             <button class="mockup-tab-btn" data-img="https://github.com/user-attachments/assets/71f7328e-5f57-4783-8df5-47194fc8dd98" data-name="Pristine Library Dashboard" data-desc="High-speed SQLite local indexing, locked-column virtualization, and high-res cover grids.">📚 Library Dashboard</button>
                             <button class="mockup-tab-btn" data-img="https://github.com/user-attachments/assets/0f7f7e51-3ed0-424e-8afe-067b8974faf8" data-name="AI Discovery Hub" data-desc="Personalized taste-weighted recommendations with anti-collision verification and zero video slop.">🌐 Discovery Hub</button>
                             <button class="mockup-tab-btn" data-img="https://github.com/user-attachments/assets/c92ca717-a53b-421c-a571-b77570c00f7f" data-name="Main Player Console" data-desc="Dynamic color-reactive interface, responsive track queues, and instant playback controls.">💎 Main Player View</button>
@@ -256,13 +267,13 @@
                     <p style="font-size: 0.92rem; color: var(--text-secondary);">Aideo bypasses all Windows software mixing matrices and streams directly to your DAC:</p>
                     <div class="signal-steps-flow">
                         <div class="signal-step-pill highlight-success"><span>1. Symphonia Codec Core</span><span>Pure 32-bit floating point</span></div>
-                        <div class="signal-step-pill highlight-success"><span>2. Real-Time Biquad DSP</span><span>64-bit precision math</span></div>
-                        <div class="signal-step-pill highlight-success"><span>3. Soft Gain Ramping</span><span>256-frame zero-click anti-pop</span></div>
+                        <div class="signal-step-pill highlight-success"><span>2. True Gapless Session</span><span>Sample-accurate delay trim</span></div>
+                        <div class="signal-step-pill highlight-success"><span>3. True Bit-Perfect Mode</span><span>Zero DSP bypass &amp; unity gain</span></div>
                         <div class="signal-step-pill highlight-success"><span>4. Hardware Clock Lock</span><span>Direct poll-thread transfer</span></div>
-                        <div class="signal-step-pill highlight-success"><span>5. Physical DAC Hardware</span><span>Pristine Original Sound</span></div>
+                        <div class="signal-step-pill highlight-success"><span>5. Physical DAC Hardware</span><span>Pristine Bit-for-Bit Output</span></div>
                     </div>
                     <div style="font-size: 0.85rem; color: var(--emerald); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 14px;">
-                        <strong>Result:</strong> Zero latency jitter (&lt;0.3ms), native sample rate locking, and pristine master clarity.
+                        <strong>Result:</strong> Bit-for-bit output (&lt;0.3ms jitter), zero gapless clicks, native sample rate locking, and true master clarity.
                     </div>
                 </div>
             </div>
@@ -274,7 +285,7 @@
                 <span class="section-tag">Feature Suite</span>
                 <h2 class="section-title-h2">Everything You Need for Pure Listening</h2>
                 <p class="section-sub-desc">
-                    From automated acoustic headphone calibration to synchronized lyrics and mobile remote control.
+                    From automated acoustic headphone calibration to hardware visualizers, true gapless streaming, and mobile remote control.
                 </p>
             </div>
 
@@ -308,7 +319,37 @@
                     </div>
                 </div>
 
-                <!-- Bento 3: Hybrid Library -->
+                <!-- Bento 3: Studio Audio Visualizer Engine -->
+                <div class="glass-feature-card bento-col-2">
+                    <div>
+                        <div class="feature-icon-badge"><i class="fas fa-chart-simple"></i></div>
+                        <h3>Studio Audio Visualizer &amp; Ballistic Physics Engine</h3>
+                        <p>Hardware-grade obsidian visualizer engine featuring 5 distinct styles: Studio Peak-Decay Bars, Bilateral Mirror Spectrum, Analog Oscilloscope Silk Ribbon, Radial Halo Orbit, and Phosphor LED Dot-Matrix. Powered by gravity-accelerated falling peak caps, smooth exponential pause decay, and an ambient breathing resting state at 0% idle CPU.</p>
+                    </div>
+                    <div class="feature-tags-list">
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> 5 Visualizer Styles</span>
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> Gravity Peak-Decay Caps</span>
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> Ambient Idle Breathing</span>
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> Adaptive 64px / 140px Stage</span>
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> 30 / 60 / 120 FPS Cap</span>
+                    </div>
+                </div>
+
+                <!-- Bento 4: True Gapless & Bit-Perfect Transport -->
+                <div class="glass-feature-card bento-col-1 cyan-accent">
+                    <div>
+                        <div class="feature-icon-badge"><i class="fas fa-bolt-lightning"></i></div>
+                        <h3>True Gapless &amp; Bit-Perfect</h3>
+                        <p>Experience seamless playback with sample-accurate encoder delay and padding frame trimming. Enforce strict bit-perfect streaming with complete DSP bypass, unity volume, and dither suppression.</p>
+                    </div>
+                    <div class="feature-tags-list">
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> Sample-Accurate Delay Trim</span>
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> Zero-Gap Album Flow</span>
+                        <span class="feature-tag-chip"><i class="fas fa-check"></i> Strict DSP Bypass</span>
+                    </div>
+                </div>
+
+                <!-- Bento 5: Hybrid Library -->
                 <div class="glass-feature-card bento-col-1 cyan-accent">
                     <div>
                         <div class="feature-icon-badge"><i class="fas fa-layer-group"></i></div>
@@ -322,7 +363,7 @@
                     </div>
                 </div>
 
-                <!-- Bento 4: 4 Home Layouts & 5 Player Bar Styles -->
+                <!-- Bento 6: 4 Home Layouts & 5 Player Bar Styles -->
                 <div class="glass-feature-card bento-col-2">
                     <div>
                         <div class="feature-icon-badge"><i class="fas fa-palette"></i></div>
@@ -336,7 +377,7 @@
                     </div>
                 </div>
 
-                <!-- Bento 5: Song Tag & Cover Art Editor -->
+                <!-- Bento 7: Song Tag & Cover Art Editor -->
                 <div class="glass-feature-card bento-col-2">
                     <div>
                         <div class="feature-icon-badge"><i class="fas fa-tags"></i></div>
@@ -350,7 +391,7 @@
                     </div>
                 </div>
 
-                <!-- Bento 6: DLNA Wireless Casting & Remote -->
+                <!-- Bento 8: DLNA Wireless Casting & Remote -->
                 <div class="glass-feature-card bento-col-1 cyan-accent">
                     <div>
                         <div class="feature-icon-badge"><i class="fas fa-tower-broadcast"></i></div>
@@ -361,6 +402,79 @@
                         <span class="feature-tag-chip"><i class="fas fa-check"></i> DLNA / UPnP Hi-Fi Casting</span>
                         <span class="feature-tag-chip"><i class="fas fa-check"></i> Mobile LAN Web Remote</span>
                         <span class="feature-tag-chip"><i class="fas fa-check"></i> Discord Status Sync</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECTION 2.5: Interactive Studio Audio Visualizer Sandbox -->
+        <section class="feature-section" id="visualizer">
+            <div class="section-head">
+                <span class="section-tag">Audio Telemetry &amp; Acoustics</span>
+                <h2 class="section-title-h2">Interactive Studio Visualizer Sandbox</h2>
+                <p class="section-sub-desc">
+                    Experience Aideo's hardware-inspired visualizer engine directly in your browser. Switch between all 5 visualizer modes, toggle playback to test gravity peak-decay physics and ambient idle breathing states, or expand to panoramic stage mode.
+                </p>
+            </div>
+
+            <div class="viz-rack-container">
+                <div class="viz-rack-header">
+                    <div class="viz-rack-title">
+                        <i class="fas fa-chart-simple" style="color: var(--accent-light);"></i>
+                        <span>STUDIO BALLISTIC VISUALIZER ENGINE</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <div style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--emerald); background: rgba(16, 185, 129, 0.1); padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid rgba(16, 185, 129, 0.25);">
+                            <i class="fas fa-microchip"></i> HIGH-DPI RETINA
+                        </div>
+                        <div style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--cyan-bright); background: rgba(6, 182, 212, 0.1); padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid rgba(6, 182, 212, 0.25);">
+                            0% IDLE EFFICIENCY
+                        </div>
+                    </div>
+                </div>
+
+                <div class="viz-controls-toolbar">
+                    <div class="viz-modes-row">
+                        <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-dim); margin-right: 4px;">STYLE:</span>
+                        <button class="viz-mode-pill active" data-mode="bars"><i class="fas fa-chart-column"></i> Peak Bars</button>
+                        <button class="viz-mode-pill" data-mode="mirror"><i class="fas fa-arrows-split-up-and-left"></i> Mirror</button>
+                        <button class="viz-mode-pill" data-mode="wave"><i class="fas fa-water"></i> Wave Ribbon</button>
+                        <button class="viz-mode-pill" data-mode="circle"><i class="fas fa-circle-notch"></i> Radial Orbit</button>
+                        <button class="viz-mode-pill" data-mode="dots"><i class="fas fa-braille"></i> LED Matrix</button>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <button id="viz-play-toggle" class="viz-btn-action playing" aria-label="Toggle Audio Playback Simulation">
+                            <i class="fas fa-pause"></i> <span>Audio Playing</span>
+                        </button>
+                        <button id="viz-stage-toggle" class="viz-mode-pill" aria-label="Toggle Stage Container Height">
+                            <i class="fas fa-expand"></i> <span>Expand Stage (160px)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="viz-stage-wrapper">
+                    <div class="viz-canvas-frame" id="viz-frame">
+                        <canvas id="interactive-viz-canvas" class="viz-canvas-element" title="Click anywhere on visualizer to cycle styles"></canvas>
+                    </div>
+
+                    <div class="viz-telemetry-strip">
+                        <div class="viz-telemetry-item">
+                            <span class="viz-telemetry-label">Active Mode</span>
+                            <span class="viz-telemetry-value" id="viz-readout-mode">Studio Peak-Decay Bars</span>
+                        </div>
+                        <div class="viz-telemetry-item">
+                            <span class="viz-telemetry-label">Audio &amp; Physics State</span>
+                            <span class="viz-telemetry-value" id="viz-readout-state" style="color: var(--emerald);">Simulating Active Stream</span>
+                        </div>
+                        <div class="viz-telemetry-item">
+                            <span class="viz-telemetry-label">Peak Ballistics</span>
+                            <span class="viz-telemetry-value">Gravity Drop (0.15px/frame)</span>
+                        </div>
+                        <div class="viz-telemetry-item">
+                            <span class="viz-telemetry-label">Render Pipeline</span>
+                            <span class="viz-telemetry-value" id="viz-readout-fps">60 FPS (Auto High-DPI)</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -468,6 +582,22 @@
                             <td><span class="badge-partial"><i class="fas fa-wrench"></i> Preset Skins</span></td>
                             <td><span class="badge-no"><i class="fas fa-times"></i> Fixed Theme</span></td>
                             <td><span class="badge-no"><i class="fas fa-times"></i> Fixed Theme</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Studio Audio Visualizer</strong></td>
+                            <td class="highlight-col"><span class="badge-yes"><i class="fas fa-check-circle"></i> 5 Modes + Ballistics</span></td>
+                            <td><span class="badge-partial"><i class="fas fa-plug"></i> Via Plugin</span></td>
+                            <td><span class="badge-partial"><i class="fas fa-minus"></i> Basic Spectrum</span></td>
+                            <td><span class="badge-no"><i class="fas fa-times"></i> Static Waveform</span></td>
+                            <td><span class="badge-no"><i class="fas fa-times"></i> No</span></td>
+                        </tr>
+                        <tr>
+                            <td><strong>True Gapless Stream Sessions</strong></td>
+                            <td class="highlight-col"><span class="badge-yes"><i class="fas fa-check-circle"></i> Delay &amp; Padding Trimmed</span></td>
+                            <td><span class="badge-yes"><i class="fas fa-check"></i> Built-in</span></td>
+                            <td><span class="badge-yes"><i class="fas fa-check"></i> Built-in</span></td>
+                            <td><span class="badge-yes"><i class="fas fa-check"></i> Built-in</span></td>
+                            <td><span class="badge-partial"><i class="fas fa-minus"></i> Crossfade / Gapless</span></td>
                         </tr>
                         <tr>
                             <td><strong>Pricing &amp; License</strong></td>
@@ -652,6 +782,16 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
                                 <td>SQLite Virtualized Tables</td>
                                 <td style="font-family: var(--font-mono); color: var(--accent-light); font-weight: 700;">50k Tracks &lt; 80ms</td>
                             </tr>
+                            <tr>
+                                <td style="font-weight: 700; color: #fff;">Visualizer Render Pipeline</td>
+                                <td>High-DPI Canvas &amp; RAF Ballistics</td>
+                                <td style="font-family: var(--font-mono); color: var(--accent-light); font-weight: 700;">60 / 120 FPS Cap</td>
+                            </tr>
+                            <tr>
+                                <td style="font-weight: 700; color: #fff;">Gapless Stream Trimming</td>
+                                <td>Container Delay / Padding Pruning</td>
+                                <td style="font-family: var(--font-mono); color: var(--accent-light); font-weight: 700;">0ms Sample-Exact</td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -774,6 +914,28 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
                         Desktop Lyrics HUD creates a transparent, floating lyric bar on top of all Windows applications. Pressing <code>Alt + L</code> locks the HUD in click-through mode, allowing you to click games and work windows underneath without interruption.
                     </div>
                 </div>
+
+                <!-- FAQ 9 -->
+                <div class="faq-card-item">
+                    <button class="faq-question-btn">
+                        <span>What visualizer styles does Aideo include and how do they impact performance?</span>
+                        <i class="fas fa-chevron-down faq-chevron-icon"></i>
+                    </button>
+                    <div class="faq-answer-content">
+                        Aideo includes 5 bespoke visualizer modes adhering to its Dark Obsidian Studio aesthetic: Studio Peak-Decay Bars (with gravity-governed falling peak caps), Bilateral Mirror Spectrum, Analog Oscilloscope Silk Ribbon, Radial Halo Orbit, and Phosphor LED Dot-Matrix. The engine renders on hardware-accelerated HTML5 Canvas with High-DPI auto-scaling. When playback is paused or stopped, audio decays exponentially into an ambient breathing resting state, automatically cutting CPU/GPU usage to 0%. Users can also select 30/60/120 FPS caps or low-spec mode in Settings.
+                    </div>
+                </div>
+
+                <!-- FAQ 10 -->
+                <div class="faq-card-item">
+                    <button class="faq-question-btn">
+                        <span>How does Aideo achieve True Gapless playback and Bit-Perfect transport?</span>
+                        <i class="fas fa-chevron-down faq-chevron-icon"></i>
+                    </button>
+                    <div class="faq-answer-content">
+                        Aideo eliminates audible gap clicks and micro-pauses by parsing audio container metadata (such as iTunSMPB) and truncating encoder delay and padding frames with sample accuracy. Paired with monotonic clock smoothing, continuous live albums and symphony movements stream seamlessly. In True Bit-Perfect Mode, all DSP modules (EQ, crossfeed, pitch, limiter) are fully bypassed with unity 1.0 digital volume and dither suppression for uncolored bit-for-bit delivery.
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -788,10 +950,21 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
             </div>
 
             <div class="timeline-list-wrapper">
-                <!-- v0.9.6 Live -->
+                <!-- v0.9.7 Live -->
                 <div class="timeline-entry-card live-version">
                     <div class="timeline-badge-bar">
-                        <span class="timeline-version-tag">v0.9.6 (Live)</span>
+                        <span class="timeline-version-tag">v0.9.7 (Live)</span>
+                        <span class="timeline-card-title">Studio Visualizer Engine, True Gapless &amp; Theater Mode Archetypes</span>
+                    </div>
+                    <p class="timeline-card-desc">
+                        Overhauled Studio Audio Visualizer with 5 hardware-inspired modes (Peak-decay bars with ballistic gravity physics, bilateral mirror spectrum, oscilloscope silk ribbon, radial orbit, and phosphor LED dot-matrix) and ambient idle breathing, True Gapless stream sessions with sample-accurate encoder delay and padding trimming, True Bit-Perfect mode with complete DSP bypass, 5 full-screen Theater Mode themes, real-time Audio Telemetry &amp; Signal Path Inspector, silky-smooth 60fps karaoke lyrics, and lossless Qobuz and Tidal streaming.
+                    </p>
+                </div>
+
+                <!-- v0.9.6 -->
+                <div class="timeline-entry-card">
+                    <div class="timeline-badge-bar">
+                        <span class="timeline-version-tag">v0.9.6</span>
                         <span class="timeline-card-title">Audiophile DSP Engine, Surround Silence &amp; Concurrency Hardening</span>
                     </div>
                     <p class="timeline-card-desc">
@@ -1309,6 +1482,414 @@ Filter 5: ON PK Fc 8000 Hz Gain 0.0 dB Q 0.70</pre>
                 parent.classList.toggle("open");
             });
         });
+
+        // ==========================================================================
+        // Interactive Studio Audio Visualizer Simulator
+        // ==========================================================================
+        const vizCanvas = document.getElementById("interactive-viz-canvas");
+        const vizFrame = document.getElementById("viz-frame");
+        const vizPlayBtn = document.getElementById("viz-play-toggle");
+        const vizStageBtn = document.getElementById("viz-stage-toggle");
+        const vizModePills = document.querySelectorAll(".viz-mode-pill[data-mode]");
+        const vizReadoutMode = document.getElementById("viz-readout-mode");
+        const vizReadoutState = document.getElementById("viz-readout-state");
+
+        if (vizCanvas) {
+            const vizCtx = vizCanvas.getContext("2d");
+            let vizCurrentMode = "bars";
+            let vizIsPlaying = true;
+            let vizExpanded = false;
+
+            const VIZ_NUM_BANDS = 64;
+            const vizBands = new Array(VIZ_NUM_BANDS).fill(0);
+            const vizSmoothed = new Array(VIZ_NUM_BANDS).fill(0);
+            const vizPeaks = new Array(VIZ_NUM_BANDS).fill(0);
+            const vizPeakHold = new Array(VIZ_NUM_BANDS).fill(0);
+            const vizPeakVel = new Array(VIZ_NUM_BANDS).fill(0);
+
+            const vizProfile = { smooth: 0.20, gravity: 0.15, hold: 12 };
+            const MODE_NAMES = {
+                bars: "Studio Peak-Decay Bars",
+                mirror: "Bilateral Mirror Spectrum",
+                wave: "Analog Oscilloscope Silk Ribbon",
+                circle: "Radial Halo Orbit",
+                dots: "Phosphor LED Dot-Matrix"
+            };
+
+            let vizWidth = 600;
+            let vizHeight = 100;
+
+            function resizeVizCanvas() {
+                const rect = vizCanvas.getBoundingClientRect();
+                vizWidth = rect.width || 600;
+                vizHeight = rect.height || 100;
+                const dpr = window.devicePixelRatio || 1;
+                vizCanvas.width = Math.round(vizWidth * dpr);
+                vizCanvas.height = Math.round(vizHeight * dpr);
+                vizCtx.setTransform(1, 0, 0, 1, 0, 0);
+                vizCtx.scale(dpr, dpr);
+            }
+
+            resizeVizCanvas();
+            window.addEventListener("resize", resizeVizCanvas);
+
+            const vizResizeObserver = new ResizeObserver(() => {
+                resizeVizCanvas();
+            });
+            if (vizCanvas.parentElement) vizResizeObserver.observe(vizCanvas.parentElement);
+
+            function updateSimulation() {
+                const t = Date.now() / 1000;
+                if (vizIsPlaying) {
+                    const kick = Math.pow(Math.max(0, Math.sin(t * 4.2)), 5);
+                    const snare = Math.pow(Math.max(0, Math.sin(t * 4.2 + 1.57)), 8);
+                    for (let i = 0; i < VIZ_NUM_BANDS; i++) {
+                        const freqNorm = i / VIZ_NUM_BANDS;
+                        const bass = Math.max(0, 1 - freqNorm * 1.5) * (0.35 + kick * 0.65);
+                        const mid = Math.sin(t * 5.5 + i * 0.28) * 0.3 * (1 - Math.abs(freqNorm - 0.45));
+                        const high = Math.sin(t * 11 + i * 0.75) * 0.22 * freqNorm;
+                        const snareHit = (i >= 12 && i <= 36) ? snare * 0.45 : 0;
+                        const noise = (Math.sin(t * 18 + i * 3.1) * 0.5 + 0.5) * 0.12;
+                        vizBands[i] = Math.max(0.04, Math.min(0.98, bass + mid + high + snareHit + noise));
+                    }
+
+                    for (let i = 0; i < VIZ_NUM_BANDS; i++) {
+                        const target = vizBands[i];
+                        vizSmoothed[i] += (target - vizSmoothed[i]) * vizProfile.smooth;
+                        if (vizSmoothed[i] > vizPeaks[i]) {
+                            vizPeaks[i] = vizSmoothed[i];
+                            vizPeakHold[i] = vizProfile.hold;
+                            vizPeakVel[i] = 0;
+                        } else if (vizPeakHold[i] > 0) {
+                            vizPeakHold[i]--;
+                        } else {
+                            vizPeakVel[i] += vizProfile.gravity;
+                            vizPeaks[i] = Math.max(0, vizPeaks[i] - vizPeakVel[i]);
+                        }
+                    }
+                } else {
+                    let allNearZero = true;
+                    for (let i = 0; i < VIZ_NUM_BANDS; i++) {
+                        vizSmoothed[i] *= 0.88;
+                        vizPeaks[i] *= 0.88;
+                        if (vizSmoothed[i] >= 0.005) allNearZero = false;
+                    }
+                    if (vizReadoutState) {
+                        vizReadoutState.textContent = allNearZero ? "Ambient Idle Breath (0% CPU)" : "Decaying Audio Falloff";
+                        vizReadoutState.style.color = allNearZero ? "var(--cyan-bright)" : "var(--accent-light)";
+                    }
+                }
+            }
+
+            function renderViz() {
+                updateSimulation();
+                vizCtx.clearRect(0, 0, vizWidth, vizHeight);
+                vizCtx.shadowBlur = 0;
+
+                const isAmbient = !vizIsPlaying && vizSmoothed.every(v => v < 0.005);
+                const accent = "#a855f7";
+
+                if (isAmbient) {
+                    const breath = 0.2 + 0.1 * Math.sin(Date.now() / 1200);
+                    if (vizCurrentMode === "circle") {
+                        const r = Math.min(vizWidth, vizHeight) * 0.32;
+                        vizCtx.beginPath();
+                        vizCtx.arc(vizWidth / 2, vizHeight / 2, r, 0, Math.PI * 2);
+                        vizCtx.lineWidth = 1.5;
+                        vizCtx.strokeStyle = accent;
+                        vizCtx.globalAlpha = breath;
+                        vizCtx.stroke();
+                        vizCtx.globalAlpha = 1.0;
+                    } else if (vizCurrentMode === "mirror" || vizCurrentMode === "wave") {
+                        const cy = vizHeight / 2;
+                        vizCtx.beginPath();
+                        vizCtx.moveTo(0, cy);
+                        vizCtx.lineTo(vizWidth, cy);
+                        vizCtx.lineWidth = 1.5;
+                        vizCtx.strokeStyle = accent;
+                        vizCtx.globalAlpha = breath;
+                        vizCtx.stroke();
+                        vizCtx.globalAlpha = 1.0;
+                    } else {
+                        vizCtx.beginPath();
+                        vizCtx.moveTo(0, vizHeight - 1);
+                        vizCtx.lineTo(vizWidth, vizHeight - 1);
+                        vizCtx.lineWidth = 1.5;
+                        vizCtx.strokeStyle = accent;
+                        vizCtx.globalAlpha = breath;
+                        vizCtx.stroke();
+                        vizCtx.globalAlpha = 1.0;
+                    }
+                    requestAnimationFrame(renderViz);
+                    return;
+                }
+
+                if (vizCurrentMode === "bars") {
+                    const numBars = 64;
+                    const barW = (vizWidth / numBars) * 0.78;
+                    const gap = (vizWidth / numBars) * 0.22;
+                    vizCtx.shadowBlur = 10;
+                    vizCtx.shadowColor = accent;
+
+                    for (let i = 0; i < numBars; i++) {
+                        const val = vizSmoothed[i] * vizHeight * 0.82;
+                        const x = i * (barW + gap);
+                        const y = vizHeight - val;
+
+                        const grad = vizCtx.createLinearGradient(x, y, x, vizHeight);
+                        grad.addColorStop(0, "#ffffff");
+                        grad.addColorStop(0.25, accent);
+                        grad.addColorStop(1, "rgba(168, 85, 247, 0.08)");
+                        vizCtx.fillStyle = grad;
+
+                        if (val > 0) {
+                            const cr = Math.min(3, barW / 2, val / 2);
+                            vizCtx.beginPath();
+                            if (typeof vizCtx.roundRect === "function") {
+                                vizCtx.roundRect(x, y, barW, val, [cr, cr, 0, 0]);
+                            } else {
+                                vizCtx.rect(x, y, barW, val);
+                            }
+                            vizCtx.fill();
+                        }
+
+                        const peakH = vizPeaks[i] * vizHeight * 0.82;
+                        if (peakH > 2) {
+                            vizCtx.fillStyle = "#fbbf24";
+                            vizCtx.fillRect(x, Math.max(0, vizHeight - peakH - 2), barW, 2);
+                        }
+                    }
+
+                    vizCtx.beginPath();
+                    vizCtx.moveTo(0, vizHeight - 1);
+                    vizCtx.lineTo(vizWidth, vizHeight - 1);
+                    vizCtx.lineWidth = 1;
+                    vizCtx.strokeStyle = accent;
+                    vizCtx.globalAlpha = 0.35;
+                    vizCtx.stroke();
+                    vizCtx.globalAlpha = 1.0;
+
+                } else if (vizCurrentMode === "mirror") {
+                    const numBars = 64;
+                    const barW = (vizWidth / numBars) * 0.78;
+                    const gap = (vizWidth / numBars) * 0.22;
+                    const cy = vizHeight / 2;
+                    vizCtx.shadowBlur = 10;
+                    vizCtx.shadowColor = accent;
+
+                    for (let i = 0; i < numBars; i++) {
+                        const dist = Math.abs(i - 31.5);
+                        const bandIdx = Math.min(63, Math.floor(dist * 2));
+                        const val = vizSmoothed[bandIdx] * (vizHeight / 2) * 0.82;
+                        const x = i * (barW + gap);
+                        const topY = cy - val;
+                        const barH = Math.max(0, val * 2);
+
+                        const grad = vizCtx.createLinearGradient(0, topY, 0, topY + barH);
+                        grad.addColorStop(0, "#06b6d4");
+                        grad.addColorStop(0.5, accent);
+                        grad.addColorStop(1, "#c084fc");
+                        vizCtx.fillStyle = grad;
+
+                        if (barH > 0) {
+                            vizCtx.beginPath();
+                            if (typeof vizCtx.roundRect === "function") {
+                                vizCtx.roundRect(x, topY, barW, barH, [2, 2, 2, 2]);
+                            } else {
+                                vizCtx.rect(x, topY, barW, barH);
+                            }
+                            vizCtx.fill();
+                        }
+
+                        const peakH = vizPeaks[bandIdx] * (vizHeight / 2) * 0.82;
+                        if (peakH > 2) {
+                            vizCtx.fillStyle = "#fbbf24";
+                            vizCtx.fillRect(x, Math.max(0, cy - peakH - 2), barW, 2);
+                            vizCtx.fillRect(x, Math.min(vizHeight - 2, cy + peakH), barW, 2);
+                        }
+                    }
+
+                    vizCtx.beginPath();
+                    vizCtx.moveTo(0, cy);
+                    vizCtx.lineTo(vizWidth, cy);
+                    vizCtx.lineWidth = 1;
+                    vizCtx.strokeStyle = accent;
+                    vizCtx.globalAlpha = 0.25;
+                    vizCtx.stroke();
+                    vizCtx.globalAlpha = 1.0;
+
+                } else if (vizCurrentMode === "wave") {
+                    const cy = vizHeight / 2;
+                    const numPoints = 64;
+                    const tf = Date.now() / 240;
+                    const pts = [];
+                    vizCtx.shadowBlur = 14;
+                    vizCtx.shadowColor = accent;
+
+                    for (let i = 0; i < numPoints; i++) {
+                        const x = (i / (numPoints - 1)) * vizWidth;
+                        const sineF = Math.sin((i / (numPoints - 1)) * Math.PI * 4 + tf);
+                        const val = vizSmoothed[i] || 0;
+                        const waveH = val * (vizHeight * 0.42) * sineF;
+                        pts.push({ x, y: cy + waveH });
+                    }
+
+                    vizCtx.beginPath();
+                    vizCtx.moveTo(pts[0].x, pts[0].y);
+                    for (let i = 0; i < pts.length - 1; i++) {
+                        const xc = (pts[i].x + pts[i + 1].x) / 2;
+                        const yc = (pts[i].y + pts[i + 1].y) / 2;
+                        vizCtx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+                    }
+                    vizCtx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                    vizCtx.lineTo(vizWidth, vizHeight);
+                    vizCtx.lineTo(0, vizHeight);
+                    vizCtx.closePath();
+
+                    const areaG = vizCtx.createLinearGradient(0, cy, 0, vizHeight);
+                    areaG.addColorStop(0, "rgba(168, 85, 247, 0.15)");
+                    areaG.addColorStop(1, "rgba(0,0,0,0)");
+                    vizCtx.fillStyle = areaG;
+                    vizCtx.fill();
+
+                    vizCtx.beginPath();
+                    vizCtx.moveTo(pts[0].x, pts[0].y);
+                    for (let i = 0; i < pts.length - 1; i++) {
+                        const xc = (pts[i].x + pts[i + 1].x) / 2;
+                        const yc = (pts[i].y + pts[i + 1].y) / 2;
+                        vizCtx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+                    }
+                    vizCtx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                    vizCtx.lineWidth = 2.5;
+                    const strokeG = vizCtx.createLinearGradient(0, 0, vizWidth, 0);
+                    strokeG.addColorStop(0, "#c084fc");
+                    strokeG.addColorStop(0.5, accent);
+                    strokeG.addColorStop(1, "#38bdf8");
+                    vizCtx.strokeStyle = strokeG;
+                    vizCtx.stroke();
+
+                } else if (vizCurrentMode === "circle") {
+                    const cx = vizWidth / 2;
+                    const cy = vizHeight / 2;
+                    const minDim = Math.min(vizWidth, vizHeight);
+                    const baseR = minDim * 0.34;
+                    const numSpokes = vizHeight <= 100 ? 32 : 64;
+                    vizCtx.shadowBlur = 12;
+                    vizCtx.shadowColor = accent;
+                    vizCtx.lineCap = "round";
+                    const spokeW = Math.max(2, ((Math.PI * 2 * baseR) / numSpokes) * 0.45);
+                    vizCtx.lineWidth = spokeW;
+
+                    for (let i = 0; i < numSpokes; i++) {
+                        const bIdx = Math.floor((i / numSpokes) * 64);
+                        const val = vizSmoothed[bIdx] || 0;
+                        const angle = (i / numSpokes) * Math.PI * 2 - Math.PI / 2;
+                        const spokeLen = val * (minDim * 0.38);
+                        const x1 = cx + Math.cos(angle) * baseR;
+                        const y1 = cy + Math.sin(angle) * baseR;
+                        const x2 = cx + Math.cos(angle) * (baseR + spokeLen);
+                        const y2 = cy + Math.sin(angle) * (baseR + spokeLen);
+
+                        vizCtx.beginPath();
+                        vizCtx.moveTo(x1, y1);
+                        vizCtx.lineTo(x2, y2);
+                        vizCtx.strokeStyle = i % 2 === 0 ? accent : "#06b6d4";
+                        vizCtx.stroke();
+                    }
+
+                    vizCtx.beginPath();
+                    vizCtx.arc(cx, cy, baseR, 0, Math.PI * 2);
+                    vizCtx.lineWidth = 1.5;
+                    vizCtx.strokeStyle = "rgba(255,255,255,0.2)";
+                    vizCtx.stroke();
+
+                } else if (vizCurrentMode === "dots") {
+                    const numCols = 32;
+                    const dotsPerCol = vizHeight <= 100 ? 8 : 14;
+                    const colW = vizWidth / numCols;
+                    const dotSize = Math.min(6, colW * 0.45);
+                    const gapY = (vizHeight - 12) / dotsPerCol;
+
+                    for (let c = 0; c < numCols; c++) {
+                        const bIdx = Math.floor((c / numCols) * 64);
+                        const val = vizSmoothed[bIdx] || 0;
+                        const litCount = Math.floor(val * dotsPerCol);
+                        const peakCount = Math.floor(vizPeaks[bIdx] * dotsPerCol);
+                        const x = c * colW + colW / 2;
+
+                        for (let d = 0; d < dotsPerCol; d++) {
+                            const y = vizHeight - 8 - d * gapY;
+                            const isLit = d < litCount;
+                            const isPeak = d === peakCount && peakCount > 0;
+
+                            vizCtx.beginPath();
+                            vizCtx.arc(x, y, dotSize / 2, 0, Math.PI * 2);
+
+                            if (isPeak) {
+                                vizCtx.fillStyle = "#fbbf24";
+                                vizCtx.shadowBlur = 8;
+                                vizCtx.shadowColor = "#fbbf24";
+                            } else if (isLit) {
+                                vizCtx.fillStyle = d > dotsPerCol * 0.75 ? "#f87171" : d > dotsPerCol * 0.5 ? "#fbbf24" : accent;
+                                vizCtx.shadowBlur = 6;
+                                vizCtx.shadowColor = accent;
+                            } else {
+                                vizCtx.fillStyle = "rgba(255, 255, 255, 0.05)";
+                                vizCtx.shadowBlur = 0;
+                            }
+                            vizCtx.fill();
+                        }
+                    }
+                }
+
+                requestAnimationFrame(renderViz);
+            }
+
+            function setVizMode(mode) {
+                vizCurrentMode = mode;
+                vizModePills.forEach(p => p.classList.toggle("active", p.dataset.mode === mode));
+                if (vizReadoutMode) vizReadoutMode.textContent = MODE_NAMES[mode] || mode;
+            }
+
+            vizModePills.forEach(pill => {
+                pill.addEventListener("click", () => {
+                    setVizMode(pill.dataset.mode);
+                });
+            });
+
+            vizCanvas.addEventListener("click", () => {
+                const modes = ["bars", "mirror", "wave", "circle", "dots"];
+                const nextIdx = (modes.indexOf(vizCurrentMode) + 1) % modes.length;
+                setVizMode(modes[nextIdx]);
+            });
+
+            if (vizPlayBtn) {
+                vizPlayBtn.addEventListener("click", () => {
+                    vizIsPlaying = !vizIsPlaying;
+                    vizPlayBtn.classList.toggle("playing", vizIsPlaying);
+                    vizPlayBtn.innerHTML = vizIsPlaying 
+                        ? '<i class="fas fa-pause"></i> <span>Audio Playing</span>' 
+                        : '<i class="fas fa-play"></i> <span>Audio Paused</span>';
+                    if (vizReadoutState) {
+                        vizReadoutState.textContent = vizIsPlaying ? "Simulating Active Stream" : "Decaying Audio Falloff";
+                        vizReadoutState.style.color = vizIsPlaying ? "var(--emerald)" : "var(--accent-light)";
+                    }
+                });
+            }
+
+            if (vizStageBtn && vizFrame) {
+                vizStageBtn.addEventListener("click", () => {
+                    vizExpanded = !vizExpanded;
+                    vizFrame.classList.toggle("expanded", vizExpanded);
+                    vizStageBtn.innerHTML = vizExpanded 
+                        ? '<i class="fas fa-compress"></i> <span>Compact (100px)</span>' 
+                        : '<i class="fas fa-expand"></i> <span>Expand Stage (160px)</span>';
+                    setTimeout(resizeVizCanvas, 360);
+                });
+            }
+
+            requestAnimationFrame(renderViz);
+        }
 
         // Initialize EQ Graph on load
         drawCurve();

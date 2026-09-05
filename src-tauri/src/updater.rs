@@ -29,6 +29,30 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
+fn select_update_assets(assets: &[GithubAsset]) -> Option<(String, Option<String>)> {
+    let installers = assets.iter().filter(|asset| {
+        let name = asset.name.to_ascii_lowercase();
+        name.ends_with(".exe") || name.ends_with(".msi")
+    });
+
+    let first_installer = installers.clone().next()?;
+    for installer in installers {
+        let sha256_name = format!("{}.sha256", installer.name);
+        let sha256sum_name = format!("{}.sha256sum", installer.name);
+        if let Some(checksum) = assets.iter().find(|asset| {
+            asset.name.eq_ignore_ascii_case(&sha256_name)
+                || asset.name.eq_ignore_ascii_case(&sha256sum_name)
+        }) {
+            return Some((
+                installer.browser_download_url.clone(),
+                Some(checksum.browser_download_url.clone()),
+            ));
+        }
+    }
+
+    Some((first_installer.browser_download_url.clone(), None))
+}
+
 fn is_newer(remote: &str, local: &str) -> bool {
     let parse = |v: &str| -> (u32, u32, u32) {
         let clean = v.trim_start_matches('v').split('-').next().unwrap_or(v);
@@ -64,7 +88,7 @@ pub async fn check_update(app_handle: tauri::AppHandle) -> Result<UpdateResponse
     let current_version = app_handle.package_info().version.to_string();
     let client = crate::get_http_client();
     let url = "https://api.github.com/repos/Alirull18/Aideo-Music-Player/releases/latest";
-    
+
     let res = client
         .get(url)
         .header(USER_AGENT, format!("AideoMusicPlayer/{}", current_version))
@@ -75,27 +99,13 @@ pub async fn check_update(app_handle: tauri::AppHandle) -> Result<UpdateResponse
     let release: GithubRelease = res.json().await.map_err(|e| e.to_string())?;
 
     let remote_version = release.tag_name.trim_start_matches('v').to_string();
-    
-    if is_newer(&remote_version, &current_version) {
-        let mut download_url = None;
-        let mut sha256_url = None;
-        
-        for asset in &release.assets {
-            if asset.name.ends_with(".exe") || asset.name.ends_with(".msi") {
-                if download_url.is_none() {
-                    download_url = Some(asset.browser_download_url.clone());
-                }
-            }
-            if asset.name.ends_with(".sha256") || asset.name.ends_with(".sha256sum") {
-                sha256_url = Some(asset.browser_download_url.clone());
-            }
-        }
 
-        if let Some(url) = download_url {
+    if is_newer(&remote_version, &current_version) {
+        if let Some((download_url, sha256_url)) = select_update_assets(&release.assets) {
             return Ok(UpdateResponse {
                 available: true,
                 version: remote_version,
-                download_url: url,
+                download_url,
                 body: release.body,
                 sha256_url,
             });
@@ -114,29 +124,55 @@ pub async fn check_update(app_handle: tauri::AppHandle) -> Result<UpdateResponse
 #[tauri::command]
 pub async fn download_and_install(
     url: String,
-    expected_sha256: Option<String>,
+    sha256_url: Option<String>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     if !is_trusted_github_url(&url) {
-        return Err("Untrusted update URL domain: updates must originate from official GitHub releases.".to_string());
+        return Err(
+            "Untrusted update URL domain: updates must originate from official GitHub releases."
+                .to_string(),
+        );
+    }
+
+    let sha256_url = sha256_url.ok_or_else(|| {
+        "Mandatory SHA256 checksum missing: installation aborted for security.".to_string()
+    })?;
+    if !is_trusted_github_url(&sha256_url) {
+        return Err("Untrusted checksum URL domain: checksums must originate from official GitHub releases.".to_string());
     }
 
     let client = crate::get_http_client();
+    let checksum_res = client
+        .get(&sha256_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download SHA256 checksum: {}", e))?;
+    if !checksum_res.status().is_success() {
+        return Err(format!(
+            "SHA256 checksum download failed with status: {}",
+            checksum_res.status()
+        ));
+    }
+    let expected_sha256 = checksum_res
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read SHA256 checksum: {}", e))?;
+
     let mut res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !res.status().is_success() {
         return Err(format!("Download failed with status: {}", res.status()));
     }
-    
+
     let is_msi = url.to_lowercase().ends_with(".msi");
     let ext = if is_msi { "msi" } else { "exe" };
-    
+
     let mut temp_file_path = env::temp_dir();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     temp_file_path.push(format!("aideo_installer_{}.{}", timestamp, ext));
-    
+
     let mut file = File::create(&temp_file_path)
         .await
         .map_err(|e| e.to_string())?;
@@ -151,11 +187,11 @@ pub async fn download_and_install(
     drop(file);
 
     let actual_hash = hex::encode(hasher.finalize());
-    if let Err(e) = validate_sha256_checksum(expected_sha256.as_deref(), &actual_hash) {
+    if let Err(e) = validate_sha256_checksum(Some(&expected_sha256), &actual_hash) {
         let _ = tokio::fs::remove_file(&temp_file_path).await;
         return Err(e);
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -196,14 +232,20 @@ pub async fn download_and_install(
     }
 
     app_handle.exit(0);
-    
+
     Ok(())
 }
 
 /// Extract the hash token from a `.sha256` sidecar string.
 /// Sidecars are typically "<hash>  <filename>\n"; bare hashes also accepted.
 pub fn extract_sha256_token(sidecar: &str) -> String {
-    sidecar.trim().to_lowercase().split_whitespace().next().unwrap_or("").to_string()
+    sidecar
+        .trim()
+        .to_lowercase()
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Validate that a remote SHA256 token is valid and matches the actual computed SHA256 hex digest.
@@ -213,7 +255,10 @@ pub fn validate_sha256_checksum(expected: Option<&str>, actual: &str) -> Result<
     })?;
     let expected_clean = extract_sha256_token(expected_str);
     if expected_clean.len() != 64 || !expected_clean.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err("Mandatory SHA256 checksum missing or malformed: installation aborted for security.".to_string());
+        return Err(
+            "Mandatory SHA256 checksum missing or malformed: installation aborted for security."
+                .to_string(),
+        );
     }
 
     let actual_clean = actual.trim().to_lowercase();
@@ -241,9 +286,15 @@ mod tests {
 
     #[test]
     fn test_is_trusted_github_url() {
-        assert!(is_trusted_github_url("https://github.com/Alirul/Aideo-Music-Player/releases/download/v0.9.4/aideo.exe"));
-        assert!(is_trusted_github_url("https://objects.githubusercontent.com/github-production-release-asset/123"));
-        assert!(!is_trusted_github_url("https://malicious-domain.com/setup.exe"));
+        assert!(is_trusted_github_url(
+            "https://github.com/Alirul/Aideo-Music-Player/releases/download/v0.9.4/aideo.exe"
+        ));
+        assert!(is_trusted_github_url(
+            "https://objects.githubusercontent.com/github-production-release-asset/123"
+        ));
+        assert!(!is_trusted_github_url(
+            "https://malicious-domain.com/setup.exe"
+        ));
         assert!(!is_trusted_github_url("http://github.com/insecure"));
     }
 
@@ -257,9 +308,38 @@ mod tests {
     }
 
     #[test]
+    fn test_select_update_assets_pairs_installer_with_its_own_checksum() {
+        let assets = vec![
+            GithubAsset {
+                name: "Aideo_0.9.8_x64_en-US.msi".to_string(),
+                browser_download_url: "https://github.com/example/aideo.msi".to_string(),
+            },
+            GithubAsset {
+                name: "Aideo_0.9.8_x64-setup.exe".to_string(),
+                browser_download_url: "https://github.com/example/aideo.exe".to_string(),
+            },
+            GithubAsset {
+                name: "Aideo_0.9.8_x64-setup.exe.sha256".to_string(),
+                browser_download_url: "https://github.com/example/aideo.exe.sha256".to_string(),
+            },
+        ];
+
+        let selected =
+            select_update_assets(&assets).expect("a verified installer should be selected");
+        assert_eq!(selected.0, "https://github.com/example/aideo.exe");
+        assert_eq!(
+            selected.1.as_deref(),
+            Some("https://github.com/example/aideo.exe.sha256")
+        );
+    }
+
+    #[test]
     fn test_extract_sha256_token_sidecar_with_filename() {
         let hash = "a".repeat(64);
-        assert_eq!(extract_sha256_token(&format!("{}  aideo_0.9.5_x64.exe\n", hash)), hash);
+        assert_eq!(
+            extract_sha256_token(&format!("{}  aideo_0.9.5_x64.exe\n", hash)),
+            hash
+        );
     }
 
     #[test]
@@ -271,7 +351,10 @@ mod tests {
     #[test]
     fn test_extract_sha256_token_uppercase_normalized() {
         let hash = "C".repeat(64);
-        assert_eq!(extract_sha256_token(&format!("{}  file.msi", hash)), hash.to_lowercase());
+        assert_eq!(
+            extract_sha256_token(&format!("{}  file.msi", hash)),
+            hash.to_lowercase()
+        );
     }
 
     #[test]
@@ -336,5 +419,3 @@ mod tests {
         assert!(res.unwrap_err().contains("checksum mismatch"));
     }
 }
-
-

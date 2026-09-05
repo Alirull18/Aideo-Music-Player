@@ -26,6 +26,12 @@ jobs:
         with:
           version: '25.1'
 
+      - name: Configure Protoc
+        run: |
+          $protoc = (Get-Command protoc).Source
+          Write-Host "Found protoc at $protoc"
+          "PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -51,6 +57,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+          PROTOC: ${{ env.PROTOC }}
         with:
           tagName: v__VERSION__
           releaseName: "AIDEO v__VERSION__"
@@ -58,3 +65,24 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Generate and upload installer checksums
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(
+            Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File
+            Get-ChildItem -Path 'src-tauri/target/release/bundle/msi' -Filter '*.msi' -File
+          )
+          if ($installers.Count -eq 0) {
+            throw 'No installer artifacts were produced.'
+          }
+
+          foreach ($installer in $installers) {
+            $checksumPath = "$($installer.FullName).sha256"
+            $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($installer.Name)" | Set-Content -LiteralPath $checksumPath -Encoding ascii
+            gh release upload $env:GITHUB_REF_NAME $checksumPath --clobber
+          }

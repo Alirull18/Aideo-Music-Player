@@ -372,6 +372,17 @@ function AideoApp() {
       if (isCancelled) { uEnded(); return; }
       cleanups.push(uEnded);
 
+      const uPlaybackError = await listen<string>('playback-error', (event) => {
+        if (isCancelled) return;
+        const { currentTrack, queue, playNext } = useStore.getState();
+        if (currentTrack && queue.length > 0) {
+          console.warn('[playback] Stream decode failed, auto-advancing to next queued track:', event.payload);
+          playNext();
+        }
+      });
+      if (isCancelled) { uPlaybackError(); return; }
+      cleanups.push(uPlaybackError);
+
       const uLib = await listen('library-updated', () => {
         if (isCancelled) return;
         useStore.getState().loadLibrary();
@@ -926,7 +937,7 @@ function AideoApp() {
                   The automatic installation encountered an issue: {updateError}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                  Since you are running an older release (like v0.6.0), the built-in process launcher might have run into an escaping limitation. Please download and install the update manually.
+                  Automatic installation stopped before the installer was launched. You can retry, or download and install the update manually.
                 </div>
               </div>
             ) : (
@@ -947,7 +958,7 @@ function AideoApp() {
                     try {
                       await invoke('download_and_install', { 
                         url: updateInfo.download_url,
-                        expectedSha256: updateInfo.sha256_url ? await fetch(updateInfo.sha256_url).then(r => r.text()).catch(() => null) : null
+                        sha256Url: updateInfo.sha256_url
                       });
                     } catch (e: any) {
                       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Update failed: ${e}`, type: 'error' } }));
