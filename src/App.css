@@ -9484,7 +9484,7 @@ html.light-theme .modal-overlay {
   justify-content: center;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  z-index: 95;
+  z-index: 1200;
   outline: none;
   padding: 0;
   transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1),

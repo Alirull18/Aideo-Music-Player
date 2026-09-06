@@ -59,11 +59,23 @@ export function CastSelector() {
   }, []);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const fetchUrl = () => {
       invoke<string>('get_remote_connection_url')
         .then(setRemoteUrl)
-        .catch(console.error);
-    }
+        .catch(() => {
+          attempts++;
+          if (attempts < 6) {
+            timer = setTimeout(fetchUrl, 1000);
+          }
+        });
+    };
+    fetchUrl();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [isOpen]);
 
   const handleScanAll = () => {
@@ -386,38 +398,60 @@ export function CastSelector() {
                 </span>
               </div>
 
-              {remoteUrl ? (
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Control playback from your phone:</span>
-                    <a
-                      href={remoteUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        fontSize: 11,
-                        color: 'var(--accent)',
-                        fontWeight: 600,
-                        textDecoration: 'underline',
-                        wordBreak: 'break-all'
-                      }}
-                    >
-                      {remoteUrl}
-                    </a>
+              {remoteUrl ? (() => {
+                const pinMatch = remoteUrl.match(/pin=([^&]+)/);
+                const pin = pinMatch ? pinMatch[1] : '';
+                return (
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Control playback from your phone:</span>
+                      <a
+                        href={remoteUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--accent)',
+                          fontWeight: 600,
+                          textDecoration: 'underline',
+                          wordBreak: 'break-all'
+                        }}
+                      >
+                        {remoteUrl}
+                      </a>
+                      {pin && (
+                        <div style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: 'var(--accent)',
+                          background: 'rgba(168, 85, 247, 0.15)',
+                          border: '1px solid rgba(168, 85, 247, 0.3)',
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                          width: 'fit-content',
+                          marginTop: 2
+                        }}>
+                          PIN: <span style={{ color: 'white', letterSpacing: 1 }}>{pin}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{
+                      background: 'white',
+                      padding: 4,
+                      borderRadius: 6,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <LocalQRCode value={remoteUrl} size={60} />
+                    </div>
                   </div>
-                  <div style={{
-                    background: 'white',
-                    padding: 4,
-                    borderRadius: 6,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    <LocalQRCode value={remoteUrl} size={60} />
-                  </div>
-                </div>
-              ) : (
+                );
+              })() : (
                 <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>
                   Connecting to local network...
                 </div>

@@ -1330,6 +1330,7 @@ export function LibraryView() {
     <div 
       ref={scrollRef}
       className="library-wrap" 
+      data-scroll-container="true"
       onClick={() => setMenuOpenFor(null)}
       onScroll={(e) => {
         const target = e.currentTarget;

@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useStore } from '../store';
 import type { AudioTagData, Track } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic, Sliders, Info, X } from 'lucide-react';
+import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic, Sliders, X } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
@@ -306,12 +307,41 @@ export function NowPlayingView() {
       if (e.key.toLowerCase() === 'i') {
         e.preventDefault();
         setIsSignalPathOpen(prev => !prev);
+      } else if (e.key === 'Escape' && showArtInfo) {
+        setShowArtInfo(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [showArtInfo]);
+
+  const handleArtworkPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (showArtInfo || dsp.low_spec_mode) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const pointerX = Math.max(-1, Math.min(1, ((e.clientX - rect.left) / rect.width) * 2 - 1));
+    const pointerY = Math.max(-1, Math.min(1, ((e.clientY - rect.top) / rect.height) * 2 - 1));
+    const style = e.currentTarget.style;
+
+    style.setProperty('--np-art-tilt-x', `${(-pointerY * 8).toFixed(2)}deg`);
+    style.setProperty('--np-art-tilt-y', `${(pointerX * 10).toFixed(2)}deg`);
+    style.setProperty('--np-art-shift-x', `${(pointerX * 5).toFixed(2)}px`);
+    style.setProperty('--np-art-shift-y', `${(pointerY * 5).toFixed(2)}px`);
+    style.setProperty('--np-art-light-x', `${((pointerX + 1) * 50).toFixed(1)}%`);
+    style.setProperty('--np-art-light-y', `${((pointerY + 1) * 50).toFixed(1)}%`);
+  };
+
+  const handleArtworkPointerLeave = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const style = e.currentTarget.style;
+    style.setProperty('--np-art-tilt-x', '0deg');
+    style.setProperty('--np-art-tilt-y', '0deg');
+    style.setProperty('--np-art-shift-x', '0px');
+    style.setProperty('--np-art-shift-y', '0px');
+    style.setProperty('--np-art-light-x', '50%');
+    style.setProperty('--np-art-light-y', '50%');
+  };
 
   if (!playbackCurrentTrack) {
     return (
@@ -631,7 +661,23 @@ export function NowPlayingView() {
         </div>
 
         <div
-          className={`np-art-wrap${effectiveCover ? ' has-art' : ''} ${albumArtFit === 'contain' ? 'contain-mode' : ''}${showArtInfo ? ' np-art-info-open' : ''}`}
+          className={`np-art-wrap${effectiveCover ? ' has-art' : ''} ${albumArtFit === 'contain' ? 'contain-mode' : ''} np-art-interactive${showArtInfo ? ' np-art-info-open' : ''}${dsp.low_spec_mode ? ' np-art-motion-disabled' : ''}`}
+          onClick={() => setShowArtInfo(prev => !prev)}
+          title={showArtInfo ? 'Show album artwork' : 'Inspect track details'}
+          role="button"
+          aria-label={showArtInfo ? 'Show album artwork' : 'Inspect track'}
+          aria-expanded={showArtInfo}
+          aria-controls="now-playing-track-inspector"
+          tabIndex={0}
+          onPointerMove={handleArtworkPointerMove}
+          onPointerLeave={handleArtworkPointerLeave}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setShowArtInfo(prev => !prev);
+            }
+          }}
         >
           {albumArtFit === 'contain' && (
             <div
@@ -645,24 +691,13 @@ export function NowPlayingView() {
             className={`np-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
           />
 
-          <button
-            className={`np-art-info-btn ${showArtInfo ? 'active' : ''}`}
-            onClick={() => setShowArtInfo(prev => !prev)}
-            title={showArtInfo ? 'Show album artwork' : 'Inspect track details'}
-            aria-label={showArtInfo ? 'Show album artwork' : 'Inspect track'}
-            aria-expanded={showArtInfo}
-            aria-controls="now-playing-track-inspector"
-          >
-            {showArtInfo ? <X size={15} /> : <Info size={15} />}
-            <span>{showArtInfo ? 'Artwork' : 'Inspect'}</span>
-          </button>
-
           {showArtInfo && (
             <div
               id="now-playing-track-inspector"
               className="np-art-overlay"
               role="region"
               aria-label="Track inspector"
+              onClick={(e) => e.stopPropagation()}
             >
               <div className="np-art-overlay-header">
                 <div className="np-art-overlay-heading">
@@ -674,7 +709,10 @@ export function NowPlayingView() {
                 </div>
                 <button
                   className="np-art-overlay-close"
-                  onClick={() => setShowArtInfo(false)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowArtInfo(false);
+                  }}
                   title="Close track inspector"
                   aria-label="Close track inspector"
                 >

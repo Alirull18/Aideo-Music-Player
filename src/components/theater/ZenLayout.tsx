@@ -35,7 +35,7 @@ export function ZenLayout({
     >
       {/* Centered Circle Visualizer in background for Zen mode */}
       {vizMode === 'circle' && (
-        <div style={{ position: 'absolute', width: 600, height: 600, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 0, opacity: 0.12, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', width: 520, height: 520, top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 0, opacity: 0.15, pointerEvents: 'none' }}>
           <Visualizer mode="circle" />
         </div>
       )}

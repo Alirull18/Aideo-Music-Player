@@ -538,6 +538,8 @@ export function AideoLabView() {
 
   return (
     <div
+      className="aideo-lab-wrap"
+      data-scroll-container="true"
       style={{
         display: 'flex',
         flexDirection: 'column',

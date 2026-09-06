@@ -34,7 +34,7 @@ export function LastfmView() {
   }
 
   return (
-    <div className="lastfm-dashboard" style={{ padding: '40px 60px calc(var(--player-h) + 40px) 60px', overflowY: 'auto', height: '100%' }}>
+    <div className="lastfm-dashboard" data-scroll-container="true" style={{ padding: '40px 60px calc(var(--player-h) + 40px) 60px', overflowY: 'auto', height: '100%' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 }}>
         <div>
           <h1 style={{ fontSize: 32, margin: 0 }}>Last.fm Dashboard</h1>

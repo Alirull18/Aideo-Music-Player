@@ -94,7 +94,7 @@ export function ListenbrainzView() {
   };
 
   return (
-    <div className="lastfm-dashboard" style={{ padding: '40px 60px calc(var(--player-h) + 40px) 60px', overflowY: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <div className="lastfm-dashboard" data-scroll-container="true" style={{ padding: '40px 60px calc(var(--player-h) + 40px) 60px', overflowY: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 28 }}>
       
       {/* Premium Gradient Glow Header */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>

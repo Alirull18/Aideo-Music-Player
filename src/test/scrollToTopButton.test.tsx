@@ -157,4 +157,94 @@ describe('ScrollToTopButton', () => {
 
     expect(screen.queryByTestId('scroll-to-top-btn')).toBeNull();
   });
+
+  it('works across different scroll containers (aideo-lab, charts, settings, downloaded, etc.)', () => {
+    useStore.setState({ view: 'aideo_lab' });
+
+    render(
+      <div>
+        <main className="app-main">
+          <div className="aideo-lab-wrap" data-scroll-container="true" style={{ height: 600 }}>Lab Content</div>
+        </main>
+        <ScrollToTopButton />
+      </div>
+    );
+
+    const labContainer = document.querySelector('.aideo-lab-wrap') as HTMLElement;
+    Object.defineProperty(labContainer, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(labContainer, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(labContainer, 'scrollTop', { value: 250, writable: true, configurable: true });
+
+    act(() => {
+      labContainer.dispatchEvent(new Event('scroll', { bubbles: false }));
+    });
+
+    expect(screen.getByTestId('scroll-to-top-btn')).toBeInTheDocument();
+
+    const scrollToMock = vi.fn();
+    labContainer.scrollTo = scrollToMock;
+
+    const button = screen.getByTestId('scroll-to-top-btn');
+    fireEvent.click(button);
+
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
+  });
+
+  it('uses behavior: auto when lowSpecMode is enabled', () => {
+    useStore.setState({ view: 'settings', lowSpecMode: true });
+
+    render(
+      <div>
+        <main className="app-main">
+          <div className="settings-view-scrollable" data-scroll-container="true" style={{ height: 600 }}>Settings Content</div>
+        </main>
+        <ScrollToTopButton />
+      </div>
+    );
+
+    const container = document.querySelector('.settings-view-scrollable') as HTMLElement;
+    Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(container, 'scrollHeight', { value: 1500, configurable: true });
+    Object.defineProperty(container, 'scrollTop', { value: 300, writable: true, configurable: true });
+
+    act(() => {
+      container.dispatchEvent(new Event('scroll', { bubbles: false }));
+    });
+
+    const scrollToMock = vi.fn();
+    container.scrollTo = scrollToMock;
+
+    const button = screen.getByTestId('scroll-to-top-btn');
+    fireEvent.click(button);
+
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: 'auto' });
+  });
+
+  it('detects preserved scroll position when switching views', async () => {
+    useStore.setState({ view: 'aideo' });
+
+    render(
+      <div>
+        <main className="app-main">
+          <div className="aideo-home-wrap" data-scroll-container="true" style={{ height: 600 }}>Home Content</div>
+          <div className="charts-page" data-scroll-container="true" style={{ height: 600 }}>Charts Content</div>
+        </main>
+        <ScrollToTopButton />
+      </div>
+    );
+
+    const chartsContainer = document.querySelector('.charts-page') as HTMLElement;
+    Object.defineProperty(chartsContainer, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(chartsContainer, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(chartsContainer, 'scrollTop', { value: 400, writable: true, configurable: true });
+
+    // Switch view to charts
+    act(() => {
+      useStore.setState({ view: 'charts' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('scroll-to-top-btn')).toBeInTheDocument();
+    }, { timeout: 400 });
+  });
 });

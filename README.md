@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player v0.9.7
+# 💎 Aideo Music Player v0.9.8
 
 **A beautiful, crystal-clear desktop music player built for pure sound, real-time karaoke lyrics, and a listening experience that looks as good as it feels.**
 
@@ -66,35 +66,57 @@ Aideo is a modern, lightweight desktop music player designed for music lovers wh
 
 ---
 
-## ✨ What's New in v0.9.7
+## ✨ What's New in v0.9.8
 
-Version **0.9.7** introduces 5 immersive Theater Mode archetypes, an interactive signal path inspector, fluid 60fps karaoke lyrics rendering, lossless streaming upgrades, and major audio engine hardening:
+Version **0.9.8** delivers an overhauled mobile remote experience with Aideo Connect, official Tauri v2 cryptographically signed auto-updates, next-generation editorial discovery hubs, a 5-mode studio visualizer engine, and essential streaming transport hardening:
 
-* 🎭 **5 Theater Mode Visual Archetypes**: Experience music with dedicated visual themes in Theater Mode or switch via the HUD / `H` key:
-  * **Stage Mode**: Immersive concert lighting and ambient stage glow.
-  * **Hi-Fi Studio Deck**: Dual-needle ballistic VU meters (peak + RMS) and brushed anodized aluminum faceplate.
-  * **Vinyl Turntable**: 33⅓ RPM rotating vinyl record with groove reflections, animated tonearm tracking, and needle drop/lift.
-  * **Editorial Poster**: High-contrast Swiss typography, dominant color extraction, and vinyl sleeve artwork.
-  * **Zen Minimalist**: Distraction-free sanctuary with breathing typography and hover controls.
-* 🎛️ **Audio Telemetry & Live Signal Path Inspector**: Inspect the exact end-to-end signal chain (file container, bit depth, sample rate, DSP nodes, and active output backend) with a real-time Bit-Perfect badge.
-* 📋 **Immersive Up Next Queue Drawer**: Slide-out glassmorphic drawer for seamless queue management directly inside Theater and Now Playing views.
-* 🌊 **PureScope Visualizer Overhaul**: Zero-crossing oscilloscope and calibrated phosphor decay FFT spectrum analyzer with jitter-free RequestAnimationFrame rendering.
-* 🎤 **Silky-Smooth Karaoke Lyrics Engine**: Fluid 60fps word-by-word syllable wipe animations with zero micro-stuttering or font jitter.
-* 🎵 **Lossless Streaming Hub (Qobuz & Tidal)**: Native Qobuz catalog browsing & streaming, persistent Tidal bootstrap on launch via OS keyring, and dedicated connection cards.
-* 📊 **Top Charts Explorer**: Redesigned charts browser with regional top ranks, trend indicators, genre filters, and automatic library matching for instant local playback.
-* 🧭 **3 Custom Discovery Hub Layouts**: Choose between **Command Deck**, **Editorial Home**, and **Stage Home** to tailor your music discovery experience.
-* 🔊 **Audio Engine & Bit-Perfect Hardening**:
-  * **WASAPI Exclusive Buffer Drain Sync**: Eliminates premature track progression at the end of songs in exclusive mode.
-  * **True Bit-Perfect Pipeline**: Guaranteed complete DSP bypass, unity volume, and triangular dither suppression.
-  * **True Gapless Stream Sessions**: Encoder delay and padding trimming (iTunSMPB) for zero-gap album playback.
-  * **Clock Smoothing**: Eliminated 1:53 playback stutter and snap-back via monotonic clock smoothing and proactive pre-buffering.
-  * **EcoQoS / Windows Crash Guard**: Opted audio threads out of Windows EcoQoS power throttling and enforced 1ms multimedia timer resolution.
+* 📱 **Aideo Connect Mobile Remote & Instant QR Pairing**:
+  * **Touch-Optimized Mobile Web Remote**: Control playback from any smartphone, tablet, or browser on your local network with a responsive web app.
+  * **Frictionless Pairing**: Instant 6-digit numeric PIN pairing and dynamic QR code generation (`qrcode.react`) — no typing long hexadecimal strings.
+  * **Complete Remote Transport**: Full remote Play/Pause, Seek scrubbing bar, Volume slider, Shuffle/Repeat toggles, and live synchronized album art.
+  * **Timing-Attack Hardened**: Constant-time PIN verification (`constant_time_eq`) and reliable LAN IP subnet probing.
+* 🔄 **Official Tauri v2 Cryptographic Auto-Updater**:
+  * Seamless, secure in-app updates powered by `@tauri-apps/plugin-updater` and Minisign cryptographic signature verification.
+  * Modern Update Modal with real-time download progress bar, byte transfer counters, release notes, and atomic auto-relaunch via `tauri-plugin-process`.
+  * Dedicated updater control panel in **Settings → Updates**.
+* 📰 **Discovery Hub (Aideo Home) Next-Gen Redesigns**:
+  * **Editorial Home**: High-contrast Swiss magazine layout with expansive hero banners, bento album cards, and fluid micro-interactions.
+  * **Stage Home**: Immersive concert atmosphere with real-time ambient lighting canvas and responsive bento cards.
+  * **GPU-Accelerated Styling**: Over 700 lines of hardware-accelerated animations and styling (`home.css`).
+* 🌊 **Studio Audio Visualizer Engine & Settings**:
+  * **5 Hardware-Inspired Visual Styles**: Studio Peak-Decay Bars with realistic gravity physics, Bilateral Mirror Spectrum, Analog Oscilloscope Silk Ribbon, Radial Halo Orbit, and Phosphor LED Dot-Matrix.
+  * **Ballistic Physics & Smooth Idle Decay**: Exponential audio level decay on pause and ambient resting baseline at 0% idle CPU consumption.
+  * **Adaptive 64px / 140px Container**: Instant expand/collapse toggle in Now Playing view.
+  * **Visualizer Preferences**: Dedicated settings card in **Settings → Audio Visualizer** with style chips, FPS limiter (30/60/120), decay profiles, and sensitivity tuning.
+* ⚡ **Tidal Streaming Stability Fixes**:
+  * Resolved stream EOF stalls ensuring seamless, uninterrupted continuous track transitions.
+  * Proactive token refresh preventing mid-album authorization expiration during extended listening sessions.
+* 🧭 **Ergonomics & Navigation**:
+  * Floating spring-animated **Scroll to Top** button across all library and album views.
+  * Interactive **Now Playing Artwork Flip** to inspect track technical telemetry and audio specs.
 
-> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.7 Release Notes**](docs/RELEASE_NOTES_v0.9.7.md).*
+> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.8 Release Notes**](docs/RELEASE_NOTES_v0.9.8.md).*
 
 ---
 
 ## 📜 Previous Release Highlights
+
+<details>
+<summary><strong>✨ What Was New in v0.9.7 (Click to expand)</strong></summary>
+<br />
+
+* 🎭 **5 Theater Mode Visual Archetypes**: Stage Mode, Hi-Fi Studio Deck, Vinyl Turntable, Editorial Poster, and Zen Minimalist.
+* 🎛️ **Audio Telemetry & Live Signal Path Inspector**: Inspect the exact end-to-end signal chain with a real-time Bit-Perfect badge.
+* 📋 **Immersive Up Next Queue Drawer**: Slide-out glassmorphic drawer for seamless queue management inside Theater and Now Playing.
+* 🌊 **PureScope Visualizer Overhaul**: Zero-crossing oscilloscope and calibrated phosphor decay FFT spectrum analyzer.
+* 🎤 **Silky-Smooth Karaoke Lyrics Engine**: Fluid 60fps word-by-word syllable wipe animations with zero micro-stuttering.
+* 🎵 **Lossless Streaming Hub (Qobuz & Tidal)**: Native Qobuz catalog browsing & streaming, persistent Tidal bootstrap on launch via OS keyring.
+* 📊 **Top Charts Explorer**: Redesigned charts browser with regional top ranks, trend indicators, and automatic library matching.
+* 🔊 **Audio Engine & Bit-Perfect Hardening**: WASAPI Exclusive Buffer Drain Sync, True Bit-Perfect Pipeline, True Gapless Stream Sessions, and Clock Smoothing.
+
+> Read the full [**v0.9.7 Release Notes**](docs/RELEASE_NOTES_v0.9.7.md).
+</details>
+<br />
 
 <details>
 <summary><strong>✨ What Was New in v0.9.6 (Click to expand)</strong></summary>

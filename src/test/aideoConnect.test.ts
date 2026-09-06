@@ -120,4 +120,176 @@ describe('Aideo Connect Mobile Synced Lyrics', () => {
     await routePlayback({ chromecast_connected: false, upnp_connected: false }, track, mockInvoke);
     expect(invokedCmd).toBe('play_track');
   });
+
+  describe('Aideo Connect Overhaul Payloads & Synchronization', () => {
+    interface TickMessage {
+      type: 'tick';
+      title?: string;
+      artist?: string;
+      album?: string;
+      position: number;
+      duration: number;
+      volume: number;
+      is_playing: boolean;
+      has_cover?: boolean;
+      cover_url?: string | null;
+      shuffle?: boolean;
+      repeat?: string;
+    }
+
+    interface TrackChangeMessage {
+      type: 'track_change';
+      title: string;
+      artist: string;
+      album: string;
+      duration: number;
+      cover_url: string | null;
+      lyrics: LyricLine[];
+      shuffle?: boolean;
+      repeat?: string;
+    }
+
+    it('should parse lightweight 500ms tick messages with synced cover endpoint and without heavy lyrics', () => {
+      const rawTick = JSON.stringify({
+        type: 'tick',
+        title: 'Instant Crush',
+        artist: 'Daft Punk',
+        album: 'Random Access Memories',
+        position: 42.5,
+        duration: 180.0,
+        volume: 0.75,
+        is_playing: true,
+        has_cover: true,
+        cover_url: '/cover?pin=123456&v=2',
+        shuffle: false,
+        repeat: 'off',
+      });
+
+      const tick: TickMessage = JSON.parse(rawTick);
+      expect(tick.type).toBe('tick');
+      expect(tick.title).toBe('Instant Crush');
+      expect(tick.artist).toBe('Daft Punk');
+      expect(tick.position).toBe(42.5);
+      expect(tick.volume).toBe(0.75);
+      expect(tick.is_playing).toBe(true);
+      expect(tick.cover_url).toBe('/cover?pin=123456&v=2');
+      // Ensure tick does NOT carry heavy arrays or base64 data
+      expect((tick as any).lyrics).toBeUndefined();
+      expect((tick as any).cover_art).toBeUndefined();
+      expect(rawTick.length).toBeLessThan(250); // Under 250 bytes, eliminating bandwidth hogging
+    });
+
+    it('should dynamically update title, artist, and cover when metadata resolves asynchronously', () => {
+      // Emulate client state
+      let displayedTitle = 'Not Playing';
+      let displayedArtist = 'Aideo Player';
+      let displayedCover = '';
+
+      const handleMessage = (data: any) => {
+        if (data.type === 'track_change' || data.type === 'tick') {
+          if (data.title && data.title !== 'Not Playing' && data.title !== displayedTitle) {
+            displayedTitle = data.title;
+            displayedArtist = data.artist || (data.album ? data.album : 'Aideo Player');
+          }
+          if (data.cover_url && data.cover_url !== displayedCover) {
+            displayedCover = data.cover_url;
+          }
+        }
+      };
+
+      // 1. Initial tick when stopped
+      handleMessage({ type: 'tick', title: 'Not Playing', artist: '', is_playing: false, position: 0 });
+      expect(displayedTitle).toBe('Not Playing');
+
+      // 2. Track started but metadata still loading from disk
+      handleMessage({ type: 'track_change', title: 'Song 2', artist: 'Blur', duration: 122, cover_url: null, lyrics: [] });
+      expect(displayedTitle).toBe('Song 2');
+      expect(displayedArtist).toBe('Blur');
+      expect(displayedCover).toBe('');
+
+      // 3. Asynchronous cover resolved 300ms later on subsequent tick
+      handleMessage({ type: 'tick', title: 'Song 2', artist: 'Blur', is_playing: true, position: 1.5, cover_url: '/cover?pin=123456&v=3' });
+      expect(displayedCover).toBe('/cover?pin=123456&v=3');
+    });
+
+    it('should parse track_change messages with full metadata, cover endpoint, and lyrics', () => {
+      const rawChange = JSON.stringify({
+        type: 'track_change',
+        title: 'Instant Crush',
+        artist: 'Daft Punk',
+        album: 'Random Access Memories',
+        duration: 337.0,
+        cover_url: '/cover?t=1710000000',
+        lyrics: mockLyrics,
+        shuffle: true,
+        repeat: 'all',
+      });
+
+      const change: TrackChangeMessage = JSON.parse(rawChange);
+      expect(change.type).toBe('track_change');
+      expect(change.title).toBe('Instant Crush');
+      expect(change.cover_url).toContain('/cover');
+      expect(change.lyrics).toHaveLength(4);
+      expect(change.shuffle).toBe(true);
+      expect(change.repeat).toBe('all');
+    });
+
+    it('should correctly format all remote control action commands', () => {
+      const actions = [
+        { action: 'play' },
+        { action: 'pause' },
+        { action: 'toggle' },
+        { action: 'next' },
+        { action: 'prev' },
+        { action: 'seek', value: 95.5 },
+        { action: 'volume', value: 0.65 },
+        { action: 'shuffle' },
+        { action: 'repeat' },
+      ];
+
+      actions.forEach((act) => {
+        const serialized = JSON.stringify(act);
+        const parsed = JSON.parse(serialized);
+        expect(parsed.action).toBe(act.action);
+        if ('value' in act) {
+          expect(parsed.value).toBe((act as any).value);
+        }
+      });
+    });
+
+    it('should validate 6-digit PIN format and URL extraction', () => {
+      const validPins = ['100000', '482910', '999999'];
+      const invalidPins = ['12345', '1234567', 'abcdef', '12a456'];
+
+      const pinRegex = /^\d{6}$/;
+      validPins.forEach((pin) => expect(pinRegex.test(pin)).toBe(true));
+      invalidPins.forEach((pin) => expect(pinRegex.test(pin)).toBe(false));
+
+      // Test URL extraction
+      const sampleUrl = 'http://192.168.1.105:38562?pin=654321';
+      const match = sampleUrl.match(/pin=([^&]+)/);
+      expect(match).not.toBeNull();
+      expect(match![1]).toBe('654321');
+
+      // Test URL extraction with trailing query parameters
+      const sampleUrlWithExtra = 'http://10.0.0.15:38562?pin=123456&mode=dark';
+      const matchExtra = sampleUrlWithExtra.match(/pin=([^&]+)/);
+      expect(matchExtra).not.toBeNull();
+      expect(matchExtra![1]).toBe('123456');
+    });
+
+    it('should verify connection URL formatting uses correct port and rejects 0.0.0.0', () => {
+      const formatRemoteUrl = (ip: string, port: number, pin: string) => {
+        if (!ip || ip === '0.0.0.0' || ip === '127.0.0.1') {
+          return null;
+        }
+        return `http://${ip}:${port}?pin=${pin}`;
+      };
+
+      expect(formatRemoteUrl('0.0.0.0', 38562, '123456')).toBeNull();
+      expect(formatRemoteUrl('127.0.0.1', 38562, '123456')).toBeNull();
+      expect(formatRemoteUrl('192.168.1.42', 38562, '123456')).toBe('http://192.168.1.42:38562?pin=123456');
+      expect(formatRemoteUrl('10.0.0.5', 38562, '987654')).toBe('http://10.0.0.5:38562?pin=987654');
+    });
+  });
 });

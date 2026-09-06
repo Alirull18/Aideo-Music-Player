@@ -45,7 +45,7 @@ export function StageLayout({
             }}
           />
           {vizMode === 'circle' && (
-            <div style={{ position: 'absolute', width: 620, height: 620, zIndex: 1, pointerEvents: 'none' }}>
+            <div style={{ position: 'absolute', width: 560, height: 560, zIndex: 1, pointerEvents: 'none' }}>
               <Visualizer mode="circle" />
             </div>
           )}

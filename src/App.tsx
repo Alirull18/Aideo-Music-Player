@@ -1,5 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { useStore } from './store';
+import { useUpdaterStore } from './store/updaterStore';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -150,9 +151,16 @@ function AideoApp() {
     }
   }, [isLightTheme]);
 
-  const [updateInfo, setUpdateInfo] = useState<any>(null);
-  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
-  const [updateError, setUpdateError] = useState<string | null>(null);
+  const {
+    status: updaterStatus,
+    update: updateInfo,
+    error: updateError,
+    downloadProgress,
+    modalOpen: updateModalOpen,
+    checkForUpdates,
+    installUpdate,
+    dismissModal,
+  } = useUpdaterStore();
 
   useEffect(() => {
     const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession, checkTidalStatus } = useStore.getState();
@@ -204,15 +212,23 @@ function AideoApp() {
     // Ensure window is always centered and safely on-screen on startup
     invoke('center_window').catch(() => {});
 
+    // Push initial track metadata to Aideo Connect if restored from previous session
+    const initialTrack = useStore.getState().currentTrack;
+    if (initialTrack) {
+      invoke('update_media_metadata', {
+        title: initialTrack.title || initialTrack.path.split(/[\\/]/).pop(),
+        artist: initialTrack.artist || 'Unknown Artist',
+        album: initialTrack.album || '',
+        coverUrl: initialTrack.cover_url || useStore.getState().coverArt || null,
+        duration: initialTrack.duration || 0,
+      }).catch(() => {});
+    }
+
     // Async background setup for yt-dlp audio decoder
     invoke('check_and_download_ytdlp').catch(e => console.error("ytdlp download error:", e));
 
     // Silent background check for updates
-    invoke<any>('check_update').then(res => {
-      if (res.available) {
-        setUpdateInfo(res);
-      }
-    }).catch(e => console.error("Update check failed:", e));
+    checkForUpdates().catch(e => console.error("Update check failed:", e));
 
     // Fix #7: Use async IIFE to ensure unlisten is assigned before cleanup runs
     let isCancelled = false;
@@ -430,6 +446,40 @@ function AideoApp() {
       });
       if (isCancelled) { uPrev(); return; }
       cleanups.push(uPrev);
+
+      const uSeek = await listen('media-seek', (event: any) => {
+        if (isCancelled) return;
+        const pos = typeof event.payload === 'number' ? event.payload : parseFloat(event.payload);
+        if (!isNaN(pos)) {
+          useStore.getState().seek(pos);
+        }
+      });
+      if (isCancelled) { uSeek(); return; }
+      cleanups.push(uSeek);
+
+      const uVolume = await listen('media-volume', (event: any) => {
+        if (isCancelled) return;
+        const vol = typeof event.payload === 'number' ? event.payload : parseFloat(event.payload);
+        if (!isNaN(vol)) {
+          useStore.getState().setVolume(vol);
+        }
+      });
+      if (isCancelled) { uVolume(); return; }
+      cleanups.push(uVolume);
+
+      const uShuffle = await listen('media-shuffle', () => {
+        if (isCancelled) return;
+        useStore.getState().toggleShuffle();
+      });
+      if (isCancelled) { uShuffle(); return; }
+      cleanups.push(uShuffle);
+
+      const uRepeat = await listen('media-repeat', () => {
+        if (isCancelled) return;
+        useStore.getState().toggleRepeat();
+      });
+      if (isCancelled) { uRepeat(); return; }
+      cleanups.push(uRepeat);
 
       const uDesktopToggle = await listen('toggle-desktop-lyrics', () => {
         if (isCancelled) return;
@@ -729,7 +779,7 @@ function AideoApp() {
 
         <AnimatePresence mode="wait">
           {view === 'albums' && (
-            <motion.div key="albums" style={{ height: '100%' }}
+            <motion.div key="albums" className="library-wrap albums-page-wrap" data-scroll-container="true" style={{ height: '100%', overflowY: 'auto' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <Suspense fallback={
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-dim)' }}>
@@ -896,7 +946,7 @@ function AideoApp() {
         )}
 
 
-        {updateInfo && (
+        {updateModalOpen && updateInfo && (
           <motion.div
             key="update-popup"
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -929,7 +979,7 @@ function AideoApp() {
               <button 
                 className="modal-close" 
                 style={{ padding: 8, margin: -8, cursor: 'pointer' }} 
-                onClick={(e) => { e.stopPropagation(); setUpdateInfo(null); setUpdateError(null); }}
+                onClick={(e) => { e.stopPropagation(); dismissModal(); }}
               >
                 <X size={16} />
               </button>
@@ -941,12 +991,36 @@ function AideoApp() {
                   The automatic installation encountered an issue: {updateError}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                  Automatic installation stopped before the installer was launched. You can retry, or download and install the update manually.
+                  You can retry, or download and install the update manually.
                 </div>
               </div>
             ) : (
-              <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 20, maxHeight: 60, overflowY: 'auto', lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 16, maxHeight: 60, overflowY: 'auto', lineHeight: 1.5 }}>
                 {updateInfo.body || 'A new version of Aideo is ready to install.'}
+              </div>
+            )}
+
+            {updaterStatus === 'downloading' && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6, color: 'var(--text-dim)' }}>
+                  <span>Downloading update...</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>{downloadProgress.percentage}%</span>
+                </div>
+                <div style={{ height: 6, background: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div 
+                    style={{ 
+                      height: '100%', 
+                      width: `${downloadProgress.percentage}%`, 
+                      background: 'var(--accent)', 
+                      transition: 'width 0.2s ease' 
+                    }} 
+                  />
+                </div>
+                {downloadProgress.totalBytes > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, textAlign: 'right' }}>
+                    {(downloadProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB / {(downloadProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB
+                  </div>
+                )}
               </div>
             )}
 
@@ -955,24 +1029,13 @@ function AideoApp() {
                 <button
                   className="btn btn-primary"
                   style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
-                  disabled={isDownloadingUpdate}
-                  onClick={async () => {
-                    setIsDownloadingUpdate(true);
-                    setUpdateError(null);
-                    try {
-                      await invoke('download_and_install', { 
-                        url: updateInfo.download_url,
-                        sha256Url: updateInfo.sha256_url
-                      });
-                    } catch (e: any) {
-                      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Update failed: ${e}`, type: 'error' } }));
-                      setUpdateError(e.toString());
-                      setIsDownloadingUpdate(false);
-                    }
-                  }}
+                  disabled={updaterStatus === 'downloading'}
+                  onClick={installUpdate}
                 >
-                  {isDownloadingUpdate ? (
+                  {updaterStatus === 'downloading' ? (
                     'Downloading & Installing...'
+                  ) : updaterStatus === 'downloaded' ? (
+                    'Restarting Aideo...'
                   ) : (
                     <>
                       <Download size={16} />
@@ -997,10 +1060,7 @@ function AideoApp() {
                 <button
                   className="btn btn-secondary"
                   style={{ width: '100%', padding: '10px 0' }}
-                  onClick={() => {
-                    setUpdateInfo(null);
-                    setUpdateError(null);
-                  }}
+                  onClick={dismissModal}
                 >
                   Dismiss
                 </button>

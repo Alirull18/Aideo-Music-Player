@@ -85,25 +85,27 @@ beforeEach(() => {
 });
 
 describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
-  it('renders artwork container with info button', () => {
+  it('renders interactive artwork container', () => {
     const { container } = render(<NowPlayingView />);
 
     const artWrap = container.querySelector('.np-art-wrap');
     expect(artWrap).toBeInTheDocument();
+    expect(artWrap).toHaveClass('np-art-interactive');
 
     const infoBtn = screen.getByRole('button', { name: /Inspect track/i });
     expect(infoBtn).toBeInTheDocument();
+    expect(infoBtn).toBe(artWrap);
   });
 
-  it('toggles track inspector overlay when clicking info button', () => {
+  it('toggles track inspector overlay when clicking artwork or pressing close', () => {
     const { container } = render(<NowPlayingView />);
 
     // Initially overlay is not visible
     expect(container.querySelector('.np-art-overlay')).toBeNull();
 
-    // Click info button to open overlay
-    const infoBtn = screen.getByRole('button', { name: /Inspect track/i });
-    fireEvent.click(infoBtn);
+    // Click artwork to open overlay
+    const artWrap = container.querySelector('.np-art-wrap') as HTMLElement;
+    fireEvent.click(artWrap);
 
     const overlay = container.querySelector('.np-art-overlay') as HTMLElement;
     expect(overlay).toBeInTheDocument();
@@ -117,6 +119,43 @@ describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
     const closeBtn = within(overlay).getByRole('button', { name: /Close track inspector/i });
     fireEvent.click(closeBtn);
 
+    expect(container.querySelector('.np-art-overlay')).toBeNull();
+  });
+
+  it('tilts the artwork toward the pointer and resets when the pointer leaves', () => {
+    const { container } = render(<NowPlayingView />);
+    const artWrap = container.querySelector('.np-art-wrap') as HTMLDivElement;
+    expect(artWrap).toBeInTheDocument();
+
+    vi.spyOn(artWrap, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 360,
+      height: 360,
+      right: 360,
+      bottom: 360,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.pointerMove(artWrap, { clientX: 288, clientY: 72, pointerType: 'mouse' });
+    expect(artWrap.style.getPropertyValue('--np-art-tilt-x')).not.toBe('0deg');
+    expect(artWrap.style.getPropertyValue('--np-art-tilt-y')).not.toBe('0deg');
+    expect(artWrap.style.getPropertyValue('--np-art-light-x')).not.toBe('50%');
+
+    fireEvent.pointerLeave(artWrap);
+    expect(artWrap.style.getPropertyValue('--np-art-tilt-x')).toBe('0deg');
+    expect(artWrap.style.getPropertyValue('--np-art-tilt-y')).toBe('0deg');
+    expect(artWrap.style.getPropertyValue('--np-art-light-x')).toBe('50%');
+  });
+
+  it('closes track inspector overlay on Escape key', () => {
+    const { container } = render(<NowPlayingView />);
+    const artWrap = container.querySelector('.np-art-wrap') as HTMLElement;
+
+    fireEvent.click(artWrap);
+    expect(container.querySelector('.np-art-overlay')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
     expect(container.querySelector('.np-art-overlay')).toBeNull();
   });
 

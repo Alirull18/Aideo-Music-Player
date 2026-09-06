@@ -234,7 +234,7 @@ export function ListeningInsightsView() {
   };
 
   return (
-    <div className="insights-view-wrap">
+    <div className="insights-view-wrap" data-scroll-container="true">
       {/* Header */}
       <div className="insights-header">
         <h1 className="insights-main-title">Aideo Insights</h1>

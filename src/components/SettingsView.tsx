@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
+import { useUpdaterStore } from '../store/updaterStore';
 import { PlayerBarDesign, AideoPageDesign, TheaterModeDesign, TheaterHudStyle } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,6 +19,7 @@ import {
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
 import { DebugLogsModal } from './DebugLogsModal';
+import { LocalQRCode } from './LocalQRCode';
 import { logger } from '../utils/logger';
 
 interface PresetTheme {
@@ -342,9 +344,22 @@ export function SettingsView() {
 
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   useEffect(() => {
-    invoke<string>('get_remote_connection_url')
-      .then(setRemoteUrl)
-      .catch(console.error);
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const fetchUrl = () => {
+      invoke<string>('get_remote_connection_url')
+        .then(url => setRemoteUrl(url))
+        .catch(() => {
+          attempts++;
+          if (attempts < 8) {
+            timer = setTimeout(fetchUrl, 1000);
+          }
+        });
+    };
+    fetchUrl();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -371,10 +386,15 @@ export function SettingsView() {
   const [lbToken, setLbToken] = useState('');
   const [lbLoading, setLbLoading] = useState(false);
   const [lbError, setLbError] = useState('');
-  const [updateChecking, setUpdateChecking] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState('');
   const [devOpen, setDevOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const {
+    status: updaterStoreStatus,
+    update: updaterStoreUpdate,
+    error: updaterStoreError,
+    checkForUpdates: checkTauriUpdates,
+    openModal: openUpdateModal,
+  } = useUpdaterStore();
 
   // Theme & Appearance states
   const [themeMode, setThemeMode] = useState<'dynamic' | 'preset' | 'windows'>(() => {
@@ -1538,10 +1558,10 @@ export function SettingsView() {
               {
                 id: 'editorial' as AideoPageDesign,
                 name: 'Editorial Feed',
-                badge: 'Calm / Art-first',
+                badge: 'Magazine / Broadsheet',
                 badgeColor: '#a855f7',
                 icon: <LayoutGrid size={18} color="#c084fc" />,
-                desc: 'One calm centered column: quiet stats, hero web search, and art-forward recommendation shelves with a reason line under every section.',
+                desc: 'Curated magazine broadsheet: publication masthead, asymmetric Cover Story spread, curatorial liner notes, and volume shelves.',
                 visual: (
                   <div className="aideo-prev-box prev-bento">
                     <div className="aideo-prev-line title" style={{ width: '55%' }} />
@@ -1587,10 +1607,10 @@ export function SettingsView() {
               {
                 id: 'stage' as AideoPageDesign,
                 name: 'Ambient Stage',
-                badge: 'Immersive / Hero',
+                badge: 'Living Soundstage',
                 badgeColor: '#f59e0b',
                 icon: <Sparkles size={18} color="#fbbf24" />,
-                desc: 'A full-bleed color-wash hero with greeting, stats and pill search, then a discovery feed grouped by why each track was picked, plus a recently-played strip.',
+                desc: 'Atmospheric soundstage: living aurora aura, floating glass pedestal, dynamic mood filters (Midnight, Focus, Acoustic, Lossless), and frosted sensory rows.',
                 visual: (
                   <div className="aideo-prev-box prev-cinematic">
                     <div className="aideo-prev-cine-hero">
@@ -3441,26 +3461,98 @@ export function SettingsView() {
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 250 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Web Remote URL</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Web Remote Control</div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
-                Open this URL or scan the QR code to control playback from another device on your network:
+                Scan the QR code or open the link below on your phone/tablet to control playback, volume, and live lyrics:
               </div>
               {remoteUrl ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <a 
-                    href={remoteUrl} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    style={{ 
-                      color: 'var(--accent)', 
-                      fontSize: 14, 
-                      fontWeight: 600, 
-                      textDecoration: 'underline',
-                      wordBreak: 'break-all'
-                    }}
-                  >
-                    {remoteUrl}
-                  </a>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <a 
+                      href={remoteUrl} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      style={{ 
+                        color: 'var(--accent)', 
+                        fontSize: 13, 
+                        fontWeight: 600, 
+                        textDecoration: 'underline',
+                        wordBreak: 'break-all'
+                      }}
+                    >
+                      {remoteUrl}
+                    </a>
+                  </div>
+
+                  {(() => {
+                    const pinMatch = remoteUrl.match(/pin=([^&]+)/);
+                    const pin = pinMatch ? pinMatch[1] : '';
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        {pin && (
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            background: 'rgba(168, 85, 247, 0.15)',
+                            border: '1px solid rgba(168, 85, 247, 0.35)',
+                            padding: '4px 10px',
+                            borderRadius: 8,
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: 'var(--accent)'
+                          }}>
+                            PIN: <span style={{ letterSpacing: 2, color: 'var(--text)' }}>{pin}</span>
+                          </div>
+                        )}
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(remoteUrl);
+                            window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Remote URL copied to clipboard!', type: 'success' } }));
+                          }}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            background: 'var(--panel-bg)',
+                            border: '1px solid var(--border)',
+                            color: 'var(--text)',
+                            padding: '4px 10px',
+                            borderRadius: 8,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <Copy size={12} />
+                          Copy Link
+                        </button>
+                        {pin && (
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(pin);
+                              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Pairing PIN copied!', type: 'success' } }));
+                            }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              background: 'var(--panel-bg)',
+                              border: '1px solid var(--border)',
+                              color: 'var(--text)',
+                              padding: '4px 10px',
+                              borderRadius: 8,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Copy PIN
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>
@@ -3473,18 +3565,14 @@ export function SettingsView() {
               <div style={{ 
                 background: 'white', 
                 padding: 10, 
-                borderRadius: 12, 
+                borderRadius: 14, 
                 boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 border: '1px solid var(--glass-border)'
               }}>
-                <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(remoteUrl)}`} 
-                  alt="Aideo Connect QR Code"
-                  style={{ width: 120, height: 120, display: 'block' }}
-                />
+                <LocalQRCode value={remoteUrl} size={120} />
               </div>
             )}
           </div>
@@ -3889,31 +3977,34 @@ export function SettingsView() {
               <button
                 className="btn btn-primary"
                 style={{ padding: '8px 16px', fontSize: 11, width: 'auto' }}
-                disabled={updateChecking}
+                disabled={updaterStoreStatus === 'checking' || updaterStoreStatus === 'downloading'}
                 onClick={async () => {
-                  setUpdateChecking(true);
-                  setUpdateStatus('Checking for updates...');
-                  try {
-                    const res = await invoke<any>('check_update');
-                    if (res.available) {
-                      setUpdateStatus(`Version ${res.version} is available!`);
-                      window.dispatchEvent(new CustomEvent('update-available', { detail: res }));
-                    } else {
-                      setUpdateStatus(`Latest version is installed (${res.version}).`);
-                    }
-                  } catch (e: any) {
-                    setUpdateStatus(`Error checking updates: ${e}`);
-                  } finally {
-                    setUpdateChecking(false);
-                  }
+                  await checkTauriUpdates(true);
                 }}
               >
-                {updateChecking ? 'Checking...' : 'Check for Updates'}
+                {updaterStoreStatus === 'checking' ? 'Checking...' : 'Check for Updates'}
               </button>
             </div>
-            {updateStatus && (
-              <div className="settings-update-status-msg" style={{ background: 'var(--glass)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--glass-border)', marginTop: 16 }}>
-                {updateStatus}
+            {updaterStoreStatus === 'available' && updaterStoreUpdate && (
+              <div className="settings-update-status-msg" style={{ background: 'var(--glass)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--glass-border)', marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--accent)' }}>Version {updaterStoreUpdate.version} is available!</span>
+                <button
+                  className="btn btn-primary"
+                  style={{ padding: '4px 12px', fontSize: 11 }}
+                  onClick={openUpdateModal}
+                >
+                  View & Install
+                </button>
+              </div>
+            )}
+            {updaterStoreStatus === 'up-to-date' && (
+              <div className="settings-update-status-msg" style={{ background: 'var(--glass)', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--glass-border)', marginTop: 16, fontSize: 12, color: 'var(--text-dim)' }}>
+                You are on the latest version of Aideo.
+              </div>
+            )}
+            {updaterStoreStatus === 'error' && updaterStoreError && (
+              <div className="settings-update-status-msg" style={{ background: 'rgba(239,68,68,0.1)', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)', marginTop: 16, fontSize: 12, color: '#f87171' }}>
+                Error checking updates: {updaterStoreError}
               </div>
             )}
           </div>
@@ -4060,7 +4151,7 @@ export function SettingsView() {
       )}
 
       {/* Main Settings List Area */}
-      <div className="settings-view-scrollable">
+      <div className="settings-view-scrollable" data-scroll-container="true">
         <div style={{ maxWidth: 1000, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 60 }}>
           {searchQuery.trim() && (
             <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--accent)', letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>

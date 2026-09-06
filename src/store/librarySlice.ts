@@ -39,6 +39,7 @@ const fetchTrackMetadataAndLyrics = async (
           invoke('update_media_metadata', {
             title: track.title || path.split(/[\\/]/).pop(),
             artist: track.artist || 'Unknown Artist',
+            album: track.album || '',
             coverUrl: art,
             duration: track.duration || 0,
           }).catch(() => {});
@@ -53,6 +54,13 @@ const fetchTrackMetadataAndLyrics = async (
                   const color = await extractDominantColor(localArt);
                   if (isCurrent()) set({ accentColor: color });
                 } catch (_) {}
+                invoke('update_media_metadata', {
+                  title: track.title || path.split(/[\\/]/).pop(),
+                  artist: track.artist || 'Unknown Artist',
+                  album: track.album || '',
+                  coverUrl: localArt,
+                  duration: track.duration || 0,
+                }).catch(() => {});
               }
             }).catch(() => {});
           }
@@ -68,6 +76,13 @@ const fetchTrackMetadataAndLyrics = async (
                 const color = await extractDominantColor(localArt);
                 if (isCurrent()) set({ accentColor: color });
               } catch (_) {}
+              invoke('update_media_metadata', {
+                title: track.title || path.split(/[\\/]/).pop(),
+                artist: track.artist || 'Unknown Artist',
+                album: track.album || '',
+                coverUrl: localArt,
+                duration: track.duration || 0,
+              }).catch(() => {});
             }
           }).catch(() => {});
         }
@@ -82,7 +97,8 @@ const fetchTrackMetadataAndLyrics = async (
   invoke('update_media_metadata', {
     title: track.title || path.split(/[\\/]/).pop(),
     artist: track.artist || 'Unknown Artist',
-    coverUrl: track.cover_url || null,
+    album: track.album || '',
+    coverUrl: track.cover_url || get().coverArt || null,
     duration: track.duration || 0,
   }).catch(() => { });
 
@@ -102,6 +118,7 @@ const fetchTrackMetadataAndLyrics = async (
         invoke('update_media_metadata', {
           title: track.title || path.split(/[\\/]/).pop(),
           artist: track.artist || 'Unknown Artist',
+          album: track.album || '',
           coverUrl: art,
           duration: track.duration || 0,
         }).catch(() => { });
@@ -475,6 +492,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           last_skip_time: Date.now()
         },
       });
+
+      invoke('update_media_metadata', {
+        title: track.title || track.path.split(/[\\/]/).pop(),
+        artist: track.artist || 'Unknown Artist',
+        album: track.album || '',
+        coverUrl: track.cover_url || null,
+        duration: track.duration || 0,
+      }).catch(() => { });
 
       if (isOnline) {
         window.dispatchEvent(new CustomEvent('ui-stream-buffering', {

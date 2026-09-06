@@ -203,14 +203,25 @@ export function Visualizer({ mode: propMode, decayRate: propDecay }: VisualizerP
         const breathOpacity = 0.2 + 0.08 * Math.sin(Date.now() / 1200);
 
         if (effectiveMode === 'circle') {
-          const restingRadius = Math.min(width, height) * 0.32;
+          const minDim = Math.min(width, height);
+          const isCompact = minDim < 200;
+          const restingRadius = minDim * (isCompact ? 0.30 : 0.38);
+
+          // Inner breathing datum ring
           ctx.beginPath();
           ctx.arc(width / 2, height / 2, restingRadius, 0, Math.PI * 2);
           ctx.lineWidth = 1;
-          ctx.strokeStyle = accentColor;
-          ctx.globalAlpha = breathOpacity;
+          ctx.strokeStyle = hexToRgba(accentColor, breathOpacity * 0.7);
           ctx.stroke();
-          ctx.globalAlpha = 1.0;
+
+          // Delicate dashed outer ring
+          ctx.beginPath();
+          ctx.arc(width / 2, height / 2, restingRadius + minDim * (isCompact ? 0.06 : 0.04), 0, Math.PI * 2);
+          ctx.lineWidth = 1;
+          if (typeof ctx.setLineDash === 'function') ctx.setLineDash([2, 6]);
+          ctx.strokeStyle = hexToRgba(accentColor, breathOpacity * 0.35);
+          ctx.stroke();
+          if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
         } else if (effectiveMode === 'mirror' || effectiveMode === 'wave') {
           const centerY = height / 2;
           ctx.beginPath();
@@ -412,23 +423,47 @@ export function Visualizer({ mode: propMode, decayRate: propDecay }: VisualizerP
         const centerX = width / 2;
         const centerY = height / 2;
         const minDim = Math.min(width, height);
-        const baseRadius = minDim * 0.36;
-        const numSpokes = height <= 80 ? 32 : 64;
+        const isCompact = minDim < 200;
+        const baseRadius = minDim * (isCompact ? 0.30 : 0.38);
+        const maxExtension = minDim * (isCompact ? 0.16 : 0.085);
+        const numSpokes = isCompact ? (height <= 80 ? 32 : 48) : 96;
 
         if (!lowSpecMode) {
-          ctx.shadowBlur = 12;
+          ctx.shadowBlur = isCompact ? 4 : 6;
           ctx.shadowColor = accentColor;
         }
 
         ctx.lineCap = 'round';
-        const spokeWidth = Math.max(2, ((Math.PI * 2 * baseRadius) / numSpokes) * 0.45);
+        const spokeWidth = Math.max(1.5, Math.min(2.2, ((Math.PI * 2 * baseRadius) / numSpokes) * 0.36));
         ctx.lineWidth = spokeWidth;
 
+        // Faint inner reference ring (datum)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, baseRadius, 0, Math.PI * 2);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = hexToRgba(accentColor, 0.22);
+        ctx.stroke();
+
+        // Subtle outer boundary guide ring (dotted)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, baseRadius + maxExtension, 0, Math.PI * 2);
+        ctx.lineWidth = 1;
+        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([2, 5]);
+        ctx.strokeStyle = hexToRgba(accentColor, 0.08);
+        ctx.stroke();
+        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([]);
+
+        ctx.lineWidth = spokeWidth;
         for (let i = 0; i < numSpokes; i++) {
           const bandIdx = Math.floor((i / numSpokes) * 64);
-          const val = smoothedBands[bandIdx] || 0;
-          const peakVal = peakLevels[bandIdx] || 0;
-          const outerRadius = baseRadius + val * (minDim * 0.35);
+          const rawVal = smoothedBands[bandIdx] || 0;
+          const rawPeak = peakLevels[bandIdx] || 0;
+
+          // Non-linear musical dampening for calm, eye-friendly dynamic response
+          const val = Math.pow(Math.min(1, Math.max(0, rawVal)), 1.25);
+          const peakVal = Math.pow(Math.min(1, Math.max(0, rawPeak)), 1.25);
+
+          const outerRadius = baseRadius + val * maxExtension;
           const angle = (i / numSpokes) * Math.PI * 2 - Math.PI / 2;
 
           const cos = Math.cos(angle);
@@ -440,9 +475,9 @@ export function Visualizer({ mode: propMode, decayRate: propDecay }: VisualizerP
           const y2 = centerY + sin * outerRadius;
 
           const grad = ctx.createLinearGradient(x1, y1, x2, y2);
-          grad.addColorStop(0, accentColor);
-          grad.addColorStop(0.8, '#c084fc');
-          grad.addColorStop(1, '#ffffff');
+          grad.addColorStop(0, hexToRgba(accentColor, 0.85));
+          grad.addColorStop(0.65, hexToRgba(accentColor, 0.45));
+          grad.addColorStop(1, hexToRgba('#ffffff', 0.25));
           ctx.strokeStyle = grad;
 
           ctx.beginPath();
@@ -450,26 +485,18 @@ export function Visualizer({ mode: propMode, decayRate: propDecay }: VisualizerP
           ctx.lineTo(x2, y2);
           ctx.stroke();
 
-          // Radial peak marker
-          if (peakVal > 0.05) {
-            const peakRadius = baseRadius + peakVal * (minDim * 0.35) + 3;
+          // Luminous micro-bead peak marker in matching accent tone
+          if (rawPeak > 0.06) {
+            const peakRadius = Math.min((minDim / 2) - 4, baseRadius + peakVal * maxExtension + 2);
             const px = centerX + cos * peakRadius;
             const py = centerY + sin * peakRadius;
-            ctx.fillStyle = '#fbbf24';
+            ctx.fillStyle = hexToRgba(accentColor, 0.85);
             ctx.beginPath();
-            ctx.arc(px, py, Math.max(1.5, spokeWidth / 2), 0, Math.PI * 2);
+            ctx.arc(px, py, Math.max(1, spokeWidth * 0.65), 0, Math.PI * 2);
             ctx.fill();
           }
         }
-
-        // Inner halo ring
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, baseRadius, 0, Math.PI * 2);
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = accentColor;
-        ctx.globalAlpha = 0.35;
-        ctx.stroke();
-        ctx.globalAlpha = 1.0;
+        ctx.shadowBlur = 0;
       } else if (effectiveMode === 'dots') {
         const numCols = 32;
         const numDots = height <= 80 ? 8 : 12;

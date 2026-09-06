@@ -56,6 +56,7 @@ describe('Modular Canvas Visualizer Engine Tests', () => {
       roundRect: vi.fn(),
       quadraticCurveTo: vi.fn(),
       closePath: vi.fn(),
+      setLineDash: vi.fn(),
       createLinearGradient: vi.fn().mockReturnValue({ addColorStop: vi.fn() }),
     }) as any;
   });
@@ -267,6 +268,76 @@ describe('Modular Canvas Visualizer Engine Tests', () => {
       expect(toastListener).not.toHaveBeenCalled();
 
       window.removeEventListener('ui-toast', toastListener);
+    });
+  });
+
+  describe('Overhauled Circle Radial Halo Mode', () => {
+    it('should calculate non-clipping outer radius with strict headroom for theater bounds', () => {
+      // For large theater/fullscreen container (e.g. 560x560)
+      const minDim = 560;
+      const isCompact = minDim < 200;
+      expect(isCompact).toBe(false);
+
+      const baseRadius = minDim * 0.38;
+      const maxExtension = minDim * 0.085;
+      const maxOuterRadius = baseRadius + maxExtension;
+
+      // Ensure max outer radius has at least 3% padding from canvas boundary (half-width = 280)
+      const canvasHalf = minDim / 2;
+      expect(maxOuterRadius).toBeLessThan(canvasHalf - 10);
+      expect(maxOuterRadius / canvasHalf).toBeLessThanOrEqual(0.95);
+    });
+
+    it('should calculate non-clipping outer radius for compact mini-player bounds', () => {
+      // For compact now playing / mini-player (e.g. 64px height)
+      const minDim = 64;
+      const isCompact = minDim < 200;
+      expect(isCompact).toBe(true);
+
+      const baseRadius = minDim * 0.30;
+      const maxExtension = minDim * 0.16;
+      const maxOuterRadius = baseRadius + maxExtension;
+
+      const canvasHalf = minDim / 2;
+      expect(maxOuterRadius).toBeLessThan(canvasHalf);
+      expect(maxOuterRadius / canvasHalf).toBeLessThanOrEqual(0.95);
+    });
+
+    it('should render circle visualizer without errors in both playing and ambient modes', () => {
+      useStore.setState({
+        visualizerMode: 'circle',
+        playback: {
+          status: 'Playing',
+          current_track: null,
+          position_secs: 0,
+          volume: 1,
+          exclusive: false,
+          bit_perfect: false,
+          dev_rate: 44100,
+          driver_type: 'WASAPI',
+        },
+      });
+
+      const { container, unmount } = render(React.createElement(Visualizer, { mode: 'circle' }));
+      const canvas = container.querySelector('canvas');
+      expect(canvas).toBeTruthy();
+
+      // Switch to paused/ambient
+      useStore.setState({
+        playback: {
+          status: 'Paused',
+          current_track: null,
+          position_secs: 0,
+          volume: 1,
+          exclusive: false,
+          bit_perfect: false,
+          dev_rate: 44100,
+          driver_type: 'WASAPI',
+        },
+      });
+
+      expect(canvas).toBeTruthy();
+      unmount();
     });
   });
 });

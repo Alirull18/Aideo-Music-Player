@@ -34,7 +34,6 @@ pub mod youtube;
 pub mod wasapi_engine;
 pub mod tidal;
 pub mod qobuz;
-pub mod updater;
 pub mod cloud;
 pub mod link_resolver;
 pub mod dependencies;
@@ -352,7 +351,7 @@ async fn get_unison_ttml(
         );
         if let Ok(resp) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.7")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
             .send()
             .await
         {
@@ -406,7 +405,7 @@ async fn get_unison_ttml(
             if let Ok(resp) = client
                 .get(&url)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.7")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
                 .send()
                 .await
             {
@@ -523,7 +522,7 @@ async fn search_lyrics_online(
         );
         if let Ok(res) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.7")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
             .send()
             .await
         {
@@ -606,7 +605,7 @@ async fn search_lyrics_online(
         for u in urls {
             if let Ok(res) = client.get(&u)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.7")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
                 .send()
                 .await
             {
@@ -1962,16 +1961,18 @@ fn get_network_telemetry() -> player::NetworkTelemetry {
 fn update_media_metadata(
     title: String,
     artist: String,
+    album: Option<String>,
     cover_url: Option<String>,
     duration: f64,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    crate::remote_server::set_active_metadata(&title, &artist, album.as_deref(), duration, cover_url.as_deref());
     if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
         controls
             .set_metadata(MediaMetadata {
                 title: Some(&title),
                 artist: Some(&artist),
-                album: None,
+                album: album.as_deref(),
                 duration: Some(std::time::Duration::from_secs_f64(duration)),
                 cover_url: cover_url.as_deref(),
             })
@@ -3000,18 +3001,17 @@ async fn get_similar_tracks(state: State<'_, AppState>, path: String) -> Result<
     Ok(result)
 }
 
-fn get_local_ip() -> Option<String> {
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    let _ = socket.connect("8.8.8.8:80");
-    socket.local_addr().ok().map(|addr| addr.ip().to_string())
-}
-
 #[tauri::command]
 fn get_remote_connection_url() -> Result<String, String> {
     let port = crate::remote_server::ACTIVE_PORT.get().copied().ok_or_else(|| "Remote server not active".to_string())?;
-    let ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
+    let ip = crate::remote_server::get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
     let pin = crate::remote_server::get_or_init_pin();
     Ok(format!("http://{}:{}/?pin={}", ip, port, pin))
+}
+
+#[tauri::command]
+fn get_remote_pin() -> Result<String, String> {
+    Ok(crate::remote_server::get_or_init_pin().to_string())
 }
 
 #[tauri::command]
@@ -3437,6 +3437,8 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let _ = app.emit("deep-link", argv);
             if let Some(w) = app.get_webview_window("main") {
@@ -3628,8 +3630,6 @@ pub fn run() {
             qobuz::qobuz_get_stream_url,
             qobuz::qobuz_download,
             qobuz::get_qobuz_autoplay_recommendations,
-            updater::check_update,
-            updater::download_and_install,
             toggle_keep_awake,
             add_to_queue_bulk,
             listenbrainz_scrobble,
@@ -3657,6 +3657,7 @@ pub fn run() {
             acoustid_identify_track,
             get_similar_tracks,
             get_remote_connection_url,
+            get_remote_pin,
             open_cache_folder,
             check_files_exist,
             chromecast::chromecast_discover,

@@ -5,21 +5,81 @@ use tokio::io::AsyncWriteExt;
 use futures::{StreamExt, SinkExt};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
+use base64::Engine;
 
 pub static ACTIVE_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
 pub static REMOTE_PIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ActiveRemoteMetadata {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration: f64,
+    pub cover_url: Option<String>,
+}
+
+pub static ACTIVE_METADATA: std::sync::RwLock<Option<ActiveRemoteMetadata>> = std::sync::RwLock::new(None);
+pub static METADATA_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub fn set_active_metadata(title: &str, artist: &str, album: Option<&str>, duration: f64, cover_url: Option<&str>) {
+    if let Ok(mut lock) = ACTIVE_METADATA.write() {
+        *lock = Some(ActiveRemoteMetadata {
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album: album.unwrap_or("").to_string(),
+            duration,
+            cover_url: cover_url.map(|s| s.to_string()),
+        });
+        METADATA_VERSION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+pub fn get_active_metadata() -> Option<ActiveRemoteMetadata> {
+    ACTIVE_METADATA.read().ok().and_then(|lock| lock.clone())
+}
+
+/// Generates or retrieves a clean 6-digit PIN for simple mobile pairing.
 pub fn get_or_init_pin() -> &'static str {
     REMOTE_PIN.get_or_init(|| {
-        format!("{:032x}", rand::random::<u128>())
+        let pin_val: u32 = 100_000 + (rand::random::<u32>() % 900_000);
+        pin_val.to_string()
     })
 }
 
+/// Constant-time string equality check to prevent timing attacks.
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
     a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Robust local LAN IP resolver. Tests outbound routing against candidate targets
+/// and ensures the returned address is valid, non-unspecified (not 0.0.0.0), and non-loopback.
+pub fn get_local_ip() -> Option<String> {
+    let probe_targets = [
+        "8.8.8.8:80",
+        "1.1.1.1:80",
+        "192.168.0.1:80",
+        "192.168.1.1:80",
+        "10.0.0.1:80",
+        "172.16.0.1:80",
+    ];
+
+    for target in probe_targets {
+        if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+            if socket.connect(target).is_ok() {
+                if let Ok(addr) = socket.local_addr() {
+                    let ip = addr.ip();
+                    if !ip.is_unspecified() && !ip.is_loopback() {
+                        return Some(ip.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn extract_pin_from_query(query: &str) -> Option<&str> {
@@ -51,6 +111,15 @@ pub fn extract_auth_header_from_raw_http(request_str: &str) -> Option<&str> {
         if let Some(val) = trimmed.strip_prefix("Authorization:")
             .or_else(|| trimmed.strip_prefix("authorization:")) {
             return Some(val.trim());
+        }
+    }
+    None
+}
+
+pub fn parse_data_url(data_url: &str) -> Option<(&str, &str)> {
+    if let Some(rest) = data_url.strip_prefix("data:") {
+        if let Some((mime, b64_part)) = rest.split_once(";base64,") {
+            return Some((mime, b64_part));
         }
     }
     None
@@ -161,22 +230,27 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, app_handle: AppH
             handle_websocket(ws_stream, addr, app_handle, state).await;
         }
     } else {
-        handle_http(stream, request_str).await;
+        handle_http(stream, &request_str, state).await;
     }
 }
 
-async fn handle_http(mut stream: TcpStream, request_str: std::borrow::Cow<'_, str>) {
+async fn handle_http(mut stream: TcpStream, request_str: &str, state: Arc<crate::AppState>) {
     let expected_pin = get_or_init_pin();
 
+    // Parse HTTP request line
+    let first_line = request_str.lines().next().unwrap_or("");
+    let path_and_query = first_line.split_whitespace().nth(1).unwrap_or("/");
+    let (path, query) = match path_and_query.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (path_and_query, ""),
+    };
+
     // 1. Check Authorization header
-    let pin_from_header = extract_auth_header_from_raw_http(&request_str)
+    let pin_from_header = extract_auth_header_from_raw_http(request_str)
         .and_then(extract_pin_from_auth_header);
 
     // 2. Check query parameter ?pin=...
-    let first_line = request_str.lines().next().unwrap_or("");
-    let path_and_query = first_line.split_whitespace().nth(1).unwrap_or("");
-    let query_str = path_and_query.splitn(2, '?').nth(1).unwrap_or("");
-    let pin_from_query = extract_pin_from_query(query_str);
+    let pin_from_query = extract_pin_from_query(query);
 
     let has_valid_pin = match (pin_from_header, pin_from_query) {
         (Some(pin), _) => constant_time_eq(pin, expected_pin),
@@ -184,26 +258,150 @@ async fn handle_http(mut stream: TcpStream, request_str: std::borrow::Cow<'_, st
         (None, None) => false,
     };
 
-    let (status_line, content) = if !has_valid_pin {
-        ("HTTP/1.1 403 FORBIDDEN\r\nContent-Type: text/html; charset=utf-8\r\n",
-         "<!DOCTYPE html><html><head><title>403 Forbidden</title></head>\
-         <body style=\"background-color:#09090e;color:#f3f4f6;font-family:sans-serif;text-align:center;padding:50px;\">\
-         <h1>403 Forbidden</h1><p>Invalid or missing PIN. Please scan the QR code in Aideo Settings.</p>\
-         </body></html>".to_string())
-    } else if path_and_query.starts_with('/') {
-        ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n", get_remote_html())
-    } else {
-        ("HTTP/1.1 404 NOT FOUND\r\n", "Not Found".to_string())
-    };
+    // Route: /cover (Dedicated high-speed cached artwork endpoint)
+    if path == "/cover" {
+        if !has_valid_pin {
+            let resp = "HTTP/1.1 403 FORBIDDEN\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nForbidden - Invalid or missing PIN";
+            let _ = stream.write_all(resp.as_bytes()).await;
+            let _ = stream.flush().await;
+            let _ = stream.shutdown().await;
+            return;
+        }
 
-    let response = format!(
-        "{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
-        status_line,
-        content.len(),
-        content
-    );
+        // 1. Try active metadata cover URL (e.g. YouTube, Subsonic, or tagged track)
+        let active_cover = get_active_metadata().and_then(|m| m.cover_url);
+        if let Some(ref cover_url) = active_cover {
+            if cover_url.starts_with("http://") || cover_url.starts_with("https://") {
+                let resp = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {}\r\nCache-Control: public, max-age=3600\r\nConnection: close\r\n\r\n",
+                    cover_url
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+                let _ = stream.flush().await;
+                let _ = stream.shutdown().await;
+                return;
+            } else if let Some((mime, b64)) = parse_data_url(cover_url) {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) {
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nCache-Control: public, max-age=3600\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        mime,
+                        bytes.len()
+                    );
+                    let _ = stream.write_all(header.as_bytes()).await;
+                    let _ = stream.write_all(&bytes).await;
+                    let _ = stream.flush().await;
+                    let _ = stream.shutdown().await;
+                    return;
+                }
+            }
+        }
 
-    let _ = stream.write_all(response.as_bytes()).await;
+        // 2. Try current playing local audio file
+        let track_path_opt = {
+            let player = crate::safe_lock(&state.player);
+            let track = crate::safe_lock(&player.current_track).clone();
+            track
+        };
+
+        if let Some(ref track_path) = track_path_opt {
+            if !track_path.starts_with("http") {
+                if let Some(data_url) = crate::artwork::get_cover_art(track_path) {
+                    if let Some((mime, b64)) = parse_data_url(&data_url) {
+                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) {
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nCache-Control: public, max-age=3600\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                mime,
+                                bytes.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes()).await;
+                            let _ = stream.write_all(&bytes).await;
+                            let _ = stream.flush().await;
+                            let _ = stream.shutdown().await;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // 3. Fallback: Query SQLite database for cover_url
+            let db_cover_url: Option<String> = {
+                let alt_path = if track_path.contains('\\') {
+                    track_path.replace('\\', "/")
+                } else {
+                    track_path.replace('/', "\\")
+                };
+                let conn = crate::safe_lock(&state.db);
+                let mut res = None;
+                if let Ok(mut stmt) = conn.prepare("SELECT cover_url FROM tracks WHERE path = ?1 OR path = ?2 LIMIT 1") {
+                    if let Ok(mut rows) = stmt.query(rusqlite::params![track_path, alt_path]) {
+                        if let Ok(Some(row)) = rows.next() {
+                            res = row.get::<_, Option<String>>(0).ok().flatten();
+                        }
+                    }
+                }
+                res
+            };
+
+            if let Some(c_url) = db_cover_url {
+                if c_url.starts_with("http://") || c_url.starts_with("https://") {
+                    let resp = format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {}\r\nCache-Control: public, max-age=3600\r\nConnection: close\r\n\r\n",
+                        c_url
+                    );
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                    let _ = stream.flush().await;
+                    let _ = stream.shutdown().await;
+                    return;
+                } else if let Some((mime, b64)) = parse_data_url(&c_url) {
+                    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) {
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nCache-Control: public, max-age=3600\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            mime,
+                            bytes.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes()).await;
+                        let _ = stream.write_all(&bytes).await;
+                        let _ = stream.flush().await;
+                        let _ = stream.shutdown().await;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Fallback: 404 Not Found if track has no embedded/linked art
+        let resp = "HTTP/1.1 404 NOT FOUND\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.flush().await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+
+    // Route: Root / Index
+    if path == "/" || path == "/index.html" {
+        let (status_line, content) = if has_valid_pin {
+            ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n", get_remote_html())
+        } else {
+            // Render pairing PIN keypad when unauthenticated
+            ("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n", get_pin_entry_html())
+        };
+
+        let response = format!(
+            "{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+            status_line,
+            content.len(),
+            content
+        );
+
+        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = stream.flush().await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+
+    // Route: 404 for unhandled paths (e.g. /favicon.ico)
+    let resp = "HTTP/1.1 404 NOT FOUND\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    let _ = stream.write_all(resp.as_bytes()).await;
     let _ = stream.flush().await;
     let _ = stream.shutdown().await;
 }
@@ -222,9 +420,10 @@ async fn handle_websocket(
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(500));
         let mut last_track_path: Option<String> = None;
-        let mut cached_meta: Option<(String, String, String, f64, Option<String>)> = None;
-        let mut cached_cover_art: Option<String> = None;
+        let mut last_meta_version: u64 = 0;
+        let mut cached_meta: Option<(String, String, String, f64, bool)> = None;
         let mut cached_lyrics: Option<Vec<crate::lyrics::LyricLine>> = None;
+        let mut is_first_tick = true;
 
         loop {
             tokio::select! {
@@ -232,78 +431,119 @@ async fn handle_websocket(
                     break;
                 }
                 _ = interval.tick() => {
-                    let status = {
+                    let pin = get_or_init_pin();
+                    let current_meta_version = METADATA_VERSION.load(std::sync::atomic::Ordering::Relaxed);
+                    let (status_u8, position, volume, current_track_opt) = {
                         let player = crate::safe_lock(&state_clone.player);
-                        let status_u8 = player.status.load(std::sync::atomic::Ordering::Relaxed);
-                        let is_playing = status_u8 == 1;
-                        let position = f64::from_bits(player.position_secs.load(std::sync::atomic::Ordering::Relaxed));
-                        
-                        let volume_bits = player.volume.load(std::sync::atomic::Ordering::Relaxed);
-                        let volume = f32::from_bits(volume_bits);
-                        
-                        let mut title = "Stopped".to_string();
+                        let s = player.status.load(std::sync::atomic::Ordering::Relaxed);
+                        let pos = f64::from_bits(player.position_secs.load(std::sync::atomic::Ordering::Relaxed));
+                        let vol_bits = player.volume.load(std::sync::atomic::Ordering::Relaxed);
+                        let vol = f32::from_bits(vol_bits);
+                        let track = crate::safe_lock(&player.current_track).clone();
+                        (s, pos, vol, track)
+                    };
+
+                    let is_playing = status_u8 == 1;
+
+                    let path_changed = match (&last_track_path, &current_track_opt) {
+                        (Some(last), Some(curr)) => last != curr,
+                        (None, Some(_)) => true,
+                        (Some(_), None) => true,
+                        (None, None) => false,
+                    };
+                    let version_changed = current_meta_version != last_meta_version;
+
+                    let track_changed = is_first_tick || path_changed || version_changed;
+
+                    if track_changed {
+                        last_meta_version = current_meta_version;
+                        last_track_path = current_track_opt.clone();
+
+                        let mut title = "Not Playing".to_string();
                         let mut artist = "".to_string();
                         let mut album = "".to_string();
                         let mut duration = 0.0;
-                        let mut cover_art = None;
-                        
-                        let current_track_opt = crate::safe_lock(&player.current_track).clone();
-                        if let Some(ref track_path) = current_track_opt {
-                            let track_changed = match last_track_path {
-                                Some(ref last_path) => last_path != track_path,
-                                None => true,
-                            };
+                        let mut has_cover = false;
 
-                            if track_changed {
-                                last_track_path = Some(track_path.clone());
-                                let mut fetched_meta = ("Unknown Title".to_string(), "Unknown Artist".to_string(), "".to_string(), 0.0, None);
+                        // 1. Check active metadata first (pushed from frontend)
+                        if let Some(meta) = get_active_metadata() {
+                            if !meta.title.trim().is_empty() && meta.title != "Not Playing" && meta.title != "Stopped" {
+                                title = meta.title;
+                                artist = meta.artist;
+                                album = meta.album;
+                                duration = meta.duration;
+                                has_cover = meta.cover_url.is_some();
+                            }
+                        }
+
+                        // 2. If title is still missing or default, inspect current track path
+                        if let Some(ref track_path) = current_track_opt {
+                            if title == "Not Playing" || title.trim().is_empty() {
+                                let alt_path = if track_path.contains('\\') {
+                                    track_path.replace('\\', "/")
+                                } else {
+                                    track_path.replace('/', "\\")
+                                };
+
                                 let conn = crate::safe_lock(&state_clone.db);
-                                if let Ok(mut stmt) = conn.prepare("SELECT title, artist, album, duration, cover_url FROM tracks WHERE path = ?1 LIMIT 1") {
-                                    if let Ok(mut rows) = stmt.query([track_path]) {
+                                if let Ok(mut stmt) = conn.prepare(
+                                    "SELECT title, artist, album, duration, cover_url FROM tracks WHERE path = ?1 OR path = ?2 LIMIT 1"
+                                ) {
+                                    if let Ok(mut rows) = stmt.query(rusqlite::params![track_path, alt_path]) {
                                         if let Ok(Some(row)) = rows.next() {
-                                            let t = row.get::<_, Option<String>>(0).ok().flatten().unwrap_or_else(|| "Unknown Title".to_string());
-                                            let a = row.get::<_, Option<String>>(1).ok().flatten().unwrap_or_else(|| "Unknown Artist".to_string());
-                                            let alb = row.get::<_, Option<String>>(2).ok().flatten().unwrap_or_default();
-                                            let d = row.get::<_, Option<f64>>(3).ok().flatten().unwrap_or(0.0);
-                                            let c_url = row.get::<_, Option<String>>(4).ok().flatten();
-                                            fetched_meta = (t, a, alb, d, c_url);
+                                            if let Some(t) = row.get::<_, Option<String>>(0).ok().flatten() {
+                                                if !t.trim().is_empty() { title = t; }
+                                            }
+                                            if let Some(a) = row.get::<_, Option<String>>(1).ok().flatten() {
+                                                if !a.trim().is_empty() { artist = a; }
+                                            }
+                                            if let Some(alb) = row.get::<_, Option<String>>(2).ok().flatten() {
+                                                album = alb;
+                                            }
+                                            if let Some(d) = row.get::<_, Option<f64>>(3).ok().flatten() {
+                                                if d > 0.0 { duration = d; }
+                                            }
+                                            if row.get::<_, Option<String>>(4).ok().flatten().is_some() {
+                                                has_cover = true;
+                                            }
                                         }
                                     }
-                                }
-                                cached_meta = Some(fetched_meta);
-
-                                if !track_path.starts_with("http") {
-                                    cached_cover_art = crate::artwork::get_cover_art(track_path);
-                                } else {
-                                    cached_cover_art = None;
-                                }
-
-                                // Load synchronized lyrics for the track
-                                cached_lyrics = Some(crate::lyrics::get_lyrics_for_track(track_path));
+                                };
                             }
 
-                            if let Some((ref t, ref a, ref alb, d, ref c_url)) = cached_meta {
-                                title = t.clone();
-                                artist = a.clone();
-                                album = alb.clone();
-                                duration = d;
-                                if track_path.starts_with("http://") || track_path.starts_with("https://") {
-                                    cover_art = c_url.clone();
-                                } else {
-                                    cover_art = cached_cover_art.clone();
+                            // 3. Fallback: file stem if title is still empty
+                            if title == "Not Playing" || title.trim().is_empty() {
+                                if let Some(stem) = std::path::Path::new(track_path).file_stem().and_then(|s| s.to_str()) {
+                                    if !stem.trim().is_empty() && !stem.starts_with("http") {
+                                        title = stem.to_string();
+                                    }
                                 }
                             }
-                        } else {
-                            last_track_path = None;
-                            cached_meta = None;
-                            cached_cover_art = None;
-                            cached_lyrics = None;
+
+                            // 4. Check local artwork presence
+                            if !has_cover && !track_path.starts_with("http") {
+                                has_cover = crate::artwork::get_cover_art(track_path).is_some();
+                            }
+
+                            cached_lyrics = Some(crate::lyrics::get_lyrics_for_track(track_path));
                         }
-                        
-                        let empty_lyrics: Vec<crate::lyrics::LyricLine> = Vec::new();
+
+                        cached_meta = Some((title, artist, album, duration, has_cover));
+                    }
+
+                    let cover_url = format!("/cover?pin={}&v={}", pin, current_meta_version);
+
+                    let payload = if track_changed {
+                        is_first_tick = false;
+                        let (title, artist, album, duration, has_cover) = cached_meta.clone().unwrap_or_else(|| {
+                            ("Not Playing".to_string(), "".to_string(), "".to_string(), 0.0, false)
+                        });
+                        let empty_lyrics = Vec::new();
                         let lyrics_ref = cached_lyrics.as_ref().unwrap_or(&empty_lyrics);
 
+                        // Broadcast full track metadata, lyrics, and cover endpoint ONLY on track change
                         serde_json::json!({
+                            "type": "track_change",
                             "title": title,
                             "artist": artist,
                             "album": album,
@@ -311,12 +551,31 @@ async fn handle_websocket(
                             "position": position,
                             "volume": volume,
                             "is_playing": is_playing,
-                            "cover_art": cover_art,
+                            "has_cover": has_cover,
+                            "cover_url": if has_cover { Some(&cover_url) } else { None },
                             "lyrics": lyrics_ref,
+                            "pin": pin,
+                        })
+                    } else {
+                        // Lightweight telemetry tick with cover endpoint kept in sync
+                        let (title, artist, album, duration, has_cover) = cached_meta.clone().unwrap_or_else(|| {
+                            ("Not Playing".to_string(), "".to_string(), "".to_string(), 0.0, false)
+                        });
+                        serde_json::json!({
+                            "type": "tick",
+                            "title": title,
+                            "artist": artist,
+                            "album": album,
+                            "duration": duration,
+                            "position": position,
+                            "volume": volume,
+                            "is_playing": is_playing,
+                            "has_cover": has_cover,
+                            "cover_url": if has_cover { Some(&cover_url) } else { None },
                         })
                     };
-                    
-                    if let Ok(msg_str) = serde_json::to_string(&status) {
+
+                    if let Ok(msg_str) = serde_json::to_string(&payload) {
                         if ws_sender.send(tokio_tungstenite::tungstenite::Message::Text(msg_str.into())).await.is_err() {
                             break;
                         }
@@ -349,20 +608,28 @@ async fn handle_websocket(
                         "prev" => {
                             let _ = app_handle.emit("media-prev", ());
                         }
+                        "seek" => {
+                            if let Some(pos) = val.get("value").and_then(|v| v.as_f64()) {
+                                let player = crate::safe_lock(&state.player);
+                                let _ = player.cmd_tx.send(crate::player::PlayerCommand::Seek(pos));
+                                let _ = app_handle.emit("media-seek", pos);
+                            }
+                        }
                         "volume" => {
                             if let Some(vol) = val.get("value").and_then(|v| v.as_f64()) {
                                 if vol.is_finite() {
                                     let clamped = (vol as f32).clamp(0.0, 1.0);
                                     let player = crate::safe_lock(&state.player);
                                     player.volume.store(clamped.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                                    let _ = app_handle.emit("media-volume", clamped);
                                 }
                             }
                         }
-                        "seek" => {
-                            if let Some(pos) = val.get("value").and_then(|v| v.as_f64()) {
-                                let player = crate::safe_lock(&state.player);
-                                let _ = player.cmd_tx.send(crate::player::PlayerCommand::Seek(pos));
-                            }
+                        "shuffle" => {
+                            let _ = app_handle.emit("media-shuffle", ());
+                        }
+                        "repeat" => {
+                            let _ = app_handle.emit("media-repeat", ());
                         }
                         _ => {}
                     }
@@ -374,13 +641,227 @@ async fn handle_websocket(
     let _ = tx_close.send(());
 }
 
-fn get_remote_html() -> String {
-    r#"<!DOCTYPE html>
+fn get_pin_entry_html() -> String {
+    r###"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aideo Connect</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#09090e">
+    <title>Aideo Connect — Pairing</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #a855f7;
+            --accent-glow: rgba(168, 85, 247, 0.45);
+            --bg-dark: #09090e;
+            --panel-bg: rgba(255, 255, 255, 0.04);
+            --border: rgba(255, 255, 255, 0.1);
+            --text-main: #f3f4f6;
+            --text-dim: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            width: 320px;
+            height: 320px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            top: -60px;
+            left: -60px;
+            filter: blur(60px);
+            opacity: 0.35;
+            pointer-events: none;
+        }
+
+        .auth-card {
+            width: 100%;
+            max-width: 380px;
+            background: rgba(18, 18, 30, 0.88);
+            backdrop-filter: blur(32px);
+            -webkit-backdrop-filter: blur(32px);
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            padding: 36px 28px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
+            z-index: 10;
+            text-align: center;
+        }
+
+        .brand-badge {
+            width: 54px;
+            height: 54px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #a855f7 0%, #ec4899 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 24px var(--accent-glow);
+        }
+
+        .brand-badge svg {
+            width: 28px;
+            height: 28px;
+            color: #fff;
+        }
+
+        h1 {
+            font-size: 22px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 30%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p {
+            font-size: 13px;
+            color: var(--text-dim);
+            line-height: 1.5;
+            margin-bottom: 28px;
+        }
+
+        .input-group {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .pin-input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1.5px solid var(--border);
+            border-radius: 14px;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: 12px;
+            text-align: center;
+            color: #fff;
+            outline: none;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .pin-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 16px var(--accent-glow);
+        }
+
+        .btn-connect {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+            color: #fff;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 20px var(--accent-glow);
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .btn-connect:active {
+            transform: scale(0.97);
+        }
+
+        .hint {
+            margin-top: 20px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-card">
+        <div class="brand-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+            </svg>
+        </div>
+        <h1>Aideo Connect</h1>
+        <p>Enter the 6-digit PIN displayed on your Aideo desktop player to connect.</p>
+
+        <form id="pin-form" class="input-group" onsubmit="handlePinSubmit(event)">
+            <input 
+                type="text" 
+                id="pin-input" 
+                class="pin-input" 
+                maxlength="6" 
+                placeholder="••••••" 
+                inputmode="numeric" 
+                pattern="[0-9]*" 
+                autocomplete="one-time-code"
+                autofocus
+            />
+            <button type="submit" class="btn-connect" style="margin-top: 16px;">Connect Player</button>
+        </form>
+
+        <div class="hint">Check Aideo Settings &rarr; System &rarr; Aideo Connect Remote for your PIN.</div>
+    </div>
+
+    <script>
+        // Check if PIN was previously saved in localStorage
+        const savedPin = localStorage.getItem('aideo_remote_pin');
+        if (savedPin && savedPin.length >= 4) {
+            window.location.search = '?pin=' + encodeURIComponent(savedPin);
+        }
+
+        function handlePinSubmit(e) {
+            e.preventDefault();
+            const val = document.getElementById('pin-input').value.trim();
+            if (!val) return;
+            localStorage.setItem('aideo_remote_pin', val);
+            window.location.search = '?pin=' + encodeURIComponent(val);
+        }
+    </script>
+</body>
+</html>
+"###
+    .to_string()
+}
+
+fn get_remote_html() -> String {
+    r###"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#09090e">
+    <title>Aideo Connect Remote</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -399,13 +880,15 @@ fn get_remote_html() -> String {
             -webkit-user-select: none;
             margin: 0;
             padding: 0;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
             background-color: var(--bg-dark);
             color: var(--text-main);
-            font-family: 'Outfit', sans-serif;
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             min-height: 100vh;
+            min-height: -webkit-fill-available;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -419,13 +902,13 @@ fn get_remote_html() -> String {
         body::before, body::after {
             content: '';
             position: absolute;
-            width: 320px;
-            height: 320px;
+            width: 340px;
+            height: 340px;
             border-radius: 50%;
             background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
             z-index: 0;
-            filter: blur(60px);
-            opacity: 0.4;
+            filter: blur(65px);
+            opacity: 0.35;
             pointer-events: none;
         }
 
@@ -435,17 +918,17 @@ fn get_remote_html() -> String {
         .container {
             width: 100%;
             max-width: 420px;
-            height: 90vh;
-            max-height: 820px;
-            background: rgba(15, 15, 25, 0.85);
+            height: 92vh;
+            max-height: 840px;
+            background: rgba(15, 15, 26, 0.88);
             backdrop-filter: blur(32px);
             -webkit-backdrop-filter: blur(32px);
             border: 1px solid var(--border);
-            border-radius: 28px;
+            border-radius: 30px;
             padding: 20px 24px;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75);
             z-index: 10;
             overflow: hidden;
         }
@@ -454,7 +937,7 @@ fn get_remote_html() -> String {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
             flex-shrink: 0;
         }
 
@@ -467,9 +950,16 @@ fn get_remote_html() -> String {
         .logo {
             font-weight: 800;
             font-size: 18px;
-            background: linear-gradient(135deg, #fff 0%, #a855f7 100%);
+            background: linear-gradient(135deg, #fff 20%, #c084fc 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            letter-spacing: -0.3px;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .status-badge {
@@ -489,7 +979,7 @@ fn get_remote_html() -> String {
             border: 1px solid rgba(16, 185, 129, 0.3);
         }
 
-        /* Segmented Mode Switch */
+        /* Mode Switcher Tabs */
         .tab-bar {
             display: flex;
             background: rgba(0, 0, 0, 0.4);
@@ -516,12 +1006,11 @@ fn get_remote_html() -> String {
         }
 
         .tab-btn.active {
-            background: rgba(168, 85, 247, 0.2);
+            background: rgba(168, 85, 247, 0.22);
             color: #fff;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
 
-        /* Views */
         .view-content {
             flex: 1;
             display: flex;
@@ -549,15 +1038,27 @@ fn get_remote_html() -> String {
             height: 190px;
             margin: 0 auto 16px;
             border-radius: 20px;
-            background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
+            background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.01) 100%);
             border: 1px solid var(--border);
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
-            box-shadow: 0 16px 32px rgba(0,0,0,0.5);
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
             overflow: hidden;
             flex-shrink: 0;
+        }
+
+        .album-art-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .album-art-img.loaded {
+            opacity: 1;
         }
 
         .album-art-fallback {
@@ -565,6 +1066,7 @@ fn get_remote_html() -> String {
             height: 60px;
             opacity: 0.3;
             color: #fff;
+            position: absolute;
         }
 
         .track-info {
@@ -592,7 +1094,7 @@ fn get_remote_html() -> String {
         }
 
         .slider-container {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
             flex-shrink: 0;
         }
 
@@ -628,7 +1130,7 @@ fn get_remote_html() -> String {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 24px;
+            gap: 16px;
             margin-bottom: 20px;
             flex-shrink: 0;
         }
@@ -646,24 +1148,33 @@ fn get_remote_html() -> String {
         }
 
         .btn-side {
-            opacity: 0.7;
+            opacity: 0.75;
+            padding: 8px;
+            border-radius: 12px;
         }
+
         .btn-side:active {
             opacity: 1;
-            transform: scale(0.88);
+            transform: scale(0.9);
+        }
+
+        .btn-side.active {
+            color: var(--accent);
+            opacity: 1;
+            background: rgba(168, 85, 247, 0.15);
         }
 
         .btn-play {
-            width: 60px;
-            height: 60px;
+            width: 62px;
+            height: 62px;
             border-radius: 50%;
-            background: var(--accent);
-            box-shadow: 0 6px 20px var(--accent-glow);
+            background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
+            box-shadow: 0 6px 22px var(--accent-glow);
             color: #fff;
         }
 
         .btn-play:active {
-            transform: scale(0.92);
+            transform: scale(0.93);
         }
 
         .volume-container {
@@ -677,10 +1188,13 @@ fn get_remote_html() -> String {
             flex-shrink: 0;
         }
 
-        .volume-icon {
-            opacity: 0.6;
-            width: 16px;
-            height: 16px;
+        .volume-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
         }
 
         .volume-slider {
@@ -694,8 +1208,8 @@ fn get_remote_html() -> String {
 
         .volume-slider::-webkit-slider-thumb {
             -webkit-appearance: none;
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
             background: var(--text-main);
         }
@@ -754,13 +1268,14 @@ fn get_remote_html() -> String {
             text-align: center;
             -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
             mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
+            position: relative;
         }
 
         .lyric-line {
             font-size: 16px;
             font-weight: 600;
             color: var(--text-dim);
-            opacity: 0.45;
+            opacity: 0.4;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             cursor: pointer;
             padding: 8px 12px;
@@ -769,7 +1284,7 @@ fn get_remote_html() -> String {
         }
 
         .lyric-line:active {
-            background: rgba(255,255,255,0.05);
+            background: rgba(255,255,255,0.06);
         }
 
         .lyric-line.active {
@@ -779,6 +1294,24 @@ fn get_remote_html() -> String {
             font-weight: 800;
             transform: scale(1.04);
             text-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .resume-sync-pill {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--accent);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 6px 14px;
+            border-radius: 100px;
+            border: none;
+            box-shadow: 0 4px 16px var(--accent-glow);
+            cursor: pointer;
+            display: none;
+            z-index: 20;
         }
 
         .no-lyrics {
@@ -800,7 +1333,9 @@ fn get_remote_html() -> String {
             <div class="logo-wrap">
                 <span class="logo">Aideo Connect</span>
             </div>
-            <span id="status" class="status-badge">Offline</span>
+            <div class="header-actions">
+                <span id="status" class="status-badge">Connecting...</span>
+            </div>
         </div>
 
         <div class="tab-bar">
@@ -812,7 +1347,7 @@ fn get_remote_html() -> String {
             <!-- Tab 1: Player View -->
             <div id="pane-player" class="tab-pane active">
                 <div class="album-art-container">
-                    <img id="album-art-img" style="width: 100%; height: 100%; object-fit: cover; display: none;" />
+                    <img id="album-art-img" class="album-art-img" alt="Artwork" />
                     <svg id="album-art-fallback" class="album-art-fallback" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M9 18V5l12-2v13" stroke-linecap="round" stroke-linejoin="round"/>
                         <circle cx="6" cy="18" r="3"/>
@@ -822,7 +1357,7 @@ fn get_remote_html() -> String {
 
                 <div class="track-info">
                     <div id="title" class="track-title">Not Playing</div>
-                    <div id="artist" class="track-artist">Connect to desktop player</div>
+                    <div id="artist" class="track-artist">Connecting to desktop player...</div>
                 </div>
 
                 <div class="slider-container">
@@ -834,30 +1369,58 @@ fn get_remote_html() -> String {
                 </div>
 
                 <div class="controls">
-                    <button id="btn-prev" class="btn btn-side">
+                    <!-- Shuffle -->
+                    <button id="btn-shuffle" class="btn btn-side" title="Shuffle">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 3 21 3 21 8"></polyline>
+                            <line x1="4" y1="20" x2="21" y2="3"></line>
+                            <polyline points="21 16 21 21 16 21"></polyline>
+                            <line x1="15" y1="15" x2="21" y2="21"></line>
+                            <line x1="4" y1="4" x2="9" y2="9"></line>
+                        </svg>
+                    </button>
+
+                    <!-- Previous -->
+                    <button id="btn-prev" class="btn btn-side" title="Previous">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polygon points="19 20 9 12 19 4 19 20"/>
                             <line x1="5" y1="19" x2="5" y2="5"/>
                         </svg>
                     </button>
-                    <button id="btn-play" class="btn btn-play">
-                        <svg id="play-icon" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+
+                    <!-- Play / Pause -->
+                    <button id="btn-play" class="btn btn-play" title="Play/Pause">
+                        <svg id="play-icon" width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
                             <polygon points="5 3 19 12 5 21 5 3"/>
                         </svg>
                     </button>
-                    <button id="btn-next" class="btn btn-side">
+
+                    <!-- Next -->
+                    <button id="btn-next" class="btn btn-side" title="Next">
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polygon points="5 4 15 12 5 20 5 4"/>
                             <line x1="19" y1="5" x2="19" y2="19"/>
                         </svg>
                     </button>
+
+                    <!-- Repeat -->
+                    <button id="btn-repeat" class="btn btn-side" title="Repeat">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="17 1 21 5 17 9"></polyline>
+                            <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+                            <polyline points="7 23 3 19 7 15"></polyline>
+                            <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+                        </svg>
+                    </button>
                 </div>
 
                 <div class="volume-container">
-                    <svg class="volume-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                    </svg>
+                    <button id="btn-mute" class="volume-btn" title="Mute">
+                        <svg id="vol-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                        </svg>
+                    </button>
                     <input type="range" id="volume-slider" class="volume-slider" min="0" max="100" value="80">
                 </div>
             </div>
@@ -882,6 +1445,10 @@ fn get_remote_html() -> String {
                         <span>No synchronized lyrics available</span>
                     </div>
                 </div>
+
+                <button id="btn-resume-sync" class="resume-sync-pill" onclick="resumeSync()">
+                    Resume Sync &darr;
+                </button>
             </div>
         </div>
     </div>
@@ -894,24 +1461,34 @@ fn get_remote_html() -> String {
         const playIcon = document.getElementById('play-icon');
         const btnPrev = document.getElementById('btn-prev');
         const btnNext = document.getElementById('btn-next');
+        const btnShuffle = document.getElementById('btn-shuffle');
+        const btnRepeat = document.getElementById('btn-repeat');
+        const btnMute = document.getElementById('btn-mute');
         const timeSlider = document.getElementById('time-slider');
         const timeCurrent = document.getElementById('time-current');
         const timeTotal = document.getElementById('time-total');
         const volumeSlider = document.getElementById('volume-slider');
+        const albumArtImg = document.getElementById('album-art-img');
+        const albumArtFallback = document.getElementById('album-art-fallback');
 
         // Lyrics elements
         const lyricsScrollBox = document.getElementById('lyrics-scroll-box');
         const lyricsTitle = document.getElementById('lyrics-title');
         const lyricsArtist = document.getElementById('lyrics-artist');
         const lyricsThumbImg = document.getElementById('lyrics-thumb-img');
+        const btnResumeSync = document.getElementById('btn-resume-sync');
 
         let ws;
         let isPlaying = false;
         let duration = 0;
         let userInteractingWithTime = false;
+        let userInteractingWithVolume = false;
+        let userIsScrollingLyrics = false;
+        let lyricsScrollTimer = null;
         let currentLyrics = [];
         let activeLyricIdx = -1;
         let activeTabName = 'player';
+        let currentCoverUrl = '';
 
         function switchTab(tab) {
             activeTabName = tab;
@@ -944,7 +1521,7 @@ fn get_remote_html() -> String {
                             <circle cx="6" cy="18" r="3"/>
                             <circle cx="18" cy="16" r="3"/>
                         </svg>
-                        <span>Instrumental or No Lyrics Available</span>
+                        <span>Instrumental or No Synced Lyrics</span>
                     </div>
                 `;
                 return;
@@ -987,7 +1564,7 @@ fn get_remote_html() -> String {
                     }
                 });
 
-                if (idx >= 0 && activeTabName === 'lyrics') {
+                if (idx >= 0 && activeTabName === 'lyrics' && !userIsScrollingLyrics) {
                     scrollToActiveLyric(idx);
                 }
             }
@@ -1001,11 +1578,71 @@ fn get_remote_html() -> String {
             }
         }
 
+        function resumeSync() {
+            userIsScrollingLyrics = false;
+            btnResumeSync.style.display = 'none';
+            if (activeLyricIdx >= 0) {
+                scrollToActiveLyric(activeLyricIdx);
+            }
+        }
+
+        // Detect user manual scroll in lyrics tab
+        lyricsScrollBox.addEventListener('touchstart', () => {
+            userIsScrollingLyrics = true;
+            btnResumeSync.style.display = 'block';
+            clearTimeout(lyricsScrollTimer);
+        }, { passive: true });
+
+        lyricsScrollBox.addEventListener('wheel', () => {
+            userIsScrollingLyrics = true;
+            btnResumeSync.style.display = 'block';
+            clearTimeout(lyricsScrollTimer);
+            lyricsScrollTimer = setTimeout(() => {
+                userIsScrollingLyrics = false;
+                btnResumeSync.style.display = 'none';
+            }, 5000);
+        }, { passive: true });
+
+        function updateCoverArt(url) {
+            if (url && url !== currentCoverUrl) {
+                currentCoverUrl = url;
+                albumArtImg.onload = () => {
+                    albumArtImg.classList.add('loaded');
+                    albumArtFallback.style.display = 'none';
+                };
+                albumArtImg.onerror = () => {
+                    albumArtImg.classList.remove('loaded');
+                    albumArtFallback.style.display = 'block';
+                };
+                albumArtImg.src = url;
+                lyricsThumbImg.src = url;
+                lyricsThumbImg.style.display = 'block';
+            } else if (!url) {
+                currentCoverUrl = '';
+                albumArtImg.src = '';
+                albumArtImg.classList.remove('loaded');
+                albumArtFallback.style.display = 'block';
+                lyricsThumbImg.style.display = 'none';
+            }
+        }
+
         function connect() {
+            // Retrieve PIN from URL query or localStorage
+            const urlParams = new URLSearchParams(window.location.search);
+            let pin = urlParams.get('pin');
+            if (pin) {
+                localStorage.setItem('aideo_remote_pin', pin);
+            } else {
+                pin = localStorage.getItem('aideo_remote_pin') || '';
+            }
+
             const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host;
-            const search = window.location.search || '';
-            const wsUrl = `${proto}//${host}/${search.startsWith('?') ? search : (search ? '?' + search : '')}`;
+            const wsUrl = `${proto}//${host}/?pin=${encodeURIComponent(pin)}`;
+            
+            statusBadge.textContent = 'Connecting...';
+            statusBadge.className = 'status-badge';
+
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
@@ -1020,98 +1657,145 @@ fn get_remote_html() -> String {
             };
 
             ws.onerror = (e) => {
-                console.error(e);
+                console.error('[Aideo Connect] WebSocket Error', e);
             };
 
             ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                
-                titleEl.textContent = data.title;
-                artistEl.textContent = data.artist || (data.album ? data.album : 'Aideo Stream Client');
-                lyricsTitle.textContent = data.title;
-                lyricsArtist.textContent = data.artist || 'Aideo Companion';
+                try {
+                    const data = JSON.parse(event.data);
 
-                isPlaying = data.is_playing;
-                duration = data.duration;
+                    // Track change or initial sync: full metadata & lyrics
+                    if (data.type === 'track_change') {
+                        titleEl.textContent = data.title || 'Not Playing';
+                        artistEl.textContent = data.artist || (data.album ? data.album : 'Aideo Player');
+                        lyricsTitle.textContent = data.title || 'Not Playing';
+                        lyricsArtist.textContent = data.artist || 'Aideo Companion';
 
-                // Sync lyrics if payload contains them and list changed
-                if (data.lyrics && JSON.stringify(data.lyrics) !== JSON.stringify(currentLyrics)) {
-                    renderLyrics(data.lyrics);
-                }
+                        duration = data.duration || 0;
+                        updateCoverArt(data.cover_url);
+                        renderLyrics(data.lyrics);
+                    } else {
+                        // Regular tick: keep title, artist, and artwork dynamically updated
+                        if (data.title && data.title !== 'Not Playing' && data.title !== titleEl.textContent) {
+                            titleEl.textContent = data.title;
+                            artistEl.textContent = data.artist || (data.album ? data.album : 'Aideo Player');
+                            lyricsTitle.textContent = data.title;
+                            lyricsArtist.textContent = data.artist || 'Aideo Companion';
+                        }
+                        if (data.cover_url && data.cover_url !== currentCoverUrl) {
+                            updateCoverArt(data.cover_url);
+                        }
+                    }
 
-                updateActiveLyric(data.position || 0);
+                    // Shared state sync (runs every tick)
+                    isPlaying = !!data.is_playing;
+                    if (data.duration) duration = data.duration;
 
-                // Play/Pause icon sync
-                if (isPlaying) {
-                    playIcon.innerHTML = `<rect x="5" y="4" width="4" height="16"></rect><rect x="15" y="4" width="4" height="16"></rect>`;
-                } else {
-                    playIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
-                }
+                    updateActiveLyric(data.position || 0);
 
-                // Time slider sync
-                timeTotal.textContent = formatTime(duration);
-                if (!userInteractingWithTime) {
-                    timeSlider.max = duration || 100;
-                    timeSlider.value = data.position || 0;
-                    timeCurrent.textContent = formatTime(data.position);
-                }
+                    // Play/Pause icon
+                    if (isPlaying) {
+                        playIcon.innerHTML = `<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>`;
+                    } else {
+                        playIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+                    }
 
-                // Volume slider sync
-                volumeSlider.value = Math.round(data.volume * 100);
+                    // Time slider
+                    timeTotal.textContent = formatTime(duration);
+                    if (!userInteractingWithTime) {
+                        timeSlider.max = duration || 100;
+                        timeSlider.value = data.position || 0;
+                        timeCurrent.textContent = formatTime(data.position);
+                    }
 
-                // Album art sync
-                const imgEl = document.getElementById('album-art-img');
-                const fallbackEl = document.getElementById('album-art-fallback');
-                if (data.cover_art) {
-                    imgEl.src = data.cover_art;
-                    imgEl.style.display = 'block';
-                    fallbackEl.style.display = 'none';
-                    lyricsThumbImg.src = data.cover_art;
-                    lyricsThumbImg.style.display = 'block';
-                } else {
-                    imgEl.src = '';
-                    imgEl.style.display = 'none';
-                    fallbackEl.style.display = 'block';
-                    lyricsThumbImg.style.display = 'none';
+                    // Volume slider (with drag protection)
+                    if (!userInteractingWithVolume && data.volume !== undefined) {
+                        volumeSlider.value = Math.round(data.volume * 100);
+                    }
+                } catch (err) {
+                    console.error('[Aideo Connect] Parse error', err);
                 }
             };
         }
 
+        // Control button listeners
         btnPlay.addEventListener('click', () => {
-            if (isPlaying) {
-                ws.send(JSON.stringify({ action: 'pause' }));
-            } else {
-                ws.send(JSON.stringify({ action: 'play' }));
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: isPlaying ? 'pause' : 'play' }));
             }
         });
 
         btnPrev.addEventListener('click', () => {
-            ws.send(JSON.stringify({ action: 'prev' }));
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'prev' }));
+            }
         });
 
         btnNext.addEventListener('click', () => {
-            ws.send(JSON.stringify({ action: 'next' }));
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'next' }));
+            }
         });
 
+        btnShuffle.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'shuffle' }));
+            }
+        });
+
+        btnRepeat.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'repeat' }));
+            }
+        });
+
+        btnMute.addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const cur = parseInt(volumeSlider.value);
+                const next = cur > 0 ? 0 : 80;
+                volumeSlider.value = next;
+                ws.send(JSON.stringify({ action: 'volume', value: next / 100 }));
+            }
+        });
+
+        // Time slider scrub handling
+        let timeDragTimer = null;
         timeSlider.addEventListener('input', () => {
             userInteractingWithTime = true;
+            clearTimeout(timeDragTimer);
             timeCurrent.textContent = formatTime(timeSlider.value);
         });
 
         timeSlider.addEventListener('change', () => {
-            ws.send(JSON.stringify({ action: 'seek', value: parseFloat(timeSlider.value) }));
-            userInteractingWithTime = false;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'seek', value: parseFloat(timeSlider.value) }));
+            }
+            timeDragTimer = setTimeout(() => {
+                userInteractingWithTime = false;
+            }, 400);
+        });
+
+        // Volume slider drag handling
+        let volDragTimer = null;
+        volumeSlider.addEventListener('input', () => {
+            userInteractingWithVolume = true;
+            clearTimeout(volDragTimer);
         });
 
         volumeSlider.addEventListener('change', () => {
-            ws.send(JSON.stringify({ action: 'volume', value: parseFloat(volumeSlider.value) / 100 }));
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'volume', value: parseFloat(volumeSlider.value) / 100 }));
+            }
+            volDragTimer = setTimeout(() => {
+                userInteractingWithVolume = false;
+            }, 400);
         });
 
         connect();
     </script>
 </body>
 </html>
-"#
+"###
     .to_string()
 }
 
@@ -1164,5 +1848,50 @@ mod tests {
 
         let http_req = "GET /?pin=123 HTTP/1.1\r\nHost: localhost:38562\r\nAccept: text/html\r\n\r\n";
         assert!(!is_websocket_upgrade_request(http_req));
+    }
+
+    #[test]
+    fn test_pin_is_six_digits() {
+        let pin = get_or_init_pin();
+        assert_eq!(pin.len(), 6);
+        assert!(pin.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_get_local_ip_never_returns_unspecified_or_loopback() {
+        if let Some(ip) = get_local_ip() {
+            assert_ne!(ip, "0.0.0.0");
+            assert_ne!(ip, "127.0.0.1");
+            assert!(!ip.starts_with("127."));
+        }
+    }
+
+    #[test]
+    fn test_set_and_get_active_metadata() {
+        set_active_metadata("Supermassive Black Hole", "Muse", Some("Black Holes and Revelations"), 209.0, Some("https://example.com/cover.jpg"));
+        let meta = get_active_metadata().expect("Active metadata should be present");
+        assert_eq!(meta.title, "Supermassive Black Hole");
+        assert_eq!(meta.artist, "Muse");
+        assert_eq!(meta.album, "Black Holes and Revelations");
+        assert_eq!(meta.duration, 209.0);
+        assert_eq!(meta.cover_url, Some("https://example.com/cover.jpg".to_string()));
+    }
+
+    #[test]
+    fn test_metadata_version_increments() {
+        let v1 = METADATA_VERSION.load(std::sync::atomic::Ordering::SeqCst);
+        set_active_metadata("Hysteria", "Muse", Some("Absolution"), 227.0, None);
+        let v2 = METADATA_VERSION.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(v2 > v1);
+    }
+
+    #[test]
+    fn test_parse_data_url() {
+        let data_url = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+        let parsed = parse_data_url(data_url);
+        assert_eq!(parsed, Some(("image/jpeg", "/9j/4AAQSkZJRg==")));
+
+        assert_eq!(parse_data_url("http://example.com/art.jpg"), None);
+        assert_eq!(parse_data_url("data:image/png"), None);
     }
 }

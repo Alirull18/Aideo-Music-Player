@@ -2620,7 +2620,7 @@ export function AideoView() {
   };
 
   return (
-    <div className="aideo-home-wrap">
+    <div className="aideo-home-wrap" data-scroll-container="true">
       {/* Background tint overlay */}
       <div className="aideo-bg-tint"></div>
 

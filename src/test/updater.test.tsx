@@ -1,7 +1,18 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
+import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import App from '../App';
+import { useUpdaterStore } from '../store/updaterStore';
+
+vi.mock('@tauri-apps/plugin-updater', () => ({
+  check: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-process', () => ({
+  relaunch: vi.fn().mockResolvedValue(undefined),
+}));
 
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
@@ -17,19 +28,18 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 });
 
-describe('automatic updater', () => {
+describe('official tauri updater', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useUpdaterStore.setState({
+      status: 'idle',
+      update: null,
+      error: null,
+      downloadProgress: { percentage: 0, downloadedBytes: 0, totalBytes: 0 },
+      modalOpen: false,
+    });
+
     vi.mocked(invoke).mockImplementation(async (command: string) => {
-      if (command === 'check_update') {
-        return {
-          available: true,
-          version: '0.9.8',
-          download_url: 'https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.9.8/Aideo.exe',
-          sha256_url: 'https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.9.8/Aideo.exe.sha256',
-          body: 'Update notes',
-        };
-      }
       if (/playlists|devices|queue|tracks|history|recap|library/i.test(command)) return [];
       return null;
     });
@@ -40,18 +50,53 @@ describe('automatic updater', () => {
     vi.restoreAllMocks();
   });
 
-  it('passes the checksum URL to Rust instead of fetching it in the webview', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  it('checks for updates, displays available version, and performs download & install with relaunch', async () => {
+    const mockDownloadAndInstall = vi.fn().mockImplementation(async (onEvent) => {
+      if (onEvent) {
+        onEvent({ event: 'Started', data: { contentLength: 50 * 1024 * 1024 } });
+        onEvent({ event: 'Progress', data: { chunkLength: 25 * 1024 * 1024 } });
+        onEvent({ event: 'Finished' });
+      }
+    });
+
+    const mockUpdate = {
+      available: true,
+      currentVersion: '0.9.8',
+      version: '0.9.9',
+      date: '2026-09-06',
+      body: 'New gapless playback features and stability improvements',
+      downloadAndInstall: mockDownloadAndInstall,
+      close: vi.fn().mockResolvedValue(undefined),
+      download: vi.fn(),
+      install: vi.fn(),
+      rawJson: {},
+    } as any;
+
+    vi.mocked(check).mockResolvedValue(mockUpdate);
+
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /install update now/i }));
+    // Wait for the popup modal with version 0.9.9 to be visible
+    expect(await screen.findByText(/Version 0.9.9/i)).toBeInTheDocument();
+    expect(screen.getByText(/New gapless playback features/i)).toBeInTheDocument();
+
+    // Click Install Update Now
+    const installBtn = screen.getByRole('button', { name: /install update now/i });
+    fireEvent.click(installBtn);
 
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith('download_and_install', {
-        url: 'https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.9.8/Aideo.exe',
-        sha256Url: 'https://github.com/Alirull18/Aideo-Music-Player/releases/download/v0.9.8/Aideo.exe.sha256',
-      });
+      expect(mockDownloadAndInstall).toHaveBeenCalledTimes(1);
+      expect(relaunch).toHaveBeenCalled();
     });
-    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('gracefully handles up-to-date response', async () => {
+    vi.mocked(check).mockResolvedValue(null);
+
+    await useUpdaterStore.getState().checkForUpdates();
+
+    expect(useUpdaterStore.getState().status).toBe('up-to-date');
+    expect(useUpdaterStore.getState().update).toBeNull();
+    expect(useUpdaterStore.getState().modalOpen).toBe(false);
   });
 });

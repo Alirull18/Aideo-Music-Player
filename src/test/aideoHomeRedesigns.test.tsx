@@ -142,4 +142,31 @@ describe('Aideo home redesigns render suite', () => {
     expect(onPlayTrack).toHaveBeenCalledTimes(1);
     expect(onPlayTrack.mock.calls[0][0].title).toBe('Harbour Lights');
   });
+
+  it('Editorial Feed renders Cover Story lead feature and publication masthead folio', () => {
+    const onPlayTrack = vi.fn();
+    const { getByText } = render(<EditorialHome {...baseProps} onPlayTrack={onPlayTrack} />);
+    expect(getByText(/AIDEO EDITORIAL ARCHIVE · ISSUE VOL. 28/i)).toBeTruthy();
+    expect(getByText(/Featured Record: Harbour Lights/i)).toBeTruthy();
+    expect(getByText(/Listen Now/i)).toBeTruthy();
+
+    fireEvent.click(getByText(/Listen Now/i));
+    expect(onPlayTrack).toHaveBeenCalledTimes(1);
+    expect(onPlayTrack.mock.calls[0][0].title).toBe('Harbour Lights');
+  });
+
+  it('Ambient Stage renders living soundstage centerpiece and mood filter pills', () => {
+    const onPlayTrack = vi.fn();
+    const { getByText } = render(<StageHome {...baseProps} onPlayTrack={onPlayTrack} />);
+    expect(getByText(/ATMOSPHERIC SOUNDSTAGE · 32-BIT FLOAT/i)).toBeTruthy();
+    expect(getByText(/Staged Spotlight: Harbour Lights/i)).toBeTruthy();
+    expect(getByText('Midnight Drift')).toBeTruthy();
+    expect(getByText('Lossless Hi-Fi')).toBeTruthy();
+
+    // Click mood pill
+    fireEvent.click(getByText('Lossless Hi-Fi'));
+    // Should still display playable content
+    expect(getByText('Slow Tide Radio')).toBeTruthy();
+  });
 });
+

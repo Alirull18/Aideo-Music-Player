@@ -174,6 +174,7 @@ export function DownloadedView() {
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.2 }}
       className="downloaded-view"
+      data-scroll-container="true"
       style={{
         height: '100%',
         maxHeight: '100%',

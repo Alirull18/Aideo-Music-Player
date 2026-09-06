@@ -351,7 +351,7 @@ export function ChartsView() {
   const formattedUpdate = page ? formatUpdatedAt(page.updated_at) : null;
 
   return (
-    <div className="charts-page" role="region" aria-labelledby="charts-title">
+    <div className="charts-page" data-scroll-container="true" role="region" aria-labelledby="charts-title">
       <div className="charts-shell">
         <header className="charts-header">
           <div className="charts-heading">
