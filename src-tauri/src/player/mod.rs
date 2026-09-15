@@ -709,19 +709,59 @@ pub(crate) fn get_cache_paths(url: &str) -> Option<(std::path::PathBuf, std::pat
 struct DownloadGuard {
     hash: String,
     complete: Arc<AtomicBool>,
+    child_ref: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 impl Drop for DownloadGuard {
     fn drop(&mut self) {
         self.complete.store(true, Ordering::SeqCst);
-        if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
+        let mut active = safe_lock(&ACTIVE_DOWNLOADS);
+        if active.get(&self.hash).is_some_and(|flag| Arc::ptr_eq(flag, &self.complete)) {
             active.remove(&self.hash);
+        }
+        drop(active);
+        let mut processes = safe_lock(&ACTIVE_DOWNLOAD_PROCS);
+        if processes.get(&self.hash).is_some_and(|child| Arc::ptr_eq(child, &self.child_ref)) {
+            processes.remove(&self.hash);
         }
     }
 }
 
 
 const YT_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36";
+
+fn youtube_stream_user_agent(url: &str) -> &'static str {
+    if url::Url::parse(url).is_ok_and(|url| url.query_pairs().any(|(key, value)| key == "c" && value == "VISIONOS")) {
+        crate::youtube::DIRECT_STREAM_USER_AGENT
+    } else {
+        YT_USER_AGENT
+    }
+}
+
+fn wait_for_background_transcode(
+    hash: &str,
+    child_ref: &Arc<Mutex<Option<std::process::Child>>>,
+) -> bool {
+    let success = loop {
+        if !safe_lock(&ACTIVE_DOWNLOAD_PROCS).get(hash).is_some_and(|child| Arc::ptr_eq(child, child_ref)) {
+            break false;
+        }
+        let mut child = safe_lock(child_ref);
+        match child.as_mut().map(std::process::Child::try_wait) {
+            Some(Ok(None)) => {}
+            Some(Ok(Some(status))) => break status.success(),
+            Some(Err(error)) => {
+                eprintln!("[player-bg] Error polling transcode process status: {}", error);
+                break false;
+            }
+            None => break false,
+        }
+        drop(child);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    // Registration belongs to the whole download; a failed attempt can still retry.
+    success
+}
 
 fn run_stream_downloader(
     url: String,
@@ -1028,7 +1068,7 @@ fn pipe_url_to_stdin(
             let dl_downloaded = Arc::clone(&downloaded_bytes);
             let dl_complete = Arc::clone(&complete);
             let dl_abort = Arc::clone(&abort);
-            let ua = YT_USER_AGENT.to_string();
+            let ua = youtube_stream_user_agent(&url).to_string();
 
             std::thread::spawn(move || {
                 run_stream_downloader(
@@ -1081,11 +1121,11 @@ fn spawn_youtube_downloader(
     }
 
     let hash_clone = hash.clone();
-    let app_handle_clone = app_handle.clone();
     std::thread::spawn(move || {
         let _guard = DownloadGuard {
             hash: hash_clone.clone(),
             complete: complete_clone,
+            child_ref: child_ref_clone.clone(),
         };
 
         let stream_engine = {
@@ -1114,6 +1154,9 @@ fn spawn_youtube_downloader(
         let canonical_target = canonicalize_youtube_url(&original_url);
 
         for attempt in 0..2 {
+            if !safe_lock(&ACTIVE_DOWNLOAD_PROCS).get(&hash_clone).is_some_and(|child| Arc::ptr_eq(child, &child_ref_clone)) {
+                break;
+            }
             println!("[player-bg] YouTube background transcode attempt {} (use_ytdlp={}): {} -> {:?}", attempt, use_ytdlp, original_url, temp_path);
 
             let mut ytdlp_child = if use_ytdlp {
@@ -1121,7 +1164,6 @@ fn spawn_youtube_downloader(
                 let cache_dir_str = temp_path.parent().unwrap().join("cache").to_string_lossy().to_string();
                 ytdlp_cmd.args([
                     "-f", "251/140/bestaudio/best",
-                    "--user-agent", YT_USER_AGENT,
                     "--cache-dir", &cache_dir_str,
                     "--force-ipv4",
                     "--no-check-formats",
@@ -1129,7 +1171,6 @@ fn spawn_youtube_downloader(
                     "--sleep-interval", "0",
                     "--max-sleep-interval", "0",
                     "--sleep-requests", "0",
-                    "--extractor-args", "youtube:player-client=mweb,android",
                     "-o", "-",
                     &canonical_target
                 ]);
@@ -1147,6 +1188,15 @@ fn spawn_youtube_downloader(
             } else {
                 None
             };
+
+            if let Some(stderr) = ytdlp_child.as_mut().and_then(|child| child.stderr.take()) {
+                std::thread::spawn(move || {
+                    use std::io::{BufRead, BufReader};
+                    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                        eprintln!("[yt-dlp-bg-err] {}", line);
+                    }
+                });
+            }
 
             let mut cmd = std::process::Command::new(&ffmpeg_path);
 
@@ -1215,6 +1265,7 @@ fn spawn_youtube_downloader(
                     eprintln!("[player-bg] FFmpeg background transcode failed to spawn on attempt {}: {:?}", attempt, e);
                     if let Some(mut ytdlp) = ytdlp_child {
                         let _ = ytdlp.kill();
+                        let _ = ytdlp.wait();
                     }
                     if use_ytdlp {
                         use_ytdlp = false;
@@ -1224,9 +1275,6 @@ fn spawn_youtube_downloader(
                         use_ytdlp = true;
                         let _ = std::fs::remove_file(&temp_path);
                         continue;
-                    }
-                    if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
-                        active_procs.remove(&hash_clone);
                     }
                     return;
                 }
@@ -1270,57 +1318,18 @@ fn spawn_youtube_downloader(
                 });
             }
 
-            // Wait for transcoding completion using non-blocking try_wait loop
-            transcode_success = false;
-            loop {
-                // Check if the process has been aborted (drained from ACTIVE_DOWNLOAD_PROCS)
-                let is_aborted = {
-                    if let Ok(active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
-                        !active_procs.contains_key(&hash_clone)
-                    } else {
-                        false
-                    }
-                };
-                if is_aborted {
-                    break;
-                }
-
-                let mut lock = match child_ref_clone.lock() {
-                    Ok(l) => l,
-                    Err(e) => e.into_inner(),
-                };
-                if let Some(ref mut child_proc) = *lock {
-                    match child_proc.try_wait() {
-                        Ok(None) => {
-                            // Still running. Drop lock and sleep.
-                        }
-                        Ok(Some(status)) => {
-                            transcode_success = status.success();
-                            break;
-                        }
-                        Err(e) => {
-                            eprintln!("[player-bg] Error polling transcode process status: {:?}", e);
-                            break;
-                        }
-                    }
-                } else {
-                    // Child has been taken out by abort thread
-                    break;
-                }
-                drop(lock);
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-
-            // Ensure we remove it from ACTIVE_DOWNLOAD_PROCS if it exited naturally
-            if let Ok(mut active_procs) = ACTIVE_DOWNLOAD_PROCS.lock() {
-                active_procs.remove(&hash_clone);
-            }
+            transcode_success = wait_for_background_transcode(&hash_clone, &child_ref_clone);
 
             // Clean up both processes
+            kill_current_process(&child_ref_clone);
             let mut ytdlp_to_kill = ytdlp_child;
             if let Some(mut ytdlp) = ytdlp_to_kill.take() {
                 let _ = ytdlp.kill();
                 let _ = ytdlp.wait();
+            }
+
+            if !safe_lock(&ACTIVE_DOWNLOAD_PROCS).get(&hash_clone).is_some_and(|child| Arc::ptr_eq(child, &child_ref_clone)) {
+                break;
             }
 
             if transcode_success {
@@ -1338,18 +1347,13 @@ fn spawn_youtube_downloader(
                 break; // Break the attempt loop on success!
             } else {
                 let bytes_written = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
-                if !use_ytdlp && std::path::Path::new(&ytdlp_path).exists() && bytes_written < RETRY_THRESHOLD_BYTES {
+                if attempt == 0 && !use_ytdlp && std::path::Path::new(&ytdlp_path).exists() && !YTDLP_UPDATING.load(Ordering::SeqCst) && bytes_written < RETRY_THRESHOLD_BYTES {
                     println!("[player-bg] Direct stream background transcode failed early (written {} bytes). Retrying with yt-dlp fallback...", bytes_written);
                     use_ytdlp = true;
                     let _ = std::fs::remove_file(&temp_path);
                     continue; // Retry with yt-dlp fallback
-                } else if use_ytdlp && bytes_written < RETRY_THRESHOLD_BYTES {
+                } else if attempt == 0 && use_ytdlp && bytes_written < RETRY_THRESHOLD_BYTES {
                     println!("[player-bg] yt-dlp background transcode failed early (written {} bytes). Retrying with direct reqwest stream...", bytes_written);
-
-                    let _ = app_handle_clone.emit("ui-toast", serde_json::json!({
-                        "message": "⚠ YouTube fast-buffering failed; falling back to standard stream.",
-                        "type": "warning"
-                    }));
 
                     use_ytdlp = false;
                     let _ = std::fs::remove_file(&temp_path);
@@ -1357,15 +1361,6 @@ fn spawn_youtube_downloader(
                 }
 
                 eprintln!("[player-bg] FFmpeg background transcode failed or was interrupted.");
-                // Kill and wait for child process to guarantee termination
-                {
-                    if let Ok(mut lock) = child_ref_clone.lock() {
-                        if let Some(mut child_proc) = lock.take() {
-                            let _ = child_proc.kill();
-                            let _ = child_proc.wait();
-                        }
-                    }
-                }
                 // Clean up temp file
                 let _ = std::fs::remove_file(&temp_path);
                 break; // Break on complete failure
@@ -1591,8 +1586,6 @@ pub fn resolve_youtube_url(url: &str) -> String {
     let args_1 = vec![
         "-g".to_string(),
         "-f".to_string(), "251/140/bestaudio/best".to_string(),
-        "--user-agent".to_string(), YT_USER_AGENT.to_string(),
-        "--extractor-args".to_string(), "youtube:player-client=android,mweb".to_string(),
         "--cache-dir".to_string(), cache_dir_str.clone(),
         "--force-ipv4".to_string(),
         "--no-check-formats".to_string(),
@@ -6910,6 +6903,47 @@ mod url_cache_tests;
 #[cfg(test)]
 mod transcode_tests {
     use super::{stream_allows_exclusive_mode, transcode_codec_and_rate};
+
+    #[test]
+    fn direct_stream_keeps_its_client_user_agent() {
+        assert_eq!(super::youtube_stream_user_agent("https://rr1.googlevideo.com/videoplayback?c=VISIONOS&itag=251"), crate::youtube::DIRECT_STREAM_USER_AGENT);
+        assert_eq!(super::youtube_stream_user_agent("https://rr1.googlevideo.com/videoplayback?c=ANDROID"), super::YT_USER_AGENT);
+    }
+
+    #[test]
+    fn background_transcode_registration_survives_retry() {
+        use super::*;
+        let hash = "test-background-transcode-retry".to_string();
+        let child_ref = Arc::new(Mutex::new(None));
+        let complete = Arc::new(AtomicBool::new(false));
+        let guard = DownloadGuard {
+            hash: hash.clone(),
+            complete: complete.clone(),
+            child_ref: child_ref.clone(),
+        };
+        safe_lock(&ACTIVE_DOWNLOADS).insert(hash.clone(), complete.clone());
+        safe_lock(&ACTIVE_DOWNLOAD_PROCS).insert(hash.clone(), child_ref.clone());
+
+        // Run a real, harmless child twice: a failed direct attempt then a successful fallback.
+        for (argument, expected_success) in [("--invalid-test-argument", false), ("--list", true)] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.arg(argument).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            *safe_lock(&child_ref) = Some(command.spawn().unwrap());
+            assert_eq!(wait_for_background_transcode(&hash, &child_ref), expected_success);
+            kill_current_process(&child_ref);
+            assert!(safe_lock(&ACTIVE_DOWNLOAD_PROCS).contains_key(&hash), "a completed attempt must not cancel its fallback");
+        }
+        drop(guard);
+        assert!(complete.load(Ordering::SeqCst));
+        assert!(!safe_lock(&ACTIVE_DOWNLOADS).contains_key(&hash));
+        assert!(!safe_lock(&ACTIVE_DOWNLOAD_PROCS).contains_key(&hash));
+        assert!(!wait_for_background_transcode(&hash, &child_ref), "cancellation must stop waiting");
+    }
 
     #[test]
     fn test_native_tier_preserves_source_rate_for_pcm() {

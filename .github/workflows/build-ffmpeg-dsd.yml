@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       ffmpeg_version:
-        description: 'FFmpeg version tag (e.g. n8.0.1)'
+        description: 'FFmpeg version tag (8.1 includes the Opus EOF parser fix)'
         required: false
-        default: 'n8.0.1'
+        default: 'n8.1'
+      publish:
+        description: 'Publish the verified build as a new versioned plugin release'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,6 +26,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
+      - name: Checkout regression check
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
       - name: Setup MSYS2 (MinGW64)
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
@@ -63,7 +72,19 @@ jobs:
           "$FF" -hide_banner -decoders 2>/dev/null | grep "[[:space:]]dst[[:space:]]"
           echo "DSD decoders confirmed."
 
+      - name: Verify Opus decoding through EOF
+        shell: pwsh
+        run: node scripts/check-ffmpeg-opus.mjs FFmpeg-Audio/install/bin/ffmpeg.exe
+
+      - name: Keep verified build for local testing
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ffmpeg-audio-dsd
+          path: FFmpeg-Audio/artifacts/*
+          if-no-files-found: error
+
       - name: Publish release asset
+        if: inputs.publish
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,9 +96,8 @@ jobs:
           $zip = "FFmpeg-Audio/artifacts/ffmpeg-audio-only-$ver-windows-x64.zip"
           if (-not (Test-Path $zip)) { throw "Artifact not found: $zip" }
           if (-not (Test-Path "$zip.sha256")) { throw "Checksum not found: $zip.sha256" }
-          $tag = "ffmpeg-audio-dsd"
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          # Keep the existing release available to apps pinned to its URL and checksum.
+          $tag = "ffmpeg-audio-dsd-$ver"
           gh release create $tag $zip "$zip.sha256" `
             --title "FFmpeg Audio Transcoder with DSD ($($env:VERSION))" `
             --notes "Audio-only FFmpeg transcoder used by Aideo's plugin system. Same minimal footprint as the upstream audio-only build, plus DSF/DFF (DSD) demuxers and dsd_*/dst decoders."
