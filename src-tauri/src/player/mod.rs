@@ -547,6 +547,44 @@ lazy_static::lazy_static! {
     pub static ref ACTIVE_STREAM_DOWNLOADS: std::sync::Mutex<std::collections::HashMap<String, Arc<ActiveStreamDownload>>> = std::sync::Mutex::new(std::collections::HashMap::new());
 }
 
+static YTDLP_UPDATING: AtomicBool = AtomicBool::new(false);
+
+pub(crate) const BUFFER_GATE_BYTES: u64 = 192 * 1024;
+pub(crate) const RETRY_THRESHOLD_BYTES: u64 = 128 * 1024;
+
+/// Canonicalizes any YouTube URL or video ID into standard watch format.
+pub fn canonicalize_youtube_url(url: &str) -> String {
+    if let Some(id) = crate::youtube::extract_video_id(url) {
+        format!("https://www.youtube.com/watch?v={}", id)
+    } else {
+        url.to_string()
+    }
+}
+
+/// Checks if input is a YouTube URL, googlevideo link, or clean 11-char video ID.
+pub fn is_youtube_url_or_id(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.contains("googlevideo.com") {
+        return true;
+    }
+    // Fast path for web URLs: avoid blocking filesystem syscalls for HTTP(S) links
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return crate::youtube::extract_video_id(trimmed).is_some()
+            || trimmed.contains("youtube.com")
+            || trimmed.contains("youtu.be");
+    }
+    // If it exists locally on disk, treat it as a local file, not a remote YouTube stream
+    if std::path::Path::new(trimmed).exists() {
+        return false;
+    }
+    crate::youtube::extract_video_id(trimmed).is_some()
+        || trimmed.contains("youtube.com")
+        || trimmed.contains("youtu.be")
+}
+
 #[allow(dead_code)]
 pub struct ActiveStreamDownload {
     pub url: String,
@@ -657,8 +695,9 @@ impl symphonia::core::io::MediaSource for GrowingFileReader {
     }
 }
 
-fn get_cache_paths(url: &str) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
-    let hash = format!("{:x}", md5::compute(url.as_bytes()));
+pub(crate) fn get_cache_paths(url: &str) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let canonical = canonicalize_youtube_url(url);
+    let hash = format!("{:x}", md5::compute(canonical.as_bytes()));
     let data_dir = dirs::data_dir()?;
     let cache_dir = data_dir.join("Aideo").join("CloudCache");
     let _ = std::fs::create_dir_all(&cache_dir);
@@ -1055,15 +1094,24 @@ fn spawn_youtube_downloader(
                 let d = safe_lock(&player.dsp_state);
                 d.stream_engine.clone()
             } else {
-                "yt-dlp".to_string()
+                "reqwest".to_string()
             }
         };
 
-        let is_youtube_stream = original_url.contains("youtube.com") || original_url.contains("googlevideo.com") || original_url.contains("youtu.be");
+        let is_youtube_stream = is_youtube_url_or_id(&original_url);
         let is_hls = original_url.contains("hls_playlist") || original_url.contains(".m3u8");
+        let has_direct_url = resolved_url.contains("googlevideo.com") || (resolved_url.starts_with("http") && resolved_url != original_url);
 
-        let mut use_ytdlp = is_youtube_stream && !is_hls && std::path::Path::new(&ytdlp_path).exists() && stream_engine == "yt-dlp";
+        // When a direct stream URL is already resolved, use instant Direct HTTP (reqwest) by default.
+        // yt-dlp is only used when no direct URL is available, or as a fallback if direct streaming fails.
+        let mut use_ytdlp = is_youtube_stream
+            && !is_hls
+            && std::path::Path::new(&ytdlp_path).exists()
+            && (!has_direct_url || stream_engine == "yt-dlp")
+            && !YTDLP_UPDATING.load(Ordering::SeqCst);
         let mut transcode_success;
+
+        let canonical_target = canonicalize_youtube_url(&original_url);
 
         for attempt in 0..2 {
             println!("[player-bg] YouTube background transcode attempt {} (use_ytdlp={}): {} -> {:?}", attempt, use_ytdlp, original_url, temp_path);
@@ -1083,7 +1131,7 @@ fn spawn_youtube_downloader(
                     "--sleep-requests", "0",
                     "--extractor-args", "youtube:player-client=mweb,android",
                     "-o", "-",
-                    &original_url
+                    &canonical_target
                 ]);
 
                 #[cfg(target_os = "windows")]
@@ -1170,6 +1218,10 @@ fn spawn_youtube_downloader(
                     }
                     if use_ytdlp {
                         use_ytdlp = false;
+                        let _ = std::fs::remove_file(&temp_path);
+                        continue;
+                    } else if std::path::Path::new(&ytdlp_path).exists() {
+                        use_ytdlp = true;
                         let _ = std::fs::remove_file(&temp_path);
                         continue;
                     }
@@ -1286,7 +1338,12 @@ fn spawn_youtube_downloader(
                 break; // Break the attempt loop on success!
             } else {
                 let bytes_written = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
-                if use_ytdlp && bytes_written < 256 * 1024 {
+                if !use_ytdlp && std::path::Path::new(&ytdlp_path).exists() && bytes_written < RETRY_THRESHOLD_BYTES {
+                    println!("[player-bg] Direct stream background transcode failed early (written {} bytes). Retrying with yt-dlp fallback...", bytes_written);
+                    use_ytdlp = true;
+                    let _ = std::fs::remove_file(&temp_path);
+                    continue; // Retry with yt-dlp fallback
+                } else if use_ytdlp && bytes_written < RETRY_THRESHOLD_BYTES {
                     println!("[player-bg] yt-dlp background transcode failed early (written {} bytes). Retrying with direct reqwest stream...", bytes_written);
 
                     let _ = app_handle_clone.emit("ui-toast", serde_json::json!({
@@ -1420,6 +1477,11 @@ pub fn clear_youtube_url_cache() {
 }
 
 fn run_ytdlp_resolve(ytdlp_path: &std::path::Path, args: &[String]) -> Option<String> {
+    if YTDLP_UPDATING.load(Ordering::SeqCst) {
+        println!("[player] Skipping yt-dlp execution: yt-dlp binary is currently updating.");
+        return None;
+    }
+
     #[cfg(target_os = "windows")]
     use std::os::windows::process::CommandExt;
 
@@ -1485,19 +1547,35 @@ fn run_ytdlp_resolve(ytdlp_path: &std::path::Path, args: &[String]) -> Option<St
 }
 
 pub fn resolve_youtube_url(url: &str) -> String {
-    if !url.contains("youtube.com") && !url.contains("youtu.be") {
+    let trimmed = url.trim();
+    if !is_youtube_url_or_id(trimmed) {
         return url.to_string();
     }
 
+    let canonical_url = canonicalize_youtube_url(trimmed);
+
     // Check cache first
     {
-        if let Some(cached) = get_cached_youtube_url(url, std::time::Instant::now()) {
+        if let Some(cached) = get_cached_youtube_url(url, std::time::Instant::now())
+            .or_else(|| get_cached_youtube_url(&canonical_url, std::time::Instant::now()))
+        {
             println!("[player] Using cached direct stream URL for YouTube video.");
             return cached;
         }
     }
 
-    println!("[player] YouTube URL detected. Attempting to extract direct stream URL via yt-dlp...");
+    // 🚀 Fast-Path: In-process InnerTube stream resolution (~150-250ms)
+    println!("[player] Attempting fast-path in-process InnerTube stream resolution...");
+    if let Some(direct) = crate::youtube::resolve_youtube_stream_fast(trimmed) {
+        if direct.contains("googlevideo.com") {
+            println!("[player] 🚀 InnerTube fast-path succeeded! Extracted direct stream URL in-process.");
+            insert_cached_youtube_url(url.to_string(), direct.clone(), std::time::Instant::now());
+            insert_cached_youtube_url(canonical_url.clone(), direct.clone(), std::time::Instant::now());
+            return direct;
+        }
+    }
+
+    println!("[player] InnerTube fast-path unavailable or restricted. Attempting to extract direct stream URL via yt-dlp...");
 
     let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     let aideo_dir = data_dir.join("Aideo");
@@ -1522,35 +1600,13 @@ pub fn resolve_youtube_url(url: &str) -> String {
         "--sleep-interval".to_string(), "0".to_string(),
         "--max-sleep-interval".to_string(), "0".to_string(),
         "--sleep-requests".to_string(), "0".to_string(),
-        url.to_string(),
+        canonical_url.clone(),
     ];
 
     if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_1) {
         println!("[player] Successfully extracted YouTube direct stream URL on first attempt!");
         insert_cached_youtube_url(url.to_string(), direct.clone(), std::time::Instant::now());
-        return direct;
-    }
-
-    // Attempt 2: Self-update and retry
-    println!("[player] Initial resolve failed. Attempting to self-update yt-dlp...");
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        let mut update_cmd = std::process::Command::new(&ytdlp_path);
-        update_cmd.arg("-U");
-        update_cmd.creation_flags(0x08000000);
-        let _ = update_cmd.status();
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let mut update_cmd = std::process::Command::new(&ytdlp_path);
-        update_cmd.arg("-U");
-        let _ = update_cmd.status();
-    }
-
-    if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_1) {
-        println!("[player] Successfully extracted YouTube direct stream URL after update!");
-        insert_cached_youtube_url(url.to_string(), direct.clone(), std::time::Instant::now());
+        insert_cached_youtube_url(canonical_url.clone(), direct.clone(), std::time::Instant::now());
         return direct;
     }
 
@@ -1566,16 +1622,65 @@ pub fn resolve_youtube_url(url: &str) -> String {
         "--max-sleep-interval".to_string(), "0".to_string(),
         "--sleep-requests".to_string(), "0".to_string(),
         "--extractor-args".to_string(), "youtube:player-client=mweb,android".to_string(),
-        url.to_string(),
+        canonical_url.clone(),
     ];
 
     if let Some(direct) = run_ytdlp_resolve(&ytdlp_path, &args_3) {
         println!("[player] Successfully extracted YouTube direct stream URL with client bypass!");
         insert_cached_youtube_url(url.to_string(), direct.clone(), std::time::Instant::now());
+        insert_cached_youtube_url(canonical_url.clone(), direct.clone(), std::time::Instant::now());
         return direct;
     }
 
     println!("[player] Failed to resolve YouTube stream URL through all attempts.");
+
+    // Guard yt-dlp -U update execution and avoid running against a binary being replaced
+    if YTDLP_UPDATING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        println!("[player] Scheduling non-blocking background yt-dlp update check...");
+        let ytdlp_path_update = ytdlp_path.clone();
+        std::thread::spawn(move || {
+            struct UpdateGuard;
+            impl Drop for UpdateGuard {
+                fn drop(&mut self) {
+                    YTDLP_UPDATING.store(false, Ordering::SeqCst);
+                }
+            }
+            let _guard = UpdateGuard;
+            let mut update_cmd = std::process::Command::new(&ytdlp_path_update);
+            update_cmd.arg("-U");
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                update_cmd.creation_flags(0x08000000);
+            }
+            if let Ok(mut child) = update_cmd.spawn() {
+                let start = std::time::Instant::now();
+                let timeout = std::time::Duration::from_secs(45);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            println!("[player] yt-dlp update check finished with status: {:?}", status);
+                            break;
+                        }
+                        Ok(None) => {
+                            if start.elapsed() > timeout {
+                                println!("[player] yt-dlp update check timed out after 45s. Terminating to release update lock.");
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
+                        Err(e) => {
+                            println!("[player] Error waiting for yt-dlp update check: {}", e);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Invalidate the cached YouTube InnerTube API key so it will be re-fetched on next attempt/request
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(crate::youtube::invalidate_innertube_key());
@@ -1591,11 +1696,13 @@ pub fn resolve_youtube_url(url: &str) -> String {
 
 /// 🚀 Pre-resolve and pre-buffer a YouTube watch URL in the background to eliminate initial play/transition latency.
 pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
-    if !url.contains("youtube.com") && !url.contains("youtu.be") {
+    if !is_youtube_url_or_id(&url) {
         return;
     }
 
-    let (cache_path, temp_path) = match get_cache_paths(&url) {
+    let canonical_url = canonicalize_youtube_url(&url);
+
+    let (cache_path, temp_path) = match get_cache_paths(&canonical_url) {
         Some(paths) => paths,
         None => return,
     };
@@ -1605,7 +1712,7 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
         return;
     }
 
-    let hash = format!("{:x}", md5::compute(url.as_bytes()));
+    let hash = format!("{:x}", md5::compute(canonical_url.as_bytes()));
 
     // If already downloading, do nothing
     {
@@ -1621,7 +1728,8 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         let mut success = false;
         // Resolve the direct URL
-        let mut resolved_url = get_cached_youtube_url(&url, std::time::Instant::now());
+        let mut resolved_url = get_cached_youtube_url(&url, std::time::Instant::now())
+            .or_else(|| get_cached_youtube_url(&canonical_url, std::time::Instant::now()));
 
         if resolved_url.is_none() {
             println!("[player-bg] Pre-resolving direct stream URL in background for '{}'...", url);
@@ -1629,6 +1737,7 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
             if direct != url && direct.contains("googlevideo.com") {
                 println!("[player-bg] Background pre-resolve successful! Caching direct stream URL.");
                 insert_cached_youtube_url(url.clone(), direct.clone(), std::time::Instant::now());
+                insert_cached_youtube_url(canonical_url.clone(), direct.clone(), std::time::Instant::now());
                 resolved_url = Some(direct);
             }
         }
@@ -1647,11 +1756,11 @@ pub fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
             let ytdlp_path = aideo_dir.join("yt-dlp.exe");
             let ffmpeg_path = aideo_dir.join("ffmpeg.exe");
 
-            if ytdlp_path.exists() && ffmpeg_path.exists() {
+            if ffmpeg_path.exists() {
                 println!("[player-bg] Pre-buffering YouTube track in background for '{}'...", url);
                 success = true;
                 spawn_youtube_downloader(
-                    url,
+                    canonical_url,
                     direct,
                     hash.clone(),
                     temp_path,
@@ -1816,20 +1925,28 @@ fn prepare_decoder(
     let mut resolved_path = path.to_string();
 
     // Intercept YouTube watch URLs and route them to growing Cache file
-    let is_youtube_stream = path.contains("youtube.com") || path.contains("youtu.be") || path.contains("googlevideo.com");
+    let is_youtube_stream = is_youtube_url_or_id(path);
     if is_youtube_stream {
-        let data_dir = dirs::data_dir().ok_or("Could not locate AppData directory")?;
+        let _ = app_handle.emit("stream-buffering-start", path);
+
+        let data_dir = match dirs::data_dir() {
+            Some(d) => d,
+            None => {
+                let _ = app_handle.emit("stream-buffering-end", path);
+                return Err("Could not locate AppData directory".to_string());
+            }
+        };
         let aideo_dir = data_dir.join("Aideo");
         let ytdlp_path = aideo_dir.join("yt-dlp.exe");
         let ffmpeg_plugin_path = aideo_dir.join("ffmpeg.exe");
-        if !ytdlp_path.exists() {
-            return Err("The yt-dlp plugin is missing. Please install the yt-dlp plugin in Settings -> Plugins to play YouTube tracks!".to_string());
-        }
         if !ffmpeg_plugin_path.exists() {
+            let _ = app_handle.emit("stream-buffering-end", path);
             return Err("The FFmpeg transcoder is missing. Please install the FFmpeg Transcoder in Settings -> Plugins to stream YouTube tracks!".to_string());
         }
 
-        if let Some((cache_path, temp_path)) = get_cache_paths(path) {
+        let canonical_url = canonicalize_youtube_url(path);
+
+        if let Some((cache_path, temp_path)) = get_cache_paths(&canonical_url) {
             let mut use_cache = false;
             if cache_path.exists() {
                 if let Ok(encrypted_bytes) = std::fs::read(&cache_path) {
@@ -1847,19 +1964,20 @@ fn prepare_decoder(
                     } else {
                         let ext = "wav";
                         let temp_dir = std::env::temp_dir();
-                        let hash = format!("{:x}", md5::compute(path.as_bytes()));
+                        let hash = format!("{:x}", md5::compute(canonical_url.as_bytes()));
                         let decrypted_temp_path = temp_dir.join(format!("aideo_cache_{}.{}", hash, ext));
                         if std::fs::write(&decrypted_temp_path, decrypted_bytes).is_ok() {
                             resolved_path = decrypted_temp_path.to_string_lossy().to_string();
                             println!("[player] INTERCEPT: Playing YouTube track from offline decrypted cache file!");
                             use_cache = true;
+                            let _ = app_handle.emit("stream-buffering-end", path);
                         }
                     }
                 }
             }
 
             if !use_cache {
-                let hash = format!("{:x}", md5::compute(path.as_bytes()));
+                let hash = format!("{:x}", md5::compute(canonical_url.as_bytes()));
                 let mut already_downloading = false;
                 let mut buffered_direct_url: Option<String> = None;
                 {
@@ -1873,17 +1991,23 @@ fn prepare_decoder(
                 }
 
                 if !already_downloading {
-                    let mut resolved_url = get_cached_youtube_url(path, std::time::Instant::now());
+                    let mut resolved_url = get_cached_youtube_url(path, std::time::Instant::now())
+                        .or_else(|| get_cached_youtube_url(&canonical_url, std::time::Instant::now()));
 
                     if resolved_url.is_none() {
                         println!("[player] YouTube URL cache miss. Resolving direct stream URL first...");
                         let direct = resolve_youtube_url(path);
                         if direct != *path && direct.contains("googlevideo.com") {
                             insert_cached_youtube_url(path.to_string(), direct.clone(), std::time::Instant::now());
+                            insert_cached_youtube_url(canonical_url.clone(), direct.clone(), std::time::Instant::now());
                             resolved_url = Some(direct);
                         } else {
+                            let _ = app_handle.emit("stream-buffering-end", path);
                             if let Ok(mut active) = ACTIVE_DOWNLOADS.lock() {
                                 active.remove(&hash);
+                            }
+                            if !ytdlp_path.exists() {
+                                return Err("The yt-dlp plugin is missing. Please install the yt-dlp plugin in Settings -> Plugins to play YouTube tracks!".to_string());
                             }
                             return Err("Could not extract the audio stream URL (YouTube may be throttling or temporarily unavailable). Please try again.".to_string());
                         }
@@ -1895,7 +2019,7 @@ fn prepare_decoder(
                         buffered_direct_url = Some(direct.clone());
                         println!("[player] Spawning background transcoder for YouTube stream...");
                         spawn_youtube_downloader(
-                            path.to_string(),
+                            canonical_url.clone(),
                             direct,
                             hash.clone(),
                             temp_path.clone(),
@@ -1909,12 +2033,15 @@ fn prepare_decoder(
 
                 resolved_path = temp_path.to_string_lossy().to_string();
 
-                println!("[player] Buffering first 512KB of YouTube track to ensure stable high-res DAC streaming...");
-                let _ = app_handle.emit("stream-buffering-start", path);
+                println!("[player] Buffering first 192KB of YouTube track to ensure stable high-res DAC streaming...");
                 let start_time = std::time::Instant::now();
                 loop {
+                    if cancel_token.load(Ordering::SeqCst) || PLAYBACK_GENERATION.load(Ordering::SeqCst) != generation {
+                        let _ = app_handle.emit("stream-buffering-end", path);
+                        return Err("Decoder preparation aborted: generation obsolete".to_string());
+                    }
                     let file_size = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
-                    if file_size >= 512 * 1024 {
+                    if file_size >= BUFFER_GATE_BYTES {
                         break;
                     }
                     if start_time.elapsed().as_secs() > 20 {
@@ -1927,6 +2054,9 @@ fn prepare_decoder(
                         // re-resolves a fresh URL instead of failing forever until restart.
                         if let Some(dead) = buffered_direct_url.take() {
                             invalidate_youtube_url_if(path, &dead);
+                            if canonical_url != path {
+                                invalidate_youtube_url_if(&canonical_url, &dead);
+                            }
                         }
                         return Err("Stream buffering timed out. The stream link may have expired or your connection dropped - try playing again.".to_string());
                     }
@@ -1935,6 +2065,9 @@ fn prepare_decoder(
                 let _ = app_handle.emit("stream-buffering-end", path);
                 println!("[player] Buffering complete ({} bytes). Handing over to Symphonia decoding...", std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0));
             }
+        } else {
+            let _ = app_handle.emit("stream-buffering-end", path);
+            return Err("Could not initialize local cache directory for YouTube stream".to_string());
         }
     } else if path.starts_with("http://") || path.starts_with("https://") {
         // Transparently load cached cloud stream tracks if available
@@ -2063,14 +2196,17 @@ fn prepare_decoder(
         let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         let aideo_dir = data_dir.join("Aideo");
         let ytdlp_path = aideo_dir.join("yt-dlp.exe");
-        let is_youtube_stream = is_stream && (path.contains("youtube.com") || path.contains("youtu.be") || path.contains("googlevideo.com"));
+        let is_youtube_stream = is_stream && is_youtube_url_or_id(path);
         let use_piped_ytdlp = is_youtube_stream && ytdlp_path.exists() && start_pos == 0.0;
 
         let mut cached_direct_url = None;
         if is_youtube_stream {
+            let canonical_url = canonicalize_youtube_url(path);
             if path.contains("googlevideo.com") {
                 cached_direct_url = Some(path.to_string());
-            } else if let Some(direct_url) = get_cached_youtube_url(path, std::time::Instant::now()) {
+            } else if let Some(direct_url) = get_cached_youtube_url(path, std::time::Instant::now())
+                .or_else(|| get_cached_youtube_url(&canonical_url, std::time::Instant::now()))
+            {
                 println!("[player] YouTube URL cache hit! Using cached direct stream URL for seeking.");
                 cached_direct_url = Some(direct_url);
             }
@@ -2081,6 +2217,7 @@ fn prepare_decoder(
                 if direct_url != *path && direct_url.contains("googlevideo.com") {
                     println!("[player] Caching resolved direct stream URL.");
                     insert_cached_youtube_url(path.to_string(), direct_url.clone(), std::time::Instant::now());
+                    insert_cached_youtube_url(canonical_url.clone(), direct_url.clone(), std::time::Instant::now());
                     cached_direct_url = Some(direct_url);
                 }
             }
@@ -2709,7 +2846,7 @@ fn analyzer_loop(rx: Receiver<(Vec<f32>, f32)>, app_handle: tauri::AppHandle) {
 }
 
 fn detect_format_from_path(path: &str) -> String {
-    if path.contains("youtube.com") || path.contains("youtu.be") || path.contains("googlevideo.com") {
+    if is_youtube_url_or_id(path) {
         "YouTube".to_string()
     } else if path.contains("tidal.com") || path.contains("api.tidal.com") {
         "Tidal Lossless".to_string()

@@ -373,12 +373,51 @@ fn get_fallback_innertube_key() -> String {
 
 lazy_static::lazy_static! {
     static ref INNERTUBE_KEY: tokio::sync::RwLock<Option<String>> = tokio::sync::RwLock::new(None);
+    static ref VISITOR_DATA: tokio::sync::RwLock<Option<String>> = tokio::sync::RwLock::new(None);
+    static ref RE_VISITOR_DATA: regex::Regex = regex::Regex::new(r#"Cgt[a-zA-Z0-9_%-]{20,}"#).unwrap();
 }
 
 pub async fn invalidate_innertube_key() {
     let mut w = INNERTUBE_KEY.write().await;
     *w = None;
     println!("[youtube] InnerTube API key invalidated.");
+}
+
+pub async fn invalidate_visitor_data() {
+    let mut w = VISITOR_DATA.write().await;
+    *w = None;
+    println!("[youtube] InnerTube visitor data invalidated.");
+}
+
+pub async fn fetch_visitor_data() -> Option<String> {
+    {
+        let r = VISITOR_DATA.read().await;
+        if let Some(ref cached) = *r {
+            return Some(cached.clone());
+        }
+    }
+
+    let mut w = VISITOR_DATA.write().await;
+    if let Some(ref cached) = *w {
+        return Some(cached.clone());
+    }
+
+    let client = crate::get_http_client();
+    let res = client.get("https://www.youtube.com/sw.js_data")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+        .send()
+        .await
+        .ok()?;
+
+    let text = res.text().await.ok()?;
+    if let Some(m) = RE_VISITOR_DATA.find(&text) {
+        let val = m.as_str().to_string();
+        *w = Some(val.clone());
+        Some(val)
+    } else {
+        println!("[youtube] Could not extract visitor data regex match from sw.js_data response");
+        None
+    }
 }
 
 pub async fn fetch_innertube_key() -> String {
@@ -479,6 +518,184 @@ async fn fetch_track_duration(client: &reqwest::Client, api_key: &str, video_id:
         Some(format!("{}:{:02}", minutes, seconds))
     }
 }
+
+/// Extracts the clean 11-character YouTube video ID from various URL formats or raw IDs.
+pub fn extract_video_id(url_or_id: &str) -> Option<String> {
+    let trimmed = url_or_id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // If it's already a clean 11-char ID
+    if trimmed.len() == 11 && trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Some(trimmed.to_string());
+    }
+    if let Ok(parsed) = url::Url::parse(trimmed) {
+        let host = parsed.host_str().unwrap_or("");
+        if host == "youtu.be" || host.ends_with(".youtu.be") {
+            let path = parsed.path().trim_start_matches('/');
+            let id = path.split('/').next().unwrap_or("");
+            let clean_id = id.split(['?', '&', '#']).next().unwrap_or("");
+            if clean_id.len() == 11 && clean_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                return Some(clean_id.to_string());
+            }
+        } else if host == "youtube.com" || host.ends_with(".youtube.com") {
+            if let Some((_, v)) = parsed.query_pairs().find(|(k, _)| k == "v") {
+                let clean_id = v.trim();
+                if clean_id.len() == 11 && clean_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                    return Some(clean_id.to_string());
+                }
+            }
+            let path_segments: Vec<&str> = parsed.path_segments().map(|s| s.collect()).unwrap_or_default();
+            for (idx, seg) in path_segments.iter().enumerate() {
+                if (*seg == "embed" || *seg == "v" || *seg == "shorts" || *seg == "live") && idx + 1 < path_segments.len() {
+                    let cand = path_segments[idx + 1];
+                    if cand.len() == 11 && cand.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                        return Some(cand.to_string());
+                    }
+                }
+            }
+        }
+    }
+    lazy_static::lazy_static! {
+        static ref RE_YT_ID: regex::Regex = regex::Regex::new(r#"(?:v=|\/embed\/|\/v\/|\/shorts\/|\/live\/|youtu\.be\/)([a-zA-Z0-9_-]{11})"#).unwrap();
+    }
+    RE_YT_ID.captures(trimmed).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+}
+
+/// Resolves a direct audio stream URL using YouTube's InnerTube API (e.g. ANDROID_VR client).
+/// Completes in ~150-250ms without spawning any external processes.
+pub async fn resolve_innertube_stream_url(client: &reqwest::Client, api_key: &str, video_id: &str) -> Option<String> {
+    let url = if api_key.is_empty() {
+        "https://www.youtube.com/youtubei/v1/player?prettyPrint=false".to_string()
+    } else {
+        format!("https://www.youtube.com/youtubei/v1/player?key={}&prettyPrint=false", api_key)
+    };
+
+    let visitor_data = fetch_visitor_data().await;
+    let vr_ua = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+
+    let mut client_context = serde_json::json!({
+        "clientName": "ANDROID_VR",
+        "clientVersion": "1.65.10",
+        "osName": "Android",
+        "osVersion": "12L",
+        "deviceMake": "Oculus",
+        "deviceModel": "Quest 3",
+        "androidSdkVersion": 32,
+        "hl": "en",
+        "gl": "US"
+    });
+
+    if let Some(ref vd) = visitor_data {
+        if let Some(obj) = client_context.as_object_mut() {
+            obj.insert("visitorData".to_string(), serde_json::Value::String(vd.clone()));
+        }
+    }
+
+    let payload = serde_json::json!({
+        "videoId": video_id,
+        "context": {
+            "client": client_context
+        },
+        "contentCheckOk": true,
+        "racyCheckOk": true
+    });
+
+    let mut req = client.post(&url)
+        .header("Content-Type", "application/json")
+        .header("User-Agent", vr_ua)
+        .header("X-YouTube-Client-Name", "28")
+        .header("X-YouTube-Client-Version", "1.65.10");
+
+    if let Some(ref vd) = visitor_data {
+        req = req.header("X-Goog-Visitor-Id", vd.as_str());
+    }
+
+    let res = req.json(&payload).send().await.ok()?;
+    let json_res: serde_json::Value = res.json().await.ok()?;
+
+    let status = json_res.get("playabilityStatus")
+        .and_then(|s| s.get("status"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("");
+
+    if status != "OK" {
+        let reason = json_res.get("playabilityStatus")
+            .and_then(|s| s.get("reason"))
+            .and_then(|s| s.as_str())
+            .unwrap_or("unknown reason");
+        println!("[youtube] InnerTube playability status '{}' for video '{}': {}", status, video_id, reason);
+        if status == "LOGIN_REQUIRED" || status == "UNPLAYABLE" {
+            invalidate_visitor_data().await;
+        }
+        return None;
+    }
+
+    let adaptive_formats = json_res.get("streamingData")
+        .and_then(|sd| sd.get("adaptiveFormats"))
+        .and_then(|af| af.as_array())?;
+
+    let mut best_url: Option<String> = None;
+    let mut best_score: i32 = -1;
+
+    for fmt in adaptive_formats {
+        let mime = fmt.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
+        if !mime.starts_with("audio/") {
+            continue;
+        }
+
+        let direct_url = match fmt.get("url").and_then(|u| u.as_str()) {
+            Some(u) if u.starts_with("http") => u,
+            _ => continue,
+        };
+
+        let itag = fmt.get("itag").and_then(|i| i.as_u64()).unwrap_or(0);
+        let score = match itag {
+            251 => 100, // Opus 160kbps
+            140 => 80,  // AAC 128kbps
+            250 => 60,  // Opus 70kbps
+            249 => 40,  // Opus 50kbps
+            139 => 30,  // AAC 48kbps
+            _ => 10,
+        };
+
+        if score > best_score {
+            best_score = score;
+            best_url = Some(direct_url.to_string());
+        }
+    }
+
+    best_url
+}
+
+pub async fn resolve_youtube_stream_fast_async(url_or_id: &str) -> Option<String> {
+    let video_id = extract_video_id(url_or_id)?;
+    let client = crate::get_http_client();
+    let api_key = fetch_innertube_key().await;
+    resolve_innertube_stream_url(client, &api_key, &video_id).await
+}
+
+/// Synchronously resolves a direct stream URL via InnerTube.
+/// NOTE: Spawns and blocks on a scoped OS thread if called from an active Tokio runtime thread.
+/// Prefer `resolve_youtube_stream_fast_async` when calling from an async context.
+pub fn resolve_youtube_stream_fast(url_or_id: &str) -> Option<String> {
+    if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                    rt.block_on(resolve_youtube_stream_fast_async(url_or_id))
+                } else {
+                    None
+                }
+            }).join().unwrap_or(None)
+        })
+    } else if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        rt.block_on(resolve_youtube_stream_fast_async(url_or_id))
+    } else {
+        None
+    }
+}
+
 
 pub async fn search_youtube_internal(
     client: &reqwest::Client,
@@ -5417,4 +5634,32 @@ mod tests {
             assert!(!m.tracks.is_empty(), "Mix {} should not be empty", m.id);
         }
     }
+
+    #[test]
+    fn test_extract_video_id_parses_various_formats() {
+        assert_eq!(extract_video_id("dQw4w9WgXcQ"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://music.youtube.com/watch?v=dQw4w9WgXcQ&feature=share"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://youtu.be/dQw4w9WgXcQ"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://youtu.be/dQw4w9WgXcQ?t=42"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://www.youtube.com/embed/dQw4w9WgXcQ"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://www.youtube.com/v/dQw4w9WgXcQ"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://www.youtube.com/shorts/dQw4w9WgXcQ"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://www.youtube.com/live/dQw4w9WgXcQ"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("https://www.youtube.com/live/dQw4w9WgXcQ?feature=share"), Some("dQw4w9WgXcQ".to_string()));
+        assert_eq!(extract_video_id("not-a-valid-id"), None);
+        assert_eq!(extract_video_id(""), None);
+    }
+
+    #[test]
+    fn test_visitor_data_regex_extracts_id() {
+        let sample = r#"var data = [["yt.sw.adr",null,[[["ms","MY",null,"127.0.0.1",null,null,null,null,null,null,null,"Generic","Windows App","CgtWWDJIV19teE9PVSiOiY_VBjIKCgJNWRIEGgAgV2LfAgrcAjIxLllUPVEtSWRMOS1wVXRSWFJDTklwSzF5R183QWpjMEZDekZ4N2xVNk9vZ2IxRjgzVDVlUW9xVERtU3NvaHlwUzFTamt5d2FxLVQzcWFkX0c3UldoUWlGUUQxR1dKVFhWVC1FYVJERlplMFZzNnY4Qzk1ZXNCZVU5ZElXenVwdWQtMXNGTGNzeURVQ1ZrS2RjRDNJLWhLaFFGTlJaTV9YSDBsc2JBRWU3N0VvX1Y4clRmRG90T1NFdWlyUzlsaFBvUXpFNXo2WHN1Q08tM3J5dFBhdmdwOWtWcXFTMXNRd0Raem02NnVvOW02aGpYVTRxbXVCWGtaMG5tM2RJUmljbWlSRDdhV3FJTEJ1QjlRbVVGT3h3VEl0djZLZk5YbDVicWtPS0pLWlBhbzVtNXBKT0NvS1dCbjVtdEdZWnJGWC1TN3FOWmhfcEJ5QWUyS1lYX2w3MlVuM3M5UQ%3D%3D"]]]]];"#;
+        let matched = RE_VISITOR_DATA.find(sample).map(|m| m.as_str());
+        assert!(matched.is_some());
+        let token = matched.unwrap();
+        assert!(token.starts_with("Cgt"));
+        assert!(token.len() > 30);
+    }
 }
+
+

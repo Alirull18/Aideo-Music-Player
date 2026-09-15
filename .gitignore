@@ -53,6 +53,7 @@ playwright-report/
 blob-report/
 vite.config.ts.timestamp-*
 vitest.config.ts.timestamp-*
+notebooklm_packs/
 
 # Environment & Sensitive Keys
 .env

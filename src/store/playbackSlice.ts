@@ -144,7 +144,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     saturation_drive: Number(localStorage.getItem('aideo_saturation_drive') || 0.0),
     crossfade_transition_enabled: localStorage.getItem('aideo_crossfade_enabled') === 'true',
     crossfade_transition_duration: Number(localStorage.getItem('aideo_crossfade_duration') || 5.0),
-    stream_engine: (localStorage.getItem('aideo_stream_engine') || 'yt-dlp') as 'yt-dlp' | 'reqwest',
+    stream_engine: (localStorage.getItem('aideo_stream_engine_v2') || 'reqwest') as 'yt-dlp' | 'reqwest',
     lookahead_prebuffer_enabled: localStorage.getItem('aideo_lookahead_prebuffer') !== 'false',
     track_replaygain_gain: 0.0,
     playback_rate: 1.0
@@ -878,6 +878,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_crossfade_duration', String(full.crossfade_transition_duration));
     localStorage.setItem('aideo_r128_enabled', String(full.r128_enabled));
     localStorage.setItem('aideo_stream_engine', full.stream_engine);
+    localStorage.setItem('aideo_stream_engine_v2', full.stream_engine);
     localStorage.setItem('aideo_lookahead_prebuffer', String(full.lookahead_prebuffer_enabled));
 
     // 1. Update React Zustand state instantly for fluid 60fps UI

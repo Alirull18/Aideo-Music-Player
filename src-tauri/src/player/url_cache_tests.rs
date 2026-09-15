@@ -83,4 +83,66 @@ mod url_cache_tests {
         assert_eq!(get_cached_youtube_url("k1", t0), None);
         assert_eq!(get_cached_youtube_url("k2", t0), None);
     }
+
+    #[test]
+    fn test_is_youtube_url_or_id() {
+        use crate::player::is_youtube_url_or_id;
+        assert!(is_youtube_url_or_id("dQw4w9WgXcQ"));
+        assert!(is_youtube_url_or_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+        assert!(is_youtube_url_or_id("https://youtu.be/dQw4w9WgXcQ"));
+        assert!(is_youtube_url_or_id("https://www.youtube.com/live/dQw4w9WgXcQ"));
+        assert!(is_youtube_url_or_id("https://www.youtube.com/shorts/dQw4w9WgXcQ"));
+        assert!(is_youtube_url_or_id("https://rr1---sn-xxx.googlevideo.com/videoplayback?xxx"));
+        assert!(!is_youtube_url_or_id(""));
+        assert!(!is_youtube_url_or_id("https://example.com/audio.mp3"));
+        assert!(!is_youtube_url_or_id("not-an-id"));
+    }
+
+    #[test]
+    fn test_canonicalize_youtube_url() {
+        use crate::player::canonicalize_youtube_url;
+        assert_eq!(
+            canonicalize_youtube_url("dQw4w9WgXcQ"),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+        assert_eq!(
+            canonicalize_youtube_url("https://youtu.be/dQw4w9WgXcQ"),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+        assert_eq!(
+            canonicalize_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        );
+        assert_eq!(
+            canonicalize_youtube_url("https://example.com/not-youtube"),
+            "https://example.com/not-youtube"
+        );
+    }
+
+    #[test]
+    fn test_buffer_threshold_exceeds_retry_deletion_threshold() {
+        // Invariant: The decoder buffering gate must strictly exceed the
+        // early downloader retry/deletion threshold to prevent Symphonia decoding
+        // from racing with file deletion.
+        use crate::player::{BUFFER_GATE_BYTES, RETRY_THRESHOLD_BYTES};
+        assert!(
+            BUFFER_GATE_BYTES > RETRY_THRESHOLD_BYTES,
+            "Buffer gate must strictly exceed retry threshold"
+        );
+    }
+
+    #[test]
+    fn test_get_cache_paths_canonicalization() {
+        use crate::player::get_cache_paths;
+        let p1 = get_cache_paths("dQw4w9WgXcQ").unwrap();
+        let p2 = get_cache_paths("https://www.youtube.com/watch?v=dQw4w9WgXcQ").unwrap();
+        let p3 = get_cache_paths("https://youtu.be/dQw4w9WgXcQ").unwrap();
+        let p4 = get_cache_paths("https://www.youtube.com/live/dQw4w9WgXcQ").unwrap();
+        let p5 = get_cache_paths("https://www.youtube.com/shorts/dQw4w9WgXcQ").unwrap();
+
+        assert_eq!(p1, p2);
+        assert_eq!(p1, p3);
+        assert_eq!(p1, p4);
+        assert_eq!(p1, p5);
+    }
 }

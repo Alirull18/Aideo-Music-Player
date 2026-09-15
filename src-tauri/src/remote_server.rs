@@ -610,8 +610,6 @@ async fn handle_websocket(
                         }
                         "seek" => {
                             if let Some(pos) = val.get("value").and_then(|v| v.as_f64()) {
-                                let player = crate::safe_lock(&state.player);
-                                let _ = player.cmd_tx.send(crate::player::PlayerCommand::Seek(pos));
                                 let _ = app_handle.emit("media-seek", pos);
                             }
                         }
@@ -832,10 +830,26 @@ fn get_pin_entry_html() -> String {
     </div>
 
     <script>
-        // Check if PIN was previously saved in localStorage
-        const savedPin = localStorage.getItem('aideo_remote_pin');
-        if (savedPin && savedPin.length >= 4) {
-            window.location.search = '?pin=' + encodeURIComponent(savedPin);
+        // Detect if a PIN was submitted in URL query and rejected by the server
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('pin')) {
+            localStorage.removeItem('aideo_remote_pin');
+            if (window.history.replaceState) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            const hintEl = document.querySelector('.hint');
+            if (hintEl) {
+                hintEl.textContent = 'Invalid or expired PIN. Please check Aideo player for the current PIN.';
+                hintEl.style.color = '#ef4444';
+                hintEl.style.fontWeight = '600';
+            }
+        } else {
+            // Pre-fill input if there was a saved PIN, but do NOT auto-redirect to avoid loops
+            const savedPin = localStorage.getItem('aideo_remote_pin');
+            if (savedPin && savedPin.length >= 4) {
+                const pinInput = document.getElementById('pin-input');
+                if (pinInput) pinInput.value = savedPin;
+            }
         }
 
         function handlePinSubmit(e) {
@@ -1676,20 +1690,24 @@ fn get_remote_html() -> String {
                         renderLyrics(data.lyrics);
                     } else {
                         // Regular tick: keep title, artist, and artwork dynamically updated
-                        if (data.title && data.title !== 'Not Playing' && data.title !== titleEl.textContent) {
-                            titleEl.textContent = data.title;
+                        if (data.title !== undefined && data.title !== titleEl.textContent) {
+                            titleEl.textContent = data.title || 'Not Playing';
                             artistEl.textContent = data.artist || (data.album ? data.album : 'Aideo Player');
-                            lyricsTitle.textContent = data.title;
+                            lyricsTitle.textContent = data.title || 'Not Playing';
                             lyricsArtist.textContent = data.artist || 'Aideo Companion';
+                            if (data.title === 'Not Playing' && currentLyrics.length > 0) {
+                                renderLyrics([]);
+                            }
                         }
-                        if (data.cover_url && data.cover_url !== currentCoverUrl) {
-                            updateCoverArt(data.cover_url);
+                        const incomingCover = data.cover_url || '';
+                        if (incomingCover !== currentCoverUrl) {
+                            updateCoverArt(incomingCover);
                         }
                     }
 
                     // Shared state sync (runs every tick)
                     isPlaying = !!data.is_playing;
-                    if (data.duration) duration = data.duration;
+                    if (typeof data.duration === 'number') duration = data.duration;
 
                     updateActiveLyric(data.position || 0);
 
@@ -1705,7 +1723,7 @@ fn get_remote_html() -> String {
                     if (!userInteractingWithTime) {
                         timeSlider.max = duration || 100;
                         timeSlider.value = data.position || 0;
-                        timeCurrent.textContent = formatTime(data.position);
+                        timeCurrent.textContent = formatTime(data.position || 0);
                     }
 
                     // Volume slider (with drag protection)
@@ -1893,5 +1911,24 @@ mod tests {
 
         assert_eq!(parse_data_url("http://example.com/art.jpg"), None);
         assert_eq!(parse_data_url("data:image/png"), None);
+    }
+
+    #[test]
+    fn test_pin_entry_html_does_not_unconditionally_redirect() {
+        let html = get_pin_entry_html();
+        // Ensure auto-redirect on page load was removed to prevent infinite loops
+        assert!(!html.contains("window.location.search = '?pin=' + encodeURIComponent(savedPin)"));
+        // Ensure invalid PIN detection and localStorage cleanup is present
+        assert!(html.contains("localStorage.removeItem('aideo_remote_pin')"));
+    }
+
+    #[test]
+    fn test_remote_html_updates_on_stop() {
+        let html = get_remote_html();
+        // Ensure data.title !== 'Not Playing' guard is removed so stopped state updates
+        assert!(!html.contains("data.title !== 'Not Playing'"));
+        // Ensure duration reset to 0 is properly handled when stopped
+        assert!(html.contains("if (typeof data.duration === 'number') duration = data.duration;"));
+        assert!(!html.contains("if (data.duration) duration = data.duration;"));
     }
 }

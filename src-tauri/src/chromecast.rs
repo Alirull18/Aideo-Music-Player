@@ -550,7 +550,7 @@ pub async fn chromecast_play(
 ) -> Result<(), String> {
     // If it's a YouTube link, resolve it to a direct audio stream URL using ytdlp outside the async mutex lock
     let path_clone = path.clone();
-    let resolved_path = if path.contains("youtube.com") || path.contains("youtu.be") {
+    let resolved_path = if crate::player::is_youtube_url_or_id(&path) {
         println!("[chromecast] YouTube URL detected. Extracting direct audio stream in blocking task...");
         tokio::task::spawn_blocking(move || crate::player::resolve_youtube_url(&path_clone))
             .await
