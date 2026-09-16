@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useStore, Track } from '../store';
-import { sourceTypeColor } from '../components/aideo/HomeParts';
 import { classifyDiscoveryPlayback } from '../utils';
 
 describe('Discovery Hub Local Track Playback & Tag Resolution', () => {
@@ -67,7 +66,7 @@ describe('Discovery Hub Local Track Playback & Tag Resolution', () => {
     expect(playedTrack.id).toBe(101);
   });
 
-  it('delegates to playTrack when an online stream matches an owned local library song by title and artist', async () => {
+  it('keeps an online recording separate when only title and artist match', async () => {
     const playTrackSpy = vi.spyOn(useStore.getState(), 'playTrack');
 
     // Simulate clicking a discovery hub online recommendation that matches local library
@@ -77,11 +76,8 @@ describe('Discovery Hub Local Track Playback & Tag Resolution', () => {
       duration: 250,
     });
 
-    expect(playTrackSpy).toHaveBeenCalledTimes(1);
-    const playedTrack = playTrackSpy.mock.calls[0][0];
-    expect(playedTrack.path).toBe('C:/Music/Copper Wires.flac');
-    expect(playedTrack.format).toBe('FLAC');
-    expect(playedTrack.format).not.toBe('URL');
+    expect(playTrackSpy).not.toHaveBeenCalled();
+    expect(useStore.getState().currentTrack?.path).toBe('https://www.youtube.com/watch?v=mock123');
   });
 
   it('preserves file extension format and never sets format to URL when playing an untracked local file', async () => {
@@ -131,25 +127,5 @@ describe('Discovery Hub Local Track Playback & Tag Resolution', () => {
     expect(classifyDiscoveryPlayback({ url: 'https://example.com/preview.m4a' })).toBe('stream');
   });
 
-  it('sourceTypeColor identifies owned local tracks and assigns lossless purple or local green outline', () => {
-    // Local track by path
-    const localColor = sourceTypeColor({ url: 'C:/Music/Copper Wires.flac' });
-    expect(localColor).toBe('#c084fc'); // FLAC lossless
 
-    // Online stream that matches local track by title/artist
-    const matchedColor = sourceTypeColor({
-      url: 'https://youtube.com/watch?v=stream1',
-      title: 'Copper Wires',
-      artist: 'Red Meridian',
-    });
-    expect(matchedColor).toBe('#c084fc'); // Resolves to local FLAC color, not online red (#f87171)
-
-    // Unowned stream
-    const streamColor = sourceTypeColor({
-      url: 'https://youtube.com/watch?v=unowned',
-      title: 'Random Song',
-      artist: 'Random Artist',
-    });
-    expect(streamColor).toBe('#f87171');
-  });
 });

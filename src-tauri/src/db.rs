@@ -80,6 +80,104 @@ pub struct Playlist {
     pub name: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceProvider {
+    Local,
+    Tidal,
+    Qobuz,
+    Youtube,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackSource {
+    pub provider: SourceProvider,
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_quality: Option<crate::sources::SourceQuality>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SourceMetadata>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceMetadata {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<f64>,
+    pub duration_raw: Option<String>,
+    pub cover_url: Option<String>,
+    pub track_number: Option<i32>,
+    pub disc_number: Option<i32>,
+}
+
+impl PlaybackSource {
+    pub(crate) fn matches_path(&self, path: &str) -> bool {
+        if self.id == path { return true; }
+        if self.provider != SourceProvider::Youtube { return false; }
+        let Ok(url) = reqwest::Url::parse(path) else { return false; };
+        if !matches!(url.scheme(), "http" | "https") { return false; }
+        match url.host_str() {
+            Some("youtu.be") => url.path().strip_prefix('/') == Some(self.id.as_str()),
+            Some("youtube.com" | "www.youtube.com" | "music.youtube.com") => url.query_pairs().any(|(key, value)| key == "v" && value == self.id),
+            _ => false,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
+pub enum SourceSelection {
+    Auto,
+    Explicit { source: PlaybackSource },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecordingSources {
+    pub recording_id: String,
+    pub sources: Vec<PlaybackSource>,
+    pub selection: SourceSelection,
+}
+
+impl RecordingSources {
+    pub(crate) fn to_json(&self) -> Result<String> {
+        let valid = !self.recording_id.trim().is_empty()
+            && self.recording_id.len() <= 512
+            && (1..=32).contains(&self.sources.len())
+            && self.sources.iter().enumerate().all(|(i, source)| {
+                !source.id.is_empty()
+                    && source.id.len() <= 32768
+                    && !source.id.chars().any(char::is_control)
+                    && !self.sources[..i].iter().any(|s| s.provider == source.provider && s.id == source.id)
+                    && match source.provider {
+                        SourceProvider::Local => std::path::Path::new(&source.id).is_absolute(),
+                        SourceProvider::Tidal | SourceProvider::Qobuz => source.id.bytes().all(|b| b.is_ascii_digit()),
+                        SourceProvider::Youtube => source.id.len() == 11
+                            && source.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+                    }
+            })
+            && match &self.selection {
+                SourceSelection::Auto => true,
+                SourceSelection::Explicit { source } => self.sources.iter().any(|s| s.provider == source.provider && s.id == source.id),
+            };
+        if !valid {
+            return Err(rusqlite::Error::InvalidParameterName("Invalid recording sources".into()));
+        }
+        serde_json::to_string(self).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct PlaylistEntry {
+    #[serde(flatten)]
+    pub track: Track,
+    pub playlist_entry_id: i64,
+    pub source_context: Option<RecordingSources>,
+}
+
 pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     if !table.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return false;
@@ -230,6 +328,34 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         println!("[Database] Migration completed successfully!");
     }
 
+    if !column_exists(&conn, "playlist_tracks", "entry_id") {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            "ALTER TABLE playlist_tracks RENAME TO legacy_playlist_tracks;
+             CREATE TABLE playlist_tracks (
+                entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
+                track_path TEXT,
+                position INTEGER,
+                source_context TEXT CHECK(source_context IS NULL OR json_valid(source_context)),
+                metadata_json TEXT CHECK(metadata_json IS NULL OR json_valid(metadata_json)),
+                CHECK(source_context IS NULL OR metadata_json IS NOT NULL)
+             );
+             INSERT INTO playlist_tracks (playlist_id, track_path, position)
+                SELECT playlist_id, track_path, position FROM legacy_playlist_tracks;
+             DROP TABLE legacy_playlist_tracks;
+             CREATE UNIQUE INDEX idx_playlist_legacy_path ON playlist_tracks(playlist_id, track_path)
+                WHERE source_context IS NULL;
+             CREATE UNIQUE INDEX idx_playlist_recording ON playlist_tracks(playlist_id, json_extract(source_context, '$.recording_id'))
+                WHERE source_context IS NOT NULL;",
+        )?;
+        tx.commit()?;
+    }
+
+    // Explicitly converting an old entry may coexist with an already saved Auto copy.
+    conn.execute_batch("DROP INDEX IF EXISTS idx_playlist_recording;
+        CREATE INDEX IF NOT EXISTS idx_playlist_recording_lookup ON playlist_tracks(playlist_id, json_extract(source_context, '$.recording_id')) WHERE source_context IS NOT NULL;")?;
+
     // Create library directories registry table (SEC-01)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS library_directories (
@@ -268,7 +394,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         "SELECT DISTINCT pt.track_path 
          FROM playlist_tracks pt 
          LEFT JOIN tracks t ON pt.track_path = t.path 
-         WHERE t.path IS NULL"
+         WHERE t.path IS NULL AND pt.source_context IS NULL"
     ) {
         if let Ok(missing_paths) = stmt.query_map([], |row| row.get::<_, String>(0)) {
             let missing_paths: Vec<String> = missing_paths.filter_map(|r| r.ok()).collect();
@@ -681,88 +807,123 @@ pub fn get_playlists(conn: &Connection) -> Result<Vec<Playlist>> {
     Ok(playlists)
 }
 
-pub fn add_to_playlist(conn: &mut Connection, playlist_id: i32, track_path: &str) -> Result<()> {
-    let tx = conn.transaction()?;
-    let pos: i32 = tx.query_row(
+fn insert_playlist_entry(
+    conn: &Connection, playlist_id: i32, track_path: &str,
+    source_context: Option<&RecordingSources>, metadata: Option<&Track>,
+) -> Result<()> {
+    let source_json = source_context.map(RecordingSources::to_json).transpose()?;
+    let metadata_json = if let Some(context) = source_context {
+        let track = match metadata {
+            Some(track) => track.clone(),
+            None => get_track_by_path(conn, track_path)?,
+        };
+        let is_source_path = context.sources.iter().any(|source| source.matches_path(track_path));
+        if track.path != track_path || !is_source_path {
+            return Err(rusqlite::Error::InvalidParameterName("Track path does not match metadata".into()));
+        }
+        Some(serde_json::to_string(&track).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?)
+    } else { None };
+    if let Some(context) = source_context {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM playlist_tracks WHERE playlist_id = ?1 AND json_extract(source_context, '$.recording_id') = ?2)",
+            params![playlist_id, context.recording_id], |r| r.get(0),
+        )?;
+        if exists { return Ok(()); }
+    }
+    let pos: i32 = conn.query_row(
         "SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_tracks WHERE playlist_id = ?1",
         params![playlist_id],
         |row| row.get(0),
     )?;
-    tx.execute(
-        "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_path, position) VALUES (?1, ?2, ?3)",
-        params![playlist_id, track_path, pos],
+    conn.execute(
+        "INSERT INTO playlist_tracks (playlist_id, track_path, position, source_context, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT DO NOTHING",
+        params![playlist_id, track_path, pos, source_json, metadata_json],
     )?;
+    Ok(())
+}
+
+pub fn add_to_playlist(
+    conn: &mut Connection, playlist_id: i32, track_path: &str,
+    source_context: Option<&RecordingSources>, metadata: Option<&Track>,
+) -> Result<()> {
+    let tx = conn.transaction()?;
+    insert_playlist_entry(&tx, playlist_id, track_path, source_context, metadata)?;
     tx.commit()?;
     Ok(())
 }
 
-pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &str) -> Result<()> {
+pub fn remove_from_playlist(conn: &Connection, playlist_id: i32, track_path: &str, entry_id: Option<i64>) -> Result<()> {
     conn.execute(
-        "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
-        params![playlist_id, track_path],
+        "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2
+         AND ((?3 IS NOT NULL AND entry_id = ?3) OR (?3 IS NULL AND source_context IS NULL))",
+        params![playlist_id, track_path, entry_id],
     )?;
     Ok(())
 }
 
-pub fn reorder_playlist(conn: &mut Connection, playlist_id: i32, track_paths: &[String]) -> Result<()> {
+pub fn reorder_playlist(conn: &mut Connection, playlist_id: i32, track_paths: &[String], entry_ids: Option<&[i64]>) -> Result<()> {
     let tx = conn.transaction()?;
-    for (i, path) in track_paths.iter().enumerate() {
-        tx.execute(
-            "UPDATE playlist_tracks SET position = ?1 WHERE playlist_id = ?2 AND track_path = ?3",
-            params![i as i32 + 1, playlist_id, path],
-        )?;
+    if let Some(ids) = entry_ids {
+        let count: i64 = tx.query_row("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?1", [playlist_id], |row| row.get(0))?;
+        if count != ids.len() as i64 || ids.iter().enumerate().any(|(i, id)| ids[..i].contains(id)) {
+            return Err(rusqlite::Error::InvalidParameterName("Invalid playlist entry order".into()));
+        }
+        for (i, id) in ids.iter().enumerate() {
+            if tx.execute("UPDATE playlist_tracks SET position = ?1 WHERE playlist_id = ?2 AND entry_id = ?3",
+                params![i as i32 + 1, playlist_id, id])? != 1 {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
+        }
+    } else {
+        for (i, path) in track_paths.iter().enumerate() {
+            tx.execute(
+                "UPDATE playlist_tracks SET position = ?1 WHERE playlist_id = ?2 AND track_path = ?3 AND source_context IS NULL",
+                params![i as i32 + 1, playlist_id, path],
+            )?;
+        }
     }
     tx.commit()?;
     Ok(())
 }
 
 pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Track>> {
+    Ok(get_playlist_entries(conn, playlist_id)?.into_iter().map(|entry| entry.track).collect())
+}
+
+pub fn get_playlist_entries(conn: &Connection, playlist_id: i32) -> Result<Vec<PlaylistEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.track_number, t.disc_number 
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.path_hash, t.track_number, t.disc_number,
+                pt.entry_id, pt.source_context, pt.metadata_json
          FROM playlist_tracks pt 
-         JOIN tracks t ON pt.track_path = t.path 
-         WHERE pt.playlist_id = ?1 
-         ORDER BY pt.position ASC"
+         LEFT JOIN tracks t ON pt.track_path = t.path
+         WHERE pt.playlist_id = ?1 AND (t.id IS NOT NULL OR pt.source_context IS NOT NULL)
+         ORDER BY pt.position ASC, pt.entry_id ASC"
     )?;
     let track_iter = stmt.query_map(params![playlist_id], |row| {
-        let path: String = row.get(1)?;
-        let path_hash = Some(format!("{:x}", md5::compute(path.as_bytes())));
-        Ok(Track {
-            id: row.get::<_, Option<i32>>(0)?.unwrap_or(0),
-            path,
-            title: row.get(2)?,
-            artist: row.get(3)?,
-            album: row.get(4)?,
-            duration: row.get(5)?,
-            format: row.get(6)?,
-            lyric_offset: row.get::<_, Option<i32>>(7)?.unwrap_or(0),
-            loved: Some(row.get::<_, Option<i32>>(8)?.unwrap_or(0)),
-            disliked: Some(row.get::<_, Option<i32>>(9)?.unwrap_or(0)),
-            cover_url: row.get(10).ok(),
-            path_hash,
-            bpm: row.get(11).ok(),
-            energy: row.get(12).ok(),
-            bass_ratio: row.get(13).ok(),
-            treble_ratio: row.get(14).ok(),
-            replaygain_gain: row.get(15).ok(),
-            track_number: row.get(16).ok(),
-            disc_number: row.get(17).ok(),
+        let json: Option<String> = row.get(20)?;
+        let source_context: Option<RecordingSources> = json.map(|json| serde_json::from_str(&json)
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(20, rusqlite::types::Type::Text, Box::new(e))))
+            .transpose()?;
+        let track = if let Some(context) = &source_context {
+            context.to_json()?;
+            let metadata: String = row.get(21)?;
+            serde_json::from_str(&metadata)
+                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(21, rusqlite::types::Type::Text, Box::new(e)))?
+        } else { row_to_track(row)? };
+        Ok(PlaylistEntry {
+            track,
+            playlist_entry_id: row.get(19)?,
+            source_context,
         })
     })?;
-
-    let mut tracks = Vec::new();
-    for track in track_iter {
-        if let Ok(t) = track {
-            tracks.push(t);
-        }
-    }
-    Ok(tracks)
+    track_iter.collect()
 }
 
 pub fn delete_track(conn: &mut Connection, path: &str) -> Result<()> {
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path])?;
-    tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path])?;
+    tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1 AND source_context IS NULL", rusqlite::params![path])?;
     tx.commit()?;
     Ok(())
 }
@@ -777,8 +938,28 @@ pub fn toggle_love_track(
     duration: Option<f64>,
     format: Option<&str>,
     cover_url: Option<&str>,
+    source_context: Option<&RecordingSources>,
 ) -> Result<()> {
     let tx = conn.transaction()?;
+    if let Some(context) = source_context {
+        context.to_json()?;
+        tx.execute("INSERT INTO playlists (name) VALUES ('Favorite Songs') ON CONFLICT(name) DO NOTHING", [])?;
+        let playlist_id: i32 = tx.query_row("SELECT id FROM playlists WHERE name = 'Favorite Songs'", [], |row| row.get(0))?;
+        if loved {
+            let metadata: Track = serde_json::from_value(serde_json::json!({
+                "id": 0, "path": path, "title": title, "artist": artist, "album": album,
+                "duration": duration, "format": format, "cover_url": cover_url,
+                "lyric_offset": 0, "loved": 1
+            })).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            insert_playlist_entry(&tx, playlist_id, path, Some(context), Some(&metadata))?;
+        } else {
+            tx.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?1
+                AND json_extract(source_context, '$.recording_id') = ?2",
+                params![playlist_id, context.recording_id])?;
+        }
+        tx.commit()?;
+        return Ok(());
+    }
     let loved_int = if loved { 1 } else { 0 };
 
     tx.execute(
@@ -826,7 +1007,7 @@ pub fn toggle_love_track(
     } else {
         // Remove from playlist_tracks
         tx.execute(
-            "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2 AND source_context IS NULL",
             rusqlite::params![playlist_id, path],
         )?;
     }
@@ -872,7 +1053,7 @@ pub fn toggle_dislike_track(
             |row| row.get::<_, i32>(0),
         ) {
             let _ = tx.execute(
-                "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2",
+                "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_path = ?2 AND source_context IS NULL",
                 rusqlite::params![playlist_id, path],
             );
         }

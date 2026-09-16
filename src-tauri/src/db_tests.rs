@@ -14,6 +14,183 @@ mod tests {
         assert!(column_exists(&conn, "playlists", "name"), "playlists table should contain name column");
     }
 
+    fn auto_sources() -> crate::db::RecordingSources {
+        serde_json::from_value(serde_json::json!({
+            "recording_id": "recording-1",
+            "sources": [{"provider": "tidal", "id": "123", "metadata": {
+                "title": "Song", "artist": "Artist", "album": "Album", "duration": 180,
+                "cover_url": "https://example.com/cover.jpg", "track_number": 2, "disc_number": 1
+            }}, {"provider": "qobuz", "id": "123"}],
+            "selection": {"mode": "auto"}
+        })).unwrap()
+    }
+
+    #[test]
+    fn unified_entries_preserve_legacy_sources_and_order_after_restart() {
+        use crate::db::*;
+        let db_path = std::env::temp_dir().join(format!("aideo-sources-{}.sqlite", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path = db_path.to_str().unwrap();
+        {
+            let conn = rusqlite::Connection::open(path).unwrap();
+            conn.execute_batch("CREATE TABLE playlists (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL);
+                CREATE TABLE playlist_tracks (playlist_id INTEGER, track_path TEXT, position INTEGER,
+                    PRIMARY KEY(playlist_id, track_path),
+                    FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE);
+                INSERT INTO playlists VALUES (1, 'Legacy');
+                INSERT INTO playlist_tracks VALUES (1, '123', 7);").unwrap();
+        }
+        let auto_id;
+        {
+            let mut conn = init_db(path).unwrap();
+            let legacy = get_playlist_entries(&conn, 1).unwrap();
+            assert_eq!(legacy.len(), 1);
+            assert!(legacy[0].source_context.is_none());
+            assert_eq!(legacy[0].track.path, "123");
+            add_to_playlist(&mut conn, 1, "123", Some(&auto_sources()), None).unwrap();
+            add_to_playlist(&mut conn, 1, "123", None, None).unwrap();
+            let entries = get_playlist_entries(&conn, 1).unwrap();
+            assert_eq!(entries.len(), 2);
+            auto_id = entries[1].playlist_entry_id;
+            assert_ne!(legacy[0].playlist_entry_id, auto_id);
+            reorder_playlist(&mut conn, 1, &[], Some(&[auto_id, legacy[0].playlist_entry_id])).unwrap();
+        }
+        {
+            let conn = init_db(path).unwrap();
+            let entries = get_playlist_entries(&conn, 1).unwrap();
+            assert_eq!(entries[0].playlist_entry_id, auto_id);
+            assert_eq!(entries[0].source_context, Some(auto_sources()));
+            assert!(entries[1].source_context.is_none());
+            remove_from_playlist(&conn, 1, "123", Some(auto_id)).unwrap();
+            let remaining = get_playlist_entries(&conn, 1).unwrap();
+            assert_eq!(remaining.len(), 1);
+            assert!(remaining[0].source_context.is_none());
+        }
+        std::fs::remove_file(db_path).unwrap();
+    }
+
+    #[test]
+    fn unified_entries_validate_sources_and_keep_explicit_preferences() {
+        use crate::db::*;
+        let mut conn = init_db(":memory:").unwrap();
+        let playlist = create_playlist(&conn, "Sources").unwrap();
+        conn.execute("INSERT INTO tracks (path) VALUES ('123')", []).unwrap();
+        let mut context = auto_sources();
+        context.selection = SourceSelection::Explicit { source: context.sources[1].clone() };
+        add_to_playlist(&mut conn, playlist, "123", Some(&context), None).unwrap();
+        // Re-adding Auto must not overwrite a remembered explicit preference.
+        add_to_playlist(&mut conn, playlist, "123", Some(&auto_sources()), None).unwrap();
+        assert_eq!(get_playlist_entries(&conn, playlist).unwrap()[0].source_context, Some(context));
+        let mut invalid = auto_sources();
+        invalid.sources[0].id = "https://cdn.example/expired.flac".into();
+        assert!(add_to_playlist(&mut conn, playlist, "123", Some(&invalid), None).is_err());
+        let mut invalid = auto_sources();
+        invalid.sources.clear();
+        assert!(add_to_playlist(&mut conn, playlist, "123", Some(&invalid), None).is_err());
+        let mut invalid = auto_sources();
+        invalid.recording_id.clear();
+        assert!(add_to_playlist(&mut conn, playlist, "123", Some(&invalid), None).is_err());
+        let mut invalid = auto_sources();
+        invalid.sources.push(invalid.sources[0].clone());
+        assert!(add_to_playlist(&mut conn, playlist, "123", Some(&invalid), None).is_err());
+        let mut invalid = auto_sources();
+        invalid.selection = SourceSelection::Explicit { source: PlaybackSource { provider: SourceProvider::Tidal, id: "999".into(), catalog_quality: None, metadata: None } };
+        assert!(add_to_playlist(&mut conn, playlist, "123", Some(&invalid), None).is_err());
+        let mut metadata = get_track_by_path(&conn, "123").unwrap();
+        metadata.path = "https://cdn.example/temporary.flac".into();
+        assert!(add_to_playlist(&mut conn, playlist, &metadata.path, Some(&auto_sources()), Some(&metadata)).is_err());
+        assert_eq!(get_playlist_entries(&conn, playlist).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn converting_a_legacy_entry_keeps_both_copies_and_validates_source_identity() {
+        use crate::db::*;
+        let youtube = PlaybackSource { provider: SourceProvider::Youtube, id: "abcdefghijk".into(), catalog_quality: None, metadata: None };
+        assert!(youtube.matches_path("https://youtu.be/abcdefghijk"));
+        assert!(youtube.matches_path("https://music.youtube.com/watch?v=abcdefghijk"));
+        assert!(!youtube.matches_path("https://example.com/watch?v=abcdefghijk"));
+        assert!(!youtube.matches_path("https://youtu.be/12345678901"));
+        let mut conn = init_db(":memory:").unwrap();
+        let playlist = create_playlist(&conn, "Convert").unwrap();
+        conn.execute("INSERT INTO tracks (path, title, format) VALUES ('123', 'Song', 'Tidal FLAC')", []).unwrap();
+        add_to_playlist(&mut conn, playlist, "123", None, None).unwrap();
+        add_to_playlist(&mut conn, playlist, "123", Some(&auto_sources()), None).unwrap();
+        let entries = get_playlist_entries(&conn, playlist).unwrap();
+        let json = auto_sources().to_json().unwrap();
+        let metadata = serde_json::to_string(&entries[0].track).unwrap();
+        conn.execute("UPDATE playlist_tracks SET source_context = ?1, metadata_json = ?2 WHERE entry_id = ?3",
+            rusqlite::params![json, metadata, entries[0].playlist_entry_id]).unwrap();
+        add_to_playlist(&mut conn, playlist, "123", Some(&auto_sources()), None).unwrap();
+        assert_eq!(get_playlist_entries(&conn, playlist).unwrap().len(), 2);
+        let mut invalid = auto_sources();
+        let mut duplicate = invalid.sources[0].clone();
+        duplicate.catalog_quality = Some(crate::sources::SourceQuality { lossless: Some(true), ..Default::default() });
+        invalid.sources.push(duplicate);
+        assert!(invalid.to_json().is_err());
+        let mut selected = auto_sources();
+        let mut choice = selected.sources[0].clone();
+        choice.catalog_quality = Some(crate::sources::SourceQuality { lossless: Some(true), ..Default::default() });
+        selected.selection = SourceSelection::Explicit { source: choice };
+        assert!(selected.to_json().is_ok());
+    }
+
+    #[test]
+    fn unified_entries_keep_metadata_when_provider_ids_collide_or_local_copy_is_removed() {
+        use crate::db::*;
+        let mut conn = init_db(":memory:").unwrap();
+        let playlist = create_playlist(&conn, "Sources").unwrap();
+        conn.execute("INSERT INTO tracks (path, title, format) VALUES ('123', 'Tidal Song', 'Tidal FLAC')", []).unwrap();
+        add_to_playlist(&mut conn, playlist, "123", None, None).unwrap();
+        let mut metadata = get_track_by_path(&conn, "123").unwrap();
+        metadata.title = Some("Different Qobuz Song".into());
+        metadata.format = Some("Qobuz FLAC".into());
+        let mut context = auto_sources();
+        context.sources = vec![context.sources[1].clone()];
+        add_to_playlist(&mut conn, playlist, "123", Some(&context), Some(&metadata)).unwrap();
+        let entries = get_playlist_entries(&conn, playlist).unwrap();
+        assert_eq!(entries[0].track.title.as_deref(), Some("Tidal Song"));
+        assert_eq!(entries[1].track.title.as_deref(), Some("Different Qobuz Song"));
+        delete_track(&mut conn, "123").unwrap();
+        let remaining = get_playlist_entries(&conn, playlist).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].track.title, metadata.title);
+        assert_eq!(remaining[0].source_context, Some(context));
+    }
+
+    #[test]
+    fn unified_entries_reject_wrong_playlist_ids_and_roll_back_reorders() {
+        use crate::db::*;
+        let mut conn = init_db(":memory:").unwrap();
+        let playlist = create_playlist(&conn, "Sources").unwrap();
+        conn.execute("INSERT INTO tracks (path) VALUES ('123'), ('456')", []).unwrap();
+        add_to_playlist(&mut conn, playlist, "123", None, None).unwrap();
+        add_to_playlist(&mut conn, playlist, "456", None, None).unwrap();
+        let entries = get_playlist_entries(&conn, playlist).unwrap();
+        let ids: Vec<i64> = entries.iter().map(|e| e.playlist_entry_id).collect();
+        assert!(reorder_playlist(&mut conn, playlist, &[], Some(&[ids[1], 9999])).is_err());
+        assert!(reorder_playlist(&mut conn, playlist, &[], Some(&[ids[1], ids[1]])).is_err());
+        assert!(add_to_playlist(&mut conn, 9999, "123", Some(&auto_sources()), None).is_err());
+        remove_from_playlist(&conn, 9999, "123", Some(ids[0])).unwrap();
+        let after: Vec<i64> = get_playlist_entries(&conn, playlist).unwrap().iter().map(|e| e.playlist_entry_id).collect();
+        assert_eq!(after, ids);
+    }
+
+    #[test]
+    fn unified_favorites_do_not_change_legacy_saved_sources() {
+        use crate::db::*;
+        let mut conn = init_db(":memory:").unwrap();
+        toggle_love_track(&mut conn, "123", true, Some("Legacy"), None, None, None, Some("Tidal FLAC"), None, None).unwrap();
+        toggle_love_track(&mut conn, "123", true, Some("Unified"), None, None, None, Some("Qobuz FLAC"), None, Some(&auto_sources())).unwrap();
+        let playlist = get_playlists(&conn).unwrap()[0].id;
+        let entries = get_playlist_entries(&conn, playlist).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].source_context.is_none());
+        assert_eq!(entries[0].track.title.as_deref(), Some("Legacy"));
+        assert_eq!(entries[1].source_context, Some(auto_sources()));
+        toggle_love_track(&mut conn, "123", false, None, None, None, None, None, None, Some(&auto_sources())).unwrap();
+        assert_eq!(get_playlist_entries(&conn, playlist).unwrap().len(), 1);
+        assert_eq!(get_track_by_path(&conn, "123").unwrap().loved, Some(1));
+    }
+
     #[test]
     fn test_tray_icon_bytes() {
         let img = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"));
@@ -130,7 +307,7 @@ mod tests {
         ).unwrap();
 
         let pl_id = create_playlist(&conn, "Test Playlist").unwrap();
-        add_to_playlist(&mut conn, pl_id, "C:/song.mp3").unwrap();
+        add_to_playlist(&mut conn, pl_id, "C:/song.mp3", None, None).unwrap();
 
         let tracks = get_playlist_tracks(&conn, pl_id).unwrap();
         assert_eq!(tracks.len(), 1);

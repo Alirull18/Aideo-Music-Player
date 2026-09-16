@@ -13,6 +13,7 @@ import { shuffleArray } from '../utils/shuffle';
 import { ArtistDiscographyDrawer } from './ArtistDiscographyDrawer';
 import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey, extractPrimaryArtist } from '../utils/albumUtils';
 import { SimpleLRU } from '../utils/lruCache';
+import { parseSearchQuery, foldSearchText, simplifyPunctuation } from '../utils/searchParser';
 
 interface AlbumGroup {
   id: string;
@@ -601,8 +602,46 @@ export function AlbumsView({
       .filter((a) => {
         if (filterLovedOnly && !lovedAlbumKeys.includes(a.id)) return false;
         if (!searchQuery) return true;
-        const q = searchQuery.toLowerCase();
-        return a.title.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q);
+
+        const criteria = parseSearchQuery(searchQuery);
+        const foldedTitle = foldSearchText(a.title);
+        const foldedArtist = foldSearchText(a.artist);
+        const simpleTitle = simplifyPunctuation(foldedTitle);
+        const simpleArtist = simplifyPunctuation(foldedArtist);
+
+        const matchArtist = (target: string, simpleTarget: string) => {
+          if (foldedArtist.includes(target) || (simpleTarget && simpleArtist.includes(simpleTarget))) return true;
+          return a.tracks.some(t => {
+            const tArtist = foldSearchText(t.artist);
+            const tAlbumArtist = foldSearchText(t.album_artist || t.albumArtist);
+            const sArtist = simplifyPunctuation(tArtist);
+            const sAlbumArtist = simplifyPunctuation(tAlbumArtist);
+            return tArtist.includes(target) || tAlbumArtist.includes(target) ||
+              (simpleTarget && (sArtist.includes(simpleTarget) || sAlbumArtist.includes(simpleTarget)));
+          });
+        };
+
+        if (criteria.artist) {
+          const target = foldSearchText(criteria.artist);
+          const simpleTarget = simplifyPunctuation(target);
+          if (!matchArtist(target, simpleTarget)) return false;
+        }
+
+        if (criteria.album) {
+          const target = foldSearchText(criteria.album);
+          const simpleTarget = simplifyPunctuation(target);
+          if (!foldedTitle.includes(target) && (!simpleTarget || !simpleTitle.includes(simpleTarget))) return false;
+        }
+
+        for (const token of criteria.freeText) {
+          const target = foldSearchText(token);
+          const simpleTarget = simplifyPunctuation(target);
+          const inTitle = foldedTitle.includes(target) || (Boolean(simpleTarget) && simpleTitle.includes(simpleTarget));
+          const inArtist = matchArtist(target, simpleTarget);
+          if (!inTitle && !inArtist) return false;
+        }
+
+        return true;
       })
       .sort((a, b) => {
         if (sortBy === 'title') return a.title.localeCompare(b.title);

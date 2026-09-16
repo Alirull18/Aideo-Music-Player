@@ -18,6 +18,7 @@ use base64::Engine;
 
 mod artwork;
 mod db;
+pub mod sources;
 #[cfg(test)]
 mod db_tests;
 mod lyrics;
@@ -1266,7 +1267,7 @@ async fn clean_missing_tracks(state: State<'_, AppState>) -> Result<usize, Strin
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             for path in paths_to_delete {
                 tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
-                tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![path]).map_err(|e| e.to_string())?;
+                tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1 AND source_context IS NULL", rusqlite::params![path]).map_err(|e| e.to_string())?;
             }
             tx.commit().map_err(|e| e.to_string())?;
         }
@@ -1388,27 +1389,53 @@ fn delete_playlist(id: i32, state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn add_to_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
+fn add_to_playlist(playlist_id: i32, path: String, source_context: Option<db::RecordingSources>, metadata: Option<db::Track>, state: State<'_, AppState>) -> Result<(), String> {
     let mut conn = safe_lock(&state.db);
-    db::add_to_playlist(&mut conn, playlist_id, &path).map_err(|e| e.to_string())
+    db::add_to_playlist(&mut conn, playlist_id, &path, source_context.as_ref(), metadata.as_ref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn remove_from_playlist(playlist_id: i32, path: String, state: State<'_, AppState>) -> Result<(), String> {
+fn remove_from_playlist(playlist_id: i32, path: String, entry_id: Option<i64>, state: State<'_, AppState>) -> Result<(), String> {
     let conn = safe_lock(&state.db);
-    db::remove_from_playlist(&conn, playlist_id, &path).map_err(|e| e.to_string())
+    db::remove_from_playlist(&conn, playlist_id, &path, entry_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn reorder_playlist(playlist_id: i32, track_paths: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+fn reorder_playlist(playlist_id: i32, track_paths: Vec<String>, entry_ids: Option<Vec<i64>>, state: State<'_, AppState>) -> Result<(), String> {
     let mut conn = safe_lock(&state.db);
-    db::reorder_playlist(&mut conn, playlist_id, &track_paths).map_err(|e| e.to_string())
+    db::reorder_playlist(&mut conn, playlist_id, &track_paths, entry_ids.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
+fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
     let conn = safe_lock(&state.db);
-    db::get_playlist_tracks(&conn, playlist_id).map_err(|e| e.to_string())
+    db::get_playlist_entries(&conn, playlist_id).map_err(|e| e.to_string())
+}
+
+
+#[tauri::command]
+fn update_playlist_source(entry_id: i64, source_context: db::RecordingSources, metadata: db::Track, state: State<'_, AppState>) -> Result<(), String> {
+    if !source_context.sources.iter().any(|s| s.matches_path(&metadata.path)) {
+        return Err("Metadata does not match a recording source".into());
+    }
+    let json = source_context.to_json().map_err(|e| e.to_string())?;
+    let meta = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
+    let conn = safe_lock(&state.db);
+    let count = conn.execute("UPDATE playlist_tracks SET source_context = ?1, metadata_json = ?2 WHERE entry_id = ?3 AND track_path = ?4",
+        rusqlite::params![json, meta, entry_id, metadata.path]).map_err(|e| e.to_string())?;
+    if count != 1 { return Err("Playlist entry no longer exists".into()); }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_unified_favorites(state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
+    let conn = safe_lock(&state.db);
+    let id = conn.query_row("SELECT id FROM playlists WHERE name = 'Favorite Songs'", [], |r| r.get::<_, i32>(0));
+    match id {
+        Ok(id) => db::get_playlist_entries(&conn, id).map(|entries| entries.into_iter().filter(|e| e.source_context.is_some()).collect()).map_err(|e| e.to_string()),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -1517,7 +1544,7 @@ fn delete_track(state: State<'_, AppState>, path: String) -> Result<(), String> 
 
     if is_online {
         db::delete_track(&mut conn, &path).map_err(|e| e.to_string())?;
-        let _ = conn.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![&path]);
+        let _ = conn.execute("DELETE FROM playlist_tracks WHERE track_path = ?1 AND source_context IS NULL", rusqlite::params![&path]);
         
         let hash = format!("{:x}", md5::compute(path.as_bytes()));
         if let Some(data_dir) = dirs::data_dir() {
@@ -1552,7 +1579,7 @@ fn delete_track(state: State<'_, AppState>, path: String) -> Result<(), String> 
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM tracks WHERE path = ?1", rusqlite::params![&path])
             .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1", rusqlite::params![&path])
+        tx.execute("DELETE FROM playlist_tracks WHERE track_path = ?1 AND source_context IS NULL", rusqlite::params![&path])
             .map_err(|e| e.to_string())?;
 
         // Delete primary audio file
@@ -2369,6 +2396,12 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
 }
 
 #[tauri::command]
+fn set_source_queue_mode(enabled: bool, state: State<'_, AppState>) {
+    player::SOURCE_QUEUE_MODE.store(enabled, Ordering::SeqCst);
+    if enabled { crate::safe_lock(&crate::safe_lock(&state.player).queue).clear(); }
+}
+
+#[tauri::command]
 fn play_track(path: String, start_pos: Option<f64>, state: State<'_, AppState>) -> Result<(), String> {
     if !path.starts_with("http://") && !path.starts_with("https://") && !std::path::Path::new(&path).exists() {
         return Err(format!("Cannot play track: file or stream not found: '{}'", path));
@@ -2594,6 +2627,7 @@ fn toggle_love_track(
     duration: Option<f64>,
     format: Option<String>,
     cover_url: Option<String>,
+    source_context: Option<db::RecordingSources>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let mut conn = safe_lock(&state.db);
@@ -2607,6 +2641,7 @@ fn toggle_love_track(
         duration,
         format.as_deref(),
         cover_url.as_deref(),
+        source_context.as_ref(),
     ).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -3512,6 +3547,7 @@ pub fn run() {
             scan_and_save,
             clean_missing_tracks,
             get_library,
+            get_unified_favorites,
             get_library_page,
             get_library_count,
             play_track,
@@ -3618,6 +3654,11 @@ pub fn run() {
             tidal::tidal_download,
             tidal::tidal_logout,
             tidal::tidal_get_stream_url,
+            tidal::tidal_resolve_source,
+            qobuz::qobuz_resolve_source,
+            sources::search_local_sources,
+            set_source_queue_mode,
+            update_playlist_source,
             tidal::tidal_save_credentials,
             tidal::tidal_get_credentials,
             tidal::get_tidal_autoplay_recommendations,

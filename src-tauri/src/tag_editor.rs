@@ -30,6 +30,9 @@ pub struct AudioTagData {
     pub sample_rate: Option<u32>,
     pub bit_depth: Option<u8>,
     pub channels: Option<u8>,
+    pub isrc: Option<String>,
+    pub upc: Option<String>,
+    pub lossless: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -95,10 +98,17 @@ pub fn read_tags(file_path: &str) -> Result<AudioTagData, String> {
         sample_rate,
         bit_depth,
         channels,
+        lossless: match tagged_file.file_type() {
+            lofty::file::FileType::Flac | lofty::file::FileType::Wav | lofty::file::FileType::Aiff | lofty::file::FileType::Ape => Some(true),
+            lofty::file::FileType::Mpeg | lofty::file::FileType::Vorbis | lofty::file::FileType::Opus | lofty::file::FileType::Aac => Some(false),
+            _ => None,
+        },
         ..Default::default()
     };
 
     if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        data.isrc = tag.get_string(&ItemKey::Isrc).map(str::to_owned);
+        data.upc = tag.get_string(&ItemKey::Barcode).map(str::to_owned);
         data.title = tag.get_string(&ItemKey::TrackTitle).map(|s| s.to_string());
         data.artist = tag.get_string(&ItemKey::TrackArtist).map(|s| s.to_string());
         data.album = tag.get_string(&ItemKey::AlbumTitle).map(|s| s.to_string());
@@ -395,5 +405,6 @@ mod tests {
         assert_eq!(data.bit_depth, Some(24));
         assert_eq!(data.sample_rate, Some(96_000));
         assert_eq!(data.channels, Some(2));
+        assert_eq!(data.lossless, Some(true));
     }
 }

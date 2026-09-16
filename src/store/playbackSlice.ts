@@ -1,5 +1,8 @@
+import { streamCacheKey } from '../utils/unifiedSources';
+import { cancelSourcePlayback, manageSourceQueue } from './sourcePlayback';
+import { applySourcePreference } from '../utils/unifiedSources';
 import { StateCreator } from 'zustand';
-import { PlayerState, DSPState, Track, extractDominantColor } from './types';
+import { PlayerState, DSPState, Track, StreamingQuality, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, sortLyricLines, isStreamTrack } from '../utils';
@@ -41,6 +44,25 @@ const initialBitPerfectMode = safeGetStorage(BIT_PERFECT_MODE_STORAGE_KEY) === '
 const initialExclusiveMode = initialBitPerfectMode || safeGetStorage(EXCLUSIVE_MODE_STORAGE_KEY) === 'true';
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
+  sourceQueueManaged: false,
+  preferredSource: (() => {
+    const saved = safeGetStorage('aideo_preferred_source');
+    return saved && ['local', 'youtube', 'tidal', 'qobuz'].includes(saved) ? saved : 'auto';
+  })(),
+  setPreferredSource: (source: PlayerState['preferredSource']) => {
+    if (!['auto', 'local', 'youtube', 'tidal', 'qobuz'].includes(source)) return;
+    localStorage.setItem('aideo_preferred_source', source);
+    set({ preferredSource: source });
+  },
+  streamingQuality: (() => {
+    const saved = safeGetStorage('aideo_streaming_quality');
+    return saved === 'standard_lossless' || saved === 'data_saver' ? saved : 'best_available';
+  })(),
+  setStreamingQuality: (quality: StreamingQuality) => {
+    if (!['best_available', 'standard_lossless', 'data_saver'].includes(quality)) return;
+    localStorage.setItem('aideo_streaming_quality', quality);
+    set({ streamingQuality: quality });
+  },
   networkTelemetry: null,
   playback: {
     status: 'Stopped',
@@ -180,7 +202,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
     // 1. Resolve track metadata with hierarchical priority:
     // a. currentTrack in store (active playing track, virtual track, cloud track)
-    let track = state.currentTrack && pathsEqual(state.currentTrack.path, currentPath) ? state.currentTrack : null;
+    let track = state.currentTrack && (state.currentTrack.source_context || pathsEqual(state.currentTrack.path, currentPath)) ? state.currentTrack : null;
 
     // b. tracks in library
     if (!track) {
@@ -268,6 +290,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       const currentStatus = get().playback.status;
       if (currentStatus === 'Paused' || currentStatus === 'Stopped') return;
+      if (get().currentTrack?.source_context && get().playback.is_buffering) cancelSourcePlayback();
 
       // Persist resume position before pausing so the next launch can continue where left off
       const pos = get().playback.position_secs;
@@ -292,6 +315,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     try {
       const state = get();
       if (state.playback.status === 'Playing') return;
+      if (state.currentTrack?.source_context && state.playback.is_buffering) {
+        await get().playTrack(state.currentTrack, true, false, undefined, state.playback.position_secs);
+        return;
+      }
+      if (state.playback.status === 'Stopped' && state.currentTrack?.source_context) {
+        await get().playTrack(applySourcePreference(state.currentTrack));
+        return;
+      }
       if (state.playback.status === 'Stopped') {
         const targetPath = state.playback.current_track || state.playback.last_played_track || state.currentTrack?.path;
         if (targetPath) {
@@ -355,6 +386,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   stopTrack: async () => {
+    cancelSourcePlayback();
     try {
       await get().recordPlaybackTransition(null);
       const current = get().playback.current_track;
@@ -530,6 +562,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       const status: any = await invoke('get_playback_status');
       if (!status) return;
+      if (get().currentTrack?.source_context && ((get().playback.is_buffering && status.status === 'Stopped') || get().playbackError)) return;
 
       const prevTrack = get().playback.current_track;
       const newTrack = status.current_track;
@@ -569,6 +602,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // If the backend reports a different track, it means the Rust audio pipeline
       // is still processing previous skip commands and lagging behind the UI.
       if (prevTrack && newTrack && !pathsEqual(newTrack, prevTrack)) {
+        if (get().currentTrack?.source_context) return;
         const timeSinceSkip = Date.now() - (get().playback.last_skip_time || 0);
         if (timeSinceSkip < 800) {
           return;
@@ -1192,15 +1226,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   playStream: async (url: string, metadata?: { title?: string; artist?: string; duration?: number; cover_url?: string | null }, triggerAutoplay = true) => {
-    // If this URL matches an owned local library track or is a local file path, play via playTrack
+    cancelSourcePlayback();
+    // Only a stable path identifies an existing copy.
     const allTracks = get().tracks || [];
-    const localMatch = allTracks.find(t =>
-      pathsEqual(t.path, url) ||
-      (Boolean(metadata?.title && metadata?.artist) &&
-       Boolean(t.title && t.artist) &&
-       (t.title ?? '').trim().toLowerCase() === metadata!.title!.trim().toLowerCase() &&
-       (t.artist ?? '').trim().toLowerCase() === metadata!.artist!.trim().toLowerCase())
-    );
+    const localMatch = allTracks.find(t => pathsEqual(t.path, url));
     if (localMatch) {
       return get().playTrack(localMatch);
     }
@@ -1385,7 +1414,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   addToQueue: async (track: Track) => {
+    const requestedQuality = get().streamingQuality;
     try {
+      if (track.source_context || get().sourceQueueManaged) {
+        await manageSourceQueue(set);
+        const queue = [...get().queue, applySourcePreference(track)];
+        set({ queue });
+        localStorage.setItem('aideo_queue', JSON.stringify(queue));
+        return true;
+      }
       // Prevent duplicates: skip if track already exists in queue
       const existsInQueue = get().queue.some(t => pathsEqual(t.path, track.path));
       if (existsInQueue) {
@@ -1398,19 +1435,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       let finalPath = track.path;
       if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
-          const cachedResolved = trackIdToStreamUrl.get(track.path);
+          const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(track, requestedQuality));
           if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
             finalPath = cachedResolved.url;
             console.log('[Streaming] Using pre-resolved stream URL for track in addToQueue:', track.title);
           } else {
             const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            finalPath = await invoke<string>(resolver, { trackId: track.path });
-            trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
+            finalPath = await invoke<string>(resolver, { trackId: track.path, requestedQuality });
+            trackIdToStreamUrl.set(streamCacheKey(track, requestedQuality), { url: finalPath, resolvedAt: Date.now() });
           }
           rememberResolvedPath(finalPath, track.path);
           setOnlineTrackCache(finalPath, track);
         } catch (err) {
-          trackIdToStreamUrl.delete(track.path);
+          trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
           console.error('Failed to resolve stream in addToQueue:', err);
           const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
                            (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
@@ -1434,11 +1471,24 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const newQueue = [...get().queue, track];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
-    } catch (e) { console.error(e); }
+      return true;
+    } catch (e) {
+      console.error(e);
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Could not add to queue: ${String(e)}`, type: 'error' } }));
+      return false;
+    }
   },
 
   playNextInQueue: async (track: Track) => {
+    const requestedQuality = get().streamingQuality;
     try {
+      if (track.source_context || get().sourceQueueManaged) {
+        await manageSourceQueue(set);
+        const queue = [applySourcePreference(track), ...get().queue];
+        set({ queue });
+        localStorage.setItem('aideo_queue', JSON.stringify(queue));
+        return true;
+      }
       // Prevent duplicates: skip if track already exists in queue
       const existsInQueue = get().queue.some(t => pathsEqual(t.path, track.path));
       if (existsInQueue) {
@@ -1449,19 +1499,19 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       let finalPath = track.path;
       if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
         try {
-          const cachedResolved = trackIdToStreamUrl.get(track.path);
+          const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(track, requestedQuality));
           if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
             finalPath = cachedResolved.url;
             console.log('[Streaming] Using pre-resolved stream URL for track in playNextInQueue:', track.title);
           } else {
             const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            finalPath = await invoke<string>(resolver, { trackId: track.path });
-            trackIdToStreamUrl.set(track.path, { url: finalPath, resolvedAt: Date.now() });
+            finalPath = await invoke<string>(resolver, { trackId: track.path, requestedQuality });
+            trackIdToStreamUrl.set(streamCacheKey(track, requestedQuality), { url: finalPath, resolvedAt: Date.now() });
           }
           rememberResolvedPath(finalPath, track.path);
           setOnlineTrackCache(finalPath, track);
         } catch (err) {
-          trackIdToStreamUrl.delete(track.path);
+          trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
           console.error('Failed to resolve stream in playNextInQueue:', err);
           const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
                            (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
@@ -1485,7 +1535,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const newQueue = [track, ...get().queue];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
-    } catch (e) { console.error(e); }
+      return true;
+    } catch (e) {
+      console.error(e);
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Could not add to queue: ${String(e)}`, type: 'error' } }));
+      return false;
+    }
   },
 
   playFromQueue: async (index: number) => {
@@ -1500,7 +1555,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ queue: newQueue });
     localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
 
-    await chainQueueOperation(async () => {
+    if (!get().sourceQueueManaged) await chainQueueOperation(async () => {
         await invoke('remove_from_queue', { index }).catch(() => {});
     });
 
@@ -1580,10 +1635,18 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   initializeQueue: async () => {
+    const requestedQuality = get().streamingQuality;
     try {
       const saved = localStorage.getItem('aideo_queue');
       if (saved) {
         const parsed: Track[] = JSON.parse(saved);
+        if (parsed.some(t => t.source_context)) {
+          await manageSourceQueue(set);
+          const queue = parsed.map(applySourcePreference);
+          set({ queue });
+          localStorage.setItem('aideo_queue', JSON.stringify(queue));
+          return;
+        }
         if (parsed.length > 0) {
           const localTracks = parsed.filter(t => !t.path.startsWith('http://') && !t.path.startsWith('https://') && t.format !== 'Tidal FLAC' && t.format !== 'Qobuz FLAC');
           let validTracks = parsed;
@@ -1630,18 +1693,18 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
               let p = t.path;
               if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
                 try {
-                  const cachedResolved = trackIdToStreamUrl.get(t.path);
+                  const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(t, requestedQuality));
                   if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
                     p = cachedResolved.url;
                   } else {
                     const resolver = t.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-                    p = await invoke<string>(resolver, { trackId: t.path });
-                    trackIdToStreamUrl.set(t.path, { url: p, resolvedAt: Date.now() });
+                    p = await invoke<string>(resolver, { trackId: t.path, requestedQuality });
+                    trackIdToStreamUrl.set(streamCacheKey(t, requestedQuality), { url: p, resolvedAt: Date.now() });
                   }
                   rememberResolvedPath(p, t.path);
                   setOnlineTrackCache(p, t);
                 } catch (err) {
-                  trackIdToStreamUrl.delete(t.path);
+                  trackIdToStreamUrl.delete(streamCacheKey(t, requestedQuality));
                   console.error('Failed to resolve stream in initializeQueue:', err);
                   notifyTidalAuthFailure(err);
                   notifyQobuzAuthFailure(err);
@@ -1663,6 +1726,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   fetchQueue: async () => {
+    if (get().sourceQueueManaged) return;
     try {
       // Read the backend queue through the same serialized chain as clear/add/remove,
       // otherwise a concurrent clear_queue could execute AFTER this read and its
@@ -1679,18 +1743,18 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           return currentQueue;
         }
 
+        const remainingQueue = [...currentQueue];
         return paths.map((p, idx) => {
-          // 1. Check if the track exists in local library tracks
+          // Consume each queued occurrence once so same-path entries retain their own choices.
+          const originalId = resolvedPathMap.get(p);
+          const queueIndex = remainingQueue.findIndex(t => pathsEqual(t.path, originalId || p));
+          if (queueIndex !== -1) return remainingQueue.splice(queueIndex, 1)[0];
+
           const libTrack = tracks.find(t => pathsEqual(t.path, p));
           if (libTrack) return libTrack;
 
-          // 2. Check if the track metadata already exists in the current queue state
-          const existingTrack = currentQueue.find(t => pathsEqual(t.path, p));
-          if (existingTrack) return existingTrack;
-
           // 3. Fallback: Construct a high-fidelity virtual Track object for online/streaming paths
           const isOnline = p.startsWith('http://') || p.startsWith('https://');
-          const originalId = resolvedPathMap.get(p);
           const cachedMeta = onlineTrackCache.get(p) || (originalId ? onlineTrackCache.get(originalId) : null);
           const meta = isOnline ? parseStreamMetadata(p) : { title: baseName(p), artist: 'Web Stream' };
           const virtualTrack: Track = {
@@ -1702,7 +1766,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
             format: cachedMeta?.format || (isOnline ? 'URL' : 'MP3/FLAC'),
             lyric_offset: 0,
             cover_url: cachedMeta?.cover_url || null,
-            is_autoplay: cachedMeta?.is_autoplay || undefined
+            is_autoplay: cachedMeta?.is_autoplay || undefined,
+            source_context: cachedMeta?.source_context,
+            playlist_entry_id: cachedMeta?.playlist_entry_id,
           };
           return virtualTrack;
         });

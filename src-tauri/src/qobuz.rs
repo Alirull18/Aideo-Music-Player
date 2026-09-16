@@ -28,6 +28,10 @@ pub struct QobuzTrackResult {
     pub duration: u32,
     pub cover_url: String,
     pub quality: String,
+    #[serde(default)]
+    pub recording_evidence: crate::sources::RecordingEvidence,
+    #[serde(default)]
+    pub catalog_quality: crate::sources::SourceQuality,
 }
 
 impl crate::tidal::RadioCandidate for QobuzTrackResult {
@@ -637,7 +641,13 @@ pub async fn qobuz_search(
         )
         .to_string();
 
-        tracks.push(QobuzTrackResult { id, title, artist, album, duration, cover_url, quality });
+        tracks.push(QobuzTrackResult { id, title, artist, album, duration, cover_url, quality, recording_evidence: crate::sources::RecordingEvidence::from_catalog(item),
+            catalog_quality: crate::sources::SourceQuality {
+                lossless: None,
+                sample_rate: item["maximum_sampling_rate"].as_f64().map(|v| v * 1000.0),
+                bit_depth: item["maximum_bit_depth"].as_u64().map(|v| v as u32),
+                codec: None,
+            }, });
     }
 
     println!("{BOLD}{GREEN}✔ [QOBUZ ENGINE] Search completed! Found {} tracks.{RESET}\n", tracks.len());
@@ -650,13 +660,15 @@ async fn resolve_stream_url(
     state: &Arc<QobuzState>,
     app_handle: &AppHandle,
     track_id: &str,
-) -> Result<String, String> {
+    quality: crate::sources::StreamingQuality,
+) -> Result<crate::sources::ResolvedStream, String> {
+    crate::sources::validate_track_id(track_id)?;
     let token = ensure_session_token(state)?;
     let mut creds = ensure_app_credentials(state, app_handle).await?;
     let client = get_client();
     let mut last_error = "Failed to fetch any Qobuz stream".to_string();
 
-    for fmt in FORMAT_LADDER {
+    for fmt in quality.qobuz() {
         let mut secret_idx: usize = 0;
         loop {
             let ts = now_secs();
@@ -695,7 +707,15 @@ async fn resolve_stream_url(
                     Ok(json) => {
                         if let Some(url) = json["url"].as_str() {
                             println!("[QOBUZ ENGINE] Direct CDN stream URL acquired (format {}).", fmt);
-                            return Ok(url.to_string());
+                            return Ok(crate::sources::ResolvedStream {
+                                url: url.to_string(),
+                                quality: crate::sources::SourceQuality {
+                                    lossless: json["mime_type"].as_str().map(|m| m.contains("flac")),
+                                    sample_rate: json["sampling_rate"].as_f64().map(|v| v * 1000.0),
+                                    bit_depth: json["bit_depth"].as_u64().map(|v| v as u32),
+                                    codec: json["mime_type"].as_str().map(str::to_owned),
+                                },
+                            });
                         }
                         last_error = format!("Format {} success payload contained no URL", fmt);
                     }
@@ -743,8 +763,9 @@ pub async fn qobuz_get_stream_url(
     state: State<'_, Arc<QobuzState>>,
     app_handle: AppHandle,
     track_id: String,
+    requested_quality: Option<crate::sources::StreamingQuality>,
 ) -> Result<String, String> {
-    resolve_stream_url(state.inner(), &app_handle, &track_id).await
+    Ok(resolve_stream_url(state.inner(), &app_handle, &track_id, requested_quality.unwrap_or_default()).await?.url)
 }
 
 #[tauri::command]
@@ -759,7 +780,7 @@ pub async fn qobuz_download(
     album: String,
     duration: u32,
 ) -> Result<bool, String> {
-    let direct_url = resolve_stream_url(state.inner(), &app_handle, &track_id).await?;
+    let direct_url = resolve_stream_url(state.inner(), &app_handle, &track_id, Default::default()).await?.url;
 
     let user_music = dirs::audio_dir().unwrap_or_else(|| {
         app_handle.path().audio_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
@@ -964,6 +985,13 @@ async fn qobuz_search_inner(
                 .or_else(|| item["album"]["image"]["small"].as_str())
                 .unwrap_or("")
                 .to_string(),
+            recording_evidence: crate::sources::RecordingEvidence::from_catalog(item),
+            catalog_quality: crate::sources::SourceQuality {
+                lossless: None,
+                sample_rate: item["maximum_sampling_rate"].as_f64().map(|v| v * 1000.0),
+                bit_depth: item["maximum_bit_depth"].as_u64().map(|v| v as u32),
+                codec: None,
+            },
             quality: quality_label(
                 item["maximum_sampling_rate"].as_f64().unwrap_or(44.1),
                 item["maximum_bit_depth"].as_u64().unwrap_or(16) as u32,
@@ -1135,4 +1163,12 @@ mod tests {
         let token = std::env::var("QOBUZ_E2E_TOKEN").expect("set QOBUZ_E2E_TOKEN to run live smoke");
         assert!(!token.trim().is_empty());
     }
+}
+
+#[tauri::command]
+pub async fn qobuz_resolve_source(
+    state: State<'_, Arc<QobuzState>>, app_handle: AppHandle, track_id: String,
+    requested_quality: Option<crate::sources::StreamingQuality>,
+) -> Result<crate::sources::ResolvedStream, String> {
+    resolve_stream_url(state.inner(), &app_handle, &track_id, requested_quality.unwrap_or_default()).await
 }

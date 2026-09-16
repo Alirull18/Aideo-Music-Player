@@ -1,11 +1,11 @@
 import { memo, useMemo } from 'react';
 import { RefreshCw, Play, Disc, Sparkles, BookOpen } from 'lucide-react';
-import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId, sourceTypeColor } from './HomeParts';
+import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId } from './HomeParts';
 
 const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay: (t: any) => void }) => (
   <div className="ah-row ah-editorial-row" onClick={() => onPlay(track)}>
     <div className="ah-row-idx">{idx + 1}</div>
-    <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={48} radius={8} outline={sourceTypeColor(track)} />
+    <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={48} radius={8} />
     <div className="ah-row-meta">
       <div className="ah-row-title" title={track.title}>{track.title}</div>
       <div className="ah-row-artist" title={track.artist}>{track.artist}</div>
@@ -19,7 +19,7 @@ const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay
 const ArtCard = memo(({ track, onPlay, badge }: { track: any; onPlay: (t: any) => void; badge?: string }) => (
   <div className="ah-card ah-editorial-card" onClick={() => onPlay(track)}>
     <div className="ah-card-cover">
-      <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={176} radius={14} outline={sourceTypeColor(track)} />
+      <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={176} radius={14} />
       {badge && <span className="ah-editorial-badge">{badge}</span>}
       <div className="ah-editorial-vinyl-peek">
         <Disc size={64} className="ah-vinyl-groove" />
@@ -70,7 +70,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
       {/* ── RESUME EDITORIAL BOOKMARK ── */}
       {resume && (
         <div className="ah-resume-bar ah-editorial-resume">
-          <TrackCover src={resume.coverUrl} path={resume.coverPath} size={48} radius={8} outline={resume.accent} />
+          <TrackCover src={resume.coverUrl} path={resume.coverPath} size={48} radius={8} />
           <div className="ah-resume-meta">
             <div className="ah-resume-kicker">EDITORIAL BOOKMARK · {resume.positionLabel}</div>
             <div className="ah-resume-title">{resume.title}</div>
@@ -100,7 +100,6 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
                 artist={leadTrack.artist}
                 size={220}
                 radius={16}
-                outline={sourceTypeColor(leadTrack)}
               />
               <div className="ah-cover-vinyl-disc">
                 <Disc size={180} />

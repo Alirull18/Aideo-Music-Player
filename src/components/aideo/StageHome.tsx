@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { RefreshCw, Play, Sparkles, Radio, Moon, Coffee, Disc, Flame, Waves } from 'lucide-react';
-import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, sourceTypeColor, ShelfId } from './HomeParts';
+import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId } from './HomeParts';
 
 type AmbientMood = 'all' | 'midnight' | 'focus' | 'warmth' | 'lossless';
 
@@ -78,7 +78,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
             {/* Resume Capsule */}
             {resume && (
               <div className="ah-resume-card" onClick={resume.onResume}>
-                <TrackCover src={resume.coverUrl} path={resume.coverPath} size={56} radius={10} outline={resume.accent} />
+                <TrackCover src={resume.coverUrl} path={resume.coverPath} size={56} radius={10} />
                 <div className="ah-resume-meta">
                   <div className="ah-resume-kicker">Resume · {resume.positionLabel}</div>
                   <div className="ah-resume-title">{resume.title}</div>
@@ -126,7 +126,6 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                   artist={spotlightTrack.artist}
                   size={120}
                   radius={16}
-                  outline={sourceTypeColor(spotlightTrack)}
                 />
                 <div className="ah-soundstage-vinyl-orbit">
                   <Disc size={96} className="ah-orbit-disc" />
@@ -192,7 +191,6 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                         artist={item.track.artist}
                         size={52}
                         radius={10}
-                        outline={sourceTypeColor(item.track)}
                       />
                       <div className="ah-row-meta">
                         <div className="ah-row-title" title={item.track.title}>{item.track.title}</div>
@@ -219,7 +217,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
               {history.map(t => (
                 <div key={t.id} className="ah-hist ah-stage-hist" onClick={() => onPlayTrack(t)}>
                   <div className="ah-stage-hist-art">
-                    <TrackCover src={t.cover_url} path={t.url} title={t.title} artist={t.artist} size={132} radius={12} outline={sourceTypeColor(t)} />
+                    <TrackCover src={t.cover_url} path={t.url} title={t.title} artist={t.artist} size={132} radius={12} />
                     <PlayButton size={34} onClick={() => onPlayTrack(t)} />
                   </div>
                   <div className="ah-card-title" title={t.title}>{t.title}</div>

@@ -563,9 +563,20 @@ pub fn extract_video_id(url_or_id: &str) -> Option<String> {
 }
 
 pub(crate) const DIRECT_STREAM_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+const DIRECT_CLIENT_VERSION: &str = "1.02";
 
 /// Resolves and probes audio in-process before handing the URL to the downloader.
 pub async fn resolve_innertube_stream_url(client: &reqwest::Client, api_key: &str, video_id: &str) -> Option<String> {
+    match tokio::time::timeout(std::time::Duration::from_secs(15), resolve_direct_audio(client, api_key, video_id)).await {
+        Ok(result) => result,
+        Err(_) => {
+            println!("[youtube] Direct resolution exceeded 15s; deferring to fallback.");
+            None
+        }
+    }
+}
+
+async fn resolve_direct_audio(client: &reqwest::Client, api_key: &str, video_id: &str) -> Option<String> {
     let url = if api_key.is_empty() {
         "https://www.youtube.com/youtubei/v1/player?prettyPrint=false".to_string()
     } else {
@@ -577,7 +588,7 @@ pub async fn resolve_innertube_stream_url(client: &reqwest::Client, api_key: &st
     // https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/youtube/_base.py
     let mut client_context = serde_json::json!({
         "clientName": "VISIONOS",
-        "clientVersion": "1.02",
+        "clientVersion": DIRECT_CLIENT_VERSION,
         "osName": "visionOS",
         "osVersion": "26.5.23O471",
         "deviceMake": "Apple",
@@ -606,7 +617,7 @@ pub async fn resolve_innertube_stream_url(client: &reqwest::Client, api_key: &st
         .header("Content-Type", "application/json")
         .header("User-Agent", DIRECT_STREAM_USER_AGENT)
         .header("X-YouTube-Client-Name", "101")
-        .header("X-YouTube-Client-Version", "1.02");
+        .header("X-YouTube-Client-Version", DIRECT_CLIENT_VERSION);
 
     if let Some(ref vd) = visitor_data {
         req = req.header("X-Goog-Visitor-Id", vd.as_str());
@@ -635,12 +646,22 @@ pub async fn resolve_innertube_stream_url(client: &reqwest::Client, api_key: &st
     if json_res.pointer("/videoDetails/videoId").and_then(|id| id.as_str()) != Some(video_id) {
         return None;
     }
-    let direct_url = select_direct_audio_url(&json_res)?;
-    if !probe_direct_audio(client, &direct_url).await {
-        println!("[youtube] VisionOS audio probe failed for '{}'; deferring to fallback.", video_id);
-        return None;
+    probe_direct_candidates(client, direct_audio_candidates(&json_res)).await
+}
+
+async fn probe_direct_candidates(client: &reqwest::Client, candidates: Vec<String>) -> Option<String> {
+    // ponytail: cap probes at three; add clients only when live evidence validates them.
+    for (index, direct_url) in candidates.into_iter().take(3).enumerate() {
+        if probe_direct_audio(client, &direct_url).await {
+            if index > 0 {
+                println!("[youtube] Direct audio recovered using format candidate {}.", index + 1);
+            }
+            return Some(direct_url);
+        }
+        println!("[youtube] Direct audio candidate {} failed its probe; trying next format.", index + 1);
     }
-    Some(direct_url)
+    println!("[youtube] No usable direct audio formats; deferring to fallback.");
+    None
 }
 
 async fn probe_direct_audio(client: &reqwest::Client, url: &str) -> bool {
@@ -663,13 +684,12 @@ async fn probe_direct_audio(client: &reqwest::Client, url: &str) -> bool {
     matches!(response.chunk().await, Ok(Some(bytes)) if !bytes.is_empty())
 }
 
-fn select_direct_audio_url(json_res: &serde_json::Value) -> Option<String> {
-    let adaptive_formats = json_res.get("streamingData")
+fn direct_audio_candidates(json_res: &serde_json::Value) -> Vec<String> {
+    let Some(adaptive_formats) = json_res.get("streamingData")
         .and_then(|sd| sd.get("adaptiveFormats"))
-        .and_then(|af| af.as_array())?;
+        .and_then(|af| af.as_array()) else { return Vec::new(); };
 
-    let mut best_url: Option<String> = None;
-    let mut best_score: i32 = -1;
+    let mut candidates = Vec::new();
 
     for fmt in adaptive_formats {
         let mime = fmt.get("mimeType").and_then(|m| m.as_str()).unwrap_or("");
@@ -700,13 +720,12 @@ fn select_direct_audio_url(json_res: &serde_json::Value) -> Option<String> {
             _ => 10,
         };
 
-        if score > best_score {
-            best_score = score;
-            best_url = Some(direct_url.to_string());
-        }
+        candidates.push((score, direct_url.to_string()));
     }
 
-    best_url
+    candidates.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    let mut seen = std::collections::HashSet::new();
+    candidates.into_iter().map(|(_, url)| url).filter(|url| seen.insert(url.clone())).collect()
 }
 
 pub async fn resolve_youtube_stream_fast_async(url_or_id: &str) -> Option<String> {
@@ -5093,6 +5112,29 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn direct_audio_tries_alternatives_and_caps_probes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", server.local_addr().unwrap());
+        let requests = tokio::spawn(async move {
+            let mut paths = Vec::new();
+            for status in [403, 206, 403, 403, 403] {
+                let (mut socket, _) = server.accept().await.unwrap();
+                let mut buffer = [0; 4096];
+                let length = socket.read(&mut buffer).await.unwrap();
+                paths.push(String::from_utf8_lossy(&buffer[..length]).split_whitespace().nth(1).unwrap().to_string());
+                socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: audio/webm\r\nContent-Length: 5\r\nConnection: close\r\n\r\naudio").as_bytes()).await.unwrap();
+            }
+            paths
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let candidates: Vec<String> = (0..5).map(|i| format!("{base}/{i}")).collect();
+        assert_eq!(probe_direct_candidates(&client, candidates.clone()).await, Some(candidates[1].clone()));
+        assert_eq!(probe_direct_candidates(&client, candidates).await, None);
+        assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(5), requests).await.unwrap().unwrap(), ["/0", "/1", "/0", "/1", "/2"]);
+    }
+
+    #[tokio::test]
     async fn direct_audio_probe_rejects_errors_html_and_empty_bodies() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
@@ -5141,18 +5183,19 @@ mod tests {
         let response = serde_json::json!({"streamingData": {"adaptiveFormats": [
             {"itag": 140, "mimeType": "audio/mp4", "url": "https://rr1.googlevideo.com/aac"},
             {"itag": 251, "mimeType": "audio/webm", "url": "https://rr1.googlevideo.com/opus"},
+            {"itag": 250, "mimeType": "audio/webm", "url": "https://rr1.googlevideo.com/opus"},
             {"itag": 251, "mimeType": "video/webm", "url": "https://rr1.googlevideo.com/video"}
         ]}});
-        assert_eq!(select_direct_audio_url(&response).as_deref(), Some("https://rr1.googlevideo.com/opus"));
+        assert_eq!(direct_audio_candidates(&response), ["https://rr1.googlevideo.com/opus", "https://rr1.googlevideo.com/aac"]);
         for url in ["http://rr1.googlevideo.com/audio", "https://googlevideo.com.evil.test/audio", "https://127.0.0.1/audio", "https://user:pass@rr1.googlevideo.com/audio"] {
             let unsafe_response = serde_json::json!({"streamingData": {"adaptiveFormats": [
                 {"itag": 251, "mimeType": "audio/webm", "url": url}
             ]}});
-            assert!(select_direct_audio_url(&unsafe_response).is_none(), "accepted {url}");
+            assert!(direct_audio_candidates(&unsafe_response).is_empty(), "accepted {url}");
         }
-        assert!(select_direct_audio_url(&serde_json::json!({"streamingData": {"adaptiveFormats": [
+        assert!(direct_audio_candidates(&serde_json::json!({"streamingData": {"adaptiveFormats": [
             {"itag": 251, "mimeType": "audio/webm", "signatureCipher": "encrypted"}
-        ]}})).is_none());
+        ]}})).is_empty());
     }
 
     #[test]

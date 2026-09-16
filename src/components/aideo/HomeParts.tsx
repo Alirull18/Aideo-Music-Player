@@ -66,33 +66,6 @@ export function tracksForShelf(data: DiscoveryHubData | null, shelf: ShelfId): Y
   return buildTaggedFeed(data).filter(t => t.shelf === shelf).map(t => t.track);
 }
 
-// ── Source / format color coding ────────────────────────────
-// One color per source/quality tier; communicated solely by the artwork
-// outline (no text tags, no legend, per design decision).
-
-export function sourceTypeColor(track: any): string {
-  const allTracks = useStore.getState().tracks || [];
-  const localMatch = allTracks.find(t =>
-    (track?.path && pathsEqual(t.path, track.path)) ||
-    (track?.url && pathsEqual(t.path, track.url)) ||
-    (Boolean(track?.title && track?.artist) &&
-     Boolean(t.title && t.artist) &&
-     (t.title ?? '').trim().toLowerCase() === String(track.title).trim().toLowerCase() &&
-     (t.artist ?? '').trim().toLowerCase() === String(track.artist).trim().toLowerCase())
-  );
-  const p = String(localMatch?.path || track?.path || track?.url || '').toLowerCase();
-  const fmt = String(localMatch?.format || track?.format || '').toLowerCase();
-  if (fmt === 'tidal flac') return '#22d3ee';
-  if (fmt === 'qobuz flac') {
-    const q = String(track?.quality || '').toUpperCase();
-    if (q === 'HI_RES_192' || q === 'HI_RES') return '#a78bfa';
-    return '#7fb8e6';
-  }
-  if (!localMatch && (p.startsWith('http://') || p.startsWith('https://'))) return '#f87171';
-  if (fmt === 'flac' || fmt === 'wav' || /\.(flac|wav|alac|aiff|dsd)$/.test(p)) return '#c084fc';
-  return '#34d399';
-}
-
 // ── Cover art with graceful fallback ────────────────────────
 // Mirrors AideoView's TrackCardThumbnail: direct web covers render as-is;
 // local files resolve their embedded artwork via the get_cover_art command,
@@ -107,8 +80,7 @@ export const TrackCover = memo(({
   title,
   artist,
   size,
-  radius = 8,
-  outline
+  radius = 8
 }: {
   src?: string | null;
   path?: string | null;
@@ -116,7 +88,6 @@ export const TrackCover = memo(({
   artist?: string;
   size: number;
   radius?: number;
-  outline?: string;
 }) => {
   const isDirectWebUrl = Boolean(src && (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')));
   let targetPath = isDirectWebUrl ? src! : (src || path || '');
@@ -190,7 +161,6 @@ export const TrackCover = memo(({
       width: size, height: size, borderRadius: radius, overflow: 'hidden',
       flexShrink: 0, background: 'var(--ah-cover-bg)', position: 'relative',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      boxShadow: outline ? `0 0 0 2px ${outline}` : undefined,
     }}>
       {art ? (
         <img src={art} alt="" referrerPolicy="no-referrer" loading="lazy"
@@ -241,8 +211,8 @@ export interface SearchBarProps {
   suggestions: string[];
   quickResults: any[];
   history: string[];
-  source: 'youtube' | 'tidal' | 'qobuz';
-  onSourceChange: (s: 'youtube' | 'tidal' | 'qobuz') => void;
+  source: 'all' | 'youtube' | 'tidal' | 'qobuz';
+  onSourceChange: (s: 'all' | 'youtube' | 'tidal' | 'qobuz') => void;
   tidalConnected: boolean;
   qobuzEnabled: boolean;
   qobuzConnected: boolean;
@@ -273,13 +243,14 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
     return () => document.removeEventListener('mousedown', onDown);
   }, [onFocusChange]);
 
-  const sources: Array<{ id: 'youtube' | 'tidal' | 'qobuz'; label: string; dot?: string }> = [
+  const sources: Array<{ id: 'all' | 'youtube' | 'tidal' | 'qobuz'; label: string; dot?: string }> = [
+    { id: 'all', label: 'All sources' },
     { id: 'youtube', label: variant === 'pill' ? 'YT' : 'YouTube' },
     { id: 'tidal', label: 'Tidal', dot: tidalConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' },
     ...(qobuzEnabled ? [{ id: 'qobuz' as const, label: variant === 'pill' ? 'Qobuz' : 'Qobuz β', dot: qobuzConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }] : []),
   ];
 
-  const pickSource = (id: 'youtube' | 'tidal' | 'qobuz') => {
+  const pickSource = (id: 'all' | 'youtube' | 'tidal' | 'qobuz') => {
     onSourceChange(id);
     if (id === 'tidal' && !tidalConnected) {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal first in Settings > Library > Tidal.', type: 'warning' } }));
@@ -293,49 +264,31 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
 
   return (
     <div className={`ah-search ah-search-${variant}`} ref={wrapRef}>
-      {variant !== 'rail' && (
-        <div className="ah-search-sources">
-          {sources.map(s => (
-            <button key={s.id} type="button"
-              className={`ah-chip ${source === s.id ? 'active' : ''}`}
-              onClick={() => pickSource(s.id)}>
-              {s.dot && <span className="ah-chip-dot" style={{ background: s.dot }} />}
-              {s.label}
-            </button>
-          ))}
+      <details className="unified-source-filter">
+        <summary>Source filter: {sources.find(s => s.id === source)?.label}</summary>
+        <div className="source-filter-options">
+          {sources.map(s => <button key={s.id} type="button" className="source-button" aria-pressed={source === s.id} onClick={() => pickSource(s.id)}>{s.label}</button>)}
         </div>
-      )}
+      </details>
       <form className="ah-search-form" onSubmit={e => { e.preventDefault(); onSubmit(); }}>
         <div className="ah-search-field">
           <Search size={variant === 'rail' ? 15 : 18} />
           <input
             type="text"
-            placeholder={variant === 'rail' ? 'Search the web…' : variant === 'pill' ? 'Search songs, artists, or links…' : 'Search songs, artists, or paste a link…'}
+            aria-label="Search songs and sources"
+            placeholder={variant === 'rail' ? 'Search all sources…' : variant === 'pill' ? 'Search songs, artists, or links…' : 'Search songs, artists, or paste a link…'}
             value={query}
             onChange={e => onQueryChange(e.target.value)}
             onFocus={() => onFocusChange(true)}
             onKeyDown={e => { if (e.key === 'Escape') onFocusChange(false); }}
           />
           {query && (
-            <button type="button" className="ah-search-clear" onClick={() => onQueryChange('')}>
+            <button type="button" aria-label="Clear search" className="ah-search-clear" onClick={() => onQueryChange('')}>
               <X size={15} />
             </button>
           )}
           {isSearching && <Loader2 className="spin ah-search-spin" size={14} />}
         </div>
-        {variant === 'rail' && (
-          <div className="ah-search-rail-sources">
-            {sources.map(s => (
-              <button key={s.id} type="button"
-                className={`ah-chip ah-chip-sm ${source === s.id ? 'active' : ''}`}
-                title={s.label}
-                onClick={() => pickSource(s.id)}>
-                {s.dot && <span className="ah-chip-dot" style={{ background: s.dot }} />}
-                {s.label.slice(0, 2)}
-              </button>
-            ))}
-          </div>
-        )}
       </form>
 
       {showDropdown && (
@@ -358,7 +311,7 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
               <div className="ah-dd-section">Songs</div>
               {quickResults.map(track => (
                 <div key={`quick-${track.id}`} className="ah-dd-item" onClick={() => onPlayQuickTrack(track)}>
-                  <TrackCover src={track.cover_url} path={track.url} size={30} radius={6} outline={sourceTypeColor(track)} />
+                  <TrackCover src={track.cover_url} path={track.url} size={30} radius={6} />
                   <span className="ah-dd-label" style={{ flex: 1 }}>
                     <span className="ah-dd-title">{track.title}</span>
                     <span className="ah-dd-sub">{track.artist}</span>

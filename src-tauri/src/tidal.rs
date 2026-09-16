@@ -32,6 +32,8 @@ pub struct TidalTrackResult {
     pub duration: u32,
     pub cover_url: String,
     pub quality: String,
+    #[serde(default)]
+    pub recording_evidence: crate::sources::RecordingEvidence,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -663,7 +665,7 @@ pub async fn tidal_search(
                 "".to_string()
             };
 
-            let quality = item["audioQuality"].as_str().unwrap_or("LOSSLESS").to_string();
+            let quality = item["audioQuality"].as_str().unwrap_or("UNKNOWN").to_string();
 
             tracks.push(TidalTrackResult {
                 id,
@@ -673,6 +675,7 @@ pub async fn tidal_search(
                 duration,
                 cover_url,
                 quality,
+                recording_evidence: crate::sources::RecordingEvidence::from_catalog(item),
             });
         }
     } else {
@@ -982,12 +985,22 @@ pub async fn tidal_download(
 
 #[tauri::command]
 pub async fn tidal_get_stream_url(
+    state: State<'_, Arc<TidalState>>, app_handle: AppHandle, track_id: String,
+    requested_quality: Option<crate::sources::StreamingQuality>,
+) -> Result<String, String> {
+    Ok(tidal_resolve_source(state, app_handle, track_id, requested_quality).await?.url)
+}
+
+#[tauri::command]
+pub async fn tidal_resolve_source(
     state: State<'_, Arc<TidalState>>,
     app_handle: AppHandle,
     track_id: String,
-) -> Result<String, String> {
+    requested_quality: Option<crate::sources::StreamingQuality>,
+) -> Result<crate::sources::ResolvedStream, String> {
+    crate::sources::validate_track_id(&track_id)?;
     let mut token = ensure_valid_token(&app_handle, &state, false).await?;
-    let qualities = stream_quality_ladder();
+    let qualities = requested_quality.unwrap_or_default().tidal();
     let mut last_error = "Failed to fetch any stream".to_string();
     let client = get_client();
     let mut token_refreshed = false;
@@ -1039,9 +1052,18 @@ pub async fn tidal_get_stream_url(
             if let Ok(json) = res.json::<serde_json::Value>().await {
                 if let Some(manifest_b64) = json["manifest"].as_str() {
                     match parse_manifest_b64(manifest_b64) {
-                        Ok((direct_url, _)) => {
+                        Ok((direct_url, decoded_manifest)) => {
+                            let manifest: serde_json::Value = serde_json::from_str(&decoded_manifest).unwrap_or_default();
                             println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] Resolved direct stream URL at quality {}{RESET}", q);
-                            return Ok(direct_url);
+                            return Ok(crate::sources::ResolvedStream {
+                                url: direct_url,
+                                quality: crate::sources::SourceQuality {
+                                    lossless: json["audioQuality"].as_str().map(|q| matches!(q, "LOSSLESS" | "HI_RES_LOSSLESS")),
+                                    sample_rate: json["sampleRate"].as_f64(),
+                                    bit_depth: json["bitDepth"].as_u64().map(|v| v as u32),
+                                    codec: json["codec"].as_str().or_else(|| manifest["mimeType"].as_str()).map(str::to_owned),
+                                },
+                            });
                         }
                         Err(e) => {
                             println!("{BOLD}{YELLOW}[TIDAL ENGINE] Quality {} manifest not directly playable ({}). Falling back down quality ladder...{RESET}", q, e);
@@ -1504,6 +1526,7 @@ mod tests {
             duration,
             cover_url: String::new(),
             quality: "LOSSLESS".to_string(),
+            recording_evidence: Default::default(),
         }
     }
 

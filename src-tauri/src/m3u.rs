@@ -127,14 +127,7 @@ mod tests {
     use super::*;
 
     fn test_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT UNIQUE, title TEXT, artist TEXT, album TEXT, duration REAL, format TEXT, lyric_offset INTEGER DEFAULT 0, loved INTEGER DEFAULT 0, disliked INTEGER DEFAULT 0, cover_url TEXT, bpm REAL, energy REAL, bass_ratio REAL, treble_ratio REAL, replaygain_gain REAL, path_hash TEXT, track_number INTEGER, disc_number INTEGER);
-             CREATE TABLE playlists (id INTEGER PRIMARY KEY, name TEXT);
-             CREATE TABLE playlist_tracks (playlist_id INTEGER, track_path TEXT, position INTEGER, PRIMARY KEY (playlist_id, track_path));",
-        )
-        .unwrap();
-        conn
+        db::init_db(":memory:").unwrap()
     }
 
     #[test]

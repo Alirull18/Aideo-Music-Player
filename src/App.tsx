@@ -1,3 +1,4 @@
+import { handleSourceFailure } from './store/sourcePlayback';
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { useStore } from './store';
 import { useUpdaterStore } from './store/updaterStore';
@@ -33,7 +34,7 @@ import { ToastContainer } from './components/Toast';
 import { QueueView } from './components/QueueView';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { toggleOsFullscreen } from './utils/windowFullscreen';
-import { isStreamTrack, trackIdToStreamUrl, resolvedPathMap } from './utils';
+import { isStreamTrack, trackIdToStreamUrl } from './utils';
 import { CoverArtModal } from './components/CoverArtModal';
 import { TagEditorModal } from './components/TagEditorModal';
 import { DesktopLyricBar } from './components/DesktopLyricBar';
@@ -381,8 +382,16 @@ function AideoApp() {
       if (isCancelled) { uStateChanged(); return; }
       cleanups.push(uStateChanged);
 
+      const uSourceError = await listen<{ path: string; error: string }>('source-playback-error', event => {
+        if (isCancelled) return;
+        if (useStore.getState().currentTrack?.source_context) handleSourceFailure(event.payload.path, event.payload.error);
+        else if (useStore.getState().sourceQueueManaged) useStore.getState().playNext();
+      });
+      if (isCancelled) { uSourceError(); return; }
+      cleanups.push(uSourceError);
       const uEnded = await listen('track-ended', () => {
         if (isCancelled) return;
+        if (useStore.getState().currentTrack?.source_context && useStore.getState().playback.is_buffering) return;
         console.log('[App] Received track-ended event from backend. Calling playNext()...');
         useStore.getState().playNext();
       });
@@ -392,11 +401,15 @@ function AideoApp() {
       const uPlaybackError = await listen<string>('playback-error', (event) => {
         if (isCancelled) return;
         const { currentTrack, playNext } = useStore.getState();
+        if (currentTrack?.source_context) {
+          useStore.getState().stopTrack();
+          useStore.setState({ playbackError: event.payload });
+          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: event.payload, type: 'error' } }));
+          return;
+        }
         console.warn('[playback] Stream decode failed, auto-advancing:', event.payload);
         if (currentTrack) {
-          trackIdToStreamUrl.delete(currentTrack.path);
-          const orig = resolvedPathMap.get(currentTrack.path);
-          if (orig) trackIdToStreamUrl.delete(orig);
+          trackIdToStreamUrl.clear();
           playNext();
         }
       });

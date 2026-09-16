@@ -92,6 +92,12 @@ function SlidingSwitch({ checked, onChange }: SlidingSwitchProps) {
 }
 
 export function SettingsView() {
+  const streamingQuality = useStore(s => s.streamingQuality);
+  const setStreamingQuality = useStore(s => s.setStreamingQuality);
+  const preferredSource = useStore(s => s.preferredSource);
+  const setPreferredSource = useStore(s => s.setPreferredSource);
+  const tidalConnected = useStore(s => s.tidalConnected);
+  const qobuzConnected = useStore(s => s.qobuzConnected);
   const {
     scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus,
     toggleScrobble, setLastFmSession, lastfmSessionKey, lastfmToken,
@@ -2367,6 +2373,32 @@ export function SettingsView() {
           </div>
         </div>
       )
+    },
+    {
+      id: 'streaming-quality',
+      title: 'Streaming Quality',
+      description: 'Choose the source quality for Auto playback. Available copies fall back automatically with a small notice.',
+      keywords: 'streaming quality best available standard lossless data saver sources',
+      tab: 'plugins',
+      element: <div className="settings-ctrl-card">
+        <label htmlFor="streaming-quality">Preferred source quality</label>
+        <select id="streaming-quality" value={streamingQuality} onChange={e => setStreamingQuality(e.target.value as typeof streamingQuality)} className="source-quality-select">
+          <option value="best_available">Best available</option>
+          <option value="standard_lossless">Standard lossless</option>
+          <option value="data_saver">Data saver</option>
+        </select>
+        <p>Best available prefers the highest lossless resolution. Standard lossless prefers CD quality. Data saver reduces streaming bandwidth. Local files are preferred when they meet your choice.</p>
+        <p>This selects the source stream. It does not upsample audio or change DSP settings.</p>
+        <label htmlFor="preferred-source">Preferred source when quality is equal</label>
+        <select id="preferred-source" value={preferredSource} onChange={e => setPreferredSource(e.target.value as typeof preferredSource)} className="source-quality-select">
+          <option value="auto">Automatic</option>
+          <option value="local">Local files</option>
+          <option value="youtube">YouTube</option>
+          <option value="tidal" disabled={!tidalConnected}>Tidal{!tidalConnected ? ' (connect first)' : ''}</option>
+          <option value="qobuz" disabled={!qobuzConnected || !qobuzExperimentalEnabled}>Qobuz{!qobuzConnected || !qobuzExperimentalEnabled ? ' (enable and connect first)' : ''}</option>
+        </select>
+        <p>Auto uses accessible sources only. If your quality is unavailable, the best available copy plays. A better matching copy can upgrade playback at your current position.</p>
+      </div>,
     },
     {
       id: 'tidal-connect',

@@ -4,8 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { X, Play, Shuffle, User, Disc, Music, Download } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
-import { sortAlbumTracks } from '../utils/albumUtils';
+import { sortAlbumTracks, extractPrimaryArtist } from '../utils/albumUtils';
 import { SimpleLRU } from '../utils/lruCache';
+import { foldSearchText, simplifyPunctuation } from '../utils/searchParser';
 import { fmt } from '../utils';
 import { shuffleArray } from '../utils/shuffle';
 
@@ -95,8 +96,24 @@ export function ArtistDiscographyDrawer({
   // Filter tracks by artist
   const artistTracks = useMemo(() => {
     if (!artistName) return [];
-    const target = artistName.toLowerCase().trim();
-    return allTracks.filter((t) => t.artist?.toLowerCase().trim() === target);
+    const foldedTarget = foldSearchText(artistName);
+    const simpleTarget = simplifyPunctuation(foldedTarget);
+
+    return allTracks.filter((t) => {
+      const rawArtist = t.artist || '';
+      const rawAlbumArtist = t.album_artist || t.albumArtist || '';
+      const foldedArtist = foldSearchText(rawArtist);
+      const foldedAlbumArtist = foldSearchText(rawAlbumArtist);
+      const simpleArtist = simplifyPunctuation(foldedArtist);
+      const simpleAlbumArtist = simplifyPunctuation(foldedAlbumArtist);
+      const primaryArtist = foldSearchText(extractPrimaryArtist(rawArtist));
+
+      if (foldedArtist === foldedTarget || foldedAlbumArtist === foldedTarget) return true;
+      if (simpleTarget && (simpleArtist === simpleTarget || simpleAlbumArtist === simpleTarget)) return true;
+      if (primaryArtist === foldedTarget) return true;
+      if (foldedArtist.includes(foldedTarget) || (simpleTarget && simpleArtist.includes(simpleTarget))) return true;
+      return false;
+    });
   }, [artistName, allTracks]);
 
   // Group artist tracks into Albums

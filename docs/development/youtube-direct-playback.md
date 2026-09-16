@@ -29,7 +29,10 @@ separate. A header change alone does not implement either mechanism.
 
 1. Resolve audio in Rust using the maintained VisionOS profile.
 2. Select an HTTPS Googlevideo audio URL, preferring Opus format 251, then AAC 140.
-3. Check a small range request before declaring success or caching the URL.
+3. Rank and deduplicate safe direct audio URLs, then probe up to three in order.
+   A rejected Opus URL can recover through another direct format, including AAC.
+   The whole direct resolver has a 15-second deadline, including visitor-data
+   retrieval, the player request, and probes, before handing off to fallback.
 4. Download directly with reqwest and feed the existing FFmpeg/audio pipeline.
 5. Invoke yt-dlp only when direct resolution or download fails.
 
@@ -40,6 +43,11 @@ No additional runtime, cookies, token service, or dependency is needed for this
 client update. This profile remains subject to YouTube changes, regional
 availability, and session restrictions. A later authenticated/token-aware client
 should be added only when live evidence shows it is needed.
+
+Client version headers and payload share one constant. Client retirement still
+requires an app update: format retries cannot repair a retired identity, decipher
+signatures, or supply missing authentication. No remote executable configuration
+or speculative client rotation is introduced.
 
 ## Sources
 

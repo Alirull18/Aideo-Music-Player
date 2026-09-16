@@ -1,3 +1,4 @@
+pub static SOURCE_QUEUE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 use std::sync::{Arc, Mutex};
 use std::io::BufRead;
 use std::thread;
@@ -3158,10 +3159,10 @@ fn player_loop(
                 }
             }
             PlayerCommand::PushNext(path) => {
-                safe_lock(&queue).push_front(path);
+                if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
             }
             PlayerCommand::AppendQueue(path) => {
-                safe_lock(&queue).push_back(path);
+                if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_back(path); }
             }
             PlayerCommand::Shutdown => {
                 abort_background_downloads();
@@ -4825,7 +4826,10 @@ fn play_file(
                     cancel_token.store(true, Ordering::SeqCst);
                     PLAYBACK_GENERATION.fetch_add(1, Ordering::SeqCst);
                     kill_current_process(&current_process); // Ensure dead process is reaped immediately
-                    let _ = app_handle.emit("playback-error", e);
+                    let _ = app_handle.emit("source-playback-error", serde_json::json!({ "path": path, "error": e }));
+                    if !SOURCE_QUEUE_MODE.load(Ordering::Relaxed) {
+                        let _ = app_handle.emit("playback-error", e);
+                    }
                     return (None, None);
                 }
             }
@@ -4871,10 +4875,10 @@ fn play_file(
                     return (Some((path.to_string(), start_pos)), None);
                 }
                 PlayerCommand::PushNext(path) => {
-                    safe_lock(&queue).push_front(path);
+                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
                 }
                 PlayerCommand::AppendQueue(path) => {
-                    safe_lock(&queue).push_back(path);
+                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_back(path); }
                 }
                 PlayerCommand::Shutdown => {
                     cancel_token.store(true, Ordering::SeqCst);
@@ -6116,10 +6120,10 @@ fn play_file(
                     }
                 }
                 Ok(PlayerCommand::PushNext(path)) => {
-                    safe_lock(&queue).push_front(path);
+                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
                 }
                 Ok(PlayerCommand::AppendQueue(path)) => {
-                    safe_lock(&queue).push_back(path);
+                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_back(path); }
                 }
                 Ok(PlayerCommand::RestartStream) => {
                     abort_background_downloads();
@@ -6171,10 +6175,20 @@ fn play_file(
         let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
         let true_pos = true_pos.max(0.0);
 
+        if SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && crossfade_triggered {
+            kill_current_process(&next_child_process);
+            crossfade_triggered = false;
+            crossfade_frame_counter = 0;
+            next_track_path = None;
+            next_decoder_rx = None;
+            next_decoder_info = None;
+            next_resampler = None;
+            next_pending.clear();
+        }
         if dsp_now.crossfade_transition_enabled && duration_secs > dsp_now.crossfade_transition_duration as f64 {
             let crossfade_trigger_pos = duration_secs - dsp_now.crossfade_transition_duration as f64;
             if true_pos >= crossfade_trigger_pos && !crossfade_triggered {
-                let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
                 if is_local_next {
                     crossfade_triggered = true;
                     let next_path_opt = {
@@ -6251,7 +6265,7 @@ fn play_file(
                             Err(e) => {
                                 eprintln!("[player-crossfade] Failed to create resampler for next track: {}", e);
                                 if let Some(path) = next_track_path.take() {
-                                    safe_lock(&queue).push_front(path);
+                                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
                                 }
                             }
                         }
@@ -6259,7 +6273,7 @@ fn play_file(
                     Err(e) => {
                         eprintln!("[player-crossfade] Failed to prepare next track decoder: {}", e);
                         if let Some(path) = next_track_path.take() {
-                            safe_lock(&queue).push_front(path);
+                            if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
                         }
                     }
                 }
@@ -6287,7 +6301,7 @@ fn play_file(
                             next_track_info = Some((next_track_path.take().unwrap(), played_secs));
                             running = false;
                         } else {
-                            let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                            let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
                             if is_local_next {
                                 let next_queued = safe_lock(&queue).pop_front();
                                 if let Some(npath) = next_queued {
@@ -6349,7 +6363,7 @@ fn play_file(
                             next_track_info = Some((next_track_path.take().unwrap(), played_secs));
                             running = false;
                         } else {
-                            let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                            let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
                             if is_local_next {
                                 let next_queued = safe_lock(&queue).pop_front();
                                 if let Some(npath) = next_queued {
@@ -6653,10 +6667,10 @@ fn play_file(
                         break;
                     }
                     Ok(PlayerCommand::PushNext(path)) => {
-                        safe_lock(&queue).push_front(path);
+                        if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
                     }
                     Ok(PlayerCommand::AppendQueue(path)) => {
-                        safe_lock(&queue).push_back(path);
+                        if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_back(path); }
                     }
                     Ok(PlayerCommand::Shutdown) => {
                         abort_background_downloads();
@@ -6769,10 +6783,10 @@ fn play_file(
                     break;
                 }
                 PlayerCommand::PushNext(path) => {
-                    safe_lock(&queue).push_front(path);
+                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
                 }
                 PlayerCommand::AppendQueue(path) => {
-                    safe_lock(&queue).push_back(path);
+                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_back(path); }
                 }
                 PlayerCommand::Shutdown => {
                     abort_background_downloads();
@@ -6785,7 +6799,7 @@ fn play_file(
     }
 
     if running && next_track_info.is_none() {
-        let is_local_next = safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+        let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
         if is_local_next {
             let next_queued = safe_lock(&queue).pop_front();
             if let Some(npath) = next_queued {

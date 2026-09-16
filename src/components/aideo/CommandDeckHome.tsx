@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { RefreshCw, Play, Radio, Activity } from 'lucide-react';
 import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
-import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, sourceTypeColor, ShelfId } from './HomeParts';
+import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, ShelfId } from './HomeParts';
 
 type FeedTab = 'all' | ShelfId;
 
@@ -102,7 +102,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
       {resume && (
         <section className="ah-deck-resume">
           <div className="ah-deck-resume-glass">
-            <TrackCover src={resume.coverUrl} path={resume.coverPath} size={52} radius={10} outline={resume.accent} />
+            <TrackCover src={resume.coverUrl} path={resume.coverPath} size={52} radius={10} />
             <div className="ah-deck-resume-meta">
               <div className="ah-deck-resume-kicker">
                 <Radio size={11} className="pulse" />
@@ -165,7 +165,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
                   onClick={() => onPlayTrack(item.track)}
                 >
                   <div className="ah-spotlight-cover-container">
-                    <TrackCover src={item.track.cover_url} path={item.track.url} title={item.track.title} artist={item.track.artist} size={74} radius={10} outline={sourceTypeColor(item.track)} />
+                    <TrackCover src={item.track.cover_url} path={item.track.url} title={item.track.title} artist={item.track.artist} size={74} radius={10} />
                     <div className="ah-spotlight-play-overlay">
                       <PlayButton size={34} onClick={() => onPlayTrack(item.track)} />
                     </div>
@@ -215,7 +215,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
                 <div key={`${item.track.id}-${i}`} className="ah-trow" onClick={() => onPlayTrack(item.track)}>
                   <div className="ah-row-idx">{i + 1}</div>
                   <div className="ah-row-cover">
-                    <TrackCover src={item.track.cover_url} path={item.track.url} title={item.track.title} artist={item.track.artist} size={42} radius={7} outline={sourceTypeColor(item.track)} />
+                    <TrackCover src={item.track.cover_url} path={item.track.url} title={item.track.title} artist={item.track.artist} size={42} radius={7} />
                   </div>
                   <div className="ah-row-meta">
                     <div className="ah-row-title" title={item.track.title}>{item.track.title}</div>

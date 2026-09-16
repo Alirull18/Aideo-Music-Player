@@ -1,3 +1,36 @@
+export type StreamingQuality = 'best_available' | 'standard_lossless' | 'data_saver';
+
+export interface PlaybackSource {
+  provider: 'local' | 'tidal' | 'qobuz' | 'youtube';
+  // A local absolute path or a provider ID; never a resolved streaming URL.
+  id: string;
+  catalog_quality?: SourceQuality | null;
+  metadata?: SourceMetadata | null;
+}
+
+export type SourceMetadata = Pick<Track, 'title' | 'artist' | 'album' | 'duration' | 'duration_raw' | 'cover_url' | 'track_number' | 'disc_number'>;
+
+export interface SourceQuality {
+  lossless?: boolean | null;
+  sample_rate?: number | null;
+  bit_depth?: number | null;
+  codec?: string | null;
+}
+
+export interface RecordingEvidence {
+  isrc?: string | null;
+  upc?: string | null;
+  version?: string | null;
+}
+
+export type SourceSelection = { mode: 'auto' } | { mode: 'explicit'; source: PlaybackSource };
+
+export interface RecordingSources {
+  recording_id: string;
+  sources: PlaybackSource[];
+  selection: SourceSelection;
+}
+
 export interface Track {
   id: number;
   path: string;
@@ -19,6 +52,13 @@ export interface Track {
   treble_ratio?: number | null;
   track_number?: number | null;
   disc_number?: number | null;
+  playlist_entry_id?: number;
+  // Absence preserves the legacy path-based source choice.
+  source_context?: RecordingSources | null;
+  recording_evidence?: RecordingEvidence;
+  catalog_quality?: SourceQuality;
+  active_source?: PlaybackSource;
+  active_quality?: SourceQuality;
 }
 
 export interface CloudTrack {
@@ -356,6 +396,11 @@ export interface PlayerState {
   setVisualizerDecayRate: (decay: VisualizerDecayRate) => void;
   setVisualizerExpanded: (expanded: boolean) => void;
   dsp: DSPState;
+  streamingQuality: StreamingQuality;
+  preferredSource: PlaybackSource['provider'] | 'auto';
+  setPreferredSource: (source: PlaybackSource['provider'] | 'auto') => void;
+  sourceQueueManaged: boolean;
+  setStreamingQuality: (quality: StreamingQuality) => void;
   devices: string[];
   currentDevice: string | null;
   scanDirs: string[];
@@ -481,10 +526,10 @@ export interface PlayerState {
   loadLibrary: () => Promise<void>;
   deleteTrack: (path: string) => Promise<void>;
   recordPlaybackTransition: (newTrack: Track | null, playbackSource?: string) => Promise<void>;
-  playTrack: (track: Track, isHistory?: boolean, forceResetAutoplay?: boolean, playbackSource?: string, startPos?: number) => Promise<void>;
+  playTrack: (track: Track, isHistory?: boolean, forceResetAutoplay?: boolean, playbackSource?: string, startPos?: number, preservePlaybackSession?: boolean) => Promise<void>;
   playDynamicMix: (mixType: 'supermix' | 'recap' | 'discovery' | 'chill') => Promise<void>;
-  addToQueue: (track: Track) => Promise<void>;
-  playNextInQueue: (track: Track) => Promise<void>;
+  addToQueue: (track: Track) => Promise<boolean | void>;
+  playNextInQueue: (track: Track) => Promise<boolean | void>;
   playFromQueue: (index: number) => Promise<void>;
   removeFromQueue: (index: number) => Promise<void>;
   clearQueue: () => Promise<void>;
@@ -540,11 +585,11 @@ export interface PlayerState {
   fetchSmartPlaylists: () => Promise<void>;
   createSmartPlaylist: (name: string, rules: any) => Promise<number | undefined>;
   deleteSmartPlaylist: (id: number) => Promise<void>;
-  addToPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
-  removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void>;
+  addToPlaylist: (playlistId: number, track: string | Track) => Promise<void>;
+  removeFromPlaylist: (playlistId: number, track: string | Track) => Promise<void>;
   reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void>;
   loadPlaylistTracks: (playlistId: number) => Promise<void>;
-  toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
+  toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<boolean | void>;
   toggleDislikeTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
   resetDislikedTracks: () => Promise<void>;
   cachedCloudHashes: string[];

@@ -1,3 +1,4 @@
+import { streamCacheKey } from '../utils/unifiedSources';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
@@ -429,7 +430,7 @@ describe('TidalConnectCard', () => {
       const freshUrl = 'https://sp-play.tidal.com/stream/fresh.flac?token=new';
 
       // Seed cache with a 2-minute-old URL (older than 30s)
-      trackIdToStreamUrl.set(tidalTrack.path, { url: staleUrl, resolvedAt: Date.now() - 120_000 });
+      trackIdToStreamUrl.set(streamCacheKey(tidalTrack, 'best_available'), { url: staleUrl, resolvedAt: Date.now() - 120_000 });
 
       vi.mocked(invoke).mockImplementation(async (cmd: string) => {
         if (cmd === 'tidal_get_stream_url') return freshUrl;
@@ -441,7 +442,7 @@ describe('TidalConnectCard', () => {
       await useStore.getState().playTrack(tidalTrack);
 
       // Verify tidal_get_stream_url was called and play_track received freshUrl
-      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path });
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path, requestedQuality: 'best_available' });
       expect(invoke).toHaveBeenCalledWith('play_track', { path: freshUrl, startPos: 0 });
     });
 
@@ -493,7 +494,7 @@ describe('TidalConnectCard', () => {
       await useStore.getState().playTrack(trackWithUrlPath);
 
       // Should have recovered original track ID and fetched fresh URL
-      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path });
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path, requestedQuality: 'best_available' });
       expect(invoke).toHaveBeenCalledWith('play_track', { path: freshCdnUrl, startPos: 0 });
     });
 
@@ -543,7 +544,7 @@ describe('TidalConnectCard', () => {
       await useStore.getState().playNext();
 
       // Should have resolved the stream URL for the queued track
-      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: nextTidalTrack.path });
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: nextTidalTrack.path, requestedQuality: 'best_available' });
       expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedStreamUrl, startPos: 0 });
 
       // Queue should have popped the played track
@@ -596,7 +597,7 @@ describe('TidalConnectCard', () => {
       await useStore.getState().pollStatus();
 
       // Poll status should have triggered fallback playNext
-      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: queuedTrack.path });
+      expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: queuedTrack.path, requestedQuality: 'best_available' });
       expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedUrl, startPos: 0 });
     });
   });

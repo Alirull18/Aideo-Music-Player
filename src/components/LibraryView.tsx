@@ -1,3 +1,5 @@
+import { manageSourceQueue } from '../store/sourcePlayback';
+import { SourceMenu } from './SourceMenu';
 import { useState, useEffect, memo } from 'react';
 import { useStore } from '../store';
 import { chainQueueOperation } from '../store/playbackSlice';
@@ -16,8 +18,11 @@ import { SimpleLRU } from '../utils/lruCache';
 import { fmt } from '../utils';
 import { shuffleArray } from '../utils/shuffle';
 
+const entryKey = (track: Track) => track.playlist_entry_id !== undefined ? `entry:${track.playlist_entry_id}` : track.source_context ? `recording:${track.source_context.recording_id}` : track.path;
+
 const persistQueueState = (newQueue: any[], otherState?: Record<string, any>) => {
   useStore.setState({ queue: newQueue, ...otherState });
+  if (newQueue.some(t => t.source_context)) void manageSourceQueue(useStore.setState);
   try {
     localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
   } catch (_) {}
@@ -247,16 +252,16 @@ interface TrackRowProps {
   playTrack: (track: Track) => Promise<void> | void;
   setView: (view: any) => void;
   setMenuOpenFor: (id: any) => void;
-  playNextInQueue: (track: Track) => Promise<void> | void;
-  addToQueue: (track: Track) => Promise<void> | void;
+  playNextInQueue: (track: Track) => Promise<boolean | void> | void;
+  addToQueue: (track: Track) => Promise<boolean | void> | void;
   matchMetadata: (track: Track) => Promise<any>;
   setMatchData: (data: { track: Track; match: any } | null) => void;
   setIsMatching: (id: number | null) => void;
-  removeFromPlaylist: (playlistId: number, trackPath: string) => Promise<void> | void;
+  removeFromPlaylist: (playlistId: number, track: string | Track) => Promise<void> | void;
   reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void> | void;
   setPlaylistModalFor: (track: Track | null) => void;
   setEditModalFor: (track: Track | null) => void;
-  toggleLoveTrack: (path: string) => Promise<void> | void;
+  toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<boolean | void> | void;
   toggleDislikeTrack: (path: string, metadata?: Partial<Track>) => Promise<void> | void;
   setCoverArtModalTrack: (track: Track | null) => void;
   cacheCloudTrack: (track: Track) => Promise<void> | void;
@@ -267,6 +272,7 @@ interface TrackRowProps {
   onPointerDragStart?: (e: React.PointerEvent) => void;
   isSelected?: boolean;
   onRowClick?: (e: React.MouseEvent) => void;
+  onSelectArtist?: (artist: string) => void;
 }
 
 const TrackRow = memo(({ 
@@ -274,12 +280,11 @@ const TrackRow = memo(({
   playTrack, setView, setMenuOpenFor, playNextInQueue, addToQueue, matchMetadata, 
   setMatchData, setIsMatching, removeFromPlaylist, reorderPlaylistTracks, setPlaylistModalFor, setEditModalFor,
   toggleLoveTrack, toggleDislikeTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes,
-  isDraggable, isDragged, isDragOver, onPointerDragStart, isSelected, onRowClick
+  isDraggable, isDragged, isDragOver, onPointerDragStart, isSelected, onRowClick, onSelectArtist
 }: TrackRowProps) => {
   const [isRowHovered, setIsRowHovered] = useState(false);
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
-  const rowId = t.path || t.id;
-
+  const rowId = entryKey(t);
   return (
     <tr 
       className={`track-row${active ? ' playing' : ''}${isSelected ? ' selected' : ''}`}
@@ -333,7 +338,7 @@ const TrackRow = memo(({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              toggleLoveTrack(t.path);
+              toggleLoveTrack(t.path, t);
             }}
             style={{
               background: 'transparent',
@@ -395,7 +400,17 @@ const TrackRow = memo(({
         <div className="track-name">{t.title || baseName(t.path)}</div>
       </td>
       <td className="cell-truncate">
-        <div className="track-sub">{t.artist || '—'}</div>
+        <div 
+          className="track-sub"
+          style={{ cursor: t.artist ? 'pointer' : 'default' }}
+          title={t.artist ? `Filter by artist: ${t.artist}` : undefined}
+          onClick={(e) => {
+            if (t.artist && onSelectArtist) {
+              e.stopPropagation();
+              onSelectArtist(t.artist);
+            }
+          }}
+        >{t.artist || '—'}</div>
       </td>
       <td style={{ textAlign: 'center' }}>
         {t.format && (
@@ -592,9 +607,10 @@ const TrackRow = memo(({
                   </div>
                   <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
 
+                  <SourceMenu track={t} />
                   {currentPlaylist ? (() => {
                     const currentPlaylistTracks = useStore.getState().tracks;
-                    const realIdx = currentPlaylistTracks.findIndex((item: any) => item.path === t.path);
+                    const realIdx = currentPlaylistTracks.findIndex((item: any) => t.playlist_entry_id !== undefined ? item.playlist_entry_id === t.playlist_entry_id : item.path === t.path);
                     const effectiveIdx = realIdx !== -1 ? realIdx : i;
                     const maxIdx = currentPlaylistTracks.length - 1;
 
@@ -629,7 +645,7 @@ const TrackRow = memo(({
                           </div>
                         )}
                         <div
-                          onClick={(e) => { e.stopPropagation(); removeFromPlaylist(currentPlaylist.id, t.path); setMenuOpenFor(null); }}
+                          onClick={(e) => { e.stopPropagation(); removeFromPlaylist(currentPlaylist.id, t); setMenuOpenFor(null); }}
                           style={{ padding: '10px 14px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
                           onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
                           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
@@ -677,7 +693,7 @@ const TrackRow = memo(({
 
 const CloudTrackRow = memo(({ 
   t, i, active, menuOpenFor, setMenuOpenFor, playCloudTrack, addToQueue, playNextInQueue,
-  cacheCloudTrack, deleteCachedTrack, cachedCloudHashes
+  cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, onSelectArtist
 }: {
   t: CloudTrack,
   i: number,
@@ -689,7 +705,8 @@ const CloudTrackRow = memo(({
   playNextInQueue: (track: any) => void,
   cacheCloudTrack: (track: any) => Promise<void>,
   deleteCachedTrack: (streamUrl: string) => Promise<void>,
-  cachedCloudHashes: string[]
+  cachedCloudHashes: string[],
+  onSelectArtist?: (artist: string) => void
 }) => {
   const vt = cloudTrackToVirtualTrack(t);
   const rowId = t.stream_url || t.id;
@@ -718,7 +735,17 @@ const CloudTrackRow = memo(({
         </div>
       </td>
       <td className="cell-truncate">
-        <div className="track-sub">{t.artist || '—'}</div>
+        <div 
+          className="track-sub"
+          style={{ cursor: t.artist ? 'pointer' : 'default' }}
+          title={t.artist ? `Filter by artist: ${t.artist}` : undefined}
+          onClick={(e) => {
+            if (t.artist && onSelectArtist) {
+              e.stopPropagation();
+              onSelectArtist(t.artist);
+            }
+          }}
+        >{t.artist || '—'}</div>
       </td>
       <td style={{ textAlign: 'center' }}>
         <span className="quality-tag high-res">LOSSLESS</span>
@@ -880,6 +907,13 @@ export function LibraryView() {
   const [editTitle, setEditTitle] = useState('');
   const [editArtist, setEditArtist] = useState('');
   const [editAlbum, setEditAlbum] = useState('');
+  const handleSelectArtist = (artist: string) => {
+    if (!artist || artist === '—' || artist === 'Unknown Artist') return;
+    setSearchQuery(artist);
+    setDebouncedSearchQuery(artist);
+    setLibrarySearchQuery(artist);
+  };
+
   const [searchQuery, setSearchQuery] = useState(librarySearchQuery || '');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(librarySearchQuery || '');
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1184,7 +1218,7 @@ export function LibraryView() {
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        setSelectedTrackPaths(filteredTracks.map((t: any) => t.path));
+        setSelectedTrackPaths(filteredTracks.map(entryKey));
       } else if (e.key === 'Escape') {
         setSelectedTrackPaths([]);
         setLastSelectedIdx(null);
@@ -1199,7 +1233,7 @@ export function LibraryView() {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       setSelectedTrackPaths(prev => 
-        prev.includes(t.path) ? prev.filter(p => p !== t.path) : [...prev, t.path]
+        prev.includes(entryKey(t)) ? prev.filter(p => p !== entryKey(t)) : [...prev, entryKey(t)]
       );
       setLastSelectedIdx(index);
       return;
@@ -1209,7 +1243,7 @@ export function LibraryView() {
       e.preventDefault();
       const start = Math.min(lastSelectedIdx, index);
       const end = Math.max(lastSelectedIdx, index);
-      const range = filteredTracks.slice(start, end + 1).map((item: any) => item.path);
+      const range = filteredTracks.slice(start, end + 1).map(entryKey);
       setSelectedTrackPaths(Array.from(new Set([...selectedTrackPaths, ...range])));
       return;
     }
@@ -1223,7 +1257,7 @@ export function LibraryView() {
   };
 
   const handlePlaySelected = async () => {
-    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(entryKey(t)));
     if (selected.length === 0) return;
     const first = selected[0];
     const rest = selected.slice(1);
@@ -1240,7 +1274,7 @@ export function LibraryView() {
   };
 
   const handleBulkAddToQueue = async () => {
-    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(entryKey(t)));
     if (selected.length === 0) return;
     const currentQ = useStore.getState().queue;
     persistQueueState([...currentQ, ...selected]);
@@ -1252,10 +1286,10 @@ export function LibraryView() {
   };
 
   const handleBulkFavorite = async () => {
-    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+    const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(entryKey(t)));
     for (const t of selected) {
       if (t.loved !== 1) {
-        toggleLoveTrack(t.path);
+        toggleLoveTrack(t.path, t);
       }
     }
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Loved ${selected.length} songs`, type: 'success' } }));
@@ -1446,7 +1480,7 @@ export function LibraryView() {
                 />
                 <input 
                   type="text" 
-                  placeholder={viewMode === 'albums' ? "Search albums or artists..." : "Find song..."} 
+                  placeholder={viewMode === 'albums' ? "Search albums or artists..." : "Search tracks, artists (or artist:name)..."} 
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
@@ -1859,7 +1893,7 @@ export function LibraryView() {
 
                       return (
                         <TrackRow
-                          key={t.path || t.id}
+                          key={entryKey(t)}
                           t={t}
                           i={i}
                           totalTracks={filteredTracks.length}
@@ -1890,8 +1924,9 @@ export function LibraryView() {
                           isDragged={draggedIdx === i}
                           isDragOver={dragOverIdx === i}
                           onPointerDragStart={(e) => startPlaylistPointerDrag(i, e)}
-                          isSelected={selectedTrackPaths.includes(t.path)}
+                          isSelected={selectedTrackPaths.includes(entryKey(t))}
                           onRowClick={(e) => handleTrackRowClick(t, i, e)}
+                          onSelectArtist={handleSelectArtist}
                         />
                       );
                     })}
@@ -1941,6 +1976,7 @@ export function LibraryView() {
                           cacheCloudTrack={cacheCloudTrack}
                           deleteCachedTrack={deleteCachedTrack}
                           cachedCloudHashes={cachedCloudHashes}
+                          onSelectArtist={handleSelectArtist}
                         />
                       );
                     })}
@@ -1996,6 +2032,7 @@ export function LibraryView() {
                           cacheCloudTrack={cacheCloudTrack}
                           deleteCachedTrack={deleteCachedTrack}
                           cachedCloudHashes={cachedCloudHashes}
+                          onSelectArtist={handleSelectArtist}
                         />
                       );
                     })}
@@ -2087,7 +2124,7 @@ export function LibraryView() {
                     <div
                       key={p.id}
                       onClick={() => { 
-                        addToPlaylist(p.id, playlistModalFor.path); 
+                        addToPlaylist(p.id, playlistModalFor);
                         setPlaylistModalFor(null); 
                         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Added to ${p.name}`, type: 'success' } })); 
                       }}
@@ -2237,8 +2274,8 @@ export function LibraryView() {
                     <div
                       key={p.id}
                       onClick={() => { 
-                        for (const path of selectedTrackPaths) {
-                          addToPlaylist(p.id, path);
+                        for (const track of filteredTracks.filter(t => selectedTrackPaths.includes(entryKey(t)))) {
+                          addToPlaylist(p.id, track);
                         }
                         setBulkPlaylistModal(false);
                         setSelectedTrackPaths([]);
@@ -2348,7 +2385,7 @@ export function LibraryView() {
             <button
               className="btn btn-secondary"
               onClick={() => {
-                const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(t.path));
+                const selected = filteredTracks.filter((t: any) => selectedTrackPaths.includes(entryKey(t)));
                 if (selected.length > 0) {
                   useStore.getState().setTagEditorBatchTracks(selected);
                 }

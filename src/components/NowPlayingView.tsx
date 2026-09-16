@@ -1,3 +1,5 @@
+import { SourceMenu } from './SourceMenu';
+import { sourceName } from '../utils/unifiedSources';
 import { useEffect, useState, useMemo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useStore } from '../store';
@@ -168,9 +170,9 @@ export function NowPlayingView() {
   const [artworkTagLoading, setArtworkTagLoading] = useState(false);
   const [artworkTagError, setArtworkTagError] = useState(false);
   const artworkMetadata = current as ArtworkTrackMetadata | null;
-  const artworkPath = artworkMetadata?.path || playbackCurrentTrack || '';
-  const artworkFormat = artworkTagDetails?.format || artworkMetadata?.format || playbackFileFormat || null;
-  const artworkSource = getArtworkSourceLabel(artworkFormat, artworkPath, artworkMetadata?.duration);
+  const artworkPath = current?.active_source?.provider === 'local' ? current.active_source.id : current?.source_context ? playbackCurrentTrack || '' : artworkMetadata?.path || playbackCurrentTrack || '';
+  const artworkFormat = current?.source_context ? playbackFileFormat || artworkTagDetails?.format || current.active_quality?.codec || null : artworkTagDetails?.format || artworkMetadata?.format || playbackFileFormat || null;
+  const artworkSource = current?.active_source ? sourceName(current.active_source) : getArtworkSourceLabel(artworkFormat, artworkPath, artworkMetadata?.duration);
   const artworkSourceDetail = artworkPath
     ? artworkSource === 'Local library' ? baseName(artworkPath) : getStreamName(artworkPath)
     : 'No source path';
@@ -182,7 +184,7 @@ export function NowPlayingView() {
     || playbackFileRate
     || artworkTagDetails?.sample_rate
     || artworkMetadata?.sample_rate
-    || playbackDevRate
+    || (current?.source_context ? null : playbackDevRate)
     || null;
   const artworkOutputRate = liveAudioPath?.output.sample_rate || playbackDevRate || artworkSourceRate;
   const artworkSourceChannels = liveAudioPath?.source.channels
@@ -252,7 +254,7 @@ export function NowPlayingView() {
   useEffect(() => {
     const isOnlineSource = isStreamTrack(
       artworkPath,
-      artworkMetadata?.format || playbackFileFormat,
+      current?.active_source?.provider === 'local' ? '' : artworkMetadata?.format || playbackFileFormat,
     );
 
     if (!showArtInfo || !artworkPath || isOnlineSource) {
@@ -263,6 +265,7 @@ export function NowPlayingView() {
     }
 
     let active = true;
+    setArtworkTagDetails(null);
     setArtworkTagLoading(true);
     setArtworkTagError(false);
 
@@ -886,6 +889,7 @@ export function NowPlayingView() {
           )}
         </div>
         <div className="np-meta" style={{ minWidth: 0 }}>
+          {current && <div className="np-source-controls">{current.active_source && <span>Source: {sourceName(current.active_source)}</span>}<SourceMenu track={current} /></div>}
           <div className="np-title" style={{
             display: 'flex',
             alignItems: 'center',
@@ -907,7 +911,7 @@ export function NowPlayingView() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    toggleLoveTrack(current.path);
+                    toggleLoveTrack(current.path, current);
                   }}
                   style={{
                     background: 'transparent',

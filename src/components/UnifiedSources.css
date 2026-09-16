@@ -1,0 +1,49 @@
+.unified-results { width: 100%; min-width: 0; }
+.unified-search-status { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline; color: var(--text); font-size: 13px; margin-bottom: 16px; }
+.unified-search-status p { flex-basis: 100%; margin: 0; }
+.unified-search-status strong { font-size: 18px; }
+.unified-play { position: relative; flex-shrink: 0; border: 0; border-radius: 8px; padding: 0; cursor: pointer; background: var(--glass); color: white; }
+.unified-play-icon { position: absolute; inset: 0; display: grid; place-items: center; border-radius: inherit; background: rgba(0,0,0,.45); }
+.unified-play:hover .unified-play-icon { background: rgba(0,0,0,.65); }
+.unified-play:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.unified-source-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.unified-source-line .source-button { padding: 3px 8px; }
+.unified-duration { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text); }
+.unified-result.is-current { background: var(--glass); }
+.unified-result .unified-action-status { font-size: 12px; color: var(--text); }
+.unified-result-actions .source-button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+.source-button:disabled { opacity: .6; cursor: wait; }
+.unified-result { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--glass-border); }
+.unified-result-info { flex: 1; min-width: 0; }
+.unified-track-title { color: var(--text); font: inherit; font-weight: 650; overflow-wrap: anywhere; }
+.unified-result-info p { margin: 4px 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.unified-result-info small { color: var(--text-dim); }
+.unified-result-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.source-button, .source-options button { font: inherit; font-size: 12px; background: var(--glass); color: var(--text); border: 1px solid var(--glass-border); border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+.source-button:hover, .source-options button:hover { background: var(--glass-h); }
+.source-button:focus-visible, .source-options button:focus-visible, .unified-track-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.source-options button:disabled { opacity: .6; cursor: wait; }
+.source-menu { position: relative; }
+.source-options { position: fixed; inset: 0; margin: auto; max-height: 80vh; overflow-y: auto; width: min(330px, 75vw); z-index: 30; padding: 16px; background: var(--bg, #101014); border: 1px solid var(--glass-border); border-radius: 12px; display: flex; flex-direction: column; gap: 8px; color: var(--text); }
+.source-options p { margin: 0 0 4px; font-size: 12px; line-height: 1.5; }
+.source-options button { text-align: left; }
+.source-options button[aria-pressed="true"] { border-color: var(--accent); }
+.source-options small { display: block; overflow-wrap: anywhere; margin-top: 4px; }
+.source-quality-select { background: var(--glass); color: var(--text); padding: 10px; border: 1px solid var(--glass-border); border-radius: 8px; max-width: 100%; }
+.source-quality-select option { background: var(--bg, #101014); }
+.np-source-controls, .active-source-info { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; font-size: 12px; color: var(--text); }
+@media (max-width: 760px) {
+  .unified-result { flex-wrap: wrap; gap: 12px; }
+  .unified-result-info { flex-basis: calc(100% - 120px); }
+  .unified-result-actions { width: 100%; justify-content: flex-end; }
+}
+
+.unified-source-filter { margin: 12px 0 20px; color: var(--text); }
+.unified-source-filter summary { cursor: pointer; font-size: 13px; width: fit-content; }
+.unified-source-filter .source-filter-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.source-filter-options button[aria-pressed="true"] { border-color: var(--accent); }
+.aideo-search-results-view > div:first-child { flex-wrap: wrap; }
+.aideo-search-results-view h1 { overflow-wrap: anywhere; min-width: 0; }
+
+.source-options::backdrop { background: rgba(0, 0, 0, .55); }
+.np-source-controls { justify-content: center; }
