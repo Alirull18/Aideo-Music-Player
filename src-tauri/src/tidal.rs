@@ -1335,7 +1335,6 @@ pub fn is_permanent_auth_failure(status: reqwest::StatusCode, error_body: Option
 // ---------- Discovery Hub: Tidal HiFi recommendations ----------
 
 const HUB_MAX_SEEDS: usize = 6;
-const HUB_MAX_TRACK_DURATION_SECS: u32 = 900;
 
 /// Signature compatible with the discovery hub's library dedupe format
 /// (`normalize_artist_name + clean_title`, see youtube/mod.rs).
@@ -1368,9 +1367,9 @@ fn hub_seed_queries(seed_artists: Vec<String>) -> Vec<String> {
 }
 
 /// Filter + cross-seed dedupe of raw search candidates:
-/// drops marathon tracks (>15min), third-party/instrumental entries, tracks
-/// already known to the library or other rec sources, and duplicates found
-/// via multiple seed searches. First occurrence wins, order preserved.
+/// drops third-party/karaoke entries, tracks already known to the library
+/// or other rec sources, and duplicates found via multiple seed searches.
+/// First occurrence wins, order preserved.
 fn dedupe_hub_candidates(
     candidates: Vec<TidalTrackResult>,
     exclude_signatures: &std::collections::HashSet<String>,
@@ -1378,9 +1377,6 @@ fn dedupe_hub_candidates(
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out = Vec::new();
     for track in candidates {
-        if track.duration > HUB_MAX_TRACK_DURATION_SECS {
-            continue;
-        }
         if crate::youtube::is_third_party_or_instrumental(&track.title, &track.artist) {
             continue;
         }
@@ -1593,8 +1589,9 @@ mod tests {
             hub_track("3", "Real Song", "Real Artist", 400),
         ];
         let out = dedupe_hub_candidates(candidates, &std::collections::HashSet::new());
-        assert_eq!(out.len(), 1, ">15min and third-party/instrumental entries must be dropped");
-        assert_eq!(out[0].id, "3");
+        assert_eq!(out.len(), 2, "Epic Suite (>900s) and Real Song preserved; cover band dropped");
+        assert_eq!(out[0].id, "1");
+        assert_eq!(out[1].id, "3");
     }
 
     #[test]

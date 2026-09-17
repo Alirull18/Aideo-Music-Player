@@ -369,4 +369,88 @@ mod tests {
 
         let _ = std::fs::remove_file(db_path);
     }
+
+    #[test]
+    fn test_additive_persistence_ignores_unknown_fields() {
+        use crate::db::*;
+        let json_with_future_fields = serde_json::json!({
+            "recording_id": "rec_future_001",
+            "sources": [{
+                "provider": "tidal",
+                "id": "12345",
+                "extra_field": "future_provider_payload",
+                "metadata": {
+                    "title": "Future Song",
+                    "artist": "Future Artist",
+                    "unknown_tag": 42
+                }
+            }],
+            "selection": {
+                "mode": "explicit",
+                "source": {
+                    "provider": "tidal",
+                    "id": "12345",
+                    "future_flag": true
+                },
+                "unrecognized_option": "ignored"
+            },
+            "display_candidates": [{
+                "provider": "youtube",
+                "id": "abcdefghijk"
+            }],
+            "match_version": 2,
+            "future_metadata": { "score": 0.99 }
+        });
+
+        let parsed: Result<RecordingSources, _> = serde_json::from_value(json_with_future_fields);
+        assert!(parsed.is_ok(), "Deserialization should succeed despite unknown future fields");
+        let sources = parsed.unwrap();
+        assert_eq!(sources.recording_id, "rec_future_001");
+        assert_eq!(sources.sources.len(), 1);
+        assert_eq!(sources.sources[0].provider, SourceProvider::Tidal);
+        assert_eq!(sources.sources[0].id, "12345");
+        assert_eq!(sources.sources[0].metadata.as_ref().unwrap().title.as_deref(), Some("Future Song"));
+        match &sources.selection {
+            SourceSelection::Explicit { source } => {
+                assert_eq!(source.provider, SourceProvider::Tidal);
+                assert_eq!(source.id, "12345");
+            }
+            _ => panic!("Expected Explicit selection"),
+        }
+    }
+
+    #[test]
+    fn test_recording_sources_32_source_ceiling() {
+        use crate::db::*;
+        // 32 sources: allowed
+        let mut sources = Vec::new();
+        for i in 1..=32 {
+            sources.push(PlaybackSource {
+                provider: SourceProvider::Tidal,
+                id: format!("1000{i:02}"),
+                catalog_quality: None,
+                metadata: None,
+            });
+        }
+        let valid_rec = RecordingSources {
+            recording_id: "rec_max_sources".into(),
+            sources: sources.clone(),
+            selection: SourceSelection::Auto,
+        };
+        assert!(valid_rec.to_json().is_ok(), "32 sources should be accepted at durable ceiling");
+
+        // 33 sources: rejected
+        sources.push(PlaybackSource {
+            provider: SourceProvider::Tidal,
+            id: "100033".into(),
+            catalog_quality: None,
+            metadata: None,
+        });
+        let invalid_rec = RecordingSources {
+            recording_id: "rec_too_many".into(),
+            sources,
+            selection: SourceSelection::Auto,
+        };
+        assert!(invalid_rec.to_json().is_err(), "33 sources must exceed durable ceiling and be rejected");
+    }
 }

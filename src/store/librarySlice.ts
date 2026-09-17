@@ -1,6 +1,5 @@
-import { streamCacheKey } from '../utils/unifiedSources';
+import { streamCacheKey, applySourcePreference, cleanSourceContext, isLocalUnifiedTrack } from '../utils/unifiedSources';
 import { manageSourceQueue, cancelSourcePlayback, playbackRequest, playUnifiedTrack } from './sourcePlayback';
-import { applySourcePreference } from '../utils/unifiedSources';
 import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
@@ -394,7 +393,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const request = playbackRequest();
     if (track.source_context) return playUnifiedTrack(set, get, track, isHistory, forceResetAutoplay, startPos, preservePlaybackSession);
     const isCurrentRequest = () => request === playbackRequest();
-    if (get().queue.some(t => t.source_context)) await manageSourceQueue(set);
+    if (get().queue.some(t => t.source_context && !isLocalUnifiedTrack(t))) await manageSourceQueue(set);
     else if (get().sourceQueueManaged) {
       await invoke('set_source_queue_mode', { enabled: false });
       set({ sourceQueueManaged: false });
@@ -1140,6 +1139,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   playPrev: async () => {
+    cancelSourcePlayback();
     if (isSkipping) return;
     isSkipping = true;
     try {
@@ -1221,7 +1221,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
             path: t.id,
             title: t.title || 'Unknown Title',
             artist: t.artist || 'Unknown Artist',
-            duration: t.duration || 180,
+            duration: typeof t.duration === 'number' && Number.isFinite(t.duration) && t.duration > 0 ? t.duration : null,
             format: isQobuz ? 'Qobuz FLAC' : 'Tidal FLAC',
             lyric_offset: 0,
             cover_url: t.cover_url || null,
@@ -1514,7 +1514,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         playlistId,
         path: typeof track === 'string' ? track : track.path,
         ...(typeof track !== 'string' && track.source_context
-          ? { sourceContext: track.source_context, metadata: track } : {}),
+          ? { sourceContext: cleanSourceContext(track.source_context), metadata: track } : {}),
       });
       if (get().currentPlaylist?.id === playlistId) {
         await get().loadPlaylistTracks(playlistId);
@@ -1604,7 +1604,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         duration: track.duration || null,
         format: track.format || null,
         coverUrl: track.cover_url || null,
-        ...(track.source_context ? { sourceContext: track.source_context } : {}),
+        ...(track.source_context ? { sourceContext: cleanSourceContext(track.source_context) } : {}),
       });
 
       // Update tracks array in-place

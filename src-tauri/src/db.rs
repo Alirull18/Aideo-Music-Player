@@ -90,7 +90,6 @@ pub enum SourceProvider {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct PlaybackSource {
     pub provider: SourceProvider,
     pub id: String,
@@ -101,7 +100,6 @@ pub struct PlaybackSource {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct SourceMetadata {
     pub title: Option<String>,
     pub artist: Option<String>,
@@ -128,14 +126,13 @@ impl PlaybackSource {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
+#[serde(tag = "mode", rename_all = "lowercase")]
 pub enum SourceSelection {
     Auto,
     Explicit { source: PlaybackSource },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct RecordingSources {
     pub recording_id: String,
     pub sources: Vec<PlaybackSource>,

@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react';
 import { RefreshCw, Play, Disc, Sparkles, BookOpen } from 'lucide-react';
-import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId } from './HomeParts';
+import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId, SongSources } from './HomeParts';
 
 const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay: (t: any) => void }) => (
   <div className="ah-row ah-editorial-row" onClick={() => onPlay(track)}>
@@ -9,6 +9,7 @@ const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay
     <div className="ah-row-meta">
       <div className="ah-row-title" title={track.title}>{track.title}</div>
       <div className="ah-row-artist" title={track.artist}>{track.artist}</div>
+      <SongSources track={track} />
     </div>
     <div className="ah-editorial-tag">VOL. {(idx + 1).toString().padStart(2, '0')}</div>
     <span className="ah-row-dur">{track.duration_raw}</span>
@@ -28,6 +29,7 @@ const ArtCard = memo(({ track, onPlay, badge }: { track: any; onPlay: (t: any) =
     </div>
     <div className="ah-card-title" title={track.title}>{track.title}</div>
     <div className="ah-card-artist" title={track.artist}>{track.artist}</div>
+    <SongSources track={track} />
   </div>
 ));
 

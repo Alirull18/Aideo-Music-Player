@@ -18,7 +18,49 @@ export function SourceMenu({ track, compact = false, onChange }: { track: Track;
   const qobuzConnected = useStore(s => s.qobuzConnected && s.qobuzExperimentalEnabled);
   const localOnly = useStore(s => s.appMode === 'local');
   const available = (provider: string) => provider === 'local' || (!localOnly && (provider === 'youtube' || (provider === 'tidal' ? tidalConnected : qobuzConnected)));
-  useEffect(() => { request.current++; setContext(track.source_context || null); setOpen(false); return () => { request.current++; }; }, [track.path, track.playlist_entry_id, track.source_context?.recording_id, selectionKey]);
+
+  const recordingId = track.source_context?.recording_id;
+  const registryContext = useStore(s => recordingId ? s.sourceRegistry[recordingId] : undefined);
+
+  const trackIdRef = useRef(`${track.path}:${track.playlist_entry_id ?? ''}`);
+  useEffect(() => {
+    const currentId = `${track.path}:${track.playlist_entry_id ?? ''}`;
+    if (trackIdRef.current !== currentId) {
+      trackIdRef.current = currentId;
+      request.current++;
+      setContext(track.source_context || null);
+      setOpen(false);
+    } else {
+      // Same track: update context without closing dialog
+      if (track.source_context) {
+        setContext(prev => {
+          if (!prev) return track.source_context!;
+          const combined = [...new Map([...prev.sources, ...track.source_context!.sources].map(s => [sourceKey(s), s])).values()].slice(0, 32);
+          return {
+            ...prev,
+            ...track.source_context,
+            sources: combined,
+          };
+        });
+      }
+    }
+    return () => { request.current++; };
+  }, [track.path, track.playlist_entry_id, track.source_context, selectionKey]);
+
+  useEffect(() => {
+    if (registryContext) {
+      setContext(prev => {
+        if (!prev) return registryContext;
+        const combined = [...new Map([...prev.sources, ...registryContext.sources].map(s => [sourceKey(s), s])).values()].slice(0, 32);
+        return {
+          ...prev,
+          sources: combined,
+          display_candidates: registryContext.display_candidates || prev.display_candidates,
+        };
+      });
+    }
+  }, [registryContext]);
+
   useEffect(() => { if (open) dialog.current?.showModal(); }, [open]);
   const close = () => { request.current++; setOpen(false); };
   const load = async () => {
@@ -28,9 +70,20 @@ export function SourceMenu({ track, compact = false, onChange }: { track: Track;
     const source = sourceFor(track);
     if (!source) { setError('This saved stream has no stable source ID. Find the recording in Search to choose another copy.'); return; }
     const selected = applySourcePreference(track);
-    const initial = selected.source_context || groupRecordings([track], '')[0]?.source_context;
+    const recId = track.source_context?.recording_id;
+    const fromRegistry = recId ? useStore.getState().sourceRegistry[recId] : undefined;
+    const initial = fromRegistry || selected.source_context || groupRecordings([track], '')[0]?.source_context;
     const selection = selected.source_context?.selection || { mode: 'explicit' as const, source };
-    setContext(initial ? { ...initial, selection } : null);
+    const initialContext: RecordingSources | null = initial ? { ...initial, selection } : null;
+    setContext(initialContext);
+
+    // If sources already exist in sourceRegistry with alternatives, use them immediately without redundant search
+    if (fromRegistry && fromRegistry.sources.length > 1) {
+      setLoading(false);
+      setError('');
+      return;
+    }
+
     setLoading(true); setError('');
     try {
       const state = useStore.getState();
@@ -39,7 +92,12 @@ export function SourceMenu({ track, compact = false, onChange }: { track: Track;
         qobuz: state.appMode !== 'local' && state.qobuzConnected && state.qobuzExperimentalEnabled, youtube: state.appMode !== 'local',
       }, result => {
         if (token !== request.current) return;
-        if (initial) setContext({ ...initial, sources: matchingSources(selected, result.tracks), selection });
+        if (initial) {
+          const matched = matchingSources(selected, result.tracks);
+          const nextContext: RecordingSources = { ...initial, sources: matched, selection };
+          setContext(nextContext);
+          useStore.getState().registerDiscoveredSources(nextContext);
+        }
         if (Object.keys(result.errors).length) setError(`Could not check ${Object.keys(result.errors).join(', ')}. Available copies are shown.`);
       });
     } catch (e) { if (token === request.current) setError(String(e)); }
@@ -51,6 +109,9 @@ export function SourceMenu({ track, compact = false, onChange }: { track: Track;
     try {
       const next = await saveSourceChoice(track, { ...context, selection });
       const state = useStore.getState();
+      if (next.source_context) {
+        state.registerDiscoveredSources(next.source_context);
+      }
       const matches = (t: Track) => track.playlist_entry_id !== undefined
         ? t.playlist_entry_id === track.playlist_entry_id
         : t.playlist_entry_id === undefined && (t === track || (t.source_context?.recording_id === context.recording_id));
@@ -91,7 +152,7 @@ export function SourceMenu({ track, compact = false, onChange }: { track: Track;
     <button type="button" className="source-button" aria-label={compact ? `Change source for ${track.title}` : undefined} aria-expanded={open} onClick={() => void load()}>{compact ? context?.selection.mode === 'explicit' ? sourceName(context.selection.source) : 'Auto' : 'Other sources'}</button>
     {open && createPortal(<dialog ref={dialog} onCancel={close} onClose={close} className="source-options" aria-label={`Sources for ${track.title || 'this recording'}`}>
       <h2>Other sources</h2>
-      <p>Catalog matches are preferred. Local and web copies also require matching title, artist, duration, and album when available.</p>
+      <p>Sources for the same song are grouped by title, artist and version. Each copy keeps its own duration and album.</p>
       {loading && <span role="status">Checking available copies...</span>}
       {error && <p role="status">{error}</p>}
       {!loading && context && context.sources.length < 2 && <p>No alternative copies found. Connected sources must have a matching title, artist and duration.</p>}

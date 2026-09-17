@@ -17,6 +17,8 @@ import { foldSearchText, simplifyPunctuation } from '../utils/searchParser';
 import { extractPrimaryArtist } from '../utils/albumUtils';
 import { UnifiedSearchResults } from './UnifiedSearchResults';
 import { catalogTrack, groupRecordings, searchSources, type SourceSearch } from '../utils/unifiedSources';
+import { SongSources } from './aideo/HomeParts';
+import { discoveryTrack, unifyDiscoveryHub } from '../utils/discoveryFeed';
 
 // Format track duration
 function fmt(s: number | null) {
@@ -317,9 +319,7 @@ function getSourceType(track: any): { color: string; label: string } {
 // Small colored outline rendered around each artwork showing its source/quality tier.
 // (Replaces the old inline SourceSquare text-adjacent tag; color meaning is
 // intentionally undocumented in the UI per design decision.)
-const coverOutlineStyle = (track: any): React.CSSProperties => ({
-  boxShadow: `0 0 0 2px ${getSourceType(track).color}`,
-});
+const coverOutlineStyle = (_track?: any): React.CSSProperties => ({});
 
 const TrackCardThumbnail = memo(({
   path,
@@ -442,7 +442,7 @@ export function AideoView() {
     resumeTrack,
     generateSmartMix,
     showSmartMixWidget,
-    discoveryData,
+    discoveryData: rawDiscoveryData,
     setDiscoveryData,
     isLoadingRecs,
     setIsLoadingRecs,
@@ -519,6 +519,11 @@ export function AideoView() {
     downloadQobuzTrack: s.downloadQobuzTrack,
     downloadBatchPlaylist: s.downloadBatchPlaylist,
   })));
+
+  const discoveryData = useMemo(() => {
+    return unifyDiscoveryHub(rawDiscoveryData, tracks) || rawDiscoveryData;
+  }, [rawDiscoveryData, tracks]);
+
   const [greeting, setGreeting] = useState('Good morning');
   const isFetchingRef = useRef(false);
   const tidalHubPoolRef = useRef<any[]>([]);
@@ -631,12 +636,6 @@ export function AideoView() {
 
   // Fetch suggestions and quick results dynamically
   useEffect(() => {
-    if (appMode === 'local' || musicSource === 'tidal' || musicSource === 'qobuz') {
-      setSuggestions([]);
-      setQuickResults([]);
-      return;
-    }
-
     if (!searchQuery.trim()) {
       setSuggestions([]);
       setQuickResults([]);
@@ -647,7 +646,8 @@ export function AideoView() {
     const delayDebounceFn = setTimeout(async () => {
       try {
         // Autocomplete suggestions: blend matching local artists and web suggestions
-        const suggs = await invoke<string[]>('get_search_suggestions', { query: searchQuery.trim() });
+        const rawSuggs = await invoke<string[]>('get_search_suggestions', { query: searchQuery.trim() }).catch(() => []);
+        const suggs = Array.isArray(rawSuggs) ? rawSuggs : [];
         const foldedQ = foldSearchText(searchQuery.trim());
         const localMatchingArtists = Array.from(new Set(tracks.map(t => t.artist).filter((a): a is string => Boolean(a))))
           .filter(a => foldSearchText(a).includes(foldedQ))
@@ -656,16 +656,73 @@ export function AideoView() {
         if (cancelled) return;
         setSuggestions(combinedSuggs);
 
-        // Quick search results
-        const ytTracks = await invoke<any[]>('search_youtube', { query: searchQuery.trim() });
-        if (!cancelled) setQuickResults(ytTracks.slice(0, 3));
+        // Quick search results across active local and online providers
+        const q = searchQuery.trim();
+        const promises: Promise<Track[]>[] = [];
+
+        // Local provider
+        if (musicSource === 'all' || musicSource === 'youtube') {
+          promises.push((async () => {
+            try {
+              const local = await invoke<Track[]>('search_local_sources', { query: q });
+              if (Array.isArray(local) && local.length > 0) return local;
+            } catch {}
+            return tracks.filter(t =>
+              (t.title && foldSearchText(t.title).includes(foldedQ)) ||
+              (t.artist && foldSearchText(t.artist).includes(foldedQ))
+            ).slice(0, 5);
+          })());
+        }
+
+        // YouTube provider
+        if (appMode !== 'local' && (musicSource === 'all' || musicSource === 'youtube')) {
+          promises.push((async () => {
+            try {
+              const raw = await invoke<any[]>('search_youtube', { query: q });
+              return Array.isArray(raw) ? raw.map(t => catalogTrack(t, 'youtube')) : [];
+            } catch { return []; }
+          })());
+        }
+
+        // Tidal provider
+        if (appMode !== 'local' && tidalConnected && (musicSource === 'all' || musicSource === 'tidal')) {
+          promises.push((async () => {
+            try {
+              const raw = await invoke<any[]>('tidal_search', { query: q });
+              return Array.isArray(raw) ? raw.map(t => catalogTrack(t, 'tidal')) : [];
+            } catch { return []; }
+          })());
+        }
+
+        // Qobuz provider
+        if (appMode !== 'local' && qobuzConnected && qobuzExperimentalEnabled && (musicSource === 'all' || musicSource === 'qobuz')) {
+          promises.push((async () => {
+            try {
+              const raw = await invoke<any[]>('qobuz_search', { query: q });
+              return Array.isArray(raw) ? raw.map(t => catalogTrack(t, 'qobuz')) : [];
+            } catch { return []; }
+          })());
+        }
+
+        const settled = await Promise.allSettled(promises);
+        if (cancelled) return;
+
+        const allCandidates: Track[] = [];
+        for (const s of settled) {
+          if (s.status === 'fulfilled' && Array.isArray(s.value)) {
+            allCandidates.push(...s.value);
+          }
+        }
+
+        const grouped = groupRecordings(allCandidates, q);
+        if (!cancelled) setQuickResults(grouped.slice(0, 3));
       } catch (e) {
         console.error('Failed to fetch suggestions/quick results:', e);
       }
     }, 250);
 
     return () => { cancelled = true; clearTimeout(delayDebounceFn); };
-  }, [searchQuery, musicSource, tracks, appMode]);
+  }, [searchQuery, musicSource, tracks, appMode, tidalConnected, qobuzConnected, qobuzExperimentalEnabled]);
 
   const triggerSearch = async (rawQuery: string) => {
     const request = ++unifiedSearchRequest.current;
@@ -750,8 +807,9 @@ export function AideoView() {
 
   const handlePlayQuickTrack = async (track: any) => {
     setSearchFocused(false);
-    const provider = track.format === 'Tidal FLAC' ? 'tidal' : track.format === 'Qobuz FLAC' ? 'qobuz' : 'youtube';
-    const song = groupRecordings([catalogTrack(track, provider)], '')[0];
+    const song = track.source_context ? track : groupRecordings([
+      track.format ? track : catalogTrack(track, track.format === 'Tidal FLAC' ? 'tidal' : track.format === 'Qobuz FLAC' ? 'qobuz' : 'youtube')
+    ], '')[0];
     if (song) await playTrack(song);
   };
 
@@ -962,20 +1020,16 @@ export function AideoView() {
 
       let tidalPromise: Promise<any[]> | null = null;
       if (tidalEligible && wantFreshTidalSearch) {
-        const excludeSignatures = Array.from(new Set(
-          currentTracks
-            .map(t => `${(t.artist || '').trim().toLowerCase()}::${(t.title || '').trim().toLowerCase()}`)
-            .filter(s => !s.startsWith('::'))
-        ));
         tidalPromise = (async () => {
-          const raw = await Promise.race([
-            invoke<any[]>('get_tidal_hub_recommendations', {
+          try {
+            const raw = await invoke<any[]>('get_tidal_hub_recommendations', {
               seedArtists: topArtists,
-              excludeSignatures,
-            }),
-            new Promise<null>(resolve => setTimeout(() => resolve(null), 2500)),
-          ]);
-          return Array.isArray(raw) ? tidalResultsToHubTracks(raw) : [];
+              excludeSignatures: [],
+            });
+            return Array.isArray(raw) ? tidalResultsToHubTracks(raw) : [];
+          } catch {
+            return [];
+          }
         })();
         tidalPromise.catch(() => {});
         if (forceRefresh) tidalRefreshCountRef.current += 1;
@@ -1142,6 +1196,19 @@ export function AideoView() {
   };
 
   const handleTogglePreview = async (track: any) => {
+    if (track.source_context) {
+      const song = discoveryTrack(track);
+      const current = currentTrack?.source_context?.recording_id === song.source_context?.recording_id;
+      if (current && playbackStatus === 'Playing') {
+        await pauseTrack();
+      } else if (current && playbackStatus === 'Paused') {
+        await resumeTrack();
+      } else {
+        await playTrack(song);
+      }
+      return;
+    }
+
     const localMatch = resolveLocalMatch(track);
     const playbackRoute = classifyDiscoveryPlayback(track, Boolean(localMatch));
     const isLocal = playbackRoute === 'local';
@@ -1252,6 +1319,7 @@ export function AideoView() {
       const parsedSeconds = (track: any): number => parseDuration(track.duration_raw);
 
       const tracksToQueue: Track[] = mix.tracks.map((t: any) => {
+        if (t.source_context) return discoveryTrack(t);
         const localMatch = resolveLocalMatch(t);
         if (localMatch) return localMatch;
 
@@ -1290,16 +1358,20 @@ export function AideoView() {
       }
 
       const first = tracksToQueue[0];
-      const isFirstOnline = first.path.startsWith('http://') || first.path.startsWith('https://');
-      if (isFirstOnline) {
-        await playStream(first.path, {
-          title: first.title || undefined,
-          artist: first.artist || undefined,
-          cover_url: first.cover_url,
-          duration: first.duration || undefined,
-        }, false);
+      if (first.source_context) {
+        await playTrack(first, false, false);
       } else {
-        await playTrack(first);
+        const isFirstOnline = first.path.startsWith('http://') || first.path.startsWith('https://');
+        if (isFirstOnline) {
+          await playStream(first.path, {
+            title: first.title || undefined,
+            artist: first.artist || undefined,
+            cover_url: first.cover_url,
+            duration: first.duration || undefined,
+          }, false);
+        } else {
+          await playTrack(first);
+        }
       }
 
       window.dispatchEvent(new CustomEvent('ui-toast', {
@@ -1674,7 +1746,9 @@ export function AideoView() {
                   <p className="discovery-grid-artist" title={track.artist}>
                     <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
                   </p>
-                  {track.recommendation_source && (
+                  {track.source_context ? (
+                    <SongSources track={track} />
+                  ) : track.recommendation_source && (
                     <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
                       {(track.recommendation_source.includes('â€¢') || track.recommendation_source.includes('Î“Ã‡Ã³')) && (
                         <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 3 }} />
@@ -1780,7 +1854,9 @@ export function AideoView() {
                   <p className="discovery-artist" title={track.artist}>
                     <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
                   </p>
-                  {track.recommendation_source && (
+                  {track.source_context ? (
+                    <SongSources track={track} />
+                  ) : track.recommendation_source && (
                     <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
                       {(track.recommendation_source.includes('â€¢') || track.recommendation_source.includes('Î“Ã‡Ã³')) && (
                         <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 4 }} />
@@ -2818,7 +2894,7 @@ export function AideoView() {
                 </div>
                 {quickResults.map(track => (
                   <div
-                    key={`quick-${track.id}`}
+                    key={`quick-${track.source_context?.recording_id || track.id || track.path}`}
                     onClick={() => handlePlayQuickTrack(track)}
                     style={{
                       display: 'flex',
@@ -2834,7 +2910,7 @@ export function AideoView() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
                       <div style={coverOutlineStyle(track)}>
                         <TrackCardThumbnail
-                          path={track.url}
+                          path={track.path || track.url}
                           coverUrl={track.cover_url}
                           className="aideo-search-thumb"
                           fallbackIconSize={16}
@@ -2849,8 +2925,17 @@ export function AideoView() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0 }}>
-                      {track.duration_raw}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {track.source_context?.sources && (
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          {Array.from(new Set(track.source_context.sources.map((s: any) => s.provider))).map((p: any) => (
+                            <span key={p} className="badge badge-xs" style={{ fontSize: 9, opacity: 0.8, textTransform: 'capitalize' }}>{p}</span>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                        {track.duration_raw || (track.duration ? `${Math.floor(track.duration / 60)}:${String(Math.floor(track.duration % 60)).padStart(2, '0')}` : '')}
+                      </div>
                     </div>
                   </div>
                 ))}

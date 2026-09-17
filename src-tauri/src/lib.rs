@@ -2402,14 +2402,19 @@ fn set_source_queue_mode(enabled: bool, state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-fn play_track(path: String, start_pos: Option<f64>, state: State<'_, AppState>) -> Result<(), String> {
+fn play_track(
+    path: String,
+    start_pos: Option<f64>,
+    attempt_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     if !path.starts_with("http://") && !path.starts_with("https://") && !std::path::Path::new(&path).exists() {
         return Err(format!("Cannot play track: file or stream not found: '{}'", path));
     }
     let player = safe_lock(&state.player);
     player
         .cmd_tx
-        .send(player::PlayerCommand::Play(path, start_pos.unwrap_or(0.0)))
+        .send(player::PlayerCommand::Play(path, start_pos.unwrap_or(0.0), attempt_id))
         .map_err(|e| e.to_string())?;
     Ok(())
 }

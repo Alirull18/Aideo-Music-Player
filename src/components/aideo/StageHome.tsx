@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { RefreshCw, Play, Sparkles, Radio, Moon, Coffee, Disc, Flame, Waves } from 'lucide-react';
-import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId } from './HomeParts';
+import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId, SongSources } from './HomeParts';
 
 type AmbientMood = 'all' | 'midnight' | 'focus' | 'warmth' | 'lossless';
 
@@ -28,6 +28,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
   // Filter groups according to active mood
   const filteredFeed = useMemo(() => {
     if (activeMood === 'all') return feed;
+    if (activeMood === 'lossless') return feed.filter(item => item.track.source_context?.sources.some(source => source.catalog_quality?.lossless || source.provider === 'tidal' || source.provider === 'qobuz') || item.shelf === 'tidal');
     const moodCfg = AMBIENT_MOODS.find(m => m.id === activeMood);
     if (!moodCfg?.shelfFilter) return feed;
     const filtered = feed.filter(t => moodCfg.shelfFilter!.includes(t.shelf));
@@ -195,6 +196,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                       <div className="ah-row-meta">
                         <div className="ah-row-title" title={item.track.title}>{item.track.title}</div>
                         <div className="ah-row-artist" title={item.track.artist}>{item.track.artist}</div>
+                        <SongSources track={item.track} />
                       </div>
                       <PlayButton onClick={() => onPlayTrack(item.track)} />
                     </div>
@@ -222,6 +224,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                   </div>
                   <div className="ah-card-title" title={t.title}>{t.title}</div>
                   <div className="ah-card-artist" title={t.artist}>{t.artist}</div>
+                  <SongSources track={t} />
                 </div>
               ))}
             </div>

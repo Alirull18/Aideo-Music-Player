@@ -23,7 +23,8 @@ interface RawTidalResult {
 }
 
 const formatDuration = (secs?: number): string => {
-  const s = Math.max(0, Math.floor(secs ?? 0));
+  if (secs == null || !Number.isFinite(secs) || secs <= 0) return '--:--';
+  const s = Math.floor(secs);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
@@ -33,19 +34,22 @@ const signatureOf = (artist?: string | null, title?: string | null): string =>
 export function tidalResultsToHubTracks(results: RawTidalResult[]): TidalHubTrack[] {
   return (results || [])
     .filter(t => t.title && t.artist)
-    .map(t => ({
-      id: `tidal-${t.id}`,
-      title: t.title!,
-      artist: t.artist!,
-      cover_url: t.cover_url || null,
-      duration: t.duration || 180,
-      duration_raw: formatDuration(t.duration),
-      url: String(t.id),
-      path: String(t.id),
-      format: 'Tidal FLAC',
-      album: t.album,
-      recommendation_source: TIDAL_SOURCE_LABEL,
-    }));
+    .map(t => {
+      const hasDuration = typeof t.duration === 'number' && Number.isFinite(t.duration) && t.duration > 0;
+      return {
+        id: `tidal-${t.id}`,
+        title: t.title!,
+        artist: t.artist!,
+        cover_url: t.cover_url || null,
+        duration: hasDuration ? t.duration : undefined,
+        duration_raw: hasDuration ? formatDuration(t.duration) : '--:--',
+        url: String(t.id),
+        path: String(t.id),
+        format: 'Tidal FLAC',
+        album: t.album,
+        recommendation_source: TIDAL_SOURCE_LABEL,
+      };
+    });
 }
 
 function* hubShelves(data: DiscoveryHubData): Generator<YoutubeTrack[]> {
@@ -58,7 +62,7 @@ function* hubShelves(data: DiscoveryHubData): Generator<YoutubeTrack[]> {
 
 /**
  * Merge deduped Tidal picks into the resolved hub:
- * - `tidal_hifi`: uncapped pool for its own shelf/tab
+ * - `tidal_hifi`: source pool retained for the unified home-song merge
  * - `recommendations`: up to `maxBlend` picks interleaved evenly
  * Never mutates the input; never caches (caller decides persistence).
  */
@@ -73,11 +77,12 @@ export function mergeTidalIntoHub(
   }
 
   const pool: TidalHubTrack[] = [];
+  const sourceIds = new Set<string>();
   for (const t of tidalTracks || []) {
     const key = signatureOf(t.artist, t.title);
     if (!key.replace(/::/g, '')) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (sourceIds.has(t.path)) continue;
+    sourceIds.add(t.path);
     pool.push(t);
   }
 
@@ -86,7 +91,12 @@ export function mergeTidalIntoHub(
   }
 
   const recs = [...(hubData.recommendations || [])];
-  const blend = pool.slice(0, Math.max(0, maxBlend));
+  const blend = pool.filter(track => {
+    const key = signatureOf(track.artist, track.title);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, Math.max(0, maxBlend));
   const gap = Math.max(1, Math.ceil(recs.length / Math.max(1, blend.length)));
 
   const mergedRecs: YoutubeTrack[] = [];

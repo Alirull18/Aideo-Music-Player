@@ -1710,10 +1710,13 @@ mod dsp_tests {
 
         let url1 = "https://sp-pr-cf.audio.tidal.com/stream1";
         let url2 = "https://sp-pr-cf.audio.tidal.com/stream2";
+        let yt_direct = "https://rr1---sn-abc.googlevideo.com/videoplayback?id=123";
+        let yt_canonical = "https://www.youtube.com/watch?v=kJQP7kiw5Fk";
         let temp_dir = std::env::temp_dir();
 
         let dl1 = Arc::new(ActiveStreamDownload {
             url: url1.to_string(),
+            canonical_url: None,
             stream_path: temp_dir.join("test_stream1.stream"),
             cache_path: temp_dir.join("test_stream1.cache"),
             total_bytes: Arc::new(AtomicU64::new(10_000_000)),
@@ -1724,9 +1727,21 @@ mod dsp_tests {
 
         let dl2 = Arc::new(ActiveStreamDownload {
             url: url2.to_string(),
+            canonical_url: None,
             stream_path: temp_dir.join("test_stream2.stream"),
             cache_path: temp_dir.join("test_stream2.cache"),
             total_bytes: Arc::new(AtomicU64::new(20_000_000)),
+            downloaded_bytes: Arc::new(AtomicU64::new(1_000_000)),
+            complete: Arc::new(AtomicBool::new(false)),
+            abort: Arc::new(AtomicBool::new(false)),
+        });
+
+        let dl3 = Arc::new(ActiveStreamDownload {
+            url: yt_direct.to_string(),
+            canonical_url: Some(yt_canonical.to_string()),
+            stream_path: temp_dir.join("test_stream3.stream"),
+            cache_path: temp_dir.join("test_stream3.cache"),
+            total_bytes: Arc::new(AtomicU64::new(5_000_000)),
             downloaded_bytes: Arc::new(AtomicU64::new(1_000_000)),
             complete: Arc::new(AtomicBool::new(false)),
             abort: Arc::new(AtomicBool::new(false)),
@@ -1736,13 +1751,28 @@ mod dsp_tests {
             let mut active = ACTIVE_STREAM_DOWNLOADS.lock().unwrap();
             active.insert(url1.to_string(), Arc::clone(&dl1));
             active.insert(url2.to_string(), Arc::clone(&dl2));
+            active.insert(yt_direct.to_string(), Arc::clone(&dl3));
         }
 
-        // Seeking on url1 or switching to url1 should preserve url1 and abort url2
+        // Passing canonical YouTube watch URL must keep the googlevideo stream download alive
+        abort_inactive_stream_downloads(Some(yt_canonical));
+        assert!(!dl3.abort.load(Ordering::SeqCst), "YouTube stream download must not be aborted when passing canonical watch URL");
+        assert!(dl1.abort.load(Ordering::SeqCst), "Inactive url1 must be aborted");
+        assert!(dl2.abort.load(Ordering::SeqCst), "Inactive url2 must be aborted");
+
+        // Seeking on url1 or switching to url1 should preserve url1 and abort url2 and dl3
+        {
+            let mut active = ACTIVE_STREAM_DOWNLOADS.lock().unwrap();
+            dl1.abort.store(false, Ordering::SeqCst);
+            dl2.abort.store(false, Ordering::SeqCst);
+            active.insert(url1.to_string(), Arc::clone(&dl1));
+            active.insert(url2.to_string(), Arc::clone(&dl2));
+        }
         abort_inactive_stream_downloads(Some(url1));
 
         assert!(!dl1.abort.load(Ordering::SeqCst), "Active track stream download must not be aborted");
         assert!(dl2.abort.load(Ordering::SeqCst), "Inactive track stream download must be aborted");
+        assert!(dl3.abort.load(Ordering::SeqCst), "Inactive YouTube stream must be aborted when switching to url1");
 
         {
             let active = ACTIVE_STREAM_DOWNLOADS.lock().unwrap();

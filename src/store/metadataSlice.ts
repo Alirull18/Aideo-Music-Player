@@ -1,12 +1,135 @@
 import { StateCreator } from 'zustand';
-import { PlayerState, extractDominantColor, LyricsDisplayMode } from './types';
+import { PlayerState, extractDominantColor, LyricsDisplayMode, RecordingSources, PlaybackSource, SourceSelection } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { cleanSearchQuery, pathsEqual, getVariantPenalty, sortLyricLines } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { romanizeText } from '../utils/romanizer';
+import { sourceKey } from '../utils/unifiedSources';
 
 export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
+  sourceRegistry: (() => {
+    try {
+      const raw = localStorage.getItem('aideo_library_source_choices');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      const registry: Record<string, RecordingSources> = {};
+      for (const val of Object.values(parsed)) {
+        if (val && typeof val === 'object' && (val as RecordingSources).recording_id) {
+          registry[(val as RecordingSources).recording_id] = val as RecordingSources;
+        }
+      }
+      return registry;
+    } catch {
+      return {};
+    }
+  })(),
+
+  registerDiscoveredSources: (sourcesInput: RecordingSources | PlaybackSource[], recordingIdParam?: string) => {
+    let recordingId = recordingIdParam;
+    let newSources: PlaybackSource[] = [];
+    let displayCandidates: PlaybackSource[] | undefined;
+    let selection: SourceSelection | undefined;
+
+    if (!Array.isArray(sourcesInput)) {
+      recordingId = sourcesInput.recording_id;
+      newSources = sourcesInput.sources || [];
+      displayCandidates = sourcesInput.display_candidates;
+      selection = sourcesInput.selection;
+    } else {
+      newSources = sourcesInput;
+    }
+
+    if (!recordingId) {
+      if (newSources.length > 0) {
+        recordingId = sourceKey(newSources[0]);
+      } else {
+        return;
+      }
+    }
+
+    set((state: PlayerState) => {
+      const existing = state.sourceRegistry[recordingId!];
+      const mergedSources = existing
+        ? [...new Map([...existing.sources, ...newSources].map(s => [sourceKey(s), s])).values()].slice(0, 32)
+        : newSources.slice(0, 32);
+
+      const mergedCandidates = existing?.display_candidates || displayCandidates
+        ? [...new Map([
+            ...(existing?.display_candidates || []),
+            ...(displayCandidates || []),
+          ].map(s => [sourceKey(s), s])).values()].slice(0, 32)
+        : undefined;
+
+      const updatedContext: RecordingSources = {
+        recording_id: recordingId!,
+        sources: mergedSources,
+        selection: selection || existing?.selection || { mode: 'auto' },
+        ...(mergedCandidates ? { display_candidates: mergedCandidates } : {}),
+      };
+
+      const newRegistry = {
+        ...state.sourceRegistry,
+        [recordingId!]: updatedContext,
+      };
+
+      // Reactively update currentTrack if it matches this recording
+      let updatedCurrentTrack = state.currentTrack;
+      if (state.currentTrack) {
+        const ctRecId = state.currentTrack.source_context?.recording_id;
+        const matchesCurrent = ctRecId === recordingId
+          || (Boolean(state.currentTrack.title) && newSources.some(s => s.metadata?.title === state.currentTrack?.title && s.metadata?.artist === state.currentTrack?.artist));
+        if (matchesCurrent) {
+          updatedCurrentTrack = {
+            ...state.currentTrack,
+            source_context: {
+              ...(state.currentTrack.source_context || updatedContext),
+              sources: mergedSources,
+              ...(mergedCandidates ? { display_candidates: mergedCandidates } : {}),
+            },
+          };
+          try {
+            localStorage.setItem('aideo_current_track', JSON.stringify(updatedCurrentTrack));
+          } catch { /* ignore */ }
+        }
+      }
+
+      // Reactively update queue items matching this recording
+      const updatedQueue = state.queue.map(item => {
+        if (item.source_context?.recording_id === recordingId) {
+          return {
+            ...item,
+            source_context: {
+              ...item.source_context,
+              sources: mergedSources,
+              ...(mergedCandidates ? { display_candidates: mergedCandidates } : {}),
+            },
+          };
+        }
+        return item;
+      });
+
+      // Update matching library tracks that already have source_context
+      const updatedTracks = state.tracks.some(t => t.source_context?.recording_id === recordingId)
+        ? state.tracks.map(t => t.source_context?.recording_id === recordingId ? {
+            ...t,
+            source_context: {
+              ...t.source_context,
+              sources: mergedSources,
+              ...(mergedCandidates ? { display_candidates: mergedCandidates } : {}),
+            },
+          } : t)
+        : state.tracks;
+
+      return {
+        sourceRegistry: newRegistry,
+        currentTrack: updatedCurrentTrack,
+        queue: updatedQueue,
+        tracks: updatedTracks,
+      };
+    });
+  },
+
   lyrics: [],
   lyricOffset: 0,
   lyricStatus: 'idle',

@@ -412,6 +412,10 @@ pub fn xor_cipher(data: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+pub fn rendition_cache_key(namespace: &str, provider: &str, source_id: &str, rendition_format: &str) -> String {
+    crate::player::rendition_cache_key(namespace, provider, source_id, rendition_format)
+}
+
 #[tauri::command]
 pub async fn cache_cloud_track(app_handle: tauri::AppHandle, stream_url: String) -> Result<bool, String> {
     let parsed_url = url::Url::parse(&stream_url).map_err(|e| format!("Invalid stream URL: {}", e))?;
@@ -419,14 +423,8 @@ pub async fn cache_cloud_track(app_handle: tauri::AppHandle, stream_url: String)
         return Err("Invalid stream URL scheme: only http and https are permitted".to_string());
     }
 
-    let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
-    let Some(data_dir) = dirs::data_dir() else {
-        return Err("Failed to resolve data directory".to_string());
-    };
-    let cache_dir = data_dir.join("Aideo").join("CloudCache");
-    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
-    
-    let cache_path = cache_dir.join(format!("{}.cache", hash));
+    let (cache_path, temp_path) = crate::player::get_cache_paths(&stream_url)
+        .ok_or_else(|| "Failed to resolve cache path".to_string())?;
     if cache_path.exists() {
         return Ok(true); // Already cached
     }
@@ -447,8 +445,6 @@ pub async fn cache_cloud_track(app_handle: tauri::AppHandle, stream_url: String)
             return Err("File size exceeds 150MB limit".to_string());
         }
     }
-    
-    let temp_path = cache_dir.join(format!("{}.tmp", hash));
     
     use futures::StreamExt;
     use tokio::io::AsyncWriteExt;
@@ -474,6 +470,11 @@ pub async fn cache_cloud_track(app_handle: tauri::AppHandle, stream_url: String)
     file.flush().await.map_err(|e| format!("Flush failed: {}", e))?;
     drop(file);
     
+    if bytes_written < 1024 {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err("Cloud track stream truncated (under 1024 bytes)".to_string());
+    }
+
     tokio::fs::rename(&temp_path, &cache_path).await.map_err(|e| format!("Rename failed: {}", e))?;
     
     let _ = prune_cache_to_limit_internal(&app_handle);
@@ -796,6 +797,11 @@ pub async fn prune_cache_to_limit(app_handle: tauri::AppHandle, limit_gb: f64) -
 
 #[tauri::command]
 pub fn check_url_is_cached(url: String) -> bool {
+    if let Some((cache_path, _)) = crate::player::get_cache_paths(&url) {
+        if cache_path.exists() {
+            return true;
+        }
+    }
     let hash = format!("{:x}", md5::compute(url.as_bytes()));
     if let Some(data_dir) = dirs::data_dir() {
         let cache_path = data_dir.join("Aideo").join("CloudCache").join(format!("{}.cache", hash));

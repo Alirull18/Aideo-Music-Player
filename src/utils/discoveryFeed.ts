@@ -1,4 +1,42 @@
-import { DiscoveryHubData, YoutubeTrack } from '../store/types';
+import { DiscoveryHubData, Track, YoutubeTrack } from '../store/types';
+import { catalogTrack, groupRecordings, isMusicTrack, sourceFor, sourceKey, sourceSearchQuery } from './unifiedSources';
+
+export function discoveryTrack(track: YoutubeTrack): Track {
+  const path = track.path || track.url;
+  const local = /^(?:[A-Za-z]:[\\/]|\/|\\\\)/.test(path);
+  const provider = track.format === 'Tidal FLAC' ? 'tidal' : track.format === 'Qobuz FLAC' ? 'qobuz' : 'youtube';
+  const converted = catalogTrack({ ...track, id: provider === 'youtube' ? track.id : path }, provider);
+  return { ...converted, path, format: track.format || (local ? 'Local File' : converted.format), catalog_quality: local ? undefined : converted.catalog_quality, source_context: track.source_context };
+}
+
+export function unifyDiscoveryHub(data: DiscoveryHubData | null, library: Track[]): DiscoveryHubData | null {
+  if (!data) return null;
+  const shelves = ['recently_played', 'heavy_rotation', 'forgotten_gems', 'recommendations', 'global_charts'] as const;
+  const mixed = { ...data, recommendations: [...data.recommendations, ...(data.tidal_hifi || [])] };
+  const mixes = [...data.mixed_for_you, ...(data.playlist_mixes || [])];
+  const libraryByPath = new Map(library.map(track => [track.path, track]));
+  const candidates = [...shelves.flatMap(key => mixed[key] || []), ...mixes.flatMap(mix => mix.tracks)]
+    .map(track => libraryByPath.get(track.path || track.url) || discoveryTrack(track)).filter(isMusicTrack);
+  const queries = new Set(candidates.map(sourceSearchQuery));
+  const songs = groupRecordings([...candidates, ...library.filter(track => queries.has(sourceSearchQuery(track)))], '');
+  const bySource = new Map(songs.flatMap(song => song.source_context!.sources.map(source => [sourceKey(source), song] as const)));
+  const collect = (tracks: YoutubeTrack[], seen = new Set<string>()): YoutubeTrack[] => tracks.flatMap(track => {
+    const playable = discoveryTrack(track);
+    if (!isMusicTrack(playable)) return [];
+    const source = sourceFor(playable);
+    const song = source && bySource.get(sourceKey(source));
+    const key = song?.source_context?.recording_id || track.url;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ ...track, source_context: song?.source_context || undefined }];
+  });
+  const result = { ...data, tidal_hifi: [] };
+  const seen = new Set<string>();
+  for (const shelf of shelves) result[shelf] = collect(mixed[shelf] || [], seen);
+  result.mixed_for_you = data.mixed_for_you.map(mix => ({ ...mix, tracks: collect(mix.tracks) }));
+  result.playlist_mixes = data.playlist_mixes?.map(mix => ({ ...mix, tracks: collect(mix.tracks) }));
+  return result;
+}
 
 export type UnifiedTabId = 'all' | 'recs' | 'recent' | 'rotation' | 'gems' | 'tidal' | 'charts';
 

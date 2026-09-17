@@ -1,11 +1,16 @@
 export type StreamingQuality = 'best_available' | 'standard_lossless' | 'data_saver';
 
+export type MatchAssessment = 'equivalent' | 'candidate' | 'uncertain' | 'rejected';
+
 export interface PlaybackSource {
   provider: 'local' | 'tidal' | 'qobuz' | 'youtube';
   // A local absolute path or a provider ID; never a resolved streaming URL.
   id: string;
   catalog_quality?: SourceQuality | null;
   metadata?: SourceMetadata | null;
+  recording_evidence?: RecordingEvidence | null;
+  match_assessment?: MatchAssessment | null;
+  match_reason?: string | null;
 }
 
 export type SourceMetadata = Pick<Track, 'title' | 'artist' | 'album' | 'duration' | 'duration_raw' | 'cover_url' | 'track_number' | 'disc_number'>;
@@ -21,6 +26,7 @@ export interface RecordingEvidence {
   isrc?: string | null;
   upc?: string | null;
   version?: string | null;
+  explicit?: boolean | null;
 }
 
 export type SourceSelection = { mode: 'auto' } | { mode: 'explicit'; source: PlaybackSource };
@@ -29,6 +35,8 @@ export interface RecordingSources {
   recording_id: string;
   sources: PlaybackSource[];
   selection: SourceSelection;
+  display_candidates?: PlaybackSource[];
+  match_version?: number;
 }
 
 export interface Track {
@@ -53,6 +61,7 @@ export interface Track {
   track_number?: number | null;
   disc_number?: number | null;
   playlist_entry_id?: number;
+  queue_occurrence_id?: string;
   // Absence preserves the legacy path-based source choice.
   source_context?: RecordingSources | null;
   recording_evidence?: RecordingEvidence;
@@ -101,6 +110,11 @@ export interface YoutubeTrack {
   duration_raw: string;
   url: string;
   recommendation_source?: string | null;
+  path?: string;
+  format?: string;
+  duration?: number;
+  album?: string | null;
+  source_context?: RecordingSources;
 }
 
 export interface YoutubeMix {
@@ -321,6 +335,7 @@ export interface PlaybackState {
   is_buffering?: boolean;
   backend_position_secs?: number;
   effective_audio_path?: EffectiveAudioPath | null;
+  attempt_id?: string;
 }
 
 export interface CustomPromptState {
@@ -377,6 +392,7 @@ export interface PlayerState {
   playHistory: Track[];
   playCounts: Record<string, number>;
   playback: PlaybackState;
+  currentAttemptId?: string;
   isMuted: boolean;
   mutedPrevVolume: number;
   lyrics: LyricLine[];
@@ -400,6 +416,8 @@ export interface PlayerState {
   preferredSource: PlaybackSource['provider'] | 'auto';
   setPreferredSource: (source: PlaybackSource['provider'] | 'auto') => void;
   sourceQueueManaged: boolean;
+  sourceRegistry: Record<string, RecordingSources>;
+  registerDiscoveredSources: (sources: RecordingSources | PlaybackSource[], recordingId?: string) => void;
   setStreamingQuality: (quality: StreamingQuality) => void;
   devices: string[];
   currentDevice: string | null;

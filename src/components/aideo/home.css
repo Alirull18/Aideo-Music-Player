@@ -1781,3 +1781,6 @@
   .ah-editorial, .ah-stage-content { padding-left: 24px; padding-right: 24px; }
   .ah-stage { padding: 36px 24px 32px; }
 }
+.home-song-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; min-width: 0; color: var(--text); }
+.home-song-sources small { font-size: 11px; overflow-wrap: anywhere; }
+.home-song-sources .source-button { padding: 2px 6px; font-size: 11px; }

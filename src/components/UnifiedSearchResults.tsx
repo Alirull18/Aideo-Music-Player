@@ -12,11 +12,11 @@ function SearchSong({ track: original }: { track: Track }) {
   const saved = useStore(s => s.tracks);
   const current = useStore(s => s.currentTrack);
   const buffering = useStore(s => s.playback.is_buffering);
-  const [choice, setChoice] = useState<Track | null>(null);
+  const [, refreshChoice] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [loved, setLoved] = useState<boolean>();
-  const track = applySourcePreference(choice || original);
+  const track = applySourcePreference(original);
   const isCurrent = current?.source_context?.recording_id === track.source_context?.recording_id;
   const isLoved = loved ?? saved.some(t => t.loved === 1 && t.source_context?.recording_id === track.source_context?.recording_id);
   const action = async (kind: 'queue' | 'next' | 'save') => {
@@ -44,8 +44,9 @@ function SearchSong({ track: original }: { track: Track }) {
       <span className="unified-track-title">{track.title || 'Untitled'}</span>
       <p>{track.artist || 'Unknown artist'}{track.album ? ` / ${track.album}` : ''}</p>
       <div className="unified-source-line">
-        <SourceMenu track={track} compact onChange={setChoice} />
-        <small>{isCurrent && current?.active_source ? `Playing from ${sourceName(current.active_source)}` : [...new Set(track.source_context!.sources.map(sourceName))].join(' / ')}</small>
+        <SourceMenu track={track} compact onChange={() => refreshChoice(value => value + 1)} />
+        <small>{[...new Set([...(track.source_context?.sources || []), ...(track.source_context?.display_candidates || [])].map(sourceName))].join(' / ')}</small>
+        {isCurrent && current?.active_source && <small>{`Playing from ${sourceName(current.active_source)}`}</small>}
         {isCurrent && buffering && <small role="status">Preparing audio...</small>}
       </div>
       {message && <p className="unified-action-status" role="status">{message}</p>}

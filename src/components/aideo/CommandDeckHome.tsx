@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { RefreshCw, Play, Radio, Activity } from 'lucide-react';
 import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
-import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, ShelfId } from './HomeParts';
+import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, ShelfId, SongSources } from './HomeParts';
 
 type FeedTab = 'all' | ShelfId;
 
@@ -220,6 +220,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
                   <div className="ah-row-meta">
                     <div className="ah-row-title" title={item.track.title}>{item.track.title}</div>
                     <div className="ah-row-artist" title={item.track.artist}>{item.track.artist}</div>
+                    <SongSources track={item.track} />
                   </div>
                   <div className="ah-src">
                     <span className="ah-src-pill" style={{ color: SHELVES[item.shelf].color, borderColor: `${SHELVES[item.shelf].color}35` }}>

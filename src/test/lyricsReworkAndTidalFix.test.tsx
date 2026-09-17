@@ -145,7 +145,8 @@ describe('Tidal Duration Preservation & Minute Display', () => {
     const hubTracks = tidalResultsToHubTracks(rawResults);
     expect(hubTracks[0].duration).toBe(215);
     expect(hubTracks[0].duration_raw).toBe('3:35');
-    expect(hubTracks[1].duration).toBe(180);
+    expect(hubTracks[1].duration).toBeUndefined();
+    expect(hubTracks[1].duration_raw).toBe('--:--');
   });
 
   it('parseDuration converts string duration to seconds and fmt formats it', () => {

@@ -67,6 +67,8 @@ pub struct YoutubeTrack {
     pub url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recommendation_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_context: Option<crate::db::RecordingSources>,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -1060,6 +1062,7 @@ pub async fn search_youtube_internal_impl(
             duration_raw,
             url,
             recommendation_source: None,
+            source_context: None,
         }, priority_score));
     }
 
@@ -1215,16 +1218,6 @@ pub async fn get_search_suggestions(query: String) -> Result<Vec<String>, String
     Ok(suggestions)
 }
 
-fn is_one_hour_or_longer(duration_raw: &str) -> bool {
-    let parts: Vec<&str> = duration_raw.split(':').collect();
-    if parts.len() >= 3 {
-        if let Ok(hours) = parts[0].trim().parse::<u32>() {
-            return hours >= 1;
-        }
-    }
-    false
-}
-
 #[tauri::command]
 pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Vec<String>) -> Result<Vec<YoutubeTrack>, String> {
     let api_key = fetch_innertube_key().await;
@@ -1291,9 +1284,9 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
                 active = true;
                 if !seen.contains(&track.id) {
                     seen.insert(track.id.clone());
-                    if is_one_hour_or_longer(&track.duration_raw) {
+                    if is_duration_too_long(&track.duration_raw) {
                         println!(
-                            "[youtube] Filtering out recommended track '{}' because duration is 1 hour++ ({})",
+                            "[youtube] Filtering out recommended track '{}' because duration exceeds 20 minutes ({})",
                             track.title, track.duration_raw
                         );
                         continue;
@@ -1346,6 +1339,8 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
         }
     }
 
+    final_tracks.retain(|track| !is_duration_too_long(&track.duration_raw));
+
     Ok(final_tracks)
 }
 
@@ -1371,12 +1366,12 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
 
     // 1. Direct title keyword contains
     let title_keywords = [
-        "instrumental",
+        "podcast",
+        "interview",
+        "vlog",
         "karaoke",
         "backing track",
         "backing tracks",
-        "piano version",
-        "guitar version",
         "synthesia",
         "music box version",
         "music box cover",
@@ -1392,17 +1387,10 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
         "karaoke version",
         "karaoke track",
         "karaoke mix",
-        "instrumental version",
-        "instrumental cover",
-        "instrumental mix",
-        "instrumental edit",
-        "instrumental track",
         "8-bit cover",
         "8bit cover",
         "lofi cover",
         "lo-fi cover",
-        "orchestral version",
-        "orchestral cover",
         // Remix/edit variants
         "sped up",
         "sped-up",
@@ -1436,18 +1424,6 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
         "sbs kpop",
         "mnet",
         "m2",
-        // Generic Western/Global Live & Promo filters
-        "live performance",
-        "live session",
-        "live sessions",
-        "acoustic live",
-        "stripped live",
-        "stripped session",
-        "live at ", // e.g. "Live at Wembley"
-        "tiny desk",
-        "coachella",
-        "glastonbury",
-        "lollapalooza",
         "official teaser",
         "music video teaser",
         "official trailer",
@@ -1470,7 +1446,6 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
         "unboxing",
         "live stream",
         "livestream",
-        "full concert",
         "lyric video",
         "lyrics video",
         "visualizer video",
@@ -1479,8 +1454,6 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
         "whatsapp status",
         "shorts",
         "#shorts",
-        "interview",
-        "vlog",
         "challenge",
         // Compilation signals in title
         "greatest hits",
@@ -1517,7 +1490,6 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
     // 3. Direct artist/channel keywords
     let artist_keywords = [
         "karaoke",
-        "instrumental",
         "tribute",
         "synthesia",
         "music box",
@@ -1546,14 +1518,8 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
         "line distribution",
         "fancam",
         // Generic Western/Global Curators & Promoters
-        "npr music",
         "vevo control",
         "vevo lift",
-        "vevo session",
-        "vevo sessions",
-        "live sessions",
-        "music sessions",
-        "studio sessions",
         "curator",
         "promotion",
         "promotions",
@@ -1984,6 +1950,7 @@ pub async fn get_youtube_autoplay_recommendations(
                         duration_raw,
                         url,
                         recommendation_source: None,
+                        source_context: None,
                     });
                 }
             }
@@ -3123,19 +3090,71 @@ fn yt_track_signature(t: &YoutubeTrack) -> String {
     format!("{}::{}", normalize_artist_name(&t.artist), clean_title(&t.title))
 }
 
-/// Drops online tracks whose artist+title signature already exists in the
-/// local library, so blended shelves never show the same song twice.
-fn dedupe_online_against_library(
+/// Merges online duplicate sources into the matching shelf track's source_context
+/// instead of silently discarding them, and returns only non-duplicate online tracks.
+pub fn dedupe_online_against_shelf(
+    local_shelf: &mut [YoutubeTrack],
     online: Vec<YoutubeTrack>,
     library_signatures: &std::collections::HashSet<String>,
 ) -> Vec<YoutubeTrack> {
-    if library_signatures.is_empty() {
-        return online;
+    let mut kept = Vec::new();
+    for online_track in online {
+        let sig = yt_track_signature(&online_track);
+        if let Some(matching_local) = local_shelf.iter_mut().find(|lt| yt_track_signature(lt) == sig) {
+            let yt_source = crate::db::PlaybackSource {
+                provider: crate::db::SourceProvider::Youtube,
+                id: online_track.id.clone(),
+                catalog_quality: None,
+                metadata: Some(crate::db::SourceMetadata {
+                    title: Some(online_track.title.clone()),
+                    artist: Some(online_track.artist.clone()),
+                    album: None,
+                    duration: None,
+                    duration_raw: Some(online_track.duration_raw.clone()),
+                    cover_url: online_track.cover_url.clone(),
+                    track_number: None,
+                    disc_number: None,
+                }),
+            };
+            let ctx = matching_local.source_context.get_or_insert_with(|| {
+                let local_source = crate::db::PlaybackSource {
+                    provider: crate::db::SourceProvider::Local,
+                    id: matching_local.url.clone(),
+                    catalog_quality: None,
+                    metadata: Some(crate::db::SourceMetadata {
+                        title: Some(matching_local.title.clone()),
+                        artist: Some(matching_local.artist.clone()),
+                        album: None,
+                        duration: None,
+                        duration_raw: Some(matching_local.duration_raw.clone()),
+                        cover_url: matching_local.cover_url.clone(),
+                        track_number: None,
+                        disc_number: None,
+                    }),
+                };
+                crate::db::RecordingSources {
+                    recording_id: matching_local.id.clone(),
+                    sources: vec![local_source],
+                    selection: crate::db::SourceSelection::Auto,
+                }
+            });
+            if !ctx.sources.iter().any(|s| s.provider == crate::db::SourceProvider::Youtube && s.id == online_track.id) {
+                ctx.sources.push(yt_source);
+            }
+        } else if !library_signatures.contains(&sig) {
+            kept.push(online_track);
+        }
     }
-    online
-        .into_iter()
-        .filter(|t| !library_signatures.contains(&yt_track_signature(t)))
-        .collect()
+    kept
+}
+
+/// Backward-compatible wrapper for library signature deduplication
+pub fn dedupe_online_against_library(
+    online: Vec<YoutubeTrack>,
+    library_signatures: &std::collections::HashSet<String>,
+) -> Vec<YoutubeTrack> {
+    let mut dummy_shelf = Vec::new();
+    dedupe_online_against_shelf(&mut dummy_shelf, online, library_signatures)
 }
 
 /// Blends online tracks into an ordered local shelf without an obvious
@@ -3248,6 +3267,27 @@ fn extract_library_shelves(
             "0:00".to_string()
         };
 
+        let local_source = crate::db::PlaybackSource {
+            provider: crate::db::SourceProvider::Local,
+            id: t.path.clone(),
+            catalog_quality: None,
+            metadata: Some(crate::db::SourceMetadata {
+                title: t.title.clone(),
+                artist: t.artist.clone(),
+                album: t.album.clone(),
+                duration: t.duration,
+                duration_raw: Some(duration_raw.clone()),
+                cover_url: t.cover_url.clone(),
+                track_number: t.track_number,
+                disc_number: t.disc_number,
+            }),
+        };
+        let source_context = Some(crate::db::RecordingSources {
+            recording_id: format!("local_{}", t.id),
+            sources: vec![local_source],
+            selection: crate::db::SourceSelection::Auto,
+        });
+
         YoutubeTrack {
             id: format!("local_{}", t.id),
             title: t.title.clone().unwrap_or_else(|| "Unknown Title".to_string()),
@@ -3256,6 +3296,7 @@ fn extract_library_shelves(
             duration_raw,
             url: t.path.clone(),
             recommendation_source: Some(source.to_string()),
+            source_context,
         }
     };
 
@@ -3422,6 +3463,27 @@ fn generate_local_mixes(
             "0:00".to_string()
         };
 
+        let local_source = crate::db::PlaybackSource {
+            provider: crate::db::SourceProvider::Local,
+            id: track.path.clone(),
+            catalog_quality: None,
+            metadata: Some(crate::db::SourceMetadata {
+                title: track.title.clone(),
+                artist: track.artist.clone(),
+                album: track.album.clone(),
+                duration: track.duration,
+                duration_raw: Some(duration_raw.clone()),
+                cover_url: track.cover_url.clone(),
+                track_number: track.track_number,
+                disc_number: track.disc_number,
+            }),
+        };
+        let source_context = Some(crate::db::RecordingSources {
+            recording_id: format!("local_{}", track.id),
+            sources: vec![local_source],
+            selection: crate::db::SourceSelection::Auto,
+        });
+
         YoutubeTrack {
             id: format!("local_{}", track.id),
             title: track.title.clone().unwrap_or_else(|| "Unknown Title".to_string()),
@@ -3430,6 +3492,7 @@ fn generate_local_mixes(
             duration_raw,
             url: track.path.clone(),
             recommendation_source: Some(source.to_string()),
+            source_context,
         }
     };
 
@@ -3631,6 +3694,27 @@ pub async fn generate_hybrid_mixes(
             "0:00".to_string()
         };
 
+        let local_source = crate::db::PlaybackSource {
+            provider: crate::db::SourceProvider::Local,
+            id: track.path.clone(),
+            catalog_quality: None,
+            metadata: Some(crate::db::SourceMetadata {
+                title: track.title.clone(),
+                artist: track.artist.clone(),
+                album: track.album.clone(),
+                duration: track.duration,
+                duration_raw: Some(duration_raw.clone()),
+                cover_url: track.cover_url.clone(),
+                track_number: track.track_number,
+                disc_number: track.disc_number,
+            }),
+        };
+        let source_context = Some(crate::db::RecordingSources {
+            recording_id: format!("local_{}", track.id),
+            sources: vec![local_source],
+            selection: crate::db::SourceSelection::Auto,
+        });
+
         YoutubeTrack {
             id: format!("local_{}", track.id),
             title: track.title.clone().unwrap_or_else(|| "Unknown Title".to_string()),
@@ -3639,6 +3723,7 @@ pub async fn generate_hybrid_mixes(
             duration_raw,
             url: track.path.clone(),
             recommendation_source: Some("Offline Library".to_string()),
+            source_context,
         }
     };
 
@@ -4340,6 +4425,27 @@ fn map_local_to_youtube_track(track: &crate::db::Track, source: &str) -> Youtube
         "0:00".to_string()
     };
 
+    let local_source = crate::db::PlaybackSource {
+        provider: crate::db::SourceProvider::Local,
+        id: track.path.clone(),
+        catalog_quality: None,
+        metadata: Some(crate::db::SourceMetadata {
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            duration: track.duration,
+            duration_raw: Some(duration_raw.clone()),
+            cover_url: track.cover_url.clone(),
+            track_number: track.track_number,
+            disc_number: track.disc_number,
+        }),
+    };
+    let source_context = Some(crate::db::RecordingSources {
+        recording_id: format!("local_{}", track.id),
+        sources: vec![local_source],
+        selection: crate::db::SourceSelection::Auto,
+    });
+
     YoutubeTrack {
         id: format!("local_{}", track.id),
         title: track.title.clone().unwrap_or_else(|| "Unknown Title".to_string()),
@@ -4348,6 +4454,7 @@ fn map_local_to_youtube_track(track: &crate::db::Track, source: &str) -> Youtube
         duration_raw,
         url: track.path.clone(),
         recommendation_source: Some(source.to_string()),
+        source_context,
     }
 }
 
@@ -4645,7 +4752,7 @@ pub async fn get_personalized_discovery_hub(
             for (res, source) in results {
                 if let Ok(tracks) = res {
                     for mut t in tracks.into_iter().take(4) {
-                        if !is_third_party_or_instrumental(&t.title, &t.artist) && !is_compilation_channel(&t.artist) && seen_ids.insert(t.id.clone()) {
+                        if !is_duration_too_long(&t.duration_raw) && !is_third_party_or_instrumental(&t.title, &t.artist) && !is_compilation_channel(&t.artist) && seen_ids.insert(t.id.clone()) {
                             t.recommendation_source = Some(source.clone());
                             global_charts.push(t);
                         }
@@ -4657,7 +4764,7 @@ pub async fn get_personalized_discovery_hub(
             let pick = rand::rng().random_range(0..fallback_queries.len());
             if let Ok(tracks) = search_youtube_internal(&client_charts, &api_key_charts, fallback_queries[pick], false).await {
                 for mut t in tracks.into_iter().take(12) {
-                    if !is_third_party_or_instrumental(&t.title, &t.artist) && !is_compilation_channel(&t.artist) && seen_ids.insert(t.id.clone()) {
+                    if !is_duration_too_long(&t.duration_raw) && !is_third_party_or_instrumental(&t.title, &t.artist) && !is_compilation_channel(&t.artist) && seen_ids.insert(t.id.clone()) {
                         t.recommendation_source = Some("Global Top Hits".to_string());
                         global_charts.push(t);
                     }
@@ -4915,6 +5022,9 @@ pub async fn get_personalized_discovery_hub(
                     if !artist_matches(&track.artist, &target.target_artist) {
                         continue;
                     }
+                    if is_duration_too_long(&track.duration_raw) {
+                        continue;
+                    }
                     if is_third_party_or_instrumental(&track.title, &track.artist) || is_compilation_channel(&track.artist) {
                         continue;
                     }
@@ -4923,7 +5033,7 @@ pub async fn get_personalized_discovery_hub(
                         continue;
                     }
                     let title_lower = track.title.to_lowercase();
-                    let has_unofficial = ["lyrics", "lyric", "가사", "color coded", "color-coded", "translation", "sub", "subbed", "fancam", "live in", "live at", "tour", "compilation", "playlist", "nonstop", "non-stop"]
+                    let has_unofficial = ["lyrics", "lyric", "가사", "color coded", "color-coded", "translation", "sub", "subbed", "fancam", "compilation", "playlist", "nonstop", "non-stop"]
                         .iter().any(|&kw| title_lower.contains(kw));
                     if has_unofficial {
                         continue;
@@ -5032,22 +5142,15 @@ pub async fn get_personalized_discovery_hub(
             tracks
         };
 
+        let dedupe_and_blend = |mut local: Vec<YoutubeTrack>, online: Vec<YoutubeTrack>, sigs: &std::collections::HashSet<String>| {
+            let filtered_online = dedupe_online_against_shelf(&mut local, online, sigs);
+            blend_shelf_naturally(local, filtered_online, 20)
+        };
+
         (
-            blend_shelf_naturally(
-                recently_played,
-                dedupe_online_against_library(tag_source(resolved_recent, "Recently Played"), &library_signatures),
-                20,
-            ),
-            blend_shelf_naturally(
-                heavy_rotation,
-                dedupe_online_against_library(tag_source(resolved_rotation, "Heavy Rotation"), &library_signatures),
-                20,
-            ),
-            blend_shelf_naturally(
-                forgotten_gems,
-                dedupe_online_against_library(tag_source(resolved_gems, "Time Capsule"), &library_signatures),
-                20,
-            ),
+            dedupe_and_blend(recently_played, tag_source(resolved_recent, "Recently Played"), &library_signatures),
+            dedupe_and_blend(heavy_rotation, tag_source(resolved_rotation, "Heavy Rotation"), &library_signatures),
+            dedupe_and_blend(forgotten_gems, tag_source(resolved_gems, "Time Capsule"), &library_signatures),
         )
     };
 
@@ -5320,6 +5423,7 @@ mod tests {
             duration_raw: "3:00".to_string(),
             url: format!("url_{}", id),
             recommendation_source: None,
+            source_context: None,
         };
 
         let online = vec![create_track("o1"), create_track("o2"), create_track("o3")];
@@ -5424,6 +5528,73 @@ mod tests {
     }
 
     #[test]
+    fn test_instrumentals_and_live_preserved() {
+        // Genuine musical instrumentals MUST return false (not dropped)
+        assert!(!is_third_party_or_instrumental("Clair de Lune (Instrumental)", "Claude Debussy"));
+        assert!(!is_third_party_or_instrumental("Moonlight Sonata Piano Solo", "Beethoven"));
+        assert!(!is_third_party_or_instrumental("Classical Guitar (Acoustic)", "Artist"));
+        assert!(!is_third_party_or_instrumental("Interstellar Main Theme Soundtrack", "Hans Zimmer"));
+        assert!(!is_third_party_or_instrumental("Theme (Instrumental)", "Artist"));
+        assert!(!is_third_party_or_instrumental("Piano Version", "Artist"));
+        assert!(!is_third_party_or_instrumental("Orchestral Version", "Artist"));
+
+        // Genuine live music MUST return false (not dropped)
+        assert!(!is_third_party_or_instrumental("Comfortably Numb (Live at Pompeii)", "David Gilmour"));
+        assert!(!is_third_party_or_instrumental("Song (Live at Wembley)", "Queen"));
+        assert!(!is_third_party_or_instrumental("Artist Live in Concert 2026", "Artist"));
+        assert!(!is_third_party_or_instrumental("Tiny Desk Concert", "Dua Lipa"));
+        assert!(!is_third_party_or_instrumental("Live Performance 2024", "Artist"));
+        assert!(!is_third_party_or_instrumental("Live Session", "Artist"));
+        assert!(!is_third_party_or_instrumental("Stripped Live", "Artist"));
+        assert!(!is_third_party_or_instrumental("Song", "NPR Music"));
+        assert!(!is_third_party_or_instrumental("Song", "Vevo Session"));
+
+        // Non-music slop MUST return true (dropped)
+        assert!(is_third_party_or_instrumental("Episode 42: A Great Podcast", "Podcaster"));
+        assert!(is_third_party_or_instrumental("Daily Studio Vlog #12", "Vlogger"));
+        assert!(is_third_party_or_instrumental("How to Play Piano Tutorial", "Teacher"));
+        assert!(is_third_party_or_instrumental("Vinyl Unboxing Edition", "Reviewer"));
+        assert!(is_third_party_or_instrumental("Vocal Coach Reacts to Song", "Coach"));
+        assert!(is_third_party_or_instrumental("Karaoke Track", "Karaoke Channel"));
+        assert!(is_third_party_or_instrumental("Backing Track in Am", "Backing Tracks"));
+    }
+
+    #[test]
+    fn test_dedupe_online_preserves_alternate_sources() {
+        let mut local_shelf = vec![shelf_track("local_1", "Nightcall", "Kavinsky", "Recently Played")];
+        local_shelf[0].source_context = Some(crate::db::RecordingSources {
+            recording_id: "local_1".to_string(),
+            sources: vec![crate::db::PlaybackSource {
+                provider: crate::db::SourceProvider::Local,
+                id: "C:/Music/Nightcall.flac".to_string(),
+                catalog_quality: None,
+                metadata: None,
+            }],
+            selection: crate::db::SourceSelection::Auto,
+        });
+
+        let mut signatures = std::collections::HashSet::new();
+        signatures.insert(format!("{}::{}", normalize_artist_name("Kavinsky"), clean_title("Nightcall")));
+
+        let online = vec![
+            shelf_track("yt1", "Nightcall", "Kavinsky", "Recently Played"),
+            shelf_track("yt2", "Outrun", "Kavinsky", "Recently Played"),
+        ];
+
+        let kept = dedupe_online_against_shelf(&mut local_shelf, online, &signatures);
+        // yt1 is deduplicated from online shelf
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].id, "yt2");
+
+        // BUT yt1 is preserved in local_shelf[0].source_context!
+        let sources = &local_shelf[0].source_context.as_ref().unwrap().sources;
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].provider, crate::db::SourceProvider::Local);
+        assert_eq!(sources[1].provider, crate::db::SourceProvider::Youtube);
+        assert_eq!(sources[1].id, "yt1");
+    }
+
+    #[test]
     fn test_discovery_hub_data_serialization_and_shelves() {
         let sample_track = YoutubeTrack {
             id: "local_101".to_string(),
@@ -5433,6 +5604,7 @@ mod tests {
             duration_raw: "4:03".to_string(),
             url: "C:/Music/M83/Midnight City.flac".to_string(),
             recommendation_source: Some("Recently Played".to_string()),
+            source_context: None,
         };
 
         let sample_mix = YoutubeMix {
@@ -5477,6 +5649,7 @@ mod tests {
             duration_raw: "3:30".to_string(),
             url: format!("https://youtu.be/{}", id),
             recommendation_source: Some(source.to_string()),
+            source_context: None,
         }
     }
 

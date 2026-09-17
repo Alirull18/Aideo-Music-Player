@@ -71,7 +71,7 @@ describe('mergeTidalIntoHub', () => {
     expect(blended.length).toBeGreaterThan(0);
   });
 
-  it('never duplicates a track already present in any hub shelf or within the pool itself', () => {
+  it('retains alternate Tidal copies without duplicating songs in the recommendation blend', () => {
     const pool = [
       tidalResultsToHubTracks([tidalRaw('1', 'Alpha', 'One')])[0],      // duplicate of recommendations[0] (case-insensitive match)
       tidalResultsToHubTracks([tidalRaw('2', 'chart hit', 'chart artist')])[0], // duplicate of global_charts
@@ -80,8 +80,7 @@ describe('mergeTidalIntoHub', () => {
     ];
     const merged = mergeTidalIntoHub(hub(), pool, 8);
 
-    expect(merged.tidal_hifi).toHaveLength(1);
-    expect(merged.tidal_hifi![0].title).toBe('Fresh');
+    expect(merged.tidal_hifi).toHaveLength(4);
 
     const allTitles = merged.recommendations.map(t => t.title.toLowerCase());
     expect(new Set(allTitles).size).toBe(allTitles.length);

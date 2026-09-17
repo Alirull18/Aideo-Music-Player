@@ -1,6 +1,5 @@
-import { streamCacheKey } from '../utils/unifiedSources';
+import { applySourcePreference, createQueueOccurrenceId, isLocalUnifiedTrack, streamCacheKey } from '../utils/unifiedSources';
 import { cancelSourcePlayback, manageSourceQueue } from './sourcePlayback';
-import { applySourcePreference } from '../utils/unifiedSources';
 import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, StreamingQuality, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
@@ -387,6 +386,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   stopTrack: async () => {
     cancelSourcePlayback();
+    const stopTime = Date.now();
+    set(s => ({
+      playback: {
+        ...s.playback,
+        status: 'Stopped',
+        last_stop_time: stopTime,
+        backend_stop_detected_at: 0,
+      }
+    }));
     try {
       await get().recordPlaybackTransition(null);
       const current = get().playback.current_track;
@@ -407,7 +415,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           status: 'Stopped',
           current_track: null,
           last_played_track: current || get().playback.last_played_track,
-          last_stop_time: Date.now(),
+          last_stop_time: stopTime,
           position_secs: 0
         },
         coverArt: null,
@@ -570,14 +578,33 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // Anti-Race Condition: If frontend eagerly set a track but backend is still booting it up,
       // the backend will temporarily return null/Stopped. Ignore it to prevent wiping the UI.
       if (prevTrack && !newTrack && status.status === 'Stopped') {
+        // Idle/restored state guard: If frontend was not actively Playing (e.g. restored track on startup,
+        // paused, or already stopped), there is no active playback to recover.
+        // Never initiate recovery or playNext() from an idle, stopped, or paused state.
+        if (currentStatus !== 'Playing') {
+          if (get().playback.backend_stop_detected_at) {
+            set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
+          }
+          return;
+        }
+
+        // Retain transition grace protection for recent skips or active buffering
         const sinceSkip = Date.now() - (get().playback.last_skip_time || 0);
         if (sinceSkip < 2000) {
           return;
         }
-        // Beyond the skip window a backend Stopped+null is real (stream died / queue
-        // drained). Allow a short grace period for track-ended recovery (autoplay
-        // radio refill), then accept the stop so the UI can't freeze on a silent
-        // "Playing" track forever.
+
+        // Manual stop intent always takes precedence over automatic recovery
+        const sinceStop = Date.now() - (get().playback.last_stop_time || 0);
+        if (sinceStop < 3000) {
+          return;
+        }
+
+        if (get().playback.is_buffering) {
+          return;
+        }
+
+        // Grace period before reacting to backend Stopped+null
         const detectedAt = get().playback.backend_stop_detected_at || 0;
         if (!detectedAt) {
           set(s => ({ playback: { ...s.playback, backend_stop_detected_at: Date.now() } }));
@@ -586,14 +613,48 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         if (Date.now() - detectedAt < 3000) {
           return;
         }
-        // Fallback recovery: If backend transitioned to Stopped with null track, but queue has tracks or autoplay is on,
-        // trigger playNext() to ensure continuous playback.
-        if (get().queue.length > 0 || (get().autoplayEnabled && get().currentTrack)) {
-          console.log('[playback] Stopped status recovery: upcoming tracks available, calling playNext()...');
+
+        // Re-read fresh state after grace period to ensure no user action (stop/pause/seek) occurred
+        const freshState = get();
+        if (freshState.playback.status !== 'Playing' || (Date.now() - (freshState.playback.last_stop_time || 0) < 3000)) {
+          set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
+          return;
+        }
+
+        // If there are explicit tracks remaining in the queue, advance to next track
+        if (freshState.queue.length > 0) {
+          console.log('[playback] Stopped status recovery: advancing to next queued track...');
           set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
           await get().playNext();
           return;
         }
+
+        // Autoplay radio recovery:
+        // Only permit automatic recommendations if prior playback position and known duration
+        // support completion (i.e. played within last 4s or >=95% of track).
+        const track = freshState.currentTrack;
+        const duration = track?.duration;
+        const pos = freshState.playback.position_secs || 0;
+        const supportsNaturalEnd = typeof duration === 'number' && duration > 10 && (pos >= duration - 4 || pos >= duration * 0.95);
+
+        if (supportsNaturalEnd && freshState.autoplayEnabled) {
+          console.log('[playback] Stopped status recovery: prior position indicates natural completion, calling playNext()...');
+          set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
+          await get().playNext();
+          return;
+        }
+
+        // Unexpected mid-track stop or unknown duration: settle into Stopped state without looping/skipping
+        console.warn('[playback] Stream stopped unexpectedly mid-track. Settling into Stopped state.');
+        set(s => ({
+          playback: {
+            ...s.playback,
+            status: 'Stopped',
+            backend_stop_detected_at: 0,
+            current_track: null,
+          }
+        }));
+        return;
       } else if (get().playback.backend_stop_detected_at) {
         set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
       }
@@ -602,7 +663,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       // If the backend reports a different track, it means the Rust audio pipeline
       // is still processing previous skip commands and lagging behind the UI.
       if (prevTrack && newTrack && !pathsEqual(newTrack, prevTrack)) {
-        if (get().currentTrack?.source_context) return;
+        if (get().sourceQueueManaged) return;
         const timeSinceSkip = Date.now() - (get().playback.last_skip_time || 0);
         if (timeSinceSkip < 800) {
           return;
@@ -1416,20 +1477,17 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   addToQueue: async (track: Track) => {
     const requestedQuality = get().streamingQuality;
     try {
-      if (track.source_context || get().sourceQueueManaged) {
+      const occurrenceTrack: Track = {
+        ...applySourcePreference(track),
+        queue_occurrence_id: track.queue_occurrence_id || createQueueOccurrenceId(),
+      };
+      const requiresSourceQueue = track.source_context ? !isLocalUnifiedTrack(occurrenceTrack) : get().sourceQueueManaged;
+      if (requiresSourceQueue) {
         await manageSourceQueue(set);
-        const queue = [...get().queue, applySourcePreference(track)];
+        const queue = [...get().queue, occurrenceTrack];
         set({ queue });
         localStorage.setItem('aideo_queue', JSON.stringify(queue));
         return true;
-      }
-      // Prevent duplicates: skip if track already exists in queue
-      const existsInQueue = get().queue.some(t => pathsEqual(t.path, track.path));
-      if (existsInQueue) {
-        if (!track.is_autoplay) {
-          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Track is already in the queue', type: 'warning' } }));
-        }
-        return;
       }
 
       let finalPath = track.path;
@@ -1468,7 +1526,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await invoke('add_to_queue', { path: finalPath });
       });
 
-      const newQueue = [...get().queue, track];
+      const newQueue = [...get().queue, occurrenceTrack];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
       return true;
@@ -1482,18 +1540,17 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   playNextInQueue: async (track: Track) => {
     const requestedQuality = get().streamingQuality;
     try {
-      if (track.source_context || get().sourceQueueManaged) {
+      const occurrenceTrack: Track = {
+        ...applySourcePreference(track),
+        queue_occurrence_id: track.queue_occurrence_id || createQueueOccurrenceId(),
+      };
+      const requiresSourceQueue = track.source_context ? !isLocalUnifiedTrack(occurrenceTrack) : get().sourceQueueManaged;
+      if (requiresSourceQueue) {
         await manageSourceQueue(set);
-        const queue = [applySourcePreference(track), ...get().queue];
+        const queue = [occurrenceTrack, ...get().queue];
         set({ queue });
         localStorage.setItem('aideo_queue', JSON.stringify(queue));
         return true;
-      }
-      // Prevent duplicates: skip if track already exists in queue
-      const existsInQueue = get().queue.some(t => pathsEqual(t.path, track.path));
-      if (existsInQueue) {
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Track is already in the queue', type: 'warning' } }));
-        return;
       }
 
       let finalPath = track.path;
@@ -1532,7 +1589,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await invoke('queue_next', { path: finalPath });
       });
 
-      const newQueue = [track, ...get().queue];
+      const newQueue = [occurrenceTrack, ...get().queue];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
       return true;
@@ -1577,6 +1634,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   clearQueue: async () => {
+    cancelSourcePlayback();
     try {
       // Remember cleared autoplay tracks so a later radio refill doesn't re-add them
       const currentQueue = get().queue;
@@ -1640,7 +1698,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const saved = localStorage.getItem('aideo_queue');
       if (saved) {
         const parsed: Track[] = JSON.parse(saved);
-        if (parsed.some(t => t.source_context)) {
+        const hasOnlineTrack = parsed.some(t => t.source_context && !isLocalUnifiedTrack(t));
+        if (hasOnlineTrack) {
           await manageSourceQueue(set);
           const queue = parsed.map(applySourcePreference);
           set({ queue });

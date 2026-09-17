@@ -2,6 +2,8 @@ import { StateCreator } from 'zustand';
 import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId, VisualizerMode, VisualizerDecayRate } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
+import { cancelSourcePlayback } from './sourcePlayback';
+import { isStreamTrack } from '../utils';
 
 export const DEFAULT_SIDEBAR_NAV_ITEMS: SidebarNavItemConfig[] = [
   { id: 'aideo', label: 'Aideo', visible: true },
@@ -252,8 +254,19 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   },
 
   setAppMode: (mode: 'local' | 'hybrid') => {
+    cancelSourcePlayback();
     localStorage.setItem('aideo-app-mode', mode);
     set({ appMode: mode });
+    if (mode === 'local') {
+      const state = get();
+      const currentTrack = state.currentTrack;
+      const isOnline = currentTrack ? (
+        currentTrack.active_source ? currentTrack.active_source.provider !== 'local' : isStreamTrack(currentTrack.path, currentTrack.format)
+      ) : false;
+      if (isOnline && (state.playback.status === 'Playing' || state.playback.status === 'Paused' || state.playback.is_buffering)) {
+        void state.stopTrack();
+      }
+    }
   },
 
   setOnboardingCompleted: (completed: boolean) => {

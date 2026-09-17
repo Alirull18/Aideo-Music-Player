@@ -5,6 +5,17 @@ import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
 import { DiscoveryHubData, YoutubeTrack, LEGACY_AIDEO_PAGE_DESIGNS } from '../../store/types';
 import { SimpleLRU } from '../../utils/lruCache';
+import { discoveryTrack } from '../../utils/discoveryFeed';
+import { sourceName } from '../../utils/unifiedSources';
+import { SourceMenu } from '../SourceMenu';
+
+export function SongSources({ track }: { track: YoutubeTrack }) {
+  if (!track.source_context) return null;
+  return <div className="home-song-sources" onClick={event => event.stopPropagation()}>
+    <small>{[...new Set(track.source_context.sources.map(sourceName))].join(' / ')}</small>
+    <SourceMenu track={discoveryTrack(track)} compact />
+  </div>;
+}
 
 // ── Shelf model ─────────────────────────────────────────────
 

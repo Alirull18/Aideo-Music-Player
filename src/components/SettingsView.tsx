@@ -14,7 +14,7 @@ import {
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
   Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3, TrendingUp,
   Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen,
-  Tv2, Sliders, FileText, Type, Sun, Moon
+  Tv2, Sliders, FileText, Type, Sun, Moon, Check
 } from 'lucide-react';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
@@ -2380,25 +2380,187 @@ export function SettingsView() {
       description: 'Choose the source quality for Auto playback. Available copies fall back automatically with a small notice.',
       keywords: 'streaming quality best available standard lossless data saver sources',
       tab: 'plugins',
-      element: <div className="settings-ctrl-card">
-        <label htmlFor="streaming-quality">Preferred source quality</label>
-        <select id="streaming-quality" value={streamingQuality} onChange={e => setStreamingQuality(e.target.value as typeof streamingQuality)} className="source-quality-select">
-          <option value="best_available">Best available</option>
-          <option value="standard_lossless">Standard lossless</option>
-          <option value="data_saver">Data saver</option>
-        </select>
-        <p>Best available prefers the highest lossless resolution. Standard lossless prefers CD quality. Data saver reduces streaming bandwidth. Local files are preferred when they meet your choice.</p>
-        <p>This selects the source stream. It does not upsample audio or change DSP settings.</p>
-        <label htmlFor="preferred-source">Preferred source when quality is equal</label>
-        <select id="preferred-source" value={preferredSource} onChange={e => setPreferredSource(e.target.value as typeof preferredSource)} className="source-quality-select">
-          <option value="auto">Automatic</option>
-          <option value="local">Local files</option>
-          <option value="youtube">YouTube</option>
-          <option value="tidal" disabled={!tidalConnected}>Tidal{!tidalConnected ? ' (connect first)' : ''}</option>
-          <option value="qobuz" disabled={!qobuzConnected || !qobuzExperimentalEnabled}>Qobuz{!qobuzConnected || !qobuzExperimentalEnabled ? ' (enable and connect first)' : ''}</option>
-        </select>
-        <p>Auto uses accessible sources only. If your quality is unavailable, the best available copy plays. A better matching copy can upgrade playback at your current position.</p>
-      </div>,
+      element: (
+        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontSize: 11, fontWeight: 750, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.6 }}>
+                Preferred Source Quality
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Info size={12} /> Auto fallback enabled
+              </span>
+            </div>
+
+            <div
+              id="streaming-quality"
+              role="radiogroup"
+              aria-label="Preferred source quality"
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}
+            >
+              {[
+                {
+                  id: 'best_available' as const,
+                  title: 'Best Available',
+                  badge: 'Up to 24-bit / 192 kHz',
+                  desc: 'Prefers studio FLAC and master quality. Falls back automatically if unavailable.',
+                  icon: <Zap size={16} />
+                },
+                {
+                  id: 'standard_lossless' as const,
+                  title: 'Standard Lossless',
+                  badge: '16-bit / 44.1 kHz FLAC',
+                  desc: 'Bit-perfect CD quality audio. Pure lossless fidelity with moderate bandwidth.',
+                  icon: <Disc size={16} />
+                },
+                {
+                  id: 'data_saver' as const,
+                  title: 'Data Saver',
+                  badge: 'Compressed Stream',
+                  desc: 'Reduces streaming data usage and eliminates buffering on metered networks.',
+                  icon: <Radio size={16} />
+                }
+              ].map(tier => {
+                const active = streamingQuality === tier.id;
+                return (
+                  <motion.button
+                    key={tier.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setStreamingQuality(tier.id)}
+                    whileHover={{ translateY: -1 }}
+                    whileTap={{ scale: 0.99 }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      textAlign: 'left',
+                      padding: '14px 14px 12px 14px',
+                      borderRadius: 10,
+                      border: active ? '1.5px solid var(--accent)' : '1px solid var(--glass-border)',
+                      background: active ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(0, 0, 0, 0.2)',
+                      cursor: 'pointer',
+                      transition: 'border 0.18s ease-out, background 0.18s ease-out',
+                      outline: 'none',
+                      position: 'relative',
+                      minHeight: 112
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 28,
+                          height: 28,
+                          borderRadius: 7,
+                          background: active ? 'var(--accent)' : 'rgba(255, 255, 255, 0.05)',
+                          color: active ? '#ffffff' : 'var(--text-dim)',
+                          transition: 'background 0.18s, color 0.18s'
+                        }}>
+                          {tier.icon}
+                        </div>
+                        {active && (
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 3,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: 'var(--accent)',
+                            background: 'rgba(var(--accent-rgb), 0.12)',
+                            padding: '2px 7px',
+                            borderRadius: 12
+                          }}>
+                            <Check size={11} strokeWidth={2.5} /> Active
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                        {tier.title}
+                      </div>
+
+                      <div style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: active ? 'var(--accent)' : 'var(--text-dim)',
+                        letterSpacing: 0.2,
+                        marginBottom: 6
+                      }}>
+                        {tier.badge}
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.35 }}>
+                      {tier.desc}
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            padding: '10px 12px',
+            borderRadius: 8,
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+            fontSize: 11,
+            color: 'var(--text-dim)',
+            lineHeight: 1.45
+          }}>
+            <Info size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--text-dim)' }} />
+            <span>
+              Source stream selection requests the matching tier from remote services. It does not upsample audio or modify DSP resamplers. Local files are always preferred when they meet your criteria.
+            </span>
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <label htmlFor="preferred-source" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                Preferred source when quality is equal
+              </label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {tidalConnected && (
+                  <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                    Tidal Connected
+                  </span>
+                )}
+                {qobuzConnected && qobuzExperimentalEnabled && (
+                  <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                    Qobuz Connected
+                  </span>
+                )}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.4 }}>
+              Determines which provider plays first when multiple sources offer identical audio resolution.
+            </div>
+            <select
+              id="preferred-source"
+              value={preferredSource}
+              onChange={e => setPreferredSource(e.target.value as typeof preferredSource)}
+              className="settings-select"
+            >
+              <option value="auto">Automatic (Smart Routing)</option>
+              <option value="local">Local files</option>
+              <option value="youtube">YouTube</option>
+              <option value="tidal" disabled={!tidalConnected}>
+                Tidal {!tidalConnected ? '(requires account connection)' : ''}
+              </option>
+              <option value="qobuz" disabled={!qobuzConnected || !qobuzExperimentalEnabled}>
+                Qobuz {!qobuzConnected || !qobuzExperimentalEnabled ? '(requires active integration)' : ''}
+              </option>
+            </select>
+          </div>
+        </div>
+      ),
     },
     {
       id: 'tidal-connect',

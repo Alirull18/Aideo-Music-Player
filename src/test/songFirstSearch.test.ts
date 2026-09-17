@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useStore, type Track } from '../store';
-import { catalogTrack, groupRecordings, applySourcePreference, saveSourceChoice, clearSourceCache, rankSources } from '../utils/unifiedSources';
+import { catalogTrack, groupRecordings, applySourcePreference, saveSourceChoice, clearSourceCache, rankSources, isLikelySameRecording } from '../utils/unifiedSources';
 import { cancelSourcePlayback } from '../store/sourcePlayback';
 import { UnifiedSearchResults } from '../components/UnifiedSearchResults';
 import { AideoView } from '../components/AideoView';
@@ -67,13 +67,14 @@ describe('Song-first search', () => {
     expect(catalogTrack({ ...youtube, duration_raw }, 'youtube').duration).toBeNull();
   });
 
-  it('keeps versions, conflicting catalog evidence and ambiguous YouTube matches separate', () => {
+  it('keeps different performances separate while grouping catalog editions of a song', () => {
     for (const extra of [{ title: 'Song (Live)' }, { title: 'Song (Remastered 2026)' }, { artist: 'Cover Artist' },
-      { recording_evidence: { isrc: 'USAAA2600002', upc: '0123456789012' } }, { duration: 190 }]) {
+      { recording_evidence: { version: 'Live' } }]) {
       expect(groupRecordings([tidal, { ...tidal, path: '456', ...extra }], '')).toHaveLength(2);
     }
     const other = { ...tidal, path: '456', album: 'Other release', recording_evidence: { isrc: 'USAAA2600002', upc: '0123456789013' } };
-    expect(groupRecordings([catalogTrack(youtube, 'youtube'), tidal, other], '')).toHaveLength(3);
+    expect(groupRecordings([catalogTrack(youtube, 'youtube'), tidal, other], '')).toHaveLength(1);
+    expect(isLikelySameRecording(tidal, other)).toBe(false);
   });
 
   it('retains a discovered alternative when playing the original search row again', async () => {
@@ -132,7 +133,7 @@ describe('Song-first search', () => {
     expect(invoke).toHaveBeenCalledWith('tidal_search', { query: 'Song' });
   });
 
-  it.each(['Playing', 'Paused'] as const)('upgrades a late matching source at the current position while %s', async status => {
+  it.each(['Playing', 'Paused'] as const)('enriches source alternatives in the background without interrupting playing audio while %s', async status => {
     let finishSearch!: (tracks: unknown[]) => void;
     vi.mocked(invoke).mockImplementation(async cmd => {
       if (cmd === 'tidal_search') return new Promise(resolve => { finishSearch = resolve; });
@@ -143,21 +144,17 @@ describe('Song-first search', () => {
     await useStore.getState().playTrack(track);
     await waitFor(() => expect(finishSearch).toBeTypeOf('function'));
     useStore.setState({ playback: { ...useStore.getState().playback, status, is_buffering: false, position_secs: 43 }, queue: [tidal] });
-    const history = useStore.getState().playHistory;
     finishSearch([{ ...tidal, id: '123' }]);
-    if (status === 'Paused') {
-      await new Promise(resolve => setTimeout(resolve, 20));
-      expect(invoke).not.toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/audio' }));
-      expect(useStore.getState().playback.status).toBe('Paused');
-      await useStore.getState().resumeTrack();
-    }
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('play_track', { path: 'https://tidal.example/audio', startPos: 43 }));
-    await waitFor(() => expect(useStore.getState().playback.status).toBe('Playing'));
-    expect(useStore.getState().queue).toEqual([tidal]);
-    expect(useStore.getState().playHistory).toEqual(history);
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/audio' }));
+    expect(useStore.getState().playback.status).toBe(status);
     expect(useStore.getState().recordPlaybackTransition).toHaveBeenCalledTimes(1);
-    expect(useStore.getState().currentTrack?.source_context?.selection.mode).toBe('auto');
-    expect(useStore.getState().currentTrack).toMatchObject({ title: 'Song', artist: 'Artist', album: 'Album', duration: 180 });
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('youtube');
+
+    const enrichedSources = useStore.getState().currentTrack?.source_context?.sources || [];
+    expect(enrichedSources.some(s => s.provider === 'tidal' && s.id === '123')).toBe(true);
   });
 
   it('cancels a background upgrade after stopping', async () => {
@@ -171,7 +168,7 @@ describe('Song-first search', () => {
     await waitFor(() => expect(finishSearch).toBeTypeOf('function'));
     await useStore.getState().stopTrack();
     finishSearch([{ ...tidal, id: '123' }]);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise(resolve => setTimeout(resolve, 30));
     expect(invoke).not.toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/audio' }));
     expect(useStore.getState().playback.status).toBe('Stopped');
   });
@@ -200,9 +197,9 @@ describe('Song-first search', () => {
     useStore.setState({ currentTrack: { ...current, source_context: { ...current.source_context!, selection: { mode: 'explicit', source: current.active_source! } } },
       playback: { ...useStore.getState().playback, is_buffering: false } });
     finishSearch([{ ...tidal, id: '123' }]);
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('tidal_resolve_source', expect.anything()));
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise(resolve => setTimeout(resolve, 30));
     expect(invoke).not.toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/audio' }));
+    expect(useStore.getState().currentTrack?.source_context?.selection.mode).toBe('explicit');
   });
 
   it('starts an available copy without waiting for a slow known source', async () => {
@@ -219,7 +216,7 @@ describe('Song-first search', () => {
     finish({ url: 'https://tidal.example/audio', quality: { lossless: true } });
   });
 
-  it('uses connected sources only and skips background upgrades in Data saver', async () => {
+  it('uses connected sources only and skips background discovery in Data saver', async () => {
     useStore.setState({ tidalConnected: false, streamingQuality: 'data_saver' });
     await useStore.getState().playTrack(groupRecordings([catalogTrack(youtube, 'youtube'), tidal], '')[0]);
     expect(useStore.getState().currentTrack?.active_source?.provider).toBe('youtube');

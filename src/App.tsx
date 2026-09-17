@@ -389,11 +389,60 @@ function AideoApp() {
       });
       if (isCancelled) { uSourceError(); return; }
       cleanups.push(uSourceError);
-      const uEnded = await listen('track-ended', () => {
+      const uPlaybackReady = await listen<{ attempt_id?: string; path?: string }>('playback-ready', event => {
         if (isCancelled) return;
-        if (useStore.getState().currentTrack?.source_context && useStore.getState().playback.is_buffering) return;
+        const state = useStore.getState();
+        const incomingAttemptId = event.payload?.attempt_id;
+        if (incomingAttemptId && state.currentAttemptId && incomingAttemptId !== state.currentAttemptId) {
+          console.log('[App] Discarding playback-ready for superseded attempt:', incomingAttemptId);
+          return;
+        }
+        const recId = state.currentTrack?.source_context?.recording_id;
+        useStore.setState(s => {
+          const updates: any = {
+            playback: { ...s.playback, is_buffering: false }
+          };
+          if (recId && !s.playCounts[recId]) {
+            const nextCounts = { ...s.playCounts, [recId]: 1 };
+            updates.playCounts = nextCounts;
+            try { localStorage.setItem('aideo_play_counts', JSON.stringify(nextCounts)); } catch {}
+          }
+          return updates as any;
+        });
+      });
+      if (isCancelled) { uPlaybackReady(); return; }
+      cleanups.push(uPlaybackReady);
+
+      let lastHandledAttemptId: string | null = null;
+      let lastHandledEndedTimestamp = 0;
+      const uEnded = await listen<{ attempt_id?: string; path?: string } | undefined>('track-ended', event => {
+        if (isCancelled) return;
+        const state = useStore.getState();
+        const currentAttempt = state.currentAttemptId;
+        const eventAttempt = event?.payload?.attempt_id;
+        if (eventAttempt && currentAttempt && eventAttempt !== currentAttempt) {
+          console.log('[App] Discarding stale track-ended event for attempt:', eventAttempt);
+          return;
+        }
+        if (eventAttempt && eventAttempt === lastHandledAttemptId) {
+          console.log('[App] Discarding duplicate track-ended event for attempt:', eventAttempt);
+          return;
+        }
+        if (state.playback.status === 'Stopped' || (state.playback.last_stop_time && Date.now() - state.playback.last_stop_time < 1500)) {
+          console.log('[App] Discarding track-ended event received while playback is stopped or recently stopped');
+          return;
+        }
+        const now = Date.now();
+        if (!eventAttempt && now - lastHandledEndedTimestamp < 500) {
+          return;
+        }
+        lastHandledEndedTimestamp = now;
+        if (eventAttempt) {
+          lastHandledAttemptId = eventAttempt;
+        }
+        if (state.currentTrack?.source_context && state.playback.is_buffering) return;
         console.log('[App] Received track-ended event from backend. Calling playNext()...');
-        useStore.getState().playNext();
+        state.playNext();
       });
       if (isCancelled) { uEnded(); return; }
       cleanups.push(uEnded);
