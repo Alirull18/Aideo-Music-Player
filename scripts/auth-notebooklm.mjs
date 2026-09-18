@@ -16,7 +16,8 @@ import readline from 'node:readline';
 
 const TARGET_NOTEBOOK_URL =
   process.argv[2] ||
-  'https://notebook.google.com/notebook/2f271461-0379-41ec-a40d-8c32fe1a6187';
+  process.env.NOTEBOOKLM_URL ||
+  'https://notebook.google.com/';
 
 async function main() {
   console.log('🔍 Locating notebooklm-mcp installation...');

@@ -117,9 +117,14 @@ docs/superpowers/
 opencode.json
 handler.md
 task.md
+ORIGINAL_REQUEST.md
+TEST_INFRA.md
+TEST_READY.md
+PROJECT.md
 docs/AI_CONTEXT.md
 docs/ARCHITECTURE.md
 ponytail/
+audits/
 AUDIT_REPORT.md
 WEB_STREAM_AUDIT.md
 codebase_audit_report.md
@@ -162,6 +167,7 @@ patch_player.py
 patch_player.ps1
 Untitled-*.txt
 Untitled-1.txt
+New Text Document*.txt
 
 
 
