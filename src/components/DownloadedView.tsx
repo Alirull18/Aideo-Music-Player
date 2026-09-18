@@ -214,7 +214,7 @@ export function DownloadedView() {
                 Downloaded & Offline Cache
               </h1>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--text-dim)' }}>
-                Offline audio tracks cached from Subsonic, YouTube, Tidal, and Qobuz
+                Offline audio tracks cached from Subsonic, Webstream, Tidal, and Qobuz
               </p>
             </div>
           </div>
@@ -413,7 +413,7 @@ export function DownloadedView() {
             <DownloadCloud size={40} style={{ color: 'var(--text-dim)', opacity: 0.4 }} />
             <div style={{ fontSize: 15, fontWeight: 600 }}>No downloaded tracks found</div>
             <p style={{ fontSize: 12, color: 'var(--text-dim)', maxWidth: 400, margin: 0 }}>
-              Stream any song from Subsonic, YouTube, Tidal, or Qobuz, or click the download icon in your library to cache it for instant offline listening.
+              Stream any song from Subsonic, Webstream, Tidal, or Qobuz, or click the download icon in your library to cache it for instant offline listening.
             </p>
           </div>
         ) : (

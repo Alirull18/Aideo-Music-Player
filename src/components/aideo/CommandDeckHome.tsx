@@ -35,7 +35,7 @@ function qualitySpec(track: any): string {
   return ext ? `${ext} · Local` : 'Local';
 }
 
-export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, renderDownloadAction, resume, search }: AideoHomeProps) {
+export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, renderDownloadAction, resume, search, layoutFilter }: AideoHomeProps) {
   const [feed, setFeed] = useState<FeedTab>('all');
   const feedItems = useMemo(() => buildTaggedFeed(discoveryData), [discoveryData]);
   const visible = useMemo(() => feed === 'all' ? feedItems : feedItems.filter(t => t.shelf === feed), [feed, feedItems]);
@@ -64,31 +64,34 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
             <p className="ah-deck-sub">{greeting}, Listener · Precision audio curation & active signal stream</p>
           </div>
 
-          <div className="ah-deck-telemetry">
-            <div className="ah-deck-stat">
-              <span className="ah-deck-stat-num">{trackCount.toLocaleString()}</span>
-              <span className="ah-deck-stat-lbl">TRACKS</span>
-            </div>
-            <div className="ah-deck-stat-sep" />
-            <div className="ah-deck-stat">
-              <span className="ah-deck-stat-num">{totalPlays.toLocaleString()}</span>
-              <span className="ah-deck-stat-lbl">PLAYS</span>
-            </div>
-            <div className="ah-deck-stat-sep" />
-            <div className="ah-deck-stat">
-              <span className="ah-deck-stat-num">{visible.length}</span>
-              <span className="ah-deck-stat-lbl">SIGNALS</span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            {layoutFilter}
+            <div className="ah-deck-telemetry">
+              <div className="ah-deck-stat">
+                <span className="ah-deck-stat-num">{trackCount.toLocaleString()}</span>
+                <span className="ah-deck-stat-lbl">TRACKS</span>
+              </div>
+              <div className="ah-deck-stat-sep" />
+              <div className="ah-deck-stat">
+                <span className="ah-deck-stat-num">{totalPlays.toLocaleString()}</span>
+                <span className="ah-deck-stat-lbl">PLAYS</span>
+              </div>
+              <div className="ah-deck-stat-sep" />
+              <div className="ah-deck-stat">
+                <span className="ah-deck-stat-num">{visible.length}</span>
+                <span className="ah-deck-stat-lbl">SIGNALS</span>
+              </div>
 
-            <button
-              className="ah-deck-refresh-btn"
-              onClick={onRefreshRecs}
-              disabled={isRefreshingRecs || isLoadingRecs}
-              title="Curate recommendations"
-            >
-              <RefreshCw size={13} className={isRefreshingRecs || isLoadingRecs ? 'spin' : ''} />
-              <span>{isRefreshingRecs || isLoadingRecs ? 'Curating…' : 'Refresh'}</span>
-            </button>
+              <button
+                className="ah-deck-refresh-btn"
+                onClick={onRefreshRecs}
+                disabled={isRefreshingRecs || isLoadingRecs}
+                title="Curate recommendations"
+              >
+                <RefreshCw size={13} className={isRefreshingRecs || isLoadingRecs ? 'spin' : ''} />
+                <span>{isRefreshingRecs || isLoadingRecs ? 'Curating…' : 'Refresh'}</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -165,7 +168,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
                   onClick={() => onPlayTrack(item.track)}
                 >
                   <div className="ah-spotlight-cover-container">
-                    <TrackCover src={item.track.cover_url} path={item.track.url} title={item.track.title} artist={item.track.artist} size={74} radius={10} />
+                    <TrackCover src={item.track.cover_url} path={item.track.path || item.track.url} title={item.track.title} artist={item.track.artist} size={74} radius={10} />
                     <div className="ah-spotlight-play-overlay">
                       <PlayButton size={34} onClick={() => onPlayTrack(item.track)} />
                     </div>
@@ -215,7 +218,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
                 <div key={`${item.track.id}-${i}`} className="ah-trow" onClick={() => onPlayTrack(item.track)}>
                   <div className="ah-row-idx">{i + 1}</div>
                   <div className="ah-row-cover">
-                    <TrackCover src={item.track.cover_url} path={item.track.url} title={item.track.title} artist={item.track.artist} size={42} radius={7} />
+                    <TrackCover src={item.track.cover_url} path={item.track.path || item.track.url} title={item.track.title} artist={item.track.artist} size={42} radius={7} />
                   </div>
                   <div className="ah-row-meta">
                     <div className="ah-row-title" title={item.track.title}>{item.track.title}</div>

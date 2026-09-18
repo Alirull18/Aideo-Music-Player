@@ -62,14 +62,17 @@ function SearchSong({ track: original }: { track: Track }) {
 
 export function UnifiedSearchResults({ result }: { result: SourceSearch }) {
   const quality = useStore(s => s.streamingQuality);
+  const appMode = useStore(s => s.appMode);
   return <section className="unified-results" aria-label="Unified search results">
     <div className="unified-search-status" role="status">
       <strong>{result.tracks.length} {result.tracks.length === 1 ? 'song' : 'songs'}</strong>
-      <span>Auto / {quality === 'data_saver' ? 'Data saver' : quality === 'standard_lossless' ? 'Standard lossless' : 'Best available'}</span>
+      <span>{appMode === 'local' ? 'Local Library Only' : `Auto / ${quality === 'data_saver' ? 'Data saver' : quality === 'standard_lossless' ? 'Standard lossless' : 'Best available'}`}</span>
       {result.pending.length > 0 && <p>{`Searching ${result.pending.join(', ')}...`}</p>}
       {Object.keys(result.errors).length > 0 && <p>Could not search {Object.keys(result.errors).join(', ')}. Results from available sources are shown.</p>}
     </div>
-    {!result.pending.length && !result.tracks.length && <p>No matching songs in this filter. Try All sources, another search, or check connections in Settings.</p>}
+    {!result.pending.length && !result.tracks.length && (
+      <p>{appMode === 'local' ? 'No matching local songs found. Try a different query or add music folders in Settings.' : 'No matching songs in this filter. Try All sources, another search, or check connections in Settings.'}</p>
+    )}
     {result.tracks.map(track => <SearchSong key={track.source_context!.recording_id} track={track} />)}
   </section>;
 }

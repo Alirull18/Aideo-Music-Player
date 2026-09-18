@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId, VisualizerMode, VisualizerDecayRate } from './types';
+import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId, VisualizerMode, VisualizerDecayRate, CanvasMode, CanvasResult } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { cancelSourcePlayback } from './sourcePlayback';
@@ -137,6 +137,8 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showOnboarding: safeGetStorage('aideo-onboarding-completed') !== 'true',
   notificationsEnabled: safeGetStorage('aideo-notifications-enabled') !== 'false',
   developerNotifications: safeGetStorage('aideo-developer-notifications') === 'true',
+  osTrackNotificationsEnabled: safeGetStorage('aideo-os-notifications-enabled') !== 'false',
+  osNotifyBackgroundOnly: safeGetStorage('aideo-os-notify-bg-only') !== 'false',
   discoveryData: null,
   isLoadingRecs: true,
   activeDiscoveryTab: 'all',
@@ -171,6 +173,10 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
   theaterModeDesign: (safeGetStorage('aideo-theater-design') as any) || (safeGetStorage('aideo-fullscreen-layout') as any) || 'stage',
   theaterHudStyle: (safeGetStorage('aideo-theater-hud-style') as any) || 'capsule',
+  canvasEnabled: safeGetStorage('aideo-canvas-enabled') !== 'false',
+  canvasMode: (safeGetStorage('aideo-canvas-mode') as CanvasMode) || 'both',
+  canvasAllowOnline: safeGetStorage('aideo-canvas-allow-online') !== 'false',
+  currentCanvas: null,
 
   setCustomPrompt: (prompt: any) => set(s => ({
     customPrompt: { ...s.customPrompt, ...prompt }
@@ -253,6 +259,18 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     set({ developerNotifications: next });
   },
 
+  toggleOsTrackNotifications: () => {
+    const next = !get().osTrackNotificationsEnabled;
+    localStorage.setItem('aideo-os-notifications-enabled', String(next));
+    set({ osTrackNotificationsEnabled: next });
+  },
+
+  toggleOsNotifyBackgroundOnly: () => {
+    const next = !get().osNotifyBackgroundOnly;
+    localStorage.setItem('aideo-os-notify-bg-only', String(next));
+    set({ osNotifyBackgroundOnly: next });
+  },
+
   setAppMode: (mode: 'local' | 'hybrid') => {
     cancelSourcePlayback();
     localStorage.setItem('aideo-app-mode', mode);
@@ -265,6 +283,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
       ) : false;
       if (isOnline && (state.playback.status === 'Playing' || state.playback.status === 'Paused' || state.playback.is_buffering)) {
         void state.stopTrack();
+      }
+      if (state.view === 'loved_streams' || state.view === 'charts') {
+        state.setView('library');
       }
     }
   },
@@ -574,5 +595,38 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     invoke('set_global_shortcuts', { bindings: payload }).catch(e => {
       console.error('Failed to restore global shortcuts:', e);
     });
+  },
+
+  setCanvasEnabled: (enabled: boolean) => {
+    safeSetStorage('aideo-canvas-enabled', String(enabled));
+    set({ canvasEnabled: enabled });
+  },
+
+  toggleCanvasEnabled: () => {
+    const next = !get().canvasEnabled;
+    safeSetStorage('aideo-canvas-enabled', String(next));
+    set({ canvasEnabled: next });
+  },
+
+  setCanvasMode: (mode: CanvasMode) => {
+    safeSetStorage('aideo-canvas-mode', mode);
+    set({ canvasMode: mode });
+  },
+
+  cycleCanvasMode: () => {
+    const modes: CanvasMode[] = ['artwork', 'backdrop', 'both', 'off'];
+    const current = get().canvasMode;
+    const next = modes[(modes.indexOf(current) + 1) % modes.length];
+    safeSetStorage('aideo-canvas-mode', next);
+    set({ canvasMode: next });
+  },
+
+  setCanvasAllowOnline: (allow: boolean) => {
+    safeSetStorage('aideo-canvas-allow-online', String(allow));
+    set({ canvasAllowOnline: allow });
+  },
+
+  setCurrentCanvas: (canvas: CanvasResult | null) => {
+    set({ currentCanvas: canvas });
   },
 });

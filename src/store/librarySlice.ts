@@ -10,6 +10,7 @@ import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
 import { notifyTidalAuthFailure } from './tidalSlice';
 import { notifyQobuzAuthFailure } from './qobuzSlice';
+import { scheduleOsTrackNotification, cancelOsTrackNotification } from '../utils/notifications';
 
 let isTransitioning = false;
 let lastPlayedPathFromUI: string | null = null;
@@ -317,6 +318,17 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           set({ currentTrack: updatedTrack });
         }
       }
+      if (current && !get().coverArt && !current.cover_url && current.path && !current.path.startsWith('http://') && !current.path.startsWith('https://')) {
+        invoke<string | null>('get_cover_art', { path: current.path }).then(async (art) => {
+          if (art && typeof art === 'string') {
+            set({ coverArt: art });
+            try {
+              const color = await extractDominantColor(art);
+              set({ accentColor: color });
+            } catch (_) {}
+          }
+        }).catch(() => {});
+      }
 
       // Synchronize queued tracks tags instantly
       const currentQueue = get().queue;
@@ -408,6 +420,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
     
     const isOnline = isStreamTrack(track.path, track.format);
+    if (isOnline && get().appMode === 'local') {
+      const msg = 'Online playback is disabled in Local File Only Mode.';
+      set({ playbackError: msg });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: msg, type: 'warning' } }));
+      return;
+    }
     if (isOnline) {
       set({
         playback: {
@@ -514,11 +532,31 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         },
       });
 
+      if (!track.cover_url && !isOnline && track.path) {
+        invoke<string | null>('get_cover_art', { path: track.path }).then(async (art) => {
+          if (!isCurrentRequest()) return;
+          if (art && typeof art === 'string') {
+            set({ coverArt: art });
+            try {
+              const color = await extractDominantColor(art);
+              if (isCurrentRequest()) set({ accentColor: color });
+            } catch (_) {}
+            invoke('update_media_metadata', {
+              title: track.title || track.path.split(/[\\/]/).pop(),
+              artist: track.artist || 'Unknown Artist',
+              album: track.album || '',
+              coverUrl: art,
+              duration: track.duration || 0,
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+
       invoke('update_media_metadata', {
         title: track.title || track.path.split(/[\\/]/).pop(),
         artist: track.artist || 'Unknown Artist',
         album: track.album || '',
-        coverUrl: track.cover_url || null,
+        coverUrl: track.cover_url || get().coverArt || null,
         duration: track.duration || 0,
       }).catch(() => { });
 
@@ -682,29 +720,21 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         get().preCacheNextTracks().catch(console.error);
       }, 500);
 
-      // OS notification on track change (useful while minimized to tray)
-      if (get().notificationsEnabled && !isHistory) {
-        try {
-          const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification');
-          let granted = await isPermissionGranted();
-          if (!granted) {
-            granted = (await requestPermission()) === 'granted';
-          }
-          if (granted) {
-            sendNotification({
-              title: track.title || baseName(track.path),
-              body: track.artist || 'Unknown Artist',
-              icon: track.cover_url || undefined
-            });
-          }
-        } catch (e) {
-          console.error('Track notification failed:', e);
-        }
+      // OS notification on track change (useful while minimized to tray or running in background)
+      const osNotificationsEnabled = get().osTrackNotificationsEnabled ?? get().notificationsEnabled;
+      const osBackgroundOnly = get().osNotifyBackgroundOnly ?? true;
+
+      if (osNotificationsEnabled && !isHistory) {
+        scheduleOsTrackNotification(track, {
+          enabled: osNotificationsEnabled,
+          backgroundOnly: osBackgroundOnly,
+        });
       }
 
       await fetchTrackMetadataAndLyrics(track, set, get, isOnline || track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC');
 
     } catch (e) {
+      cancelOsTrackNotification();
       if (!isCurrentRequest()) return;
       console.error('playTrack error:', e);
       window.dispatchEvent(new CustomEvent('ui-toast', {

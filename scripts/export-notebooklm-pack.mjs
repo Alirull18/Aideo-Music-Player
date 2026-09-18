@@ -101,6 +101,7 @@ const PACK_DEFINITIONS = [
       'docs/llms.txt',
       'docs/AI_CONTEXT.md',
       'docs/RELEASE_NOTES_v0.9.8.md',
+      'docs/RELEASE_NOTES_v0.9.9.md',
       'src-tauri/capabilities/default.json',
       'src-tauri/tauri.conf.json',
       'src-tauri/src/lib.rs'

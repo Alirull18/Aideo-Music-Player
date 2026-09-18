@@ -27,9 +27,13 @@ export interface ToastMessage {
 }
 
 let toastIdCounter = 0;
-const DEDUP_INTERVAL_MS = 2000;
-const MAX_CONCURRENT_TOASTS = 4;
-const recentToastsMap = new Map<string, number>();
+const DEDUP_INTERVAL_MS = 4000;
+const MAX_CONCURRENT_TOASTS = 3;
+export const recentToastsMap = new Map<string, number>();
+
+export function clearRecentToasts(): void {
+  recentToastsMap.clear();
+}
 
 function formatToastMessage(
   rawMessage: string,
@@ -97,7 +101,7 @@ function formatToastMessage(
     msgLower.includes('could not download') ||
     msgLower.includes('yt-dlp')
   ) {
-    context = 'YouTube Downloader (youtube/mod.rs)';
+    context = 'Webstream Downloader (youtube/mod.rs)';
     cleanMsg = rawMessage;
   } else if (msgLower.includes('update') || msgLower.includes('download')) {
     context = 'Downloader/Updater (updater.rs / downloader.rs)';
@@ -346,6 +350,22 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
 export function ToastContainer() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [bufferingState, setBufferingState] = useState<{ title: string; artist: string } | null>(null);
+  const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const updateBufferingState = useCallback((state: { title: string; artist: string } | null) => {
+    if (bufferingTimerRef.current) {
+      clearTimeout(bufferingTimerRef.current);
+      bufferingTimerRef.current = null;
+    }
+    setBufferingState(state);
+    if (state) {
+      // Safety auto-dismiss: prevent stuck buffering card if network drops silently
+      bufferingTimerRef.current = setTimeout(() => {
+        setBufferingState(null);
+        bufferingTimerRef.current = null;
+      }, 10000);
+    }
+  }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -363,7 +383,15 @@ export function ToastContainer() {
       const state = useStore.getState();
       if (!state.notificationsEnabled) return;
 
-      const rawMsg = (options.message || '').trim();
+      const rawMsg = (
+        typeof options.message === 'string'
+          ? options.message
+          : options.message != null
+          ? (typeof options.message === 'object' && 'message' in (options.message as any)
+              ? String((options.message as any).message)
+              : JSON.stringify(options.message))
+          : ''
+      ).trim();
       if (!rawMsg) return;
 
       const type: ToastType = options.type || 'info';
@@ -375,13 +403,22 @@ export function ToastContainer() {
       if (lastSeen && now - lastSeen < DEDUP_INTERVAL_MS) {
         return;
       }
+
       recentToastsMap.set(dedupKey, now);
 
       const formatted = formatToastMessage(rawMsg, type, state.developerNotifications);
 
       const defaultDuration =
         options.duration ||
-        (type === 'error' && state.developerNotifications ? 8000 : type === 'error' ? 5500 : 4000);
+        (type === 'error' && state.developerNotifications
+          ? 8000
+          : type === 'error'
+          ? 5500
+          : type === 'warning'
+          ? 4200
+          : type === 'help'
+          ? 3800
+          : 2800);
 
       const id = String(++toastIdCounter);
 
@@ -411,7 +448,7 @@ export function ToastContainer() {
     // Listen for backend playback-errors
     const unlistenPlaybackError = listen<string>('playback-error', (event) => {
       addToast({ message: event.payload, type: 'error', title: 'Playback System' });
-      setBufferingState(null);
+      updateBufferingState(null);
     });
 
     const unlistenUiToast = listen<{ message?: string; title?: string; type?: ToastType; duration?: number } | string>(
@@ -435,28 +472,28 @@ export function ToastContainer() {
 
     const unlistenSuccess = listen<string>('ui-toast-success', (event) => {
       addToast({ message: event.payload, type: 'success' });
-      setBufferingState(null);
+      updateBufferingState(null);
     });
 
     const unlistenStreamStart = listen<string>('stream-buffering-start', (event) => {
       const state = useStore.getState();
       if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
-        setBufferingState(null);
+        updateBufferingState(null);
         return;
       }
       const currentTrack = state.currentTrack;
       const title = currentTrack?.title || event.payload.split(/[\\/]/).pop() || 'Online Stream';
       const artist = currentTrack?.artist || 'Preparing stream & buffering...';
-      setBufferingState({ title, artist });
+      updateBufferingState({ title, artist });
     });
 
     const unlistenStreamEnd = listen<string>('stream-buffering-end', () => {
-      setBufferingState(null);
+      updateBufferingState(null);
     });
 
     const unsubStore = useStore.subscribe((state) => {
       if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
-        setBufferingState(null);
+        updateBufferingState(null);
       }
     });
 
@@ -483,15 +520,15 @@ export function ToastContainer() {
       if (customEvent.detail && customEvent.detail.active) {
         const state = useStore.getState();
         if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
-          setBufferingState(null);
+          updateBufferingState(null);
           return;
         }
-        setBufferingState({
+        updateBufferingState({
           title: customEvent.detail.title || 'Unknown Track',
           artist: customEvent.detail.artist || 'Unknown Artist',
         });
       } else {
-        setBufferingState(null);
+        updateBufferingState(null);
       }
     };
 
@@ -499,6 +536,10 @@ export function ToastContainer() {
     window.addEventListener('ui-stream-buffering', handleBuffering);
 
     return () => {
+      if (bufferingTimerRef.current) {
+        clearTimeout(bufferingTimerRef.current);
+        bufferingTimerRef.current = null;
+      }
       unlistenPlaybackError.then((f) => f());
       unlistenUiToast.then((f) => f());
       unlistenInfo.then((f) => f());
@@ -509,7 +550,7 @@ export function ToastContainer() {
       window.removeEventListener('ui-toast', handleCustomToast);
       window.removeEventListener('ui-stream-buffering', handleBuffering);
     };
-  }, [addToast]);
+  }, [addToast, updateBufferingState]);
 
   return (
     <div
@@ -582,7 +623,7 @@ export function ToastContainer() {
               </div>
               <button
                 type="button"
-                onClick={() => setBufferingState(null)}
+                onClick={() => updateBufferingState(null)}
                 title="Dismiss notification"
                 style={{
                   background: 'none',

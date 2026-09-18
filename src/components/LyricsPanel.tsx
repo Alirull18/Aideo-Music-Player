@@ -215,9 +215,11 @@ export function LyricsPanel() {
         }
 
         let sourceBonus = 0.0;
-        if (item.source === 'Unison') sourceBonus = 0.15;
-        else if (item.source === 'NetEase') sourceBonus = 0.10;
-        else if (item.source === 'QQMusic') sourceBonus = 0.05;
+        if (item.source === 'Unison' || item.source === 'BiniLyrics' || item.source === 'Better Lyrics') sourceBonus = 0.20;
+        else if (item.source === 'Kugou') sourceBonus = 0.15;
+        else if (item.source === 'QQMusic') sourceBonus = 0.10;
+        else if (item.source === 'LRCLIB') sourceBonus = 0.05;
+        else if (item.source === 'NetEase') sourceBonus = 0.0;
 
         const variantPenalty = getVariantPenalty(targetTitle, item.title);
         const rankBonus = Math.max(0, 0.15 - (index * 0.03));

@@ -29,14 +29,16 @@ import {
   Repeat1,
   Heart,
   Activity,
-  Infinity as InfinityIcon
+  Infinity as InfinityIcon,
+  Tv2
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LiquidBackground } from './LiquidBackground';
 import { Visualizer, VisualizerMode } from './Visualizer';
+import { CanvasVideoPlayer } from './CanvasVideoPlayer';
 
 import { generateWaveformPeaks } from '../utils/waveform';
-import { TheaterModeDesign, TheaterHudStyle, LyricsDisplayMode } from '../store/types';
+import { TheaterModeDesign, TheaterHudStyle, LyricsDisplayMode, CanvasMode, CanvasResult } from '../store/types';
 
 import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
@@ -106,6 +108,12 @@ export function FullscreenView() {
     autoplayEnabled,
     toggleAutoplay,
     toggleLoveTrack,
+    canvasEnabled,
+    canvasMode,
+    canvasAllowOnline,
+    currentCanvas,
+    cycleCanvasMode,
+    setCurrentCanvas,
   } = useStore(useShallow(s => ({
     playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
@@ -153,6 +161,12 @@ export function FullscreenView() {
     autoplayEnabled: s.autoplayEnabled,
     toggleAutoplay: s.toggleAutoplay,
     toggleLoveTrack: s.toggleLoveTrack,
+    canvasEnabled: s.canvasEnabled,
+    canvasMode: s.canvasMode,
+    canvasAllowOnline: s.canvasAllowOnline,
+    currentCanvas: s.currentCanvas,
+    cycleCanvasMode: s.cycleCanvasMode,
+    setCurrentCanvas: s.setCurrentCanvas,
   })));
 
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
@@ -230,6 +244,38 @@ export function FullscreenView() {
 
     checkAndFetch();
   }, [currentTrack?.path, lyrics.length, showRomaji, showTranslation, isTranslating, getRomaji, translateLyrics]);
+
+  // Resolve Animated Video Canvas when track or settings change
+  useEffect(() => {
+    if (!canvasEnabled || !currentTrack?.title) {
+      setCurrentCanvas(null);
+      return;
+    }
+
+    let isMounted = true;
+    invoke<CanvasResult | null>('get_track_canvas', {
+      title: currentTrack.title,
+      artist: currentTrack.artist || '',
+      album: currentTrack.album || null,
+      trackPath: currentTrack.path || null,
+      allowOnline: canvasAllowOnline,
+    })
+      .then(res => {
+        if (isMounted) {
+          setCurrentCanvas(res);
+        }
+      })
+      .catch(err => {
+        console.warn('[Canvas] Resolution failed:', err);
+        if (isMounted) {
+          setCurrentCanvas(null);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentTrack?.title, currentTrack?.artist, currentTrack?.album, currentTrack?.path, canvasEnabled, canvasAllowOnline, setCurrentCanvas]);
 
   // Native Fullscreen on mount, restore on unmount
   useEffect(() => {
@@ -488,11 +534,45 @@ export function FullscreenView() {
 
   return (
     <div className={`fullscreen-overlay ${isHUDHidden ? 'hud-hidden' : ''}`}>
-      {/* Immersive backdrop visualizer (disabled in pure focus scope mode for edge-to-edge pitch black) */}
-      {theaterModeDesign !== 'scope' && <LiquidBackground />}
+      {/* Immersive backdrop visualizer or Motion Video Canvas */}
+      {theaterModeDesign !== 'scope' && (
+        canvasEnabled && !dsp.low_spec_mode && currentCanvas && (canvasMode === 'backdrop' || canvasMode === 'both') ? (
+          <CanvasVideoPlayer
+            canvas={currentCanvas}
+            isPlaying={playbackStatus === 'Playing'}
+            variant="backdrop"
+          />
+        ) : (
+          <LiquidBackground />
+        )
+      )}
 
       {/* Floating Top Actions Bar */}
       <div className="fullscreen-top-bar">
+        {/* Floating Canvas Mode Toggle */}
+        <button
+          className="fullscreen-layout-toggle fullscreen-canvas-toggle"
+          onClick={() => {
+            cycleCanvasMode();
+            const modes: Record<CanvasMode, string> = {
+              artwork: 'Artwork Only',
+              backdrop: 'Backdrop Only',
+              both: 'Artwork & Backdrop',
+              off: 'Disabled',
+            };
+            const nextMode: CanvasMode = (['artwork', 'backdrop', 'both', 'off'] as CanvasMode[])[
+              ((['artwork', 'backdrop', 'both', 'off'] as CanvasMode[]).indexOf(canvasMode) + 1) % 4
+            ];
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: `Theater Canvas: ${modes[nextMode]}`, type: 'info' }
+            }));
+          }}
+          title={`Motion Canvas: ${canvasMode.toUpperCase()} (Click to cycle mode)`}
+        >
+          <Tv2 size={16} />
+          <span>Canvas: {canvasMode === 'off' ? 'Off' : canvasMode.charAt(0).toUpperCase() + canvasMode.slice(1)}</span>
+        </button>
+
         {/* Floating HUD Style Toggle */}
         <button
           className="fullscreen-layout-toggle fullscreen-hud-toggle"
@@ -557,6 +637,8 @@ export function FullscreenView() {
         scrollRef={scrollRef}
         spectrumBands={spectrumBands}
         lowSpecMode={dsp.low_spec_mode}
+        canvas={canvasEnabled ? currentCanvas : null}
+        canvasMode={canvasMode}
       />
 
       {/* Sharp Glowing Neon Visualizer Baseline / Wave */}

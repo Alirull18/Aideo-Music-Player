@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../store';
 import type { RecordingSources, SourceSelection, Track } from '../store/types';
-import { applySourcePreference, groupRecordings, matchingSources, saveSourceChoice, searchSources, sourceFor, sourceKey, sourceName, sourceSearchQuery } from '../utils/unifiedSources';
+import { applySourcePreference, deduplicateSourcesForDisplay, groupRecordings, matchingSources, saveSourceChoice, searchSources, sourceFor, sourceKey, sourceName, sourceSearchQuery } from '../utils/unifiedSources';
 import './UnifiedSources.css';
 
-export function SourceMenu({ track, compact = false, onChange }: { track: Track; compact?: boolean; onChange?: (track: Track) => void }) {
+export function SourceMenu({ track, compact = false, onChange, renderTrigger }: { track: Track; compact?: boolean; onChange?: (track: Track) => void; renderTrigger?: (onClick: () => void) => React.ReactNode }) {
   const request = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const selectionKey = JSON.stringify(track.source_context?.selection);
@@ -78,7 +78,8 @@ export function SourceMenu({ track, compact = false, onChange }: { track: Track;
     setContext(initialContext);
 
     // If sources already exist in sourceRegistry with alternatives, use them immediately without redundant search
-    if (fromRegistry && fromRegistry.sources.length > 1) {
+    const totalAlternatives = (fromRegistry?.sources.length || 0) + (fromRegistry?.display_candidates?.length || 0);
+    if (fromRegistry && totalAlternatives > 1) {
       setLoading(false);
       setError('');
       return;
@@ -149,22 +150,56 @@ export function SourceMenu({ track, compact = false, onChange }: { track: Track;
     finally { setSaving(false); }
   };
   return <div className="source-menu" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') close(); }}>
-    <button type="button" className="source-button" aria-label={compact ? `Change source for ${track.title}` : undefined} aria-expanded={open} onClick={() => void load()}>{compact ? context?.selection.mode === 'explicit' ? sourceName(context.selection.source) : 'Auto' : 'Other sources'}</button>
+    {renderTrigger ? (
+      renderTrigger(() => void load())
+    ) : (
+      <button type="button" className="source-button" aria-label={compact ? `Change source for ${track.title}` : undefined} aria-expanded={open} onClick={() => void load()}>{compact ? context?.selection.mode === 'explicit' ? sourceName(context.selection.source) : 'Auto' : 'Other sources'}</button>
+    )}
     {open && createPortal(<dialog ref={dialog} onCancel={close} onClose={close} className="source-options" aria-label={`Sources for ${track.title || 'this recording'}`}>
       <h2>Other sources</h2>
       <p>Sources for the same song are grouped by title, artist and version. Each copy keeps its own duration and album.</p>
       {loading && <span role="status">Checking available copies...</span>}
       {error && <p role="status">{error}</p>}
-      {!loading && context && context.sources.length < 2 && <p>No alternative copies found. Connected sources must have a matching title, artist and duration.</p>}
+      {!loading && context && deduplicateSourcesForDisplay([...(context.sources || []), ...(context.display_candidates || [])], context.selection).length < 2 && <p>No alternative copies found. Connected sources must have a matching title, artist and duration.</p>}
       {context && <>
         <button type="button" disabled={saving} aria-pressed={context.selection.mode === 'auto'} onClick={() => void choose({ mode: 'auto' })}>Auto · Follow quality preference</button>
-        {context.sources.map(source => <button type="button" key={sourceKey(source)} disabled={saving || !available(source.provider)}
-          aria-pressed={context.selection.mode === 'explicit' && sourceKey(context.selection.source) === sourceKey(source)}
-          onClick={() => void choose({ mode: 'explicit', source })}>
-          {sourceName(source)}{source.catalog_quality?.sample_rate ? ` · ${source.catalog_quality.sample_rate / 1000} kHz` : ''}{source.catalog_quality?.bit_depth ? ` / ${source.catalog_quality.bit_depth}-bit` : ''}
-          {!available(source.provider) && ' (unavailable)'}
-          {source.provider === 'local' && <small>{source.id}</small>}
-        </button>)}
+        {deduplicateSourcesForDisplay([...(context.sources || []), ...(context.display_candidates || [])], context.selection).map(source => {
+          const isSelected = context.selection.mode === 'explicit' && sourceKey(context.selection.source) === sourceKey(source);
+          const fmt = source.catalog_quality?.codec || (source.provider === 'local' ? source.id.split('.').pop()?.toUpperCase() : source.provider === 'youtube' ? 'OPUS' : source.provider === 'tidal' || source.provider === 'qobuz' ? 'FLAC' : null);
+          const formatStr = fmt ? ` · ${fmt}` : '';
+          const sampleRateStr = source.catalog_quality?.sample_rate ? ` · ${source.catalog_quality.sample_rate / 1000} kHz` : '';
+          const bitDepthStr = source.catalog_quality?.bit_depth ? ` / ${source.catalog_quality.bit_depth}-bit` : '';
+          const durationSecs = source.metadata?.duration;
+          const durationStr = durationSecs && Number.isFinite(durationSecs) && durationSecs > 0
+            ? ` · ${Math.floor(durationSecs / 60)}:${String(Math.floor(durationSecs % 60)).padStart(2, '0')}`
+            : '';
+          const versionTag = source.recording_evidence?.version
+            ? ` [${source.recording_evidence.version}]`
+            : source.recording_evidence?.explicit === true
+              ? ' [Explicit]'
+              : '';
+          const subtitle = source.provider === 'local'
+            ? (source.metadata?.album ? `${source.metadata.album} · ${source.id}` : source.id)
+            : source.provider === 'youtube'
+              ? (source.metadata?.title || '')
+              : (source.metadata?.album || '');
+
+          return (
+            <button
+              type="button"
+              key={sourceKey(source)}
+              disabled={saving || !available(source.provider)}
+              aria-pressed={isSelected}
+              onClick={() => void choose({ mode: 'explicit', source })}
+            >
+              <div className="source-option-main">
+                <span>{sourceName(source)}{formatStr}{sampleRateStr}{bitDepthStr}{durationStr}{versionTag}</span>
+                {!available(source.provider) && <span className="source-option-unavailable"> (unavailable)</span>}
+              </div>
+              {subtitle && <small className="source-option-sub">{subtitle}</small>}
+            </button>
+          );
+        })}
       </>}
       <button type="button" className="source-close" onClick={close}>Close</button>
     </dialog>, document.body)}

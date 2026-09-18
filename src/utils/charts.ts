@@ -146,7 +146,7 @@ export function chartEntryToTrack(entry: ChartEntry): Track | null {
     cover_url: resolveChartArtwork(entry) ?? playbackTrack.cover_url,
     duration: parseChartDuration(playbackTrack.duration_raw),
     duration_raw: playbackTrack.duration_raw,
-    format: 'YouTube Web Stream',
+    format: 'Web Stream',
     lyric_offset: 0,
   };
 }

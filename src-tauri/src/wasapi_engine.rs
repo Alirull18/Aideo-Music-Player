@@ -146,6 +146,7 @@ pub fn start_exclusive_stream<F, E>(
     channels: u16,
     timing_mode: &str,
     playing_flag: Arc<AtomicU8>,
+    flush_signal: Arc<AtomicBool>,
     dither_enabled: bool,
     mut callback: F,
     mut on_error: E,
@@ -156,6 +157,7 @@ where
 {
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown);
+    let flush_signal_clone = Arc::clone(&flush_signal);
     let dev_name = device_name.to_string();
     let timing_str = timing_mode.to_string();
 
@@ -517,10 +519,32 @@ where
                     continue;
                 }
                 HwAction::Idle => {
+                    if flush_signal_clone.load(Ordering::SeqCst) {
+                        let _ = client.reset_stream();
+                        f32_data.fill(0.0);
+                        callback(&mut f32_data);
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(HW_RESTART_DELAY_MS));
                     continue;
                 }
                 HwAction::Run => {}
+            }
+
+            if flush_signal_clone.load(Ordering::SeqCst) {
+                if hw_running {
+                    let _ = client.stop_stream();
+                    let _ = client.reset_stream();
+                    output_bytes.fill(0);
+                    let _ = render_client.write_to_device(num_frames, &output_bytes, None);
+                    if client.start_stream().is_err() {
+                        hw_running = false;
+                    }
+                } else {
+                    let _ = client.reset_stream();
+                }
+                f32_data.fill(0.0);
+                callback(&mut f32_data);
+                continue;
             }
 
             if is_polling {
@@ -706,6 +730,7 @@ pub fn start_exclusive_stream<F, E>(
     _channels: u16,
     _timing_mode: &str,
     _playing_flag: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    _flush_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
     _dither_enabled: bool,
     _callback: F,
     _on_error: E,

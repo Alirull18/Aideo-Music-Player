@@ -14,8 +14,8 @@ describe('Aideo Page Design & Layout Suite', () => {
     expect(state.aideoPageDesign).toBe('classic');
   });
 
-  it('should switch between all 4 modern Aideo page designs', () => {
-    const designs: AideoPageDesign[] = ['classic', 'editorial', 'command', 'stage'];
+  it('should switch between all 6 modern Aideo page designs', () => {
+    const designs: AideoPageDesign[] = ['classic', 'editorial', 'command', 'stage', 'spotify', 'apple'];
     const { setAideoPageDesign } = useStore.getState();
 
     designs.forEach((design) => {
@@ -37,6 +37,12 @@ describe('Aideo Page Design & Layout Suite', () => {
     setAideoPageDesign('stage');
     expect(safeGetStorage('aideo-page-design')).toBe('stage');
 
+    setAideoPageDesign('spotify');
+    expect(safeGetStorage('aideo-page-design')).toBe('spotify');
+
+    setAideoPageDesign('apple');
+    expect(safeGetStorage('aideo-page-design')).toBe('apple');
+
     setAideoPageDesign('classic');
     expect(safeGetStorage('aideo-page-design')).toBe('classic');
   });
@@ -56,7 +62,7 @@ describe('Aideo Page Design & Layout Suite', () => {
   it('should expose the retired pre-redesign design ids as legacy', () => {
     expect(LEGACY_AIDEO_PAGE_DESIGNS).toEqual(['bento', 'audiophile', 'cinematic']);
     for (const legacy of LEGACY_AIDEO_PAGE_DESIGNS) {
-      expect(['classic', 'editorial', 'command', 'stage']).not.toContain(legacy);
+      expect(['classic', 'editorial', 'command', 'stage', 'spotify', 'apple']).not.toContain(legacy);
     }
   });
 });

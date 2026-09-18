@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
+import { MotionGlobalConfig } from 'framer-motion';
+
+MotionGlobalConfig.skipAnimations = true;
 
 // Mock Tauri IPC window and invoke APIs for unit tests
 vi.mock('@tauri-apps/api/core', () => ({

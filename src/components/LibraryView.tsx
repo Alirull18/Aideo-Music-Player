@@ -1,12 +1,13 @@
 import { manageSourceQueue } from '../store/sourcePlayback';
 import { SourceMenu } from './SourceMenu';
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, memo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../store';
 import { chainQueueOperation } from '../store/playbackSlice';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
-import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe, GripVertical, ArrowUp, ArrowDown, Play, Tag } from 'lucide-react';
+import { MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe, GripVertical, ArrowUp, ArrowDown, Play, Tag, ListPlus, Plus, FolderPlus, Image, FileText, MinusCircle } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { Track, Playlist } from '../store/types';
 import { useVirtualList } from '../utils/useVirtualList';
@@ -240,33 +241,384 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
   );
 }
 
+const getMenuPosition = (anchor: DOMRect | { x: number; y: number }): React.CSSProperties => {
+  const menuWidth = 220;
+  const isRect = 'bottom' in anchor;
+  let left = isRect ? anchor.right - menuWidth : anchor.x;
+  if (left < 12) left = 12;
+  if (left + menuWidth > window.innerWidth - 12) left = window.innerWidth - menuWidth - 12;
+
+  const yPos = isRect ? anchor.bottom : anchor.y;
+  const spaceBelow = window.innerHeight - yPos;
+  const openUpwards = spaceBelow < 380 && (isRect ? anchor.top : anchor.y) > 380;
+
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    left,
+    zIndex: 9999,
+  };
+
+  if (openUpwards) {
+    style.bottom = Math.round(window.innerHeight - (isRect ? anchor.top : anchor.y) + 4);
+    style.transformOrigin = isRect ? 'bottom right' : 'bottom left';
+  } else {
+    style.top = Math.round(yPos + (isRect ? 4 : 0));
+    style.transformOrigin = isRect ? 'top right' : 'top left';
+  }
+
+  return style;
+};
+
+interface TrackActionMenuProps {
+  track: any;
+  index: number;
+  anchor: DOMRect | { x: number; y: number };
+  isCloud?: boolean;
+  onClose: () => void;
+  playNextInQueue: (track: any) => Promise<boolean | void> | void;
+  addToQueue: (track: any) => Promise<boolean | void> | void;
+  setCoverArtModalTrack: (track: Track | null) => void;
+  setEditModalFor: (track: Track | null) => void;
+  setPlaylistModalFor: (track: Track | null) => void;
+  matchMetadata: (track: Track) => Promise<any>;
+  setMatchData: (data: { track: Track; match: any } | null) => void;
+  setIsMatching: (id: number | null) => void;
+  isMatching: number | null;
+  playTrack: (track: Track) => Promise<void> | void;
+  currentPlaylist: Playlist | null;
+  reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void> | void;
+  removeFromPlaylist: (playlistId: number, track: string | Track) => Promise<void> | void;
+}
+
+function TrackActionMenu({
+  track,
+  index,
+  anchor,
+  isCloud,
+  onClose,
+  playNextInQueue,
+  addToQueue,
+  setCoverArtModalTrack,
+  setEditModalFor,
+  setPlaylistModalFor,
+  matchMetadata,
+  setMatchData,
+  setIsMatching,
+  isMatching,
+  playTrack,
+  currentPlaylist,
+  reorderPlaylistTracks,
+  removeFromPlaylist,
+}: TrackActionMenuProps) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const handleScrollOrResize = () => onClose();
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+    };
+  }, [onClose]);
+
+  const menuStyle = getMenuPosition(anchor);
+
+  if (isCloud) {
+    const vt = track.provider ? cloudTrackToVirtualTrack(track as CloudTrack) : track;
+    return createPortal(
+      <>
+        <div
+          className="track-action-menu-backdrop"
+          onClick={onClose}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onClose();
+          }}
+        />
+        <div className="track-action-menu" style={menuStyle} onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="track-action-menu-item"
+            onClick={() => {
+              onClose();
+              playNextInQueue(vt);
+            }}
+          >
+            <span className="menu-item-icon"><ListPlus size={15} /></span>
+            <span>Play Next</span>
+          </button>
+          <button
+            type="button"
+            className="track-action-menu-item"
+            onClick={() => {
+              onClose();
+              addToQueue(vt);
+            }}
+          >
+            <span className="menu-item-icon"><Plus size={15} /></span>
+            <span>Add to Queue</span>
+          </button>
+        </div>
+      </>,
+      document.body
+    );
+  }
+
+  const currentPlaylistTracks = currentPlaylist ? useStore.getState().tracks : [];
+  const realIdx = currentPlaylist
+    ? currentPlaylistTracks.findIndex((item: any) =>
+        track.playlist_entry_id !== undefined
+          ? item.playlist_entry_id === track.playlist_entry_id
+          : item.path === track.path
+      )
+    : -1;
+  const effectiveIdx = realIdx !== -1 ? realIdx : index;
+  const maxIdx = currentPlaylistTracks.length - 1;
+
+  return createPortal(
+    <>
+      <div
+        className="track-action-menu-backdrop"
+        onClick={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      />
+      <div className="track-action-menu" style={menuStyle} onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className="track-action-menu-item"
+          onClick={() => {
+            onClose();
+            playNextInQueue(track);
+          }}
+        >
+          <span className="menu-item-icon"><ListPlus size={15} /></span>
+          <span>Play Next</span>
+        </button>
+
+        <button
+          type="button"
+          className="track-action-menu-item"
+          onClick={() => {
+            onClose();
+            addToQueue(track);
+          }}
+        >
+          <span className="menu-item-icon"><Plus size={15} /></span>
+          <span>Add to Queue</span>
+        </button>
+
+        <button
+          type="button"
+          className="track-action-menu-item"
+          onClick={() => {
+            onClose();
+            setCoverArtModalTrack(track);
+          }}
+        >
+          <span className="menu-item-icon"><Image size={15} /></span>
+          <span>Manage Cover Art</span>
+        </button>
+
+        <div className="track-action-menu-divider" />
+
+        <button
+          type="button"
+          className="track-action-menu-item accent"
+          onClick={async () => {
+            onClose();
+            setIsMatching(track.id);
+            try {
+              const match = await matchMetadata(track);
+              if (match) {
+                setMatchData({ track, match });
+              } else {
+                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'No match found for this track.', type: 'warning' } }));
+              }
+            } catch (err) {
+              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `MagicMatch failed: ${err}`, type: 'error' } }));
+            } finally {
+              setIsMatching(null);
+            }
+          }}
+        >
+          <span className="menu-item-icon">
+            {isMatching === track.id ? <RefreshCw size={15} className="spin" /> : <Activity size={15} />}
+          </span>
+          <span>{isMatching === track.id ? 'Searching...' : 'Magic Match'}</span>
+        </button>
+
+        <button
+          type="button"
+          className="track-action-menu-item emerald"
+          onClick={async () => {
+            onClose();
+            try {
+              const similar: any[] = await invoke('get_similar_tracks', { path: track.path });
+              if (similar && similar.length > 0) {
+                const store = useStore.getState();
+                await store.clearQueue();
+                for (const t of similar) {
+                  await store.addToQueue(t);
+                }
+                playTrack(similar[0]);
+                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix: Queued ${similar.length} similar tracks!`, type: 'success' } }));
+              } else {
+                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' } }));
+              }
+            } catch (err) {
+              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } }));
+            }
+          }}
+        >
+          <span className="menu-item-icon"><Sparkles size={15} /></span>
+          <span>Sonic Mix</span>
+        </button>
+
+        <div className="track-action-menu-divider" />
+
+        <button
+          type="button"
+          className="track-action-menu-item accent"
+          onClick={() => {
+            onClose();
+            useStore.getState().setTagEditorTrack(track);
+          }}
+        >
+          <span className="menu-item-icon"><Tag size={15} /></span>
+          <span>Edit Audio Tags</span>
+        </button>
+
+        <button
+          type="button"
+          className="track-action-menu-item"
+          onClick={() => {
+            onClose();
+            setEditModalFor(track);
+          }}
+        >
+          <span className="menu-item-icon"><FileText size={15} /></span>
+          <span>Edit Song Data</span>
+        </button>
+
+        <div className="track-action-menu-divider" />
+
+        <SourceMenu
+          track={track}
+          renderTrigger={(onTrigger) => (
+            <button
+              type="button"
+              className="track-action-menu-item"
+              onClick={() => {
+                onClose();
+                onTrigger();
+              }}
+            >
+              <span className="menu-item-icon"><Globe size={15} /></span>
+              <span>Other Audio Sources</span>
+            </button>
+          )}
+        />
+
+        {currentPlaylist ? (
+          <>
+            {effectiveIdx > 0 && (
+              <button
+                type="button"
+                className="track-action-menu-item"
+                onClick={() => {
+                  onClose();
+                  reorderPlaylistTracks(currentPlaylist.id, effectiveIdx, effectiveIdx - 1);
+                }}
+              >
+                <span className="menu-item-icon"><ArrowUp size={15} /></span>
+                <span>Move Up</span>
+              </button>
+            )}
+            {effectiveIdx < maxIdx && (
+              <button
+                type="button"
+                className="track-action-menu-item"
+                onClick={() => {
+                  onClose();
+                  reorderPlaylistTracks(currentPlaylist.id, effectiveIdx, effectiveIdx + 1);
+                }}
+              >
+                <span className="menu-item-icon"><ArrowDown size={15} /></span>
+                <span>Move Down</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="track-action-menu-item danger"
+              onClick={() => {
+                onClose();
+                removeFromPlaylist(currentPlaylist.id, track);
+              }}
+            >
+              <span className="menu-item-icon"><MinusCircle size={15} /></span>
+              <span>Remove from Playlist</span>
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="track-action-menu-item"
+            onClick={() => {
+              onClose();
+              setPlaylistModalFor(track);
+            }}
+          >
+            <span className="menu-item-icon"><FolderPlus size={15} /></span>
+            <span>Add to Playlist...</span>
+          </button>
+        )}
+
+        <div className="track-action-menu-divider" />
+
+        <button
+          type="button"
+          className="track-action-menu-item danger"
+          onClick={() => {
+            onClose();
+            if (window.confirm(`Are you sure you want to delete "${track.title || track.path}"? This will remove it from your library and delete the file.`)) {
+              useStore.getState().deleteTrack(track.path);
+            }
+          }}
+        >
+          <span className="menu-item-icon"><Trash2 size={15} /></span>
+          <span>Delete Song</span>
+        </button>
+      </div>
+    </>,
+    document.body
+  );
+}
+
 interface TrackRowProps {
   t: Track;
   i: number;
   totalTracks: number;
   active: boolean;
   isHighRes: boolean;
-  menuOpenFor: any;
-  isMatching: number | null;
   currentPlaylist: Playlist | null;
   playTrack: (track: Track) => Promise<void> | void;
   setView: (view: any) => void;
-  setMenuOpenFor: (id: any) => void;
-  playNextInQueue: (track: Track) => Promise<boolean | void> | void;
-  addToQueue: (track: Track) => Promise<boolean | void> | void;
-  matchMetadata: (track: Track) => Promise<any>;
-  setMatchData: (data: { track: Track; match: any } | null) => void;
-  setIsMatching: (id: number | null) => void;
-  removeFromPlaylist: (playlistId: number, track: string | Track) => Promise<void> | void;
-  reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void> | void;
-  setPlaylistModalFor: (track: Track | null) => void;
-  setEditModalFor: (track: Track | null) => void;
+  onOpenMenu: (track: Track, index: number, anchor: DOMRect | { x: number; y: number }) => void;
   toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<boolean | void> | void;
   toggleDislikeTrack: (path: string, metadata?: Partial<Track>) => Promise<void> | void;
-  setCoverArtModalTrack: (track: Track | null) => void;
   cacheCloudTrack: (track: Track) => Promise<void> | void;
   deleteCachedTrack: (streamUrl: string) => Promise<void> | void;
-  cachedCloudHashes: string[];  isDraggable?: boolean;
+  cachedCloudHashes: string[];
+  isDraggable?: boolean;
   isDragged?: boolean;
   isDragOver?: boolean;
   onPointerDragStart?: (e: React.PointerEvent) => void;
@@ -276,31 +628,30 @@ interface TrackRowProps {
 }
 
 const TrackRow = memo(({ 
-  t, i, totalTracks: _totalTracks, active, isHighRes, menuOpenFor, isMatching, currentPlaylist, 
-  playTrack, setView, setMenuOpenFor, playNextInQueue, addToQueue, matchMetadata, 
-  setMatchData, setIsMatching, removeFromPlaylist, reorderPlaylistTracks, setPlaylistModalFor, setEditModalFor,
-  toggleLoveTrack, toggleDislikeTrack, setCoverArtModalTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes,
+  t, i, totalTracks: _totalTracks, active, isHighRes, currentPlaylist: _currentPlaylist, 
+  playTrack, setView, onOpenMenu,
+  toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes,
   isDraggable, isDragged, isDragOver, onPointerDragStart, isSelected, onRowClick, onSelectArtist
 }: TrackRowProps) => {
-  const [isRowHovered, setIsRowHovered] = useState(false);
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
-  const rowId = entryKey(t);
   return (
     <tr 
       className={`track-row${active ? ' playing' : ''}${isSelected ? ' selected' : ''}`}
       data-playlist-track-index={i}
-      onMouseEnter={() => setIsRowHovered(true)}
-      onMouseLeave={() => setIsRowHovered(false)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenMenu(t, i, { x: e.clientX, y: e.clientY });
+      }}
       style={{ 
         position: 'relative', 
-        zIndex: menuOpenFor === rowId ? 2000 : 1,
+        zIndex: 1,
         opacity: isDragged ? 0.35 : 1,
         background: isSelected 
-          ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.18)' 
-          : (isDragOver ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.18)' : undefined),
-        borderLeft: isSelected ? '3px solid var(--accent, #8b5cf6)' : '3px solid transparent',
+          ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.16)' 
+          : (isDragOver ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.16)' : undefined),
         borderTop: isDragOver && !isDragged ? '2px solid var(--accent, #8b5cf6)' : undefined,
-        transition: 'background 0.15s, opacity 0.15s, border-left 0.15s',
+        transition: 'background 0.15s, opacity 0.15s',
         userSelect: isDraggable ? 'none' : 'auto'
       }}
       onClick={(e) => {
@@ -323,18 +674,25 @@ const TrackRow = memo(({
         }}
         title={isDraggable ? 'Drag to reorder' : undefined}
       >
-        {isSelected ? '✓' : (active ? '▶' : (isDraggable ? (
+        {isDraggable ? (
           <div 
             onPointerDown={onPointerDragStart}
-            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 3, cursor: 'grab', touchAction: 'none', padding: '2px 4px' }}
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              cursor: 'grab',
+              padding: '4px 0'
+            }}
           >
-            <GripVertical size={13} style={{ opacity: isRowHovered || isDragged ? 1 : 0.35, color: (isRowHovered || isDragged) ? 'var(--accent)' : 'var(--text-dim)', transition: 'opacity 0.2s' }} />
-            <span>{i + 1}</span>
+            <GripVertical size={14} style={{ opacity: isDragged ? 0.3 : 0.6 }} />
           </div>
-        ) : i + 1))}
+        ) : (
+          active ? '▶' : i + 1
+        )}
       </td>
-      <td style={{ textAlign: 'center', width: 68 }}>
-        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+      <td style={{ textAlign: 'center', padding: '0 4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -349,15 +707,7 @@ const TrackRow = memo(({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.2)';
-              if (t.loved !== 1) e.currentTarget.style.color = '#ef4444';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1.0)';
-              if (t.loved !== 1) e.currentTarget.style.color = 'var(--text-dim)';
+              transition: 'color 0.15s ease',
             }}
             title={t.loved === 1 ? "Unlove track" : "Love track"}
           >
@@ -377,15 +727,7 @@ const TrackRow = memo(({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'all 0.2s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.2)';
-              if (t.disliked !== 1) e.currentTarget.style.color = '#f43f5e';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1.0)';
-              if (t.disliked !== 1) e.currentTarget.style.color = 'var(--text-dim)';
+              transition: 'color 0.15s ease',
             }}
             title={t.disliked === 1 ? "Undislike track" : "Dislike track"}
           >
@@ -464,226 +806,19 @@ const TrackRow = memo(({
               />
             )}
           </div>
-          <div style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 3000 : 1, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <button
               className="icon-btn"
+              type="button"
+              title="More options"
               onClick={(e) => { 
                 e.stopPropagation(); 
-                setMenuOpenFor((prev: any) => prev === rowId ? null : rowId); 
+                onOpenMenu(t, i, e.currentTarget.getBoundingClientRect()); 
               }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4 }}
             >
               <MoreVertical size={16} />
             </button>
-            <AnimatePresence>
-              {menuOpenFor === rowId && (
-                <motion.div
-                  key="track-menu"
-                  initial={{ opacity: 0, scale: 0.95, y: -4 }} 
-                  animate={{ opacity: 1, scale: 1, y: 0 }} 
-                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                  transition={{ duration: 0.12 }}
-                  style={{ 
-                    position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 3000, 
-                    background: 'rgba(20, 20, 30, 0.95)', backdropFilter: 'blur(16px)',
-                    border: '1px solid var(--glass-border)', borderRadius: 12, 
-                    padding: 6, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                    display: 'flex', flexDirection: 'column', gap: 2, transformOrigin: 'top right'
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div
-                    onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); playNextInQueue(t); }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    Play Next
-                  </div>
-                  <div
-                    onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); addToQueue(t); }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    Add to Queue
-                  </div>
-
-                  <div
-                    onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setCoverArtModalTrack(t); }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    Manage Cover Art
-                  </div>
-
-                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
-
-                  <div
-                    onClick={async (e) => { 
-                      e.stopPropagation();
-                      setMenuOpenFor(null);
-                      setIsMatching(t.id);
-                      try {
-                        const match = await matchMetadata(t);
-                        if (match) {
-                          setMatchData({ track: t, match });
-                        } else {
-                          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'No match found for this track.', type: 'warning' } }));
-                        }
-                      } catch (err) {
-                        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `MagicMatch failed: ${err}`, type: 'error' } }));
-                      } finally {
-                        setIsMatching(null);
-                      }
-                    }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(168, 85, 247, 0.15)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    {isMatching === t.id ? (
-                        <RefreshCw size={14} className="spin" />
-                      ) : (
-                        <Activity size={14} />
-                      )}
-                      {isMatching === t.id ? 'Searching...' : 'Magic Match'}
-                  </div>
-
-                  <div
-                    onClick={async (e) => { 
-                      e.stopPropagation();
-                      setMenuOpenFor(null);
-                      try {
-                        const similar: any[] = await invoke('get_similar_tracks', { path: t.path });
-                        if (similar && similar.length > 0) {
-                          const store = useStore.getState();
-                          await store.clearQueue();
-                          for (const track of similar) {
-                            await store.addToQueue(track);
-                          }
-                          playTrack(similar[0]);
-                          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix: Queued ${similar.length} similar tracks!`, type: 'success' } }));
-                        } else {
-                          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' } }));
-                        }
-                      } catch (err) {
-                        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } }));
-                      }
-                    }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: '#10b981', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <Activity size={14} style={{ color: '#10b981' }} />
-                    Sonic Mix
-                  </div>
-
-                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
-                  <div
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      setMenuOpenFor(null); 
-                      useStore.getState().setTagEditorTrack(t);
-                    }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'var(--accent)', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(139, 92, 246, 0.15)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <Tag size={14} />
-                    Edit Audio Tags (ID3 / FLAC)
-                  </div>
-                  <div
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      setMenuOpenFor(null); 
-                      setEditModalFor(t); 
-                    }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    Edit Song Data
-                  </div>
-                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
-
-                  <SourceMenu track={t} />
-                  {currentPlaylist ? (() => {
-                    const currentPlaylistTracks = useStore.getState().tracks;
-                    const realIdx = currentPlaylistTracks.findIndex((item: any) => t.playlist_entry_id !== undefined ? item.playlist_entry_id === t.playlist_entry_id : item.path === t.path);
-                    const effectiveIdx = realIdx !== -1 ? realIdx : i;
-                    const maxIdx = currentPlaylistTracks.length - 1;
-
-                    return (
-                      <>
-                        {effectiveIdx > 0 && (
-                          <div
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              reorderPlaylistTracks(currentPlaylist.id, effectiveIdx, effectiveIdx - 1); 
-                              setMenuOpenFor(null); 
-                            }}
-                            style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <ArrowUp size={14} /> Move Up
-                          </div>
-                        )}
-                        {effectiveIdx < maxIdx && (
-                          <div
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              reorderPlaylistTracks(currentPlaylist.id, effectiveIdx, effectiveIdx + 1); 
-                              setMenuOpenFor(null); 
-                            }}
-                            style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 8 }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <ArrowDown size={14} /> Move Down
-                          </div>
-                        )}
-                        <div
-                          onClick={(e) => { e.stopPropagation(); removeFromPlaylist(currentPlaylist.id, t); setMenuOpenFor(null); }}
-                          style={{ padding: '10px 14px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                        >
-                          Remove from Playlist
-                        </div>
-                      </>
-                    );
-                  })() : (
-                    <div
-                      onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); setPlaylistModalFor(t); }}
-                      style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    >
-                      Add to Playlist...
-                    </div>
-                  )}
-
-                  <div style={{ height: 1, background: 'var(--glass-border)', margin: '4px 6px' }} />
-
-                  <div
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      setMenuOpenFor(null); 
-                      if (window.confirm(`Are you sure you want to delete "${t.title || t.path}"? This will remove it from your library and delete the file.`)) {
-                        useStore.getState().deleteTrack(t.path);
-                      }
-                    }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: '#ef4444', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    Delete Song
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
         </div>
       </td>
@@ -692,28 +827,29 @@ const TrackRow = memo(({
 });
 
 const CloudTrackRow = memo(({ 
-  t, i, active, menuOpenFor, setMenuOpenFor, playCloudTrack, addToQueue, playNextInQueue,
+  t, i, active, onOpenMenu, playCloudTrack,
   cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, onSelectArtist
 }: {
   t: CloudTrack,
   i: number,
   active: boolean,
-  menuOpenFor: any,
-  setMenuOpenFor: (id: any) => void,
+  onOpenMenu: (track: any, index: number, anchor: DOMRect | { x: number; y: number }, isCloud?: boolean) => void,
   playCloudTrack: (track: CloudTrack) => void,
-  addToQueue: (track: any) => void,
-  playNextInQueue: (track: any) => void,
   cacheCloudTrack: (track: any) => Promise<void>,
   deleteCachedTrack: (streamUrl: string) => Promise<void>,
   cachedCloudHashes: string[],
   onSelectArtist?: (artist: string) => void
 }) => {
   const vt = cloudTrackToVirtualTrack(t);
-  const rowId = t.stream_url || t.id;
   
   return (
     <tr className={`track-row${active ? ' playing' : ''}`}
-      style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 2000 : 1 }}
+      style={{ position: 'relative', zIndex: 1 }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenMenu(vt, i, { x: e.clientX, y: e.clientY }, true);
+      }}
       onClick={() => playCloudTrack(t)}>
       <td style={{ textAlign: 'center', color: active ? 'var(--accent)' : 'var(--text-dim)', fontSize: 12 }}>
         {active ? '▶' : i + 1}
@@ -770,53 +906,19 @@ const CloudTrackRow = memo(({
               precomputedHash={t.path_hash}
             />
           </div>
-          <div style={{ position: 'relative', zIndex: menuOpenFor === rowId ? 3000 : 1, width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <button
               className="icon-btn"
+              type="button"
+              title="More options"
               onClick={(e) => { 
                 e.stopPropagation(); 
-                setMenuOpenFor((prev: any) => prev === rowId ? null : rowId); 
+                onOpenMenu(vt, i, e.currentTarget.getBoundingClientRect(), true); 
               }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4 }}
             >
               <MoreVertical size={16} />
             </button>
-            <AnimatePresence>
-              {menuOpenFor === rowId && (
-                <motion.div
-                  key="cloud-track-menu"
-                  initial={{ opacity: 0, scale: 0.95, y: -4 }} 
-                  animate={{ opacity: 1, scale: 1, y: 0 }} 
-                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                  transition={{ duration: 0.12 }}
-                  style={{ 
-                    position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 3000, 
-                    background: 'rgba(20, 20, 30, 0.95)', backdropFilter: 'blur(16px)',
-                    border: '1px solid var(--glass-border)', borderRadius: 12, 
-                    padding: 6, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                    display: 'flex', flexDirection: 'column', gap: 2, transformOrigin: 'top right'
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div
-                    onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); playNextInQueue(vt); }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    Play Next
-                  </div>
-                  <div
-                    onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); addToQueue(vt); }}
-                    style={{ padding: '10px 14px', fontSize: 13, color: 'white', cursor: 'pointer', borderRadius: 8, transition: 'background 0.2s', display: 'flex', alignItems: 'center' }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--glass-h)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    Add to Queue
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
         </div>
       </td>
@@ -871,12 +973,6 @@ export function LibraryView() {
     }
   }, [view, currentPlaylist]);
 
-  useEffect(() => {
-    const handleGlobalClick = () => setMenuOpenFor(null);
-    window.addEventListener('click', handleGlobalClick);
-    return () => window.removeEventListener('click', handleGlobalClick);
-  }, []);
-  
   const [activeSector, setActiveSector] = useState<'local' | 'subsonic' | 'jellyfin'>('local');
   const [activeFilter, setActiveFilter] = useState<QuickFilterType>('all');
   const [viewMode, setViewModeState] = useState<'tracks' | 'albums'>(() => {
@@ -895,7 +991,20 @@ export function LibraryView() {
     setAlbumSortByState(sort);
   };
   const [albumCount, setAlbumCount] = useState<number>(0);
-  const [menuOpenFor, setMenuOpenFor] = useState<any>(null);
+  const [activeMenu, setActiveMenu] = useState<{
+    track: any;
+    index: number;
+    anchor: DOMRect | { x: number; y: number };
+    isCloud?: boolean;
+  } | null>(null);
+
+  const handleOpenMenu = useCallback((track: any, index: number, anchor: DOMRect | { x: number; y: number }, isCloud?: boolean) => {
+    setActiveMenu({ track, index, anchor, isCloud });
+  }, []);
+
+  const handleCloseMenu = useCallback(() => {
+    setActiveMenu(null);
+  }, []);
 
   useEffect(() => {
     setActiveFilter('all');
@@ -1365,7 +1474,7 @@ export function LibraryView() {
       ref={scrollRef}
       className="library-wrap" 
       data-scroll-container="true"
-      onClick={() => setMenuOpenFor(null)}
+      onClick={() => setActiveMenu(null)}
       onScroll={(e) => {
         const target = e.currentTarget;
         if (activeSector !== 'local' && target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
@@ -1486,29 +1595,7 @@ export function LibraryView() {
                     setSearchQuery(e.target.value);
                     setLibrarySearchQuery(e.target.value);
                   }}
-                  style={{
-                    width: '100%',
-                    background: 'var(--glass)',
-                    border: '1px solid var(--glass-border)',
-                    backdropFilter: 'blur(12px)',
-                    borderRadius: 20,
-                    padding: '8px 32px 8px 38px',
-                    color: 'var(--text)',
-                    outline: 'none',
-                    fontSize: 13,
-                    boxSizing: 'border-box',
-                    transition: 'all 0.2s',
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = 'rgba(var(--accent-rgb), 0.5)';
-                    e.target.style.background = 'var(--glass-h)';
-                    e.target.style.boxShadow = '0 0 12px rgba(var(--accent-rgb), 0.25)';
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = 'var(--glass-border)';
-                    e.target.style.background = 'var(--glass)';
-                    e.target.style.boxShadow = 'none';
-                  }}
+                  className="library-search-input"
                 />
                 {searchQuery && (
                   <button 
@@ -1650,7 +1737,7 @@ export function LibraryView() {
                   : 'var(--dynamic-accent, #8b5cf6)'
               }}
             >
-              <div style={{ width: 0, height: 0, borderTop: '5px solid transparent', borderBottom: '5px solid transparent', borderLeft: '8px solid white' }}></div>
+              <Play size={14} fill="currentColor" />
               Play All
             </button>
           </div>
@@ -1758,54 +1845,13 @@ export function LibraryView() {
                 return (
                   <button
                     key={chip.id}
+                    type="button"
                     onClick={() => setActiveFilter(chip.id)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '6px 14px',
-                      borderRadius: 20,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                      background: isActive 
-                        ? 'var(--dynamic-accent, #8b5cf6)' 
-                        : 'var(--glass)',
-                      color: isActive ? '#ffffff' : 'var(--text-dim)',
-                      border: isActive 
-                        ? '1px solid rgba(var(--accent-rgb), 0.5)' 
-                        : '1px solid var(--glass-border)',
-                      backdropFilter: 'blur(10px)',
-                      boxShadow: isActive 
-                        ? '0 0 14px rgba(var(--accent-rgb), 0.35)' 
-                        : 'none',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = 'var(--glass-h)';
-                        e.currentTarget.style.color = '#ffffff';
-                        e.currentTarget.style.borderColor = 'rgba(var(--accent-rgb), 0.35)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = 'var(--glass)';
-                        e.currentTarget.style.color = 'var(--text-dim)';
-                        e.currentTarget.style.borderColor = 'var(--glass-h)';
-                      }
-                    }}
+                    className={`library-filter-chip${isActive ? ' active' : ''}`}
                   >
                     {chip.icon}
                     <span>{chip.label}</span>
-                    <span style={{
-                      fontSize: 10,
-                      padding: '1px 6px',
-                      borderRadius: 10,
-                      fontWeight: 700,
-                      background: isActive ? 'var(--accent)' : 'var(--glass-h)',
-                      color: isActive ? '#ffffff' : 'var(--text-dim)',
-                    }}>
+                    <span className="chip-count">
                       {chip.count}
                     </span>
                   </button>
@@ -1899,24 +1945,12 @@ export function LibraryView() {
                           totalTracks={filteredTracks.length}
                           active={active}
                           isHighRes={isHighRes}
-                          menuOpenFor={menuOpenFor}
-                          isMatching={isMatching}
                           currentPlaylist={currentPlaylist}
                           playTrack={playTrack}
                           setView={setView}
-                          setMenuOpenFor={setMenuOpenFor}
-                          playNextInQueue={playNextInQueue}
-                          addToQueue={addToQueue}
-                          matchMetadata={matchMetadata}
-                          setMatchData={setMatchData}
-                          setIsMatching={setIsMatching}
-                          removeFromPlaylist={removeFromPlaylist}
-                          reorderPlaylistTracks={reorderPlaylistTracks}
-                          setPlaylistModalFor={setPlaylistModalFor}
-                          setEditModalFor={setEditModalFor}
+                          onOpenMenu={handleOpenMenu}
                           toggleLoveTrack={toggleLoveTrack}
                           toggleDislikeTrack={toggleDislikeTrack}
-                          setCoverArtModalTrack={setCoverArtModalTrack}
                           cacheCloudTrack={cacheCloudTrack}
                           deleteCachedTrack={deleteCachedTrack}
                           cachedCloudHashes={cachedCloudHashes}
@@ -1968,11 +2002,8 @@ export function LibraryView() {
                           t={t}
                           i={i}
                           active={active}
-                          menuOpenFor={menuOpenFor}
-                          setMenuOpenFor={setMenuOpenFor}
+                          onOpenMenu={handleOpenMenu}
                           playCloudTrack={playCloudTrack}
-                          addToQueue={addToQueue}
-                          playNextInQueue={playNextInQueue}
                           cacheCloudTrack={cacheCloudTrack}
                           deleteCachedTrack={deleteCachedTrack}
                           cachedCloudHashes={cachedCloudHashes}
@@ -2024,11 +2055,8 @@ export function LibraryView() {
                           t={t}
                           i={i}
                           active={active}
-                          menuOpenFor={menuOpenFor}
-                          setMenuOpenFor={setMenuOpenFor}
+                          onOpenMenu={handleOpenMenu}
                           playCloudTrack={playCloudTrack}
-                          addToQueue={addToQueue}
-                          playNextInQueue={playNextInQueue}
                           cacheCloudTrack={cacheCloudTrack}
                           deleteCachedTrack={deleteCachedTrack}
                           cachedCloudHashes={cachedCloudHashes}
@@ -2417,6 +2445,29 @@ export function LibraryView() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {activeMenu && (
+        <TrackActionMenu
+          track={activeMenu.track}
+          index={activeMenu.index}
+          anchor={activeMenu.anchor}
+          isCloud={activeMenu.isCloud}
+          onClose={handleCloseMenu}
+          playNextInQueue={playNextInQueue}
+          addToQueue={addToQueue}
+          setCoverArtModalTrack={setCoverArtModalTrack}
+          setEditModalFor={setEditModalFor}
+          setPlaylistModalFor={setPlaylistModalFor}
+          matchMetadata={matchMetadata}
+          setMatchData={setMatchData}
+          setIsMatching={setIsMatching}
+          isMatching={isMatching}
+          playTrack={playTrack}
+          currentPlaylist={currentPlaylist}
+          reorderPlaylistTracks={reorderPlaylistTracks}
+          removeFromPlaylist={removeFromPlaylist}
+        />
+      )}
     </div>
   );
 }

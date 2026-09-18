@@ -595,12 +595,12 @@ pub async fn tidal_search(
     }
 
     let country_str = country.unwrap_or_else(|| "MY".to_string());
-
-    let search_url = format!("https://api.tidal.com/v1/search?query={}&limit=25&types=TRACKS&countryCode={}", urlencoding::encode(&query), country_str);
+    let clean_query = query.replace(&['"', '\'', '“', '”', '‘', '’'][..], "").trim().to_string();
+    let search_url = format!("https://api.tidal.com/v1/search?query={}&limit=25&types=TRACKS&countryCode={}", urlencoding::encode(&clean_query), country_str);
 
     println!("\n{BOLD}{MAGENTA}┌────────────────────────────────────────────────────────┐{RESET}");
     println!("{BOLD}{MAGENTA}│  [TIDAL ENGINE] Searching Tidal catalog...             │{RESET}");
-    println!("{BOLD}{MAGENTA}│  Query: {:<47}│{RESET}", query);
+    println!("{BOLD}{MAGENTA}│  Query: {:<47}│{RESET}", clean_query);
     println!("{BOLD}{MAGENTA}│  Country: {:<45}│{RESET}", country_str);
     println!("{BOLD}{MAGENTA}└────────────────────────────────────────────────────────┘{RESET}");
 
@@ -648,7 +648,7 @@ pub async fn tidal_search(
     if let Some(items) = search_results["tracks"]["items"].as_array() {
         for item in items {
             let id = item["id"].as_u64().or_else(|| item["id"].as_str().map(|s| s.parse().unwrap_or(0))).unwrap_or(0).to_string();
-            let title = item["title"].as_str().unwrap_or("").to_string();
+            let title = crate::sources::format_catalog_title(item);
             let artist = item["artist"]["name"].as_str()
                 .or_else(|| item["artists"][0]["name"].as_str())
                 .unwrap_or("Unknown Artist")

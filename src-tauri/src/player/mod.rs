@@ -5207,6 +5207,7 @@ fn play_file(
         if let Some(tb) = time_base {
             let seek_ts = (start_pos * tb.denom as f64 / tb.numer as f64) as u64;
             let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+            decoder.reset();
         }
     }
 
@@ -5437,8 +5438,16 @@ fn play_file(
                 target_channels,
                 &exclusive_timing,
                 Arc::clone(&stream_paused),
+                Arc::clone(&flush_signal),
                 dither_enabled,
                 move |data: &mut [f32]| {
+                    let ch_count = target_channels as usize;
+                    if flush_cb.swap(false, Ordering::SeqCst) {
+                        let l = cons.len();
+                        let frames = l / ch_count;
+                        cons.discard(frames * ch_count);
+                    }
+
                     let paused = paused_cb.load(Ordering::Relaxed) != 1;
                     let is_bp = bp_cb.load(Ordering::Relaxed);
                     let user_vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
@@ -5449,8 +5458,6 @@ fn play_file(
                         return;
                     }
 
-                    if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
-
                     let mut n = cons.pop_slice(data);
                     if n < data.len() {
                         n += cons.pop_slice(&mut data[n..]);
@@ -5459,7 +5466,6 @@ fn play_file(
                         audio_path_cb.record_underrun();
                     }
 
-                    let ch_count = target_channels as usize;
                     let frames_count = data.len() / ch_count;
                     let fade_step = 1.0 / 256.0;
 
@@ -5596,6 +5602,12 @@ fn play_file(
                                 }
                             });
                         }
+                        if flush_cb.swap(false, Ordering::SeqCst) {
+                            let l = cons.len();
+                            let frames = l / ch_count;
+                            cons.discard(frames * ch_count);
+                        }
+
                         let paused = paused_cb.load(Ordering::Relaxed) != 1;
                         let is_bp = bp_cb_f32.load(Ordering::Relaxed);
                         let user_vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
@@ -5605,8 +5617,6 @@ fn play_file(
                             data.fill(0.0);
                             return;
                         }
-
-                        if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
 
                         let mut n = cons.pop_slice(data);
                         if n < data.len() {
@@ -5677,6 +5687,12 @@ fn play_file(
                                 initialized.set(true);
                             }
                         });
+                        if flush_cb.swap(false, Ordering::SeqCst) {
+                            let l = cons.len();
+                            let frames = l / ch_count;
+                            cons.discard(frames * ch_count);
+                        }
+
                         let paused = paused_cb.load(Ordering::Relaxed) != 1;
                         let is_bp = bp_cb_i16.load(Ordering::Relaxed);
                         let user_vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
@@ -5686,8 +5702,6 @@ fn play_file(
                             data.fill(0);
                             return;
                         }
-
-                        if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
 
                         if buf.len() < data.len() { buf.resize(data.len(), 0.0); }
                         let mut n = cons.pop_slice(&mut buf[..data.len()]);
@@ -5767,6 +5781,12 @@ fn play_file(
                                 initialized.set(true);
                             }
                         });
+                        if flush_cb.swap(false, Ordering::SeqCst) {
+                            let l = cons.len();
+                            let frames = l / ch_count;
+                            cons.discard(frames * ch_count);
+                        }
+
                         let paused = paused_cb.load(Ordering::Relaxed) != 1;
                         let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                         let target_gain = if paused { 0.0 } else { vol };
@@ -5775,8 +5795,6 @@ fn play_file(
                             data.fill(0);
                             return;
                         }
-
-                        if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
 
                         if buf.len() < data.len() { buf.resize(data.len(), 0.0); }
                         let mut n = cons.pop_slice(&mut buf[..data.len()]);
@@ -5937,6 +5955,12 @@ fn play_file(
                                     initialized.set(true);
                                 }
                             });
+                            if flush_cb.swap(false, Ordering::SeqCst) {
+                                let l = cons.len();
+                                let frames = l / ch_count;
+                                cons.discard(frames * ch_count);
+                            }
+
                             let paused = paused_cb.load(Ordering::Relaxed) != 1;
                             let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                             let target_gain = if paused { 0.0 } else { vol };
@@ -5945,8 +5969,6 @@ fn play_file(
                                 d.fill(0.0);
                                 return;
                             }
-
-                            if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
 
                             let mut n = cons.pop_slice(d);
                             if n < d.len() {
@@ -6006,6 +6028,12 @@ fn play_file(
                                     initialized.set(true);
                                 }
                             });
+                            if flush_cb.swap(false, Ordering::SeqCst) {
+                                let l = cons.len();
+                                let frames = l / ch_count;
+                                cons.discard(frames * ch_count);
+                            }
+
                             let paused = paused_cb.load(Ordering::Relaxed) != 1;
                             let vol = f32::from_bits(volume_cb.load(Ordering::Relaxed));
                             let target_gain = if paused { 0.0 } else { vol };
@@ -6014,8 +6042,6 @@ fn play_file(
                                 d.fill(0);
                                 return;
                             }
-
-                            if flush_cb.swap(false, Ordering::SeqCst) { let l = cons.len(); cons.discard(l); }
 
                             if buf.len() < d.len() { buf.resize(d.len(), 0.0); }
                             let mut n = cons.pop_slice(&mut buf[..d.len()]);
@@ -6287,15 +6313,24 @@ fn play_file(
                         position_secs.store(secs.to_bits(), Ordering::Relaxed);
                         flush_signal.store(true, Ordering::SeqCst);
                         pending.iter_mut().for_each(|ch| ch.clear());
+                        let flush_wait = std::time::Instant::now();
+                        while flush_signal.load(Ordering::SeqCst) && flush_wait.elapsed().as_millis() < 60 {
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
                     } else if !is_stream {
                         if let Some(tb) = time_base {
                             let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
                             let _ = format.seek(SeekMode::Accurate, SeekTo::TimeStamp { ts: seek_ts, track_id });
                         }
+                        decoder.reset();
                         ram_cursor = (secs * file_rate as f64) as usize;
                         position_secs.store(secs.to_bits(), Ordering::Relaxed);
                         flush_signal.store(true, Ordering::SeqCst);
                         pending.iter_mut().for_each(|ch| ch.clear());
+                        let flush_wait = std::time::Instant::now();
+                        while flush_signal.load(Ordering::SeqCst) && flush_wait.elapsed().as_millis() < 60 {
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
                     } else {
                         // HTTP Stream: Restart FFmpeg starting at target offset!
                         abort_background_downloads();
@@ -6532,7 +6567,7 @@ fn play_file(
                 } else {
                     // STILL LOADING
                     if pending[0].len() < chunk_size {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        std::thread::sleep(std::time::Duration::from_millis(2));
                     }
                 }
             } else {
@@ -6846,6 +6881,16 @@ fn play_file(
                         break;
                     }
                     Ok(PlayerCommand::Seek(secs)) => {
+                        // Reset crossfade transition states to prevent stale next-track bleed
+                        kill_current_process(&next_child_process);
+                        crossfade_frame_counter = 0;
+                        crossfade_triggered = false;
+                        next_track_path = None;
+                        next_decoder_rx = None;
+                        next_decoder_info = None;
+                        next_resampler = None;
+                        next_pending.iter_mut().for_each(|ch| ch.clear());
+
                         if let Some(samples_arc) = &decoded_samples {
                             let lock = safe_lock(samples_arc);
                             ram_cursor = (secs * file_rate as f64) as usize;
@@ -6858,15 +6903,24 @@ fn play_file(
                             flush_signal.store(true, Ordering::SeqCst);
                             pending.iter_mut().for_each(|ch| ch.clear());
                             interleaved.clear();
+                            let flush_wait = std::time::Instant::now();
+                            while flush_signal.load(Ordering::SeqCst) && flush_wait.elapsed().as_millis() < 60 {
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                            }
                         } else if !is_stream {
                             if let Some(tb) = time_base {
                                 let seek_ts = (secs * tb.denom as f64 / tb.numer as f64) as u64;
-                                  let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
+                                let _ = format.seek(symphonia::core::formats::SeekMode::Accurate, symphonia::core::formats::SeekTo::TimeStamp { ts: seek_ts, track_id });
                             }
+                            decoder.reset();
                             position_secs.store(secs.to_bits(), Ordering::Relaxed);
                             flush_signal.store(true, Ordering::SeqCst);
                             pending.iter_mut().for_each(|ch| ch.clear());
                             interleaved.clear();
+                            let flush_wait = std::time::Instant::now();
+                            while flush_signal.load(Ordering::SeqCst) && flush_wait.elapsed().as_millis() < 60 {
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                            }
                         } else {
                             // HTTP Stream: Restart FFmpeg starting at target offset!
                             abort_background_downloads();

@@ -6,13 +6,11 @@ import { pathsEqual } from '../../utils';
 import { DiscoveryHubData, YoutubeTrack, LEGACY_AIDEO_PAGE_DESIGNS } from '../../store/types';
 import { SimpleLRU } from '../../utils/lruCache';
 import { discoveryTrack } from '../../utils/discoveryFeed';
-import { sourceName } from '../../utils/unifiedSources';
 import { SourceMenu } from '../SourceMenu';
 
 export function SongSources({ track }: { track: YoutubeTrack }) {
   if (!track.source_context) return null;
   return <div className="home-song-sources" onClick={event => event.stopPropagation()}>
-    <small>{[...new Set(track.source_context.sources.map(sourceName))].join(' / ')}</small>
     <SourceMenu track={discoveryTrack(track)} compact />
   </div>;
 }
@@ -75,6 +73,57 @@ export function buildTaggedFeed(data: DiscoveryHubData | null): TaggedTrack[] {
 
 export function tracksForShelf(data: DiscoveryHubData | null, shelf: ShelfId): YoutubeTrack[] {
   return buildTaggedFeed(data).filter(t => t.shelf === shelf).map(t => t.track);
+}
+
+export function isTrackLossless(t: any): boolean {
+  if (!t) return false;
+  const f = (t.format || '').toLowerCase();
+  const p = (t.path || t.url || '').toLowerCase();
+  const id = String(t.id || '').toLowerCase();
+  const recSource = (t.recommendation_source || '').toLowerCase();
+  if (
+    f.includes('flac') || f.includes('wav') || f.includes('alac') ||
+    f.includes('dsf') || f.includes('dff') || f.includes('dsd') ||
+    f.includes('lossless') || f.includes('hi_res') ||
+    p.endsWith('.flac') || p.endsWith('.wav') || p.endsWith('.alac') ||
+    p.endsWith('.dsf') || p.endsWith('.dff') || p.endsWith('.dsd') ||
+    recSource.includes('tidal') || recSource.includes('qobuz') ||
+    id.startsWith('tidal-') || id.startsWith('qobuz-')
+  ) {
+    return true;
+  }
+  if (t.source_context?.sources?.some((s: any) =>
+    s.catalog_quality?.lossless === true ||
+    s.provider === 'tidal' ||
+    s.provider === 'qobuz' ||
+    (s.provider === 'local' && (s.id?.toLowerCase().endsWith('.flac') || s.id?.toLowerCase().endsWith('.wav') || s.id?.toLowerCase().endsWith('.alac')))
+  )) {
+    return true;
+  }
+  if (t.provider === 'tidal' || t.provider === 'qobuz') {
+    return true;
+  }
+  return false;
+}
+
+export function getLosslessTracks(discoveryData: DiscoveryHubData | null, localTracks: any[] = []): any[] {
+  const fromDiscovery = buildTaggedFeed(discoveryData)
+    .map((t) => t.track)
+    .filter(isTrackLossless);
+  const fromTidalHub = (discoveryData?.tidal_hifi || []).filter(isTrackLossless);
+  const fromLocal = (localTracks || []).filter(isTrackLossless);
+
+  const candidates = [...fromTidalHub, ...fromDiscovery, ...fromLocal];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const t of candidates) {
+    const key = `${t.title || ''}::${t.artist || ''}`.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(t);
+    }
+  }
+  return out;
 }
 
 // ── Cover art with graceful fallback ────────────────────────
@@ -212,9 +261,11 @@ export interface AideoHomeProps {
   renderDownloadAction: (track: any) => React.ReactNode;
   resume: HomeResumeInfo | null;
   search: SearchBarProps;
+  layoutFilter?: React.ReactNode;
 }
 
 export interface SearchBarProps {
+  appMode?: 'local' | 'hybrid';
   query: string;
   onQueryChange: (q: string) => void;
   focused: boolean;
@@ -238,6 +289,7 @@ export interface SearchBarProps {
 
 export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' | 'pill'; props: SearchBarProps }) {
   const {
+    appMode,
     query, onQueryChange, focused, onFocusChange, suggestions, quickResults, history,
     source, onSourceChange, tidalConnected, qobuzEnabled, qobuzConnected,
     onSubmit, onPickQuery, onDeleteHistory, onPlayQuickTrack, isSearching,
@@ -256,7 +308,7 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
 
   const sources: Array<{ id: 'all' | 'youtube' | 'tidal' | 'qobuz'; label: string; dot?: string }> = [
     { id: 'all', label: 'All sources' },
-    { id: 'youtube', label: variant === 'pill' ? 'YT' : 'YouTube' },
+    { id: 'youtube', label: variant === 'pill' ? 'Web' : 'Webstream' },
     { id: 'tidal', label: 'Tidal', dot: tidalConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' },
     ...(qobuzEnabled ? [{ id: 'qobuz' as const, label: variant === 'pill' ? 'Qobuz' : 'Qobuz β', dot: qobuzConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }] : []),
   ];
@@ -275,19 +327,21 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
 
   return (
     <div className={`ah-search ah-search-${variant}`} ref={wrapRef}>
-      <details className="unified-source-filter">
-        <summary>Source filter: {sources.find(s => s.id === source)?.label}</summary>
-        <div className="source-filter-options">
-          {sources.map(s => <button key={s.id} type="button" className="source-button" aria-pressed={source === s.id} onClick={() => pickSource(s.id)}>{s.label}</button>)}
-        </div>
-      </details>
+      {appMode !== 'local' && (
+        <details className="unified-source-filter">
+          <summary>Source filter: {sources.find(s => s.id === source)?.label}</summary>
+          <div className="source-filter-options">
+            {sources.map(s => <button key={s.id} type="button" className="source-button" aria-pressed={source === s.id} onClick={() => pickSource(s.id)}>{s.label}</button>)}
+          </div>
+        </details>
+      )}
       <form className="ah-search-form" onSubmit={e => { e.preventDefault(); onSubmit(); }}>
         <div className="ah-search-field">
           <Search size={variant === 'rail' ? 15 : 18} />
           <input
             type="text"
             aria-label="Search songs and sources"
-            placeholder={variant === 'rail' ? 'Search all sources…' : variant === 'pill' ? 'Search songs, artists, or links…' : 'Search songs, artists, or paste a link…'}
+            placeholder={appMode === 'local' ? 'Search local music library…' : (variant === 'rail' ? 'Search all sources…' : variant === 'pill' ? 'Search songs, artists, or links…' : 'Search songs, artists, or paste a link…')}
             value={query}
             onChange={e => onQueryChange(e.target.value)}
             onFocus={() => onFocusChange(true)}
@@ -322,7 +376,7 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
               <div className="ah-dd-section">Songs</div>
               {quickResults.map(track => (
                 <div key={`quick-${track.id}`} className="ah-dd-item" onClick={() => onPlayQuickTrack(track)}>
-                  <TrackCover src={track.cover_url} path={track.url} size={30} radius={6} />
+                  <TrackCover src={track.cover_url} path={track.path || track.url} title={track.title} artist={track.artist} size={30} radius={6} />
                   <span className="ah-dd-label" style={{ flex: 1 }}>
                     <span className="ah-dd-title">{track.title}</span>
                     <span className="ah-dd-sub">{track.artist}</span>

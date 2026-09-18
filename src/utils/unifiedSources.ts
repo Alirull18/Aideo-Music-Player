@@ -36,21 +36,197 @@ export function extractPrimaryArtist(artistStr?: string | null): string {
   return parts[0]?.trim() || norm;
 }
 
+export function getArtistAliases(artistStr?: string | null): string[] {
+  const norm = normalizeArtist(artistStr);
+  if (!norm) return [];
+  const set = new Set<string>();
+  set.add(norm);
+
+  // Outside parentheses: e.g. "aespa (에스파)" -> "aespa"
+  const withoutParens = norm.replace(/\s*[\(\[][^\)\]]+[\)\]]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (withoutParens) {
+    set.add(withoutParens);
+    const parts = withoutParens.split(/\s*(?:\bfeat(?:\.|\b)|\bft(?:\.|\b)|\bfeaturing\b|,|\/|&|\+|\bwith\b|\bvs(?:\.|\b)|\bx(?=\s+\S))\s*/i);
+    if (parts[0]?.trim()) set.add(parts[0].trim());
+  }
+
+  // Inside parentheses: e.g. "aespa (에스파)" -> "에스파"
+  const matches = norm.match(/[\(\[](.*?)[\)\]]/g);
+  if (matches) {
+    for (const m of matches) {
+      const inner = m.replace(/[\[\]\(\)]/g, '').trim();
+      if (inner && !/^(?:feat|ft|featuring|version|remix|edit|deluxe|live|mono|stereo)/i.test(inner)) {
+        set.add(inner);
+        const parts = inner.split(/\s*(?:\bfeat(?:\.|\b)|\bft(?:\.|\b)|\bfeaturing\b|,|\/|&|\+|\bwith\b|\bvs(?:\.|\b)|\bx(?=\s+\S))\s*/i);
+        if (parts[0]?.trim()) set.add(parts[0].trim());
+      }
+    }
+  }
+
+  const primary = extractPrimaryArtist(norm);
+  if (primary) set.add(primary);
+
+  return [...set].filter(Boolean);
+}
+
+export const PUBLISHER_CHANNELS = new Set([
+  'smtown', 'hybe labels', 'jyp entertainment', '1thek (원더케이)', '1thek', 'yg entertainment',
+  'starship', 'stone music entertainment', 'genie music', 'warner music korea',
+  'spinnin\' records', 'monstercat', 'proximity', 'trap nation', 'mrsuicidesheep',
+  'audiotree', 'colors', 'vevo'
+]);
+
+export function areArtistsCompatible(artistA: string, artistB: string, titleB?: string | null, titleA?: string | null): boolean {
+  if (!artistA || !artistB) return false;
+  if (artistA === artistB) return true;
+
+  const primaryA = extractPrimaryArtist(artistA);
+  const primaryB = extractPrimaryArtist(artistB);
+  if (primaryA === primaryB) return true;
+
+  const aliasesA = getArtistAliases(artistA);
+  const aliasesB = getArtistAliases(artistB);
+  if (aliasesA.some(a => aliasesB.includes(a))) return true;
+
+  // Check if title of B starts with artist of A (common for YouTube publisher channels like SMTOWN, HYBE, 1theK, etc.)
+  if (titleB) {
+    const cleanB = normalizeText(titleB).replace(/^\s*\[(?:mv|m\/v|official(?:\s+(?:mv|music\s+video|video|audio|lyric\s+video))?|audio|hd|4k|uhd)\]\s*/i, '');
+    if (aliasesA.some(a => a.length >= 3 && (cleanB.startsWith(a + ' ') || cleanB.startsWith(a + '-') || cleanB.startsWith(a + '\'') || cleanB.startsWith(a + '"') || cleanB.startsWith(a + '(')))) {
+      return true;
+    }
+  }
+  if (titleA) {
+    const cleanA = normalizeText(titleA).replace(/^\s*\[(?:mv|m\/v|official(?:\s+(?:mv|music\s+video|video|audio|lyric\s+video))?|audio|hd|4k|uhd)\]\s*/i, '');
+    if (aliasesB.some(b => b.length >= 3 && (cleanA.startsWith(b + ' ') || cleanA.startsWith(b + '-') || cleanA.startsWith(b + '\'') || cleanA.startsWith(b + '"') || cleanA.startsWith(b + '(')))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export const normalizeIsrc = (s?: string | null): string =>
   (s || '').replace(/[\s-]/g, '').toUpperCase();
 
 export const validIsrc = (s: string): boolean =>
   /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(s);
 
+export interface ParsedMusicQuery {
+  raw: string;
+  cleanQuery: string;
+  targetTitle?: string;
+  targetArtist?: string;
+  isCoverRequested: boolean;
+  isPianoRequested: boolean;
+  isSpedUpRequested: boolean;
+  isSlowedRequested: boolean;
+  isInstrumentalRequested: boolean;
+  isRemixRequested: boolean;
+  isLiveRequested: boolean;
+}
+
+export function parseMusicSearchQuery(rawQuery: string): ParsedMusicQuery {
+  const raw = (rawQuery || '').trim();
+  if (!raw) {
+    return {
+      raw: '',
+      cleanQuery: '',
+      isCoverRequested: false,
+      isPianoRequested: false,
+      isSpedUpRequested: false,
+      isSlowedRequested: false,
+      isInstrumentalRequested: false,
+      isRemixRequested: false,
+      isLiveRequested: false,
+    };
+  }
+
+  const norm = raw
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const lower = norm.toLowerCase();
+  const isPianoRequested = /\b(piano|keyboard)\b/i.test(lower);
+  const isCoverRequested = /\b(cover|tribute|style of|originally performed)\b/i.test(lower);
+  const isSpedUpRequested = /\b(sped\s+up|speed\s+up|spedup|speedup|fast\s+version|nightcore)\b/i.test(lower);
+  const isSlowedRequested = /\b(slowed|reverb|chopped)\b/i.test(lower);
+  const isInstrumentalRequested = /\b(instrumental|karaoke|backing\s+track|minus\s+one)\b/i.test(lower);
+  const isRemixRequested = /\b(remix|rmx|club\s+mix|extended\s+mix|dub\s+mix|vip)\b/i.test(lower);
+  const isLiveRequested = /\b(live|concert|tour)\b/i.test(lower);
+
+  let targetTitle: string | undefined;
+  let targetArtist: string | undefined;
+
+  // Patterns for "<title>" by <artist> or <title> by <artist>
+  const lastBy = norm.toLowerCase().lastIndexOf(' by ');
+  if (lastBy > 0) {
+    const left = norm.slice(0, lastBy).replace(/^["']|["']$/g, '').trim();
+    const right = norm.slice(lastBy + 4).replace(/^["']|["']$/g, '').trim();
+    const isIdiom = left.toLowerCase() === right.toLowerCase()
+      || /^(side|day|step|bit|one|little)\s+by\s+(side|day|step|bit|one|little)$/i.test(norm);
+    if (!isIdiom && left && right) {
+      targetTitle = left;
+      targetArtist = right;
+    }
+  }
+
+  // If no "by", check for dash `<artist> - <title>` or `<title> - <artist>`
+  if (!targetTitle && !targetArtist) {
+    const dashMatch = norm.match(/^["']?([^"-]+?)["']?\s+-\s+["']?([^"-]+?)["']?$/);
+    if (dashMatch) {
+      const part1 = dashMatch[1].trim();
+      const part2 = dashMatch[2].trim();
+      if (part1 && part2) {
+        targetTitle = part1;
+        targetArtist = part2;
+      }
+    }
+  }
+
+  if (!targetTitle) {
+    const quotedMatch = norm.match(/^["']([^"']+)["']$/);
+    if (quotedMatch) {
+      targetTitle = quotedMatch[1].trim();
+    }
+  }
+
+  let cleanQuery = norm;
+  if (targetTitle && targetArtist) {
+    cleanQuery = `${targetTitle} ${targetArtist}`;
+  }
+  cleanQuery = cleanQuery
+    .replace(/["']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return {
+    raw,
+    cleanQuery,
+    targetTitle,
+    targetArtist,
+    isCoverRequested,
+    isPianoRequested,
+    isSpedUpRequested,
+    isSlowedRequested,
+    isInstrumentalRequested,
+    isRemixRequested,
+    isLiveRequested,
+  };
+}
+
 const VERSION_INNER_PATTERNS = [
   /\b((?:[\w\s-]+\s+)?(?:remix|mix|vip|dub|club\s+mix|extended\s+mix|radio\s+mix|dance\s+mix|re-mix))\b/i,
   /\b(live(?:\s+at\s+[\w\s-]+|\s+in\s+[\w\s-]+|\s+from\s+[\w\s-]+|\s+\d{4}|\s+session|\s+version)?)\b/i,
   /\b(acoustic(?:\s+version)?|unplugged)\b/i,
-  /\b(instrumental(?:\s+version)?|karaoke(?:\s+version)?|backing\s+track|piano\s+version|orchestral\s+version)\b/i,
+  /\b(instrumental(?:\s+version)?|karaoke(?:\s+version)?|backing\s+track|orchestral\s+version)\b/i,
+  /\b(piano\s+(?:cover|version|solo|instrumental)|solo\s+piano|piano\s+tribute)\b/i,
+  /\b(cover(?:\s+version)?|tribute(?:\s+to|\s+band)?|originally\s+performed\s+by|made\s+popular\s+by|in\s+the\s+style\s+of)\b/i,
   /\b(radio\s+edit|extended\s+edit|extended\s+version|single\s+version|album\s+version|original\s+mix|short\s+edit)\b/i,
   /\b(mono(?:\s+version)?|stereo(?:\s+version)?)\b/i,
   /\b(remaster(?:ed)?(?:\s+\d{4})?|\d{4}\s+remaster(?:ed)?)\b/i,
-  /\b(sped\s+up|speed\s+up|slowed(?:\s*\+\s*reverb)?)\b/i,
+  /\b(sped\s+up(?:\s+version)?|speed\s+up(?:\s+version)?|spedup|speedup|fast\s+version|nightcore|slowed(?:\s*(?:\+|and)?\s*reverb)?|slowed\s+down)\b/i,
   /\b(clean(?:\s+version)?|explicit(?:\s+version)?)\b/i,
 ];
 
@@ -79,13 +255,13 @@ export function getTrackVersion(track: Track): string | null {
   if (track.recording_evidence?.explicit === false) {
     return 'clean';
   }
-  return extractVersionQualifier(track.title);
+  return extractVersionQualifier(track.title) || extractVersionQualifier(track.album);
 }
 
 export function getExplicitState(track: Track): 'clean' | 'explicit' | null {
   if (track.recording_evidence?.explicit === true) return 'explicit';
   if (track.recording_evidence?.explicit === false) return 'clean';
-  const norm = `${normalizeText(track.title)} ${normalizeText(track.recording_evidence?.version)}`;
+  const norm = `${normalizeText(track.title)} ${normalizeText(track.recording_evidence?.version)} ${normalizeText(track.album)}`;
   if (/\bexplicit(?:\s+version)?\b/i.test(norm)) return 'explicit';
   if (/\bclean(?:\s+version)?\b/i.test(norm)) return 'clean';
   return null;
@@ -98,6 +274,8 @@ export interface ParsedVersionDescriptor {
   remixDetail: string | null;
   isAcoustic: boolean;
   isInstrumental: boolean;
+  isPiano: boolean;
+  isCoverOrTribute: boolean;
   isRadioEdit: boolean;
   isRemaster: boolean;
   remasterYear: string | null;
@@ -110,7 +288,7 @@ export interface ParsedVersionDescriptor {
 
 export function parseVersionDescriptor(track: Track): ParsedVersionDescriptor {
   const rawVersion = getTrackVersion(track);
-  const combined = `${normalizeText(track.title)} ${normalizeText(track.recording_evidence?.version)}`;
+  const combined = `${normalizeText(track.title)} ${normalizeText(track.recording_evidence?.version)} ${normalizeText(track.album)} ${normalizeText(track.artist)}`;
 
   // Live
   const liveMatch = combined.match(/\blive(?:\s+(?:at|in|from)\s+([a-z0-9\s'-]+)|\s+(\d{4}))?\b/i);
@@ -125,8 +303,16 @@ export function parseVersionDescriptor(track: Track): ParsedVersionDescriptor {
   // Acoustic
   const isAcoustic = /\b(acoustic|unplugged)\b/i.test(combined);
 
+  // Piano
+  const isPiano = /\b(piano\s+(?:cover|version|solo|instrumental)|solo\s+piano|piano\s+tribute)\b/i.test(combined)
+    || /\bpiano\s+covers\b/i.test(normalizeText(track.artist));
+
+  // Cover / Tribute
+  const isCoverOrTribute = /\b(cover(?:\s+version)?|tribute(?:\s+band|\s+to)?|originally\s+performed\s+by|made\s+popular\s+by|in\s+the\s+style\s+of|tribute\s+hits)\b/i.test(combined)
+    || /\b(tribute\s+band|tribute\s+artists?|cover\s+band|tribute\s+all\s*stars)\b/i.test(normalizeText(track.artist));
+
   // Instrumental / Karaoke
-  const isInstrumental = /\b(instrumental|karaoke|backing\s+track|piano\s+version|orchestral\s+version)\b/i.test(combined);
+  const isInstrumental = /\b(instrumental(?:\s+version)?|karaoke(?:\s+version)?|backing\s+track|orchestral\s+version)\b/i.test(combined);
 
   // Radio Edit
   const isRadioEdit = /\b(radio\s+(?:edit|mix|version)|single\s+version)\b/i.test(combined);
@@ -141,7 +327,7 @@ export function parseVersionDescriptor(track: Track): ParsedVersionDescriptor {
   const isStereo = /\bstereo(?:\s+version)?\b/i.test(combined);
 
   // Sped / Slowed
-  const isSpedOrSlowed = /\b(sped\s+up|speed\s+up|slowed(?:\s*\+\s*reverb)?)\b/i.test(combined);
+  const isSpedOrSlowed = /\b(sped\s+up(?:\s+version)?|speed\s+up(?:\s+version)?|spedup|speedup|fast\s+version|nightcore|slowed(?:\s*(?:\+|and)?\s*reverb)?|slowed\s+down)\b/i.test(combined);
 
   // Explicit
   const explicitState = getExplicitState(track);
@@ -153,6 +339,8 @@ export function parseVersionDescriptor(track: Track): ParsedVersionDescriptor {
     remixDetail,
     isAcoustic,
     isInstrumental,
+    isPiano,
+    isCoverOrTribute,
     isRadioEdit,
     isRemaster,
     remasterYear,
@@ -173,6 +361,8 @@ export function areVersionsCompatible(vA: ParsedVersionDescriptor, vB: ParsedVer
 
   if (vA.isAcoustic !== vB.isAcoustic) return false;
   if (vA.isInstrumental !== vB.isInstrumental) return false;
+  if (vA.isPiano !== vB.isPiano) return false;
+  if (vA.isCoverOrTribute !== vB.isCoverOrTribute) return false;
   if (vA.isRadioEdit !== vB.isRadioEdit) return false;
   if (vA.isMono !== vB.isMono) return false;
   if (vA.isStereo && vB.isMono) return false;
@@ -184,9 +374,8 @@ export function areVersionsCompatible(vA: ParsedVersionDescriptor, vB: ParsedVer
     return false;
   }
 
-  // Explicit conflict check
+  // Explicit conflict check - reject only if both specify explicit/clean and they conflict
   if (vA.explicitState && vB.explicitState && vA.explicitState !== vB.explicitState) return false;
-  if (Boolean(vA.explicitState) !== Boolean(vB.explicitState)) return false;
 
   // Raw version check for different named versions
   if (vA.rawVersion && vB.rawVersion && vA.rawVersion !== vB.rawVersion) return false;
@@ -198,17 +387,46 @@ export function coreTitle(track: Track): string {
   let title = normalizeText(track.title);
   if (!title) return '';
 
-  const artist = normalizeArtist(track.artist);
-  const prefix = `${artist} - `;
-  if (sourceFor(track)?.provider === 'youtube' && title.startsWith(prefix)) {
-    title = title.slice(prefix.length).trim();
+  // 1. Strip leading bracketed video tags: [MV], [M/V], [Official Video], [Official MV], [Lyric Video], [Audio], [4K]
+  title = title.replace(/^\s*\[(?:mv|m\/v|official(?:\s+(?:mv|music\s+video|video|audio|lyric\s+video))?|audio|hd|4k|uhd)\]\s*/i, '');
+
+  // 2. Strip trailing presentation/version/video wrappers (with or without dash/separator):
+  // - official audio, - official music video, MV, M/V, Track Video, (Official Video), etc.
+  title = title.replace(/\s*(?:[-–—|/]|\/\/)?\s*(?:(?:official\s+)?(?:music\s+)?(?:video|audio|visuali[sz]er|m\/?v)|(?:official\s+)?m\/?v|track\s+video|performance\s+video|dance\s+practice|lyrics?(?:\s+video)?|full\s+audio|piano\s+cover|piano\s+version|sped\s+up(?:\s+version)?|speed\s+up(?:\s+version)?|slowed(?:\s*\+\s*reverb)?|slowed\s+down|instrumental(?:\s+version)?|karaoke(?:\s+version)?|cover(?:\s+version)?)\s*$/i, ' ').trim();
+
+
+  // 4. Strip artist prefix if present
+  const artistAliases = getArtistAliases(track.artist);
+  for (const a of artistAliases) {
+    if (a && a.length >= 2) {
+      if (title.startsWith(`${a} - `)) {
+        title = title.slice(a.length + 3).trim();
+        break;
+      } else if (title.startsWith(`${a} : `)) {
+        title = title.slice(a.length + 3).trim();
+        break;
+      }
+    }
+  }
+
+  // 5. If track is from YouTube and title has "Artist - Song":
+  if (sourceFor(track)?.provider === 'youtube') {
+    const dashMatch = title.match(/^([a-z0-9\s가-힣\(\)\.\'&-]+?)\s+[-–—:]\s+(.+)$/i);
+    if (dashMatch && dashMatch[1] && dashMatch[2]) {
+      const candidateArtist = dashMatch[1].trim();
+      const candidateTitle = dashMatch[2].trim();
+      const normCandidate = normalizeArtist(candidateArtist);
+      const trackNorm = normalizeArtist(track.artist);
+      const isKnownPublisher = PUBLISHER_CHANNELS.has(trackNorm);
+      const artistMatches = isKnownPublisher || artistAliases.some(a => a && (a === normCandidate || normCandidate.startsWith(a) || a.startsWith(normCandidate)));
+      if (artistMatches && !/^(?:part|pt|disc|track|vol|volume)\s*\d+$/i.test(candidateArtist) && candidateTitle.length > 0) {
+        title = candidateTitle;
+      }
+    }
   }
 
   // Strip recognized soundtrack/movie context wrappers: (From "Movie")
   title = title.replace(/\s*(?:\((?:from\s+[^)]*(?:motion\s+picture|soundtrack|film|movie|ost)[^)]*)\)|\[(?:from\s+[^\]]*(?:motion\s+picture|soundtrack|film|movie|ost)[^\]]*)\])\s*$/i, ' ').trim();
-
-  // Strip trailing presentation wrappers: - official audio, | official music video, etc.
-  title = title.replace(/\s*(?:[-–—|/]|\/\/)\s*(?:official\s+(?:audio|(?:music\s+)?video|lyric(?:s)?\s+video|visuali[sz]er)|(?:official\s+)?(?:music\s+)?video|lyrics?(?:\s+video)?|visuali[sz]er|official\s+audio|audio|full\s+audio)\s*$/i, ' ').trim();
 
   // Strip bracketed presentation wrappers: (Official Audio), [Official Music Video], (Lyric Video), [Visualizer], [4K], etc.
   title = title.replace(/\s*(?:\((?:(?:\s*[-–|/]\s*)?(?:official\s+(?:audio|(?:music\s+)?video)|(?:official\s+)?(?:music\s+)?video|lyric(?:s)?(?:\s+video)?|visuali[sz]er|official\s+audio|audio|full\s+audio|lyrics?|hd|4k|hq|1080p|720p|uhd|official)\s*)+\)|\[(?:(?:\s*[-–|/]\s*)?(?:official\s+(?:audio|(?:music\s+)?video)|(?:official\s+)?(?:music\s+)?video|lyric(?:s)?(?:\s+video)?|visuali[sz]er|official\s+audio|audio|full\s+audio|lyrics?|hd|4k|hq|1080p|720p|uhd|official)\s*)+\])\s*/gi, ' ').trim();
@@ -216,16 +434,35 @@ export function coreTitle(track: Track): string {
   // Strip featured credits in parentheses/brackets
   title = title.replace(/\s*(?:\((?:feat\.?|ft\.?|featuring)\s+[^\)]+\)|\[(?:feat\.?|ft\.?|featuring)\s+[^\]]+\])\s*/gi, ' ').trim();
 
-  // Strip version qualifier brackets
+  // 4. Strip version qualifier brackets
   title = title.replace(/\s*(?:\((?:live(?:\s+(?:at|in|from)\s+[^\)]+|\s+\d{4}|\s+session|\s+version)?)\)|\[(?:live(?:\s+(?:at|in|from)\s+[^\]]+|\s+\d{4}|\s+session|\s+version)?\]))\s*/gi, ' ').trim();
   title = title.replace(/\s*(?:\((?:[^\)]*\s+)?(?:remix|rmx|vip(?:\s+mix)?|dub\s+mix|club\s+mix|extended\s+(?:mix|version|edit)|radio\s+(?:mix|edit)|dance\s+mix|re-mix)\)|\[(?:[^\]]*\s+)?(?:remix|rmx|vip(?:\s+mix)?|dub\s+mix|club\s+mix|extended\s+(?:mix|version|edit)|radio\s+(?:mix|edit)|dance\s+mix|re-mix)\])\s*/gi, ' ').trim();
   title = title.replace(/\s*(?:\((?:acoustic(?:\s+version)?|unplugged)\)|\[(?:acoustic(?:\s+version)?|unplugged)\])\s*/gi, ' ').trim();
-  title = title.replace(/\s*(?:\((?:instrumental(?:\s+version)?|karaoke(?:\s+version)?|backing\s+track|piano\s+version|orchestral\s+version)\)|\[(?:instrumental(?:\s+version)?|karaoke(?:\s+version)?|backing\s+track|piano\s+version|orchestral\s+version)\])\s*/gi, ' ').trim();
+  title = title.replace(/\s*(?:\((?:instrumental(?:\s+version)?|karaoke(?:\s+version)?|backing\s+track|orchestral\s+version)\)|\[(?:instrumental(?:\s+version)?|karaoke(?:\s+version)?|backing\s+track|orchestral\s+version)\])\s*/gi, ' ').trim();
+  title = title.replace(/\s*(?:\((?:piano\s+(?:cover|version|solo|instrumental)|solo\s+piano)\)|\[(?:piano\s+(?:cover|version|solo|instrumental)|solo\s+piano)\])\s*/gi, ' ').trim();
+  title = title.replace(/\s*(?:\((?:cover(?:\s+version)?|tribute(?:\s+to)?|originally\s+performed\s+by[^)]*|made\s+popular\s+by[^)]*|in\s+the\s+style\s+of[^)]*)\)|\[(?:cover(?:\s+version)?|tribute(?:\s+to)?|originally\s+performed\s+by[^\]]*|made\s+popular\s+by[^\]]*|in\s+the\s+style\s+of[^\]]*)\])\s*/gi, ' ').trim();
   title = title.replace(/\s*(?:\((?:radio\s+edit|extended\s+edit|extended\s+version|single\s+version|album\s+version|original\s+mix|short\s+edit)\)|\[(?:radio\s+edit|extended\s+edit|extended\s+version|single\s+version|album\s+version|original\s+mix|short\s+edit)\])\s*/gi, ' ').trim();
   title = title.replace(/\s*(?:\((?:mono(?:\s+version)?|stereo(?:\s+version)?)\)|\[(?:mono(?:\s+version)?|stereo(?:\s+version)?\]))\s*/gi, ' ').trim();
   title = title.replace(/\s*(?:\((?:remaster(?:ed)?(?:\s+\d{4})?|\d{4}\s+remaster(?:ed)?)\)|\[(?:remaster(?:ed)?(?:\s+\d{4})?|\d{4}\s+remaster(?:ed)?\]))\s*/gi, ' ').trim();
-  title = title.replace(/\s*(?:\((?:sped\s+up|speed\s+up|slowed(?:\s*\+\s*reverb)?)\)|\[(?:sped\s+up|speed\s+up|slowed(?:\s*\+\s*reverb)?\]))\s*/gi, ' ').trim();
+  title = title.replace(/\s*(?:\((?:sped\s+up(?:\s+version)?|speed\s+up(?:\s+version)?|spedup|speedup|fast\s+version|nightcore|slowed(?:\s*(?:\+|and)?\s*reverb)?|slowed\s+down)\)|\[(?:sped\s+up(?:\s+version)?|speed\s+up(?:\s+version)?|spedup|speedup|fast\s+version|nightcore|slowed(?:\s*(?:\+|and)?\s*reverb)?|slowed\s+down)\])\s*/gi, ' ').trim();
   title = title.replace(/\s*(?:\((?:clean(?:\s+version)?|explicit(?:\s+version)?)\)|\[(?:clean(?:\s+version)?|explicit(?:\s+version)?\]))\s*/gi, ' ').trim();
+
+  // If title contains a single or double quoted segment: e.g. aespa 에스파 'Lemonade' or 'Lemonade'
+  const quotedMatch = title.match(/^(?:([a-z0-9\s가-힣\(\)\.\'&-]+?)\s+)?['"']([^'"']{2,})['"](?:\s+.*)?$/i);
+  if (quotedMatch && quotedMatch[2]) {
+    const prefix = (quotedMatch[1] || '').trim();
+    const quotedContent = quotedMatch[2].trim();
+    const normPrefix = normalizeArtist(prefix);
+    const trackNorm = normalizeArtist(track.artist);
+    const isKnownPublisher = PUBLISHER_CHANNELS.has(trackNorm);
+    const prefixMatches = !prefix || isKnownPublisher || artistAliases.some(a => a && (a === normPrefix || normPrefix.startsWith(a) || a.startsWith(normPrefix)));
+    if (prefixMatches && !/^(?:mv|m\/v|audio|video|lyrics?|remix|live)$/i.test(quotedContent)) {
+      title = quotedContent;
+    }
+  }
+
+  // Strip any remaining surrounding quotes
+  title = title.replace(/^['"]+|['"]+$/g, '').trim();
 
   const cleaned = title.replace(/\s+/g, ' ').trim();
   return cleaned || normalizeText(track.title);
@@ -235,8 +472,36 @@ export function matchingTitle(track: Track): string {
   return coreTitle(track);
 }
 
-export const sourceSearchQuery = (track: Track) => `${normalizeArtist(track.artist)} ${matchingTitle(track)}`.trim();
-export const sourceName = (source: PlaybackSource) => ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'YouTube' })[source.provider];
+export const sourceSearchQuery = (track: Track) => {
+  let artist = extractPrimaryArtist(track.artist);
+  const aliases = getArtistAliases(track.artist);
+  if (aliases.length > 0) {
+    const cleanAlias = aliases.find(a => /^[a-z0-9\s'-]+$/i.test(a));
+    if (cleanAlias) artist = cleanAlias;
+  }
+  if (sourceFor(track)?.provider === 'youtube') {
+    const title = track.title || '';
+    const quoted = title.match(/^(.*?)\s+['"']([^'"']+)['"]/);
+    if (quoted && quoted[1]) {
+      const candidateArtist = quoted[1].replace(/^\s*\[(?:mv|m\/v)\]\s*/i, '').trim();
+      const firstWord = candidateArtist.split(/\s+/)[0];
+      if (firstWord && firstWord.length >= 2 && !/^(?:official|video|audio|lyrics?)$/i.test(firstWord)) {
+        artist = firstWord;
+      }
+    } else {
+      const dashMatch = title.replace(/^\s*\[(?:mv|m\/v)\]\s*/i, '').match(/^([a-z0-9\s가-힣\(\)\.\'&-]+?)\s+[-–—:]\s+(.+)$/i);
+      if (dashMatch && dashMatch[1]) {
+        const candidateArtist = dashMatch[1].trim();
+        const firstWord = candidateArtist.split(/\s+/)[0];
+        if (firstWord && firstWord.length >= 2 && !/^(?:official|video|audio|lyrics?)$/i.test(firstWord)) {
+          artist = firstWord;
+        }
+      }
+    }
+  }
+  return `${normalizeArtist(artist)} ${matchingTitle(track)}`.trim();
+};
+export const sourceName = (source: PlaybackSource) => ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'Webstream' })[source.provider];
 
 export const sourceMetadata = (track: SourceMetadata): SourceMetadata => ({
   title: track.title, artist: track.artist, album: track.album ?? null, duration: track.duration,
@@ -279,10 +544,7 @@ export function isSameSong(a: Track, b: Track): boolean {
   const BANNED_ARTISTS = new Set(['unknown artist', 'youtube audio', 'online stream', 'various artists', '']);
   if (BANNED_ARTISTS.has(artistA) || BANNED_ARTISTS.has(artistB)) return false;
 
-  const primaryA = extractPrimaryArtist(a.artist);
-  const primaryB = extractPrimaryArtist(b.artist);
-  if (!primaryA || !primaryB || BANNED_ARTISTS.has(primaryA) || BANNED_ARTISTS.has(primaryB)) return false;
-  if (primaryA !== primaryB && artistA !== artistB) return false;
+  if (!areArtistsCompatible(artistA, artistB, b.title, a.title)) return false;
 
   const vA = parseVersionDescriptor(a);
   const vB = parseVersionDescriptor(b);
@@ -315,7 +577,7 @@ export function isSameRecording(a: Track, b: Track): boolean {
   // 4. Explicit conflict check
   const expA = getExplicitState(a);
   const expB = getExplicitState(b);
-  if (expA && expB && expA !== expB) return false;
+  if (Boolean(expA) !== Boolean(expB) || (expA && expB && expA !== expB)) return false;
 
   return true;
 }
@@ -324,12 +586,24 @@ export const isLikelySameRecording = isSameRecording;
 
 export function matchingSources(track: Track, results: Track[]): PlaybackSource[] {
   const anchor = sourceFor(track);
-  const exact = results.find(t => t.source_context?.sources.some(s => anchor && sourceKey(s) === sourceKey(anchor)));
+  const exact = results.find(t =>
+    t.source_context?.sources.some(s => anchor && sourceKey(s) === sourceKey(anchor))
+    || t.source_context?.display_candidates?.some(s => anchor && sourceKey(s) === sourceKey(anchor))
+  );
   let matches = results.filter(t => t === exact || isSameRecording(track, t));
-  if (!matches.every(a => matches.every(b => a === b || isSameRecording(a, b)))) matches = exact ? [exact] : [];
+  if (matches.length === 0 || (matches.length === 1 && matches[0] === exact)) {
+    const songMatches = results.filter(t => t === exact || isSameSong(track, t));
+    if (songMatches.length > matches.length) {
+      matches = songMatches;
+    }
+  }
   return [...new Map([
     ...(track.source_context?.sources || (anchor ? [anchor] : [])),
-    ...matches.flatMap(t => t.source_context?.sources || []),
+    ...(track.source_context?.display_candidates || []),
+    ...matches.flatMap(t => [
+      ...(t.source_context?.sources || []),
+      ...(t.source_context?.display_candidates || [])
+    ]),
   ].map(s => [sourceKey(s), s])).values()].slice(0, 32);
 }
 
@@ -447,22 +721,103 @@ export function groupRecordings(tracks: Track[], query: string, existingGroups?:
     }
   }
 
-  const normQuery = normalizeText(query);
-  const words = normQuery.split(' ').filter(Boolean);
+  const parsed = parseMusicSearchQuery(query);
+  const STOPWORDS = new Set(['by', 'the', 'a', 'an', 'of', 'and', 'in', 'on', 'for', 'with', 'to', 'from']);
+  const words = normalizeText(parsed.cleanQuery).split(' ').filter(w => w.length > 0 && !STOPWORDS.has(w));
+  const targetTitle = parsed.targetTitle ? normalizeText(parsed.targetTitle) : null;
+  const targetArtist = parsed.targetArtist ? normalizeArtist(parsed.targetArtist) : null;
+
   const relevance = (t: Track) => {
     const normTitle = normalizeText(t.title);
-    const normArtist = normalizeText(t.artist);
+    const cTitle = coreTitle(t);
+    const normArtist = normalizeArtist(t.artist);
+    const primaryArtist = extractPrimaryArtist(t.artist);
     const normAlbum = normalizeText(t.album);
+    const v = parseVersionDescriptor(t);
 
     let score = 0;
-    if (normTitle === normQuery) score += 100;
-    if (normArtist === normQuery) score += 100;
-    else if (normArtist && normQuery && (normArtist.startsWith(normQuery) || normQuery.startsWith(normArtist))) score += 50;
 
-    if (words.length > 0 && words.every(w => normArtist.includes(w))) score += 40;
-    if (words.length > 0 && words.every(w => normTitle.includes(w))) score += 30;
+    // 1. Exact Title & Artist Matching when targetTitle and targetArtist are identified
+    if (targetTitle && targetArtist) {
+      if (normTitle === targetTitle || cTitle === targetTitle) {
+        score += 160;
+      } else if (normTitle.startsWith(targetTitle) || cTitle.startsWith(targetTitle)) {
+        score += 80;
+      } else if (normTitle.includes(targetTitle)) {
+        score += 40;
+      }
 
-    score += words.reduce((n, w) => n + (normArtist.includes(w) ? 6 : 0) + (normTitle.includes(w) ? 4 : 0) + (normAlbum.includes(w) ? 1 : 0), 0);
+      if (normArtist === targetArtist || primaryArtist === targetArtist) {
+        score += 160;
+      } else if (normArtist.includes(targetArtist) || primaryArtist.includes(targetArtist)) {
+        score += 60;
+      } else {
+        score -= 100;
+      }
+    } else {
+      const normQuery = normalizeText(parsed.cleanQuery);
+      if (normTitle === normQuery || cTitle === normQuery) score += 120;
+      if (normArtist === normQuery || primaryArtist === normQuery) score += 120;
+      else if (normArtist && (normArtist.startsWith(normQuery) || normQuery.startsWith(normArtist))) score += 60;
+    }
+
+    if (words.length > 0) {
+      if (words.every(w => normArtist.includes(w))) score += 40;
+      if (words.every(w => normTitle.includes(w))) score += 30;
+      score += words.reduce((n, w) => n + (normArtist.includes(w) ? 8 : 0) + (normTitle.includes(w) ? 6 : 0) + (normAlbum.includes(w) ? 2 : 0), 0);
+    }
+
+    // 2. Penalties for derivative slop unless explicitly requested
+    if (v.isPiano && !parsed.isPianoRequested) {
+      score -= 80;
+    } else if (v.isPiano && parsed.isPianoRequested) {
+      score += 80;
+    }
+
+    if (v.isCoverOrTribute && !parsed.isCoverRequested) {
+      score -= 80;
+    } else if (v.isCoverOrTribute && parsed.isCoverRequested) {
+      score += 80;
+    }
+
+    if (v.isSpedOrSlowed && !parsed.isSpedUpRequested && !parsed.isSlowedRequested) {
+      score -= 80;
+    } else if (v.isSpedOrSlowed && (parsed.isSpedUpRequested || parsed.isSlowedRequested)) {
+      score += 80;
+    }
+
+    if (v.isInstrumental && !parsed.isInstrumentalRequested) {
+      score -= 70;
+    } else if (v.isInstrumental && parsed.isInstrumentalRequested) {
+      score += 70;
+    }
+
+    if (v.isRemix && !parsed.isRemixRequested) {
+      score -= 40;
+    } else if (v.isRemix && parsed.isRemixRequested) {
+      score += 60;
+    }
+
+    if (v.isLive && !parsed.isLiveRequested) {
+      score -= 30;
+    } else if (v.isLive && parsed.isLiveRequested) {
+      score += 50;
+    }
+
+    // 3. Bonuses for standard studio catalog releases
+    const isCleanStandard = !v.isLive && !v.isRemix && !v.isPiano && !v.isCoverOrTribute && !v.isSpedOrSlowed && !v.isInstrumental;
+    if (isCleanStandard) {
+      score += 35;
+    }
+
+    if (normAlbum && !/\b(tribute|karaoke|cover|piano)\b/i.test(normAlbum)) {
+      score += 15;
+    }
+
+    if (t.recording_evidence?.isrc) {
+      score += 10;
+    }
+
     return score;
   };
 
@@ -472,27 +827,15 @@ export function groupRecordings(tracks: Track[], query: string, existingGroups?:
       if (eg.source_context?.recording_id) existingOrder.set(eg.source_context.recording_id, i);
     });
 
-    const knownGroups: GroupEntry[] = [];
-    const newGroups: GroupEntry[] = [];
-
-    for (const g of groups) {
-      const recId = g.row.source_context?.recording_id;
-      if (recId && existingOrder.has(recId)) {
-        knownGroups.push(g);
-      } else {
-        newGroups.push(g);
-      }
-    }
-
-    knownGroups.sort((a, b) => {
-      const orderA = existingOrder.get(a.row.source_context!.recording_id) ?? 0;
-      const orderB = existingOrder.get(b.row.source_context!.recording_id) ?? 0;
-      return orderA - orderB;
+    groups.sort((a, b) => {
+      const diff = relevance(b.row) - relevance(a.row);
+      if (Math.abs(diff) >= 5) return diff;
+      const orderA = existingOrder.get(a.row.source_context?.recording_id || '') ?? 999;
+      const orderB = existingOrder.get(b.row.source_context?.recording_id || '') ?? 999;
+      return orderA - orderB || diff;
     });
 
-    newGroups.sort((a, b) => relevance(b.row) - relevance(a.row));
-
-    return [...knownGroups, ...newGroups].map(g => applySourcePreference(g.row));
+    return groups.map(g => applySourcePreference(g.row));
   }
 
   return groups.map(g => applySourcePreference(g.row)).sort((a, b) => relevance(b) - relevance(a));
@@ -527,6 +870,8 @@ export interface SourceSearch {
 }
 
 export async function searchSources(query: string, enabled: { tidal: boolean; qobuz: boolean; youtube?: boolean }, update: (result: SourceSearch) => void): Promise<SourceSearch> {
+  const parsed = parseMusicSearchQuery(query);
+  const cleanQuery = parsed.cleanQuery;
   const providers = ['local', ...(enabled.youtube !== false ? ['youtube'] : []), ...(enabled.tidal ? ['tidal'] : []), ...(enabled.qobuz ? ['qobuz'] : [])];
   const found: Track[] = [];
   const pending = new Set(providers);
@@ -550,13 +895,13 @@ export async function searchSources(query: string, enabled: { tidal: boolean; qo
   await Promise.allSettled(providers.map(async provider => {
     try {
       if (provider === 'local') {
-        const local = await bounded(invoke<Track[]>('search_local_sources', { query }));
+        const local = await bounded(invoke<Track[]>('search_local_sources', { query: cleanQuery }));
         register('local', local || []);
       } else if (provider === 'youtube') {
-        const youtube = await bounded(invoke<any[]>('search_youtube', { query }));
+        const youtube = await bounded(invoke<any[]>('search_youtube', { query: cleanQuery }));
         register('youtube', (youtube || []).map(t => catalogTrack(t, 'youtube')));
       } else {
-        const catalog = await bounded(invoke<any[]>(`${provider}_search`, { query }));
+        const catalog = await bounded(invoke<any[]>(`${provider}_search`, { query: cleanQuery }));
         register(provider, (catalog || []).map(t => catalogTrack(t, provider as 'tidal' | 'qobuz')));
       }
     } catch (error) { fail(provider, error); }
@@ -769,3 +1114,78 @@ export function isLocalUnifiedTrack(track: Track): boolean {
   }
   return track.format !== 'Tidal FLAC' && track.format !== 'Qobuz FLAC' && !track.path.startsWith('http://') && !track.path.startsWith('https://');
 }
+
+export function deduplicateSourcesForDisplay(sources: PlaybackSource[], selection?: SourceSelection): PlaybackSource[] {
+  if (!sources || sources.length <= 1) return sources || [];
+
+  const selectedKey = selection?.mode === 'explicit' && selection.source ? sourceKey(selection.source) : null;
+  const result: PlaybackSource[] = [];
+  const seenKeys = new Set<string>();
+
+  const groupSignature = (s: PlaybackSource): string => {
+    const provider = s.provider;
+    const lossless = s.catalog_quality?.lossless ? '1' : '0';
+    const rate = s.catalog_quality?.sample_rate || 0;
+    const depth = s.catalog_quality?.bit_depth || 0;
+    const codec = s.catalog_quality?.codec || '';
+    const qKey = `${lossless}:${rate}:${depth}:${codec}`;
+    const version = (s.recording_evidence?.version || '').trim().toLowerCase();
+    const explicit = s.recording_evidence?.explicit === true ? 'exp' : s.recording_evidence?.explicit === false ? 'cln' : '';
+
+    if (provider === 'youtube') {
+      const title = normalizeText(s.metadata?.title || '');
+      return `youtube:${title}:${qKey}`;
+    }
+
+    if (provider === 'local') {
+      return `local:${s.id}`;
+    }
+
+    // Streaming catalog (Tidal, Qobuz)
+    const album = normalizeText(s.metadata?.album || '');
+    return `${provider}:${album}:${qKey}:${version}:${explicit}`;
+  };
+
+  const groups = new Map<string, PlaybackSource[]>();
+  for (const s of sources) {
+    const sig = groupSignature(s);
+    const existing = groups.get(sig);
+    if (existing) {
+      existing.push(s);
+    } else {
+      groups.set(sig, [s]);
+    }
+  }
+
+  const providerCounts = new Map<string, number>();
+  const maxPerProvider: Record<string, number> = {
+    tidal: 4,
+    qobuz: 4,
+    youtube: 2,
+    local: 8,
+  };
+
+  for (const [, candidates] of groups) {
+    const selectedItem = candidates.find(c => sourceKey(c) === selectedKey);
+    const chosen = selectedItem || candidates[0];
+    const provider = chosen.provider;
+    const count = providerCounts.get(provider) || 0;
+    const max = maxPerProvider[provider] ?? 4;
+
+    if (sourceKey(chosen) === selectedKey || count < max) {
+      result.push(chosen);
+      seenKeys.add(sourceKey(chosen));
+      providerCounts.set(provider, count + 1);
+    }
+  }
+
+  if (selectedKey && !seenKeys.has(selectedKey)) {
+    const sel = sources.find(s => sourceKey(s) === selectedKey);
+    if (sel) {
+      result.unshift(sel);
+    }
+  }
+
+  return result;
+}
+

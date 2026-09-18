@@ -5,7 +5,7 @@ import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildT
 const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay: (t: any) => void }) => (
   <div className="ah-row ah-editorial-row" onClick={() => onPlay(track)}>
     <div className="ah-row-idx">{idx + 1}</div>
-    <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={48} radius={8} />
+    <TrackCover src={track.cover_url} path={track.path || track.url} title={track.title} artist={track.artist} size={48} radius={8} />
     <div className="ah-row-meta">
       <div className="ah-row-title" title={track.title}>{track.title}</div>
       <div className="ah-row-artist" title={track.artist}>{track.artist}</div>
@@ -20,7 +20,7 @@ const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay
 const ArtCard = memo(({ track, onPlay, badge }: { track: any; onPlay: (t: any) => void; badge?: string }) => (
   <div className="ah-card ah-editorial-card" onClick={() => onPlay(track)}>
     <div className="ah-card-cover">
-      <TrackCover src={track.cover_url} path={track.url} title={track.title} artist={track.artist} size={176} radius={14} />
+      <TrackCover src={track.cover_url} path={track.path || track.url} title={track.title} artist={track.artist} size={176} radius={14} />
       {badge && <span className="ah-editorial-badge">{badge}</span>}
       <div className="ah-editorial-vinyl-peek">
         <Disc size={64} className="ah-vinyl-groove" />
@@ -33,7 +33,7 @@ const ArtCard = memo(({ track, onPlay, badge }: { track: any; onPlay: (t: any) =
   </div>
 ));
 
-export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search }: AideoHomeProps) {
+export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search, layoutFilter }: AideoHomeProps) {
   const shelfIds: ShelfId[] = ['recs', 'tidal', 'rotation', 'gems', 'charts'];
   const history = tracksForShelf(discoveryData, 'recent').slice(0, 6);
 
@@ -56,6 +56,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
             <span>AIDEO EDITORIAL ARCHIVE · ISSUE VOL. 28</span>
           </div>
           <div className="ah-masthead-edition">CURATED LISTENING DIGEST</div>
+          {layoutFilter}
         </div>
 
         <div className="ah-masthead-main">
@@ -97,7 +98,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
             <div className="ah-cover-story-art">
               <TrackCover
                 src={leadTrack.cover_url}
-                path={leadTrack.url}
+                path={leadTrack.path || leadTrack.url}
                 title={leadTrack.title}
                 artist={leadTrack.artist}
                 size={220}

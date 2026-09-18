@@ -231,17 +231,19 @@ function scoreLyricResult(
   let syncBonus = 0.0;
   const raw = r.raw_lrc || '';
   const hasWordTiming = raw.includes('<span') || raw.includes('<tt') || raw.includes('(') || raw.includes('<');
-  if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison' || r.source === 'NetEase' || r.source === 'Kugou' || hasWordTiming) {
+  if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison' || r.source === 'Kugou' || hasWordTiming) {
     syncBonus = 0.40;
   } else if (r.synced || raw.includes('[')) {
     syncBonus = 0.15;
   }
 
-  // Provider cascade priority bonus: BiniLyrics / Better Lyrics (1) > NetEase / Kugou (2) > QQMusic (3) > LRCLIB (4)
+  // Provider cascade priority bonus: BiniLyrics / Better Lyrics / Unison (1) > Kugou (2) > QQMusic (3) > LRCLIB (4) > NetEase (5 - last choice)
   let sourceBonus = 0.0;
   if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison') sourceBonus = 0.25;
-  else if (r.source === 'NetEase' || r.source === 'Kugou') sourceBonus = 0.15;
-  else if (r.source === 'QQMusic') sourceBonus = 0.05;
+  else if (r.source === 'Kugou') sourceBonus = 0.20;
+  else if (r.source === 'QQMusic') sourceBonus = 0.15;
+  else if (r.source === 'LRCLIB') sourceBonus = 0.10;
+  else if (r.source === 'NetEase') sourceBonus = 0.0;
 
   const variantPenalty = getVariantPenalty(targetTitle, r.title);
   const rankBonus = Math.max(0, 0.15 - (index * 0.03));
@@ -329,7 +331,7 @@ describe('Embedded & Offline Lyrics Fallback (Lyrics Engine)', () => {
 });
 
 describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
-  it('ranks providers by priority cascade: Unison > NetEase > QQMusic > LRCLIB for identical metadata', () => {
+  it('ranks providers by priority cascade: Unison > Kugou > QQMusic > LRCLIB > NetEase for identical metadata', () => {
     const targetTitle = 'Blinding Lights';
     const targetArtist = 'The Weeknd';
     const targetDuration = 200;
@@ -344,13 +346,14 @@ describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
       duration: 200,
     };
 
-    const neteaseResult: SearchResult = {
-      id: 'netease-1',
+    const kugouResult: SearchResult = {
+      id: 'kugou-1',
       title: 'Blinding Lights',
       artist: 'The Weeknd',
-      source: 'NetEase',
+      source: 'Kugou',
       synced: true,
-      content_id: '12345',
+      content_id: 'kg123',
+      raw_lrc: '[00:10.00](0,500)Word',
       duration: 200,
     };
 
@@ -374,14 +377,26 @@ describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
       duration: 200,
     };
 
+    const neteaseResult: SearchResult = {
+      id: 'netease-1',
+      title: 'Blinding Lights',
+      artist: 'The Weeknd',
+      source: 'NetEase',
+      synced: true,
+      content_id: '12345',
+      duration: 200,
+    };
+
     const sUnison = scoreLyricResult(unisonResult, targetTitle, targetArtist, targetDuration, 0).score;
-    const sNetEase = scoreLyricResult(neteaseResult, targetTitle, targetArtist, targetDuration, 0).score;
+    const sKugou = scoreLyricResult(kugouResult, targetTitle, targetArtist, targetDuration, 0).score;
     const sQQ = scoreLyricResult(qqResult, targetTitle, targetArtist, targetDuration, 0).score;
     const sLRCLIB = scoreLyricResult(lrclibResult, targetTitle, targetArtist, targetDuration, 0).score;
+    const sNetEase = scoreLyricResult(neteaseResult, targetTitle, targetArtist, targetDuration, 0).score;
 
-    expect(sUnison).toBeGreaterThan(sNetEase);
-    expect(sNetEase).toBeGreaterThan(sQQ);
+    expect(sUnison).toBeGreaterThan(sKugou);
+    expect(sKugou).toBeGreaterThan(sQQ);
     expect(sQQ).toBeGreaterThan(sLRCLIB);
+    expect(sLRCLIB).toBeGreaterThan(sNetEase);
   });
 
   it('filters out results with zero title match score', () => {
@@ -430,27 +445,31 @@ describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
   });
 
   it('simulates multi-provider sequential fallback cascade', async () => {
-    // Mock providers returning results or null
+    // Mock providers returning results or null - NetEase is last choice
     const mockProviders = {
       unison: async (title: string) => title === 'Western Hit' ? { ttml: '<tt>...</tt>' } : null,
-      netease: async (title: string) => title === 'K-Pop Hit' ? { klyric: '[00:05.00](0,500)Karaoke' } : null,
+      kugou: async (title: string) => title === 'Kugou Hit' ? { krc: '[00:05.00](0,500)Kugou' } : null,
       qqmusic: async (title: string) => title === 'C-Pop Hit' ? { qrc: '[0,3500]Word(0,500)' } : null,
-      lrclib: async (_title: string) => ({ syncedLyrics: '[00:10.00]Fallback Line' }),
+      lrclib: async (title: string) => title === 'Obscure Indie Song' ? { syncedLyrics: '[00:10.00]Fallback Line' } : null,
+      netease: async (title: string) => title === 'K-Pop Hit' ? { klyric: '[00:05.00](0,500)Karaoke' } : null,
     };
 
-    // Sequential fallback runner
+    // Sequential fallback runner (priority: Unison > Kugou > QQMusic > LRCLIB > NetEase)
     const runCascade = async (song: string) => {
       const u = await mockProviders.unison(song);
       if (u) return { source: 'Unison', content: u.ttml, wordSync: true };
 
-      const ne = await mockProviders.netease(song);
-      if (ne) return { source: 'NetEase', content: ne.klyric, wordSync: true };
+      const kg = await mockProviders.kugou(song);
+      if (kg) return { source: 'Kugou', content: kg.krc, wordSync: true };
 
       const qq = await mockProviders.qqmusic(song);
       if (qq) return { source: 'QQMusic', content: qq.qrc, wordSync: true };
 
       const lrc = await mockProviders.lrclib(song);
       if (lrc) return { source: 'LRCLIB', content: lrc.syncedLyrics, wordSync: false };
+
+      const ne = await mockProviders.netease(song);
+      if (ne) return { source: 'NetEase', content: ne.klyric, wordSync: true };
 
       return null;
     };
@@ -459,17 +478,54 @@ describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
     expect(res1?.source).toBe('Unison');
     expect(res1?.wordSync).toBe(true);
 
-    const res2 = await runCascade('K-Pop Hit');
-    expect(res2?.source).toBe('NetEase');
+    const res2 = await runCascade('C-Pop Hit');
+    expect(res2?.source).toBe('QQMusic');
     expect(res2?.wordSync).toBe(true);
 
-    const res3 = await runCascade('C-Pop Hit');
-    expect(res3?.source).toBe('QQMusic');
-    expect(res3?.wordSync).toBe(true);
+    const res3 = await runCascade('Obscure Indie Song');
+    expect(res3?.source).toBe('LRCLIB');
+    expect(res3?.wordSync).toBe(false);
 
-    const res4 = await runCascade('Obscure Indie Song');
-    expect(res4?.source).toBe('LRCLIB');
-    expect(res4?.wordSync).toBe(false);
+    const res4 = await runCascade('K-Pop Hit');
+    expect(res4?.source).toBe('NetEase');
+    expect(res4?.wordSync).toBe(true);
+  });
+
+  it('falls through to subsequent providers when higher priority candidates yield null or empty data', async () => {
+    const mockProviders = {
+      unison: async () => null, // Unison returns null
+      netease: async () => null, // NetEase returns null / empty
+      lrclib: async () => ({ syncedLyrics: '[00:15.00]Working lyrics from LRCLIB' }),
+    };
+
+    const candidates = [
+      { source: 'NetEase', content_id: 'ne-1' },
+      { source: 'LRCLIB', content_id: 'lrc-1' },
+    ];
+
+    let resolvedLyrics = '';
+    let resolvedSource = '';
+    for (const c of candidates) {
+      if (c.source === 'NetEase') {
+        const ne = await mockProviders.netease();
+        if (ne) {
+          resolvedLyrics = (ne as any).syncedLyrics;
+          resolvedSource = 'NetEase';
+          break;
+        }
+      }
+      if (c.source === 'LRCLIB') {
+        const lrc = await mockProviders.lrclib();
+        if (lrc) {
+          resolvedLyrics = lrc.syncedLyrics;
+          resolvedSource = 'LRCLIB';
+          break;
+        }
+      }
+    }
+
+    expect(resolvedSource).toBe('LRCLIB');
+    expect(resolvedLyrics).toBe('[00:15.00]Working lyrics from LRCLIB');
   });
 
   it('correctly resolves lyrics for all supported providers on manual search pick', async () => {
@@ -574,3 +630,29 @@ describe('Multi-Provider Online Cascade & Fallback Pipeline', () => {
     expect(sJapanese).toBeGreaterThan(sKorean);
   });
 });
+
+describe('Stream Path Identity & Lyric Cache Resolution', () => {
+  it('pathsEqual resolves streaming CDN URLs to catalog track path via onlineTrackCache', async () => {
+    const { pathsEqual, setOnlineTrackCache, rememberResolvedPath } = await import('../utils');
+    const cdnUrl = 'https://rr1---sn-4g5ednsl.googlevideo.com/videoplayback?expire=1710000000&id=123';
+    const catalogPath = 'https://www.youtube.com/watch?v=abcdefghijk';
+    const track = {
+      id: 1,
+      path: catalogPath,
+      title: 'Test Song',
+      artist: 'Test Artist',
+      duration: 180,
+    } as any;
+
+    // Direct comparison without cache should be false
+    expect(pathsEqual(cdnUrl, catalogPath)).toBe(false);
+
+    // After setting online track cache or resolved path mapping
+    setOnlineTrackCache(cdnUrl, track);
+    rememberResolvedPath(cdnUrl, catalogPath);
+
+    expect(pathsEqual(cdnUrl, catalogPath)).toBe(true);
+    expect(pathsEqual(catalogPath, cdnUrl)).toBe(true);
+  });
+});
+

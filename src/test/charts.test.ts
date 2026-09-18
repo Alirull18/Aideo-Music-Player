@@ -103,7 +103,7 @@ describe('Top Charts data model', () => {
       path: 'https://youtube.test/watch?v=video-2',
       title: 'Song 2',
       duration: 185,
-      format: 'YouTube Web Stream',
+      format: 'Web Stream',
     });
   });
 

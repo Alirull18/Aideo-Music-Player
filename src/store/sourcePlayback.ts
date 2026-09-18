@@ -1,7 +1,7 @@
 import type { StoreApi } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { PlaybackSource, PlayerState, Track } from './types';
-import { setOnlineTrackCache } from '../utils';
+import { extractDominantColor, type PlaybackSource, type PlayerState, type Track } from './types';
+import { setOnlineTrackCache, rememberResolvedPath } from '../utils';
 import { applySourcePreference, bounded, isLocalUnifiedTrack, matchingSources, rankSources, resolveSource, searchSources, sourceKey, sourceMetadata, sourceName, sourceSearchQuery } from '../utils/unifiedSources';
 
 type SetState = StoreApi<PlayerState>['setState'];
@@ -114,12 +114,29 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
       )
     : -1;
   if (queued >= 0) queue.splice(queued, 1);
+  const preferredSource = ordered[0];
+  const initialCover = preferredSource
+    ? (preferredSource.metadata?.cover_url ?? (preferredSource.provider === 'local' ? (track.cover_url || null) : null))
+    : (track.cover_url || null);
+
   set({ currentTrack: track, queue, playHistory: history, playbackError: null,
     currentTrackIndex: get().tracks.findIndex(t => t === original || (t.playlist_entry_id !== undefined && t.playlist_entry_id === track.playlist_entry_id)), lyricOffset: track.lyric_offset || 0,
-    coverArt: track.cover_url || null,
+    coverArt: initialCover,
     ...(preservePlaybackSession ? {} : { lyrics: [], lyricStatus: 'loading' as const, scrobbledCurrent: false }),
     playback: { ...get().playback, status: 'Playing', current_track: track.path, position_secs: startPos, backend_position_secs: 0, backend_stop_detected_at: 0, file_rate: undefined, file_format: null, effective_audio_path: null, is_buffering: true, last_skip_time: Date.now() },
   });
+  if ((!preferredSource || preferredSource.provider === 'local') && !initialCover && track.path && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
+    invoke<string | null>('get_cover_art', { path: track.path }).then(async (art) => {
+      if (!current()) return;
+      if (art && typeof art === 'string') {
+        set({ coverArt: art });
+        try {
+          const color = await extractDominantColor(art);
+          if (current()) set({ accentColor: color });
+        } catch (_) {}
+      }
+    }).catch(() => {});
+  }
   localStorage.setItem('aideo_queue', JSON.stringify(queue));
   localStorage.setItem('aideo_current_track', JSON.stringify(track));
   localStorage.setItem('aideo_play_history', JSON.stringify(history));
@@ -155,9 +172,39 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
         if (!active()) return;
         const playingTrack = { ...track, ...(source.metadata ? sourceMetadata(source.metadata) : {}), active_source: source, active_quality: result.quality };
         setOnlineTrackCache(result.url, playingTrack);
-        set({ currentAttemptId: attemptId, currentTrack: playingTrack, coverArt: playingTrack.cover_url || null, playback: { ...get().playback, attempt_id: attemptId, current_track: result.url, status: 'Playing', position_secs: startPos,
+        if (playingTrack.path) rememberResolvedPath(result.url, playingTrack.path);
+        const isLocal = source.provider === 'local';
+        set({ currentAttemptId: attemptId, currentTrack: playingTrack, coverArt: playingTrack.cover_url || (isLocal ? get().coverArt : null), playback: { ...get().playback, attempt_id: attemptId, current_track: result.url, status: 'Playing', position_secs: startPos,
           backend_position_secs: 0, backend_stop_detected_at: 0, file_rate: undefined, file_format: null, effective_audio_path: null,
           is_buffering: true, last_skip_time: Date.now() } });
+
+        const localArtPath = !playingTrack.cover_url && isLocal
+          ? (result.url || playingTrack.path)
+          : null;
+        if (localArtPath) {
+          invoke<string | null>('get_cover_art', { path: localArtPath }).then(async (art) => {
+            if (!active()) return;
+            if (art && typeof art === 'string') {
+              set({ coverArt: art });
+              try {
+                const color = await extractDominantColor(art);
+                if (active()) set({ accentColor: color });
+              } catch (_) {}
+              invoke('update_media_metadata', {
+                title: playingTrack.title,
+                artist: playingTrack.artist,
+                album: playingTrack.album,
+                coverUrl: art,
+                duration: playingTrack.duration
+              }).catch(() => {});
+            }
+          }).catch(() => {});
+        } else if (playingTrack.cover_url) {
+          extractDominantColor(playingTrack.cover_url).then((color) => {
+            if (active() && color) set({ accentColor: color });
+          }).catch(() => {});
+        }
+
         retry = { path: result.url, run: attempt };
         const playRemainingMs = Math.max(0, overallDeadline - Date.now());
         if (playRemainingMs <= 0) throw new Error('Playback attempt timed out across all sources');
@@ -174,7 +221,7 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
         if (index > 1 || dropped) window.dispatchEvent(new CustomEvent('ui-toast', { detail: {
           message: `${index > 1 ? 'Source unavailable. Using' : 'Preferred quality unavailable or unverified. Using'} ${sourceName(source)} for this play. Your preference is unchanged.`, type: 'info',
         } }));
-        await invoke('update_media_metadata', { title: playingTrack.title, artist: playingTrack.artist, album: playingTrack.album, coverUrl: playingTrack.cover_url, duration: playingTrack.duration }).catch(() => {});
+        await invoke('update_media_metadata', { title: playingTrack.title, artist: playingTrack.artist, album: playingTrack.album, coverUrl: playingTrack.cover_url || (isLocal ? get().coverArt : null), duration: playingTrack.duration }).catch(() => {});
         if (!active()) return;
         if (!historyRecorded && !preservePlaybackSession) {
           historyRecorded = true;

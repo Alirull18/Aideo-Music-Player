@@ -1,17 +1,27 @@
-# 💎 Aideo Music Player v0.9.8
+# 💎 Aideo Music Player — Modern Windows Music Player (v0.9.9)
 
-**A beautiful, crystal-clear desktop music player built for pure sound, real-time karaoke lyrics, and a listening experience that looks as good as it feels.**
+**A fast, lightweight, open-source desktop music player for Windows 10 and Windows 11. Built with Rust and Tauri for bit-perfect WASAPI Exclusive sound, real-time synchronized karaoke lyrics, and a gorgeous glassmorphism interface.**
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform: Windows 10 | 11](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Alirul/Aideo-Music-Player/releases/latest)
+[![Website](https://img.shields.io/badge/Website-alirull18.github.io-8A2BE2?logo=googlechrome&logoColor=white)](https://alirull18.github.io/Aideo-Music-Player/)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20x64-brightgreen?logo=windows&logoColor=white)](https://github.com/Alirul/Aideo-Music-Player/releases/latest)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-Backend-000000?logo=rust)](https://www.rust-lang.org)
 [![Product Hunt](https://img.shields.io/badge/Product%20Hunt-Featured-FF6154?logo=producthunt)](https://www.producthunt.com/products/aideo-music-player)
 
 <div align="center">
+  <p>
+    <a href="https://alirull18.github.io/Aideo-Music-Player/"><strong>🌐 Official Website</strong></a> &nbsp;•&nbsp;
+    <a href="https://github.com/Alirul/Aideo-Music-Player/releases/latest"><strong>📥 Download for Windows (.exe / .msi)</strong></a> &nbsp;•&nbsp;
+    <a href="docs/RELEASE_NOTES_v0.9.9.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
+    <a href="https://www.producthunt.com/products/aideo-music-player"><strong>🚀 Product Hunt</strong></a>
+  </p>
+  <br/>
   <a href="https://www.producthunt.com/products/aideo-music-player?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-aideo-music-player" target="_blank" rel="noopener noreferrer"><img alt="Aideo Music Player - Fall in love with your music library again | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1222567&amp;theme=light&amp;t=1787490971129"></a>
 </div>
 
-Aideo is a modern, lightweight desktop music player designed for music lovers who want **studio-quality audio**, **word-by-word karaoke lyrics**, and a **gorgeous interface** that adapts to their taste. Whether you're listening to local files on your computer or streaming from your cloud collection, Aideo makes every track sound and look its best.
+**Aideo Music Player** is a modern, lightweight Windows desktop audio player designed for music lovers and audiophiles who want **studio-quality sound**, **bit-perfect WASAPI Exclusive playback**, **word-by-word karaoke lyrics**, and an **adaptive glassmorphism interface** on Windows 10 and Windows 11. Whether you are playing local lossless files (FLAC, WAV, MP3, AAC, ALAC) on your PC or streaming from Webstream, Aideo gives you complete control over your music library.
 
 ---
 
@@ -53,7 +63,7 @@ Aideo is a modern, lightweight desktop music player designed for music lovers wh
       <td width="50%" align="center">
         <strong>🌐 Smart Music Discovery Hub</strong>
         <br />
-        <img width="100%" alt="YouTube Discovery Hub" src="https://github.com/user-attachments/assets/0f7f7e51-3ed0-424e-8afe-067b8974faf8" />
+        <img width="100%" alt="Webstream Discovery Hub" src="https://github.com/user-attachments/assets/0f7f7e51-3ed0-424e-8afe-067b8974faf8" />
       </td>
       <td width="50%" align="center">
         <strong>💎 Main Music Player</strong>
@@ -66,43 +76,60 @@ Aideo is a modern, lightweight desktop music player designed for music lovers wh
 
 ---
 
-## ✨ What's New in v0.9.8
+## ✨ What's New in v0.9.9
 
-Version **0.9.8** delivers an overhauled mobile remote experience with Aideo Connect, official Tauri v2 cryptographically signed auto-updates, next-generation editorial discovery hubs, a 5-mode studio visualizer engine, and essential streaming transport hardening:
+Version **0.9.9** delivers our largest architectural update yet, introducing the **Reliable Unified Music Sources Architecture**, **6 Signature Home Screen Experiences**, native **Direct Webstream Audio Pipeline**, **Motion Canvas (Video Artwork Loops)**, a high-performance **Library View Overhaul**, complete **Settings View Overhaul**, and a massive verification suite of **1,107 frontend unit tests** and **315 backend tests**:
 
-* 📱 **Aideo Connect Mobile Remote & Instant QR Pairing**:
-  * **Touch-Optimized Mobile Web Remote**: Control playback from any smartphone, tablet, or browser on your local network with a responsive web app.
-  * **Frictionless Pairing**: Instant 6-digit numeric PIN pairing and dynamic QR code generation (`qrcode.react`) — no typing long hexadecimal strings.
-  * **Complete Remote Transport**: Full remote Play/Pause, Seek scrubbing bar, Volume slider, Shuffle/Repeat toggles, and live synchronized album art.
-  * **Timing-Attack Hardened**: Constant-time PIN verification (`constant_time_eq`) and reliable LAN IP subnet probing.
-* 🔄 **Official Tauri v2 Cryptographic Auto-Updater**:
-  * Seamless, secure in-app updates powered by `@tauri-apps/plugin-updater` and Minisign cryptographic signature verification.
-  * Modern Update Modal with real-time download progress bar, byte transfer counters, release notes, and atomic auto-relaunch via `tauri-plugin-process`.
-  * Dedicated updater control panel in **Settings → Updates**.
-* 📰 **Discovery Hub (Aideo Home) Next-Gen Redesigns**:
-  * **Editorial Home**: High-contrast Swiss magazine layout with expansive hero banners, bento album cards, and fluid micro-interactions.
-  * **Stage Home**: Immersive concert atmosphere with real-time ambient lighting canvas and responsive bento cards.
-  * **GPU-Accelerated Styling**: Over 700 lines of hardware-accelerated animations and styling (`home.css`).
-* 🌊 **Studio Audio Visualizer Engine & Settings**:
-  * **5 Hardware-Inspired Visual Styles**: Studio Peak-Decay Bars with realistic gravity physics, Bilateral Mirror Spectrum, Analog Oscilloscope Silk Ribbon, Radial Halo Orbit, and Phosphor LED Dot-Matrix.
-  * **Ballistic Physics & Smooth Idle Decay**: Exponential audio level decay on pause and ambient resting baseline at 0% idle CPU consumption.
-  * **Adaptive 64px / 140px Container**: Instant expand/collapse toggle in Now Playing view.
-  * **Visualizer Preferences**: Dedicated settings card in **Settings → Audio Visualizer** with style chips, FPS limiter (30/60/120), decay profiles, and sensitivity tuning.
-* ⚡ **Tidal Streaming Stability Fixes**:
-  * Resolved stream EOF stalls ensuring seamless, uninterrupted continuous track transitions.
-  * Proactive token refresh preventing mid-album authorization expiration during extended listening sessions.
-* 🧭 **Ergonomics & Navigation**:
-  * Floating spring-animated **Scroll to Top** button across all library and album views.
-  * Interactive **Now Playing Artwork Flip** to inspect track technical telemetry and audio specs.
+* 🔗 **Reliable Unified Music Sources Architecture (Milestones 1–4)**:
+  * **Unified Multi-Source Catalog**: Harmonious playback across Local lossless files, Tidal, Qobuz, and Webstream without source collision or catalog fragmentation.
+  * **Streaming Quality Leader**: Automatically plays the highest-fidelity lossless stream available (Qobuz 24-bit Hi-Res > Tidal Max FLAC > Webstream Opus) with instantaneous manual override.
+  * **Interactive Source Switcher (`SourceMenu`)**: Switch playback between Local, Tidal, Qobuz, and Webstream streams with real-time audio format, sample rate, and bitrate badges.
+  * **Conservative Recording Matcher Contract**: Unicode NFKC normalization, presentation wrapper stripping (`- Topic`, `Official Audio`, `Lyric Video`), version qualifier preservation (Remix, Acoustic, Live, Edit), 3-second duration corroboration, and ISRC conflict rejection.
+  * **Strict Offline / Local-Only Mode**: 1-click toggle ensuring zero outbound network calls, 100% offline privacy, and zero external telemetry.
+  * **Centralized Reactive Store & Progressive Enrichment**: Shared source state across Search, Home, and Queue; fast sources render immediately while high-res sources enrich cards without row jumping or layout shift.
+  * **Playback Attempt Lifecycle & Native Decoder Readiness**: Cryptographic `attempt_id` tracking, Symphonia native decoder readiness gating, 15s timeout bounds, and safe automatic fallback on provider failure.
+  * **Queue Occurrence Decoupling & SQLite Persistence**: Isolated `queue_occurrence_id` preserving intentional track duplicates, native gapless audio retention for local tracks, and additive SQLite persistence with a 32-source ceiling.
+* 🎨 **6 Signature Home Screen Experiences & Quick Switcher**:
+  * Seamlessly toggle between **Classic**, **Horizon** (fluid card grid & banner hero), **Spatial Glass** (frosted acrylic glass & dynamic artwork glow), **Editorial** (Swiss poster typography), **Command Deck** (pro audio telemetry console), and **Stage** (arena concert lighting) via the new collapsible top-bar Layout Filter.
+* ⚡ **Direct Webstream Audio Pipeline**:
+  * Direct audio stream extraction with high-efficiency Opus audio via ffmpeg.
+  * In-memory/disk URL caching and background prefetching for near-instant track start.
+  * Webstream duration cap (20 minutes / 1200s) and non-music content filtering.
+* 🎬 **Motion Canvas (Video Artwork Loops) Integration**:
+  * High-definition video canvas loops rendering in Now Playing and Fullscreen/Theater Mode.
+  * Hardware-accelerated background decoding with an in-app toggle in Settings.
+* 📚 **High-Performance Library View & Portal Action Menu**:
+  * Overhauled `LibraryView` featuring anchored `TrackActionMenu` portals, instant category filter chips, glass search bar, and silky 60 FPS scrolling across 10,000+ tracks.
+* 🖼️ **Local Artwork Engine & Sidecar Disk Caching**:
+  * Pure Rust embedded cover art reader for FLAC, MP3, WAV, ALAC, and AAC files with `{stem}.jpg` sidecar disk caching.
+* 📊 **Universal Scrobbling Engine (Last.fm & ListenBrainz)**:
+  * Unified scrobbler supporting Local tracks, Tidal, Qobuz, and Webstream with normalized metadata and smart duration thresholds.
+* 🔔 **Interactive Toast Notification Overhaul**:
+  * Glassmorphic notification stack with status icons, interactive action triggers, and audio engine state announcements.
+* 🎛️ **Settings View Overhaul**:
+  * Redesigned modular layout with dedicated sections for Audio Output & WASAPI Exclusive mode, Audio Visualizer presets, Music Sources management, and App Updates.
+* ⚖️ **Open-Source License**:
+  * Officially licensed under the **GNU General Public License v3 or later** (`GPL-3.0-or-later`).
 
-> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.8 Release Notes**](docs/RELEASE_NOTES_v0.9.8.md).*
+> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.9 Release Notes**](docs/RELEASE_NOTES_v0.9.9.md).*
 
 ---
 
 ## 📜 Previous Release Highlights
 
 <details>
-<summary><strong>✨ What Was New in v0.9.7 (Click to expand)</strong></summary>
+<summary><strong>✨ What Was New in v0.9.8 (Click to expand)</strong></summary>
+<br />
+
+* 📱 **Aideo Connect Mobile Remote & Instant QR Pairing**: Web controller for smartphones/tablets, 6-digit numeric PIN, timing-attack hardened comparisons, and QR code pairing.
+* 🔄 **Official Tauri v2 Cryptographic Auto-Updater**: In-app updater with Minisign signatures, live progress tracking, and atomic restart.
+* 📰 **Discovery Hub (Aideo Home) Next-Gen Redesigns**: Editorial Home and Stage Home with GPU-accelerated styling (`home.css`).
+* 🌊 **Studio Audio Visualizer Engine**: 5 ballistic modes (Peak-Decay Bars, Mirror, Ribbon, Halo, LED Dots) and adaptive 64px/140px container.
+* ⚡ **Tidal Streaming Stability**: Track boundary EOF fix and proactive token refresh.
+
+> 📖 *Read the [**v0.9.8 Release Notes**](docs/RELEASE_NOTES_v0.9.8.md).*
+
+</details>
 <br />
 
 * 🎭 **5 Theater Mode Visual Archetypes**: Stage Mode, Hi-Fi Studio Deck, Vinyl Turntable, Editorial Poster, and Zen Minimalist.
@@ -164,35 +191,47 @@ Version **0.9.8** delivers an overhauled mobile remote experience with Aideo Con
 ## 🌟 Key Features & Why You'll Love It
 
 ### 🎨 Personalize Your Look
-* **4 Home Screen Layouts**: Pick the layout that fits your mood — from a clean grid to an immersive cinematic background.
+* **6 Home Screen Experiences**: Switch effortlessly between **Classic**, **Horizon** (fluid card grid & banner hero), **Spatial Glass** (frosted acrylic glass & dynamic artwork glow), **Editorial** (Swiss poster typography), **Command Deck** (pro audio telemetry console), or **Stage** (arena concert lighting) with an instant collapsible top-bar switcher.
+* **5 Theater Mode Archetypes**: Fullscreen immersion with **Stage Mode**, **Hi-Fi Studio Deck** (dual VU meters), **Vinyl Turntable** (groove reflections & tonearm), **Editorial Poster**, and **Zen Minimalist**.
 * **5 Playback Bar Styles**: Choose standard desktop controls, an ultra-compact bar, a floating pill, or a retro spinning vinyl record.
-* **Frosted Glass (Glassmorphism)**: Beautiful transparent backgrounds that let album art and visualizers shine through.
+* **🎬 Motion Canvas**: Dynamic looping video artwork backgrounds that bring your music to life in Now Playing and Theater Mode.
+* **Frosted Glass (Glassmorphism)**: Beautiful transparent backgrounds that let album art, canvas videos, and visualizers shine through.
+
+### 🔗 Reliable Unified Music Catalog & Streaming
+* **One Unified Library**: Seamlessly blend your local lossless files with Tidal, Qobuz, and Webstream into a cohesive, conflict-free catalog.
+* **Streaming Quality Leader**: Automatically plays the highest-fidelity lossless stream available (Qobuz 24-bit Hi-Res > Tidal Max FLAC > Webstream Opus) with instantaneous manual override.
+* **Interactive Source Menu**: Compare and switch audio providers on the fly with live audio format, sample rate, and bitrate badges.
+* **100% Offline / Local-Only Mode**: Privacy-first switch that instantly cuts all outbound network queries to keep your listening completely private and offline.
 
 ### 🎤 Sing Along with Live Karaoke Lyrics
-* **Word-by-Word Sing-Along**: Highlights words in real-time as they are sung (powered by Apple Music & community lyrics).
+* **Word-by-Word Sing-Along**: Highlights words in real-time as they are sung (powered by cloud TTML, LRC, and community lyrics).
 * **3 Lyric Modes**: Switch with one click between **Word Karaoke**, **Line-by-Line Scroll**, or **Plain Text**.
 * **Floating Desktop Bar**: Keep lyrics on your screen while working or gaming. Press `Alt + L` to enable **Click-Through Mode** so it never gets in your way.
 * **Instant Translations & Pronunciation**: Translate foreign lyrics on the fly, with automatic pronunciation (Romaji) for Japanese and Korean songs.
 
 ### 🔊 Studio-Grade Sound Quality
-* **Bit-Perfect Playback**: Delivers uncompressed, exact master sound directly to your headphones or DAC.
+* **Bit-Perfect Playback**: Delivers uncompressed, exact master sound directly to your headphones or DAC via WASAPI Exclusive mode.
+* **Audio Telemetry & Signal Path Inspector**: Live interactive HUD displaying container format, DSP processing, and hardware output with a verified Bit-Perfect badge.
 * **Headphone Tuner (AutoEQ)**: Choose from over 4,000 pre-calibrated headphone profiles to make your specific headphones sound their absolute best.
-* **Volume Leveling**: Keeps song volume consistent across different albums so you don't have to constantly adjust the volume knob.
-* **Wide Stereo & Spatial Sound**: Enjoy a wide, immersive soundstage without losing vocal clarity.
+* **Volume Leveling & DSP Suite**: EBU R128 loudness leveling, 10-band equalizer, Haas spatializer, and PureScope ballistic spectrum visualizer.
 
-### 🧭 Smart Music Discovery
+### 🧭 Smart Music Discovery & Scrobbling
 * **7 Smart Mixes**: Automatically created playlists like *High Energy*, *Deep Focus*, *Late Night Chill*, and *Forgotten Gems*.
 * **Infinite Radio**: Keep the music going with an endless queue of songs that match your current listening vibe.
+* **Universal Scrobbler**: Automatically scrobbles playback history to **Last.fm** and **ListenBrainz** across Local, Tidal, Qobuz, and Webstream.
 * **100% Offline Friendly**: Generates smart mixes and browses embedded album art even with no internet connection.
 
-### 📁 Easy Music Management
+### 📁 Easy Music Management & Fluid Library
+* **Fluid 10,000+ Track Library**: Silky-smooth 60 FPS scrolling, instant search, fast category filter chips, and floating portal action menus.
 * **Tag & Cover Art Editor**: Rename tracks, fix artist names, and embed square cover art into your audio files.
+* **Local Artwork Cache**: Pure Rust embedded album art extraction with `{stem}.jpg` sidecar caching ensures instant, stutter-free browsing.
 * **One-Click Auto-Tagger**: Automatically search online music databases to fill in missing track info.
 * **Auto-Syncing Folders**: Automatically discovers newly downloaded songs in your music folders.
 * **Playlist Support**: Import and export standard `.m3u` and `.m3u8` playlists effortlessly.
 * **Cloud & Server Streaming**: Connect your Subsonic or Jellyfin home music server for remote listening.
 
 ### 📡 Listen Everywhere
+* **Aideo Connect Mobile Remote**: Control playback from any smartphone or tablet on your Wi-Fi network via instant QR code pairing.
 * **Cast to Wireless Speakers**: Stream high-quality audio to Wi-Fi speakers, home theater receivers, and smart TVs (DLNA / UPnP).
 * **Discord Integration**: Automatically shows what song and artist you're playing on your Discord profile.
 
@@ -231,11 +270,23 @@ Control your music instantly from anywhere in the app:
 
 ---
 
-## 🚀 How to Get Started
+## 🚀 Download & Installation for Windows
 
-1. **Download**: Grab the latest installer (`.msi` or `.exe`) from the [**Releases Page**](https://github.com/Alirul/Aideo-Music-Player/releases/latest).
-2. **Install**: Run the installer on your Windows PC and open Aideo.
-3. **Listen**: Select your music folder (or connect your cloud server) and enjoy your music!
+Aideo Music Player is designed natively for 64-bit **Windows 10** and **Windows 11**.
+
+### 📥 Direct Windows Installers
+| Package | Format | Architecture | Download Link | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **Windows Setup Installer** | `.exe` | `x64` | [**Download Aideo Setup .exe**](https://github.com/Alirul/Aideo-Music-Player/releases/latest) | Recommended for most Windows users (automatic updates) |
+| **Windows MSI Installer** | `.msi` | `x64` | [**Download Aideo .msi**](https://github.com/Alirul/Aideo-Music-Player/releases/latest) | Clean enterprise & silent installation |
+| **All Release Assets** | Multi | `x64` | [**GitHub Releases**](https://github.com/Alirul/Aideo-Music-Player/releases) | Standalone archives, changelogs, and checksums |
+
+### ⚡ Quick Start
+1. **Download & Run**: Grab the `.exe` or `.msi` installer above and run it on your Windows 10/11 PC.
+2. **Add Your Music**: Select your local music folders (FLAC, MP3, WAV, AAC, ALAC, Ogg Vorbis) or search Webstream directly.
+3. **Enjoy Studio Sound**: Toggle **WASAPI Exclusive mode** under Settings for bit-perfect direct DAC audio.
+
+> 💻 **System Requirements**: Windows 10 (64-bit) or Windows 11 (64-bit), 4 GB RAM, Windows audio device.
 
 ---
 
@@ -254,18 +305,19 @@ We are featured on **Product Hunt**! If you're enjoying Aideo Music Player, plea
 <br />
 
 ### Technology Stack
-- **Frontend**: React 19, TypeScript, Framer Motion, Zustand, Lucide React
-- **Desktop Architecture**: Tauri v2, Rust, Tokio Async Runtime, Windows WASAPI
-- **Audio & DSP**: CPAL, Symphonia (pure Rust multi-format decoder), Rubato Resampler, Biquad Filter Array, Dynamic Loudness Normalizer (AGC)
-- **Audio Metadata & Tagging**: Lofty (Pure Rust ID3, FLAC, MP4, Vorbis container editor)
-- **Network Streaming**: SSDP (Simple Service Discovery Protocol), UPnP AVTransport 1.0 SOAP Engine
-- **Database**: SQLite (via rusqlite), Supabase Cloud Sync
-- **Design System**: Hardware-accelerated CSS glassmorphism
+- **Frontend**: React 19, TypeScript, Framer Motion, Zustand, Lucide React (**1,107 automated unit & integration tests**)
+- **Desktop Architecture**: Tauri v2, Rust, Tokio Async Runtime, Windows WASAPI (**315 passing Rust unit tests**)
+- **Audio & DSP**: CPAL, Symphonia (pure Rust multi-format decoder), Rubato Resampler, Biquad Filter Array, Dynamic Loudness Normalizer (AGC), Direct Opus Webstream pipeline
+- **Audio Metadata & Tagging**: Lofty (Pure Rust ID3, FLAC, MP4, Vorbis container editor), native embedded cover art extraction & disk sidecar caching
+- **Motion Canvas**: High-definition video canvas loops with hardware-accelerated decoding
+- **Network Streaming & Remote**: SSDP, UPnP AVTransport 1.0, Aideo Connect HTTP remote control with constant-time security
+- **Database**: SQLite (via rusqlite) with additive migrations, WAL mode indexing, Supabase Cloud Sync
+- **Design System**: Hardware-accelerated CSS glassmorphism, 6 signature home layouts, 5 theater archetypes
 
 ### Security, Privacy & Transparency
 Aideo is 100% open-source, client-side, and privacy-first. Your music library, playback history, and login keys stay securely on your computer.
 
-* **Helper Tools (`yt-dlp`, `ffmpeg`)**: Used to stream and transcode online tracks. All helper tools are verified against official SHA-256 checksums before running.
+* **Helper Tools (`yt-dlp`, `ffmpeg`)**: Used to stream and transcode webstream tracks. All helper tools are verified against official SHA-256 checksums before running.
 * **Windows System Integrations**: Uses official Windows OS APIs for real-time audio scheduling (MMCSS / WASAPI Exclusive mode), Taskbar thumbnail controls, and secure local credential storage (Windows Credential Manager).
 
 </details>
@@ -301,9 +353,26 @@ Aideo is built on top of amazing open-source projects, libraries, and community 
 
 ---
 
-## 📄 License
+## 📈 Star History
 
-Distributed under the MIT License. See `LICENSE` for more information.
+<div align="center">
+  <a href="https://star-history.com/#alirull18/aideo-music-player&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=alirull18/aideo-music-player&type=date&theme=dark&legend=top-left" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=alirull18/aideo-music-player&type=date&legend=top-left" />
+      <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=alirull18/aideo-music-player&type=date&legend=top-left" />
+    </picture>
+  </a>
+</div>
+
+---
+
+## 📄 License & Brand Policy
+
+* **Code License:** Distributed under the [GNU General Public License v3.0 (GPLv3)](LICENSE). All derivative works and forks must remain open-source under GPLv3.
+* **Trademark & Branding:** The names **Aideo**, **Aideo Music Player**, logos, and application icons are proprietary trademarks of the author. Forks or redistributions must remove original branding and use their own distinct name and identity.
+
+See [`LICENSE`](LICENSE) for complete legal terms.
 
 ---
 

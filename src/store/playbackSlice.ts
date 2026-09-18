@@ -4,7 +4,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, StreamingQuality, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, sortLyricLines, isStreamTrack } from '../utils';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines, isStreamTrack } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { toast } from '../utils/toast';
 import { notifyTidalAuthFailure } from './tidalSlice';
@@ -767,15 +767,41 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const {
         scrobbleEnabled, lastfmSessionKey,
         listenbrainzEnabled, listenbrainzToken,
-        scrobbledCurrent, tracks, scrobbleThreshold
+        scrobbledCurrent, tracks, queue, currentTrack, scrobbleThreshold
       } = get();
 
       const canLfm = scrobbleEnabled && lastfmSessionKey;
       const canLb = listenbrainzEnabled && listenbrainzToken;
 
       if ((canLfm || canLb) && !scrobbledCurrent && current_track && status.status === 'Playing') {
-        const tr = tracks.find(t => pathsEqual(t.path, current_track));
-        if (tr && tr.artist && tr.title) {
+        let tr = (currentTrack && (currentTrack.source_context || pathsEqual(currentTrack.path, current_track))) ? currentTrack : null;
+        if (!tr) {
+          tr = tracks.find(t => pathsEqual(t.path, current_track)) || null;
+        }
+        if (!tr) {
+          tr = queue.find(t => pathsEqual(t.path, current_track)) || null;
+        }
+        if (!tr) {
+          if (onlineTrackCache.has(current_track)) {
+            const cached = onlineTrackCache.get(current_track);
+            if (cached && cached.title && cached.title !== 'Web Audio Stream') {
+              tr = cached;
+            }
+          }
+          if (!tr) {
+            for (const [key, cached] of onlineTrackCache.entries()) {
+              if (pathsEqual(key, current_track) && cached && cached.title && cached.title !== 'Web Audio Stream') {
+                tr = cached;
+                break;
+              }
+            }
+          }
+        }
+        if (!tr && currentTrack && isStreamTrack(currentTrack.path, currentTrack.format) && isStreamTrack(current_track)) {
+          tr = currentTrack;
+        }
+
+        if (tr && tr.artist && tr.title && !isGenericStreamTitle(tr.title) && !isGenericStreamArtist(tr.artist)) {
           const dur = tr.duration || 200;
           const thresholdSecs = (scrobbleThreshold / 100) * dur;
           if (position_secs > thresholdSecs || position_secs > 240) {
@@ -1296,6 +1322,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
 
     const isOnline = url.startsWith('http://') || url.startsWith('https://');
+    if (isOnline && get().appMode === 'local') {
+      const msg = 'Online streaming is disabled in Local File Only Mode.';
+      set({ playbackError: msg });
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: msg, type: 'warning' } }));
+      return;
+    }
     if (!isOnline) {
       const ext = url.split('.').pop()?.split('?')[0].toUpperCase();
       const localVirtualTrack: Track = {

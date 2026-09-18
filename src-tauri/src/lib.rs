@@ -47,6 +47,7 @@ pub mod watcher;
 pub mod tag_editor;
 pub mod upnp;
 pub mod logger;
+pub mod canvas;
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -352,7 +353,7 @@ async fn get_unison_ttml(
         );
         if let Ok(resp) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
             .send()
             .await
         {
@@ -406,7 +407,7 @@ async fn get_unison_ttml(
             if let Ok(resp) = client
                 .get(&url)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
                 .send()
                 .await
             {
@@ -523,7 +524,7 @@ async fn search_lyrics_online(
         );
         if let Ok(res) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
             .send()
             .await
         {
@@ -606,7 +607,7 @@ async fn search_lyrics_online(
         for u in urls {
             if let Ok(res) = client.get(&u)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.8")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
                 .send()
                 .await
             {
@@ -872,10 +873,10 @@ async fn search_lyrics_online(
     let mut results = Vec::new();
     if let Ok(r) = bini_res { results.extend(r); }
     if let Ok(r) = boidu_res { results.extend(r); }
-    if let Ok(r) = ne_res { results.extend(r); }
     if let Ok(r) = kugou_res { results.extend(r); }
     if let Ok(r) = qq_res { results.extend(r); }
     if let Ok(r) = lrc_res { results.extend(r); }
+    if let Ok(r) = ne_res { results.extend(r); }
 
     Ok(results)
 }
@@ -1657,6 +1658,27 @@ async fn get_cover_art(path: String) -> Result<Option<String>, String> {
     }
     
     Ok(artwork::get_cover_art(&path))
+}
+
+#[tauri::command]
+async fn get_track_canvas(
+    title: String,
+    artist: String,
+    album: Option<String>,
+    track_path: Option<String>,
+    allow_online: Option<bool>,
+) -> Result<Option<canvas::CanvasResult>, String> {
+    let client = get_http_client();
+    let res = canvas::resolve_track_canvas(
+        client,
+        &title,
+        &artist,
+        album.as_deref(),
+        track_path.as_deref(),
+        allow_online.unwrap_or(true),
+    )
+    .await;
+    Ok(res)
 }
 
 #[tauri::command]
@@ -3565,6 +3587,7 @@ pub fn run() {
             get_playback_status,
             get_lyrics,
             get_cover_art,
+            get_track_canvas,
             save_lyrics_file,
             write_text_file,
             set_volume,

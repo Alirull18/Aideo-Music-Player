@@ -590,13 +590,14 @@ pub async fn qobuz_search(
     app_handle: AppHandle,
     query: String,
 ) -> Result<Vec<QobuzTrackResult>, String> {
+    let clean_query = query.replace(&['"', '\'', '“', '”', '‘', '’'][..], "").trim().to_string();
     println!("\n{BOLD}{MAGENTA}┌────────────────────────────────────────────────────────┐{RESET}");
     println!("{BOLD}{MAGENTA}│  [QOBUZ ENGINE] Searching Qobuz catalog...             │{RESET}");
-    println!("{BOLD}{MAGENTA}│  Query: {:<47}│{RESET}", query);
+    println!("{BOLD}{MAGENTA}│  Query: {:<47}│{RESET}", clean_query);
     println!("{BOLD}{MAGENTA}└────────────────────────────────────────────────────────┘{RESET}");
 
     let res = api_get(&state, &app_handle, "track/search", &[
-        ("query", query.as_str()),
+        ("query", clean_query.as_str()),
         ("limit", "25"),
     ])
     .await?;
@@ -624,7 +625,7 @@ pub async fn qobuz_search(
         if id.is_empty() {
             continue;
         }
-        let title = item["title"].as_str().unwrap_or("").to_string();
+        let title = crate::sources::format_catalog_title(item);
         let artist = item["performer"]["name"].as_str()
             .or_else(|| item["artists"][0]["name"].as_str())
             .unwrap_or("Unknown Artist")
@@ -974,7 +975,7 @@ async fn qobuz_search_inner(
         }
         tracks.push(QobuzTrackResult {
             id,
-            title: item["title"].as_str().unwrap_or("").to_string(),
+            title: crate::sources::format_catalog_title(item),
             artist: item["performer"]["name"].as_str()
                 .or_else(|| item["artists"][0]["name"].as_str())
                 .unwrap_or("Unknown Artist")

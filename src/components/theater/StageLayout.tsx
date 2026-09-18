@@ -4,6 +4,7 @@ import { TheaterLayoutProps } from './types';
 import { Visualizer } from '../Visualizer';
 import { KaraokeActiveLine } from '../KaraokeActiveLine';
 import { baseName, getStreamName } from '../../utils';
+import { CanvasVideoPlayer } from '../CanvasVideoPlayer';
 
 export function StageLayout({
   currentTrack,
@@ -24,6 +25,9 @@ export function StageLayout({
   vizMode,
   seek,
   scrollRef,
+  canvas,
+  canvasMode,
+  lowSpecMode = false,
 }: TheaterLayoutProps) {
   return (
     <motion.div
@@ -61,6 +65,15 @@ export function StageLayout({
               alt="Album Artwork"
               className={`fullscreen-cover-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
             />
+            {!lowSpecMode && canvas && (canvasMode === 'artwork' || canvasMode === 'both') && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 3, borderRadius: 'inherit', overflow: 'hidden' }}>
+                <CanvasVideoPlayer
+                  canvas={canvas}
+                  isPlaying={playbackStatus === 'Playing'}
+                  variant="artwork"
+                />
+              </div>
+            )}
           </div>
         </div>
 

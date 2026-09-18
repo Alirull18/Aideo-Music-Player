@@ -657,8 +657,12 @@ export interface PlayerState {
   // Notification Preferences
   notificationsEnabled: boolean;
   developerNotifications: boolean;
+  osTrackNotificationsEnabled: boolean;
+  osNotifyBackgroundOnly: boolean;
   toggleNotificationsEnabled: () => void;
   toggleDeveloperNotifications: () => void;
+  toggleOsTrackNotifications: () => void;
+  toggleOsNotifyBackgroundOnly: () => void;
 
   // Discovery Hub State
   discoveryData: DiscoveryHubData | null;
@@ -748,12 +752,36 @@ export interface PlayerState {
   playerBarTransparent: boolean;
   setPlayerBarTransparent: (transparent: boolean) => void;
   togglePlayerBarTransparent: () => void;
+
+  // Animated Video Canvas (Motion Artwork)
+  canvasEnabled: boolean;
+  canvasMode: CanvasMode;
+  canvasAllowOnline: boolean;
+  currentCanvas: CanvasResult | null;
+  setCanvasEnabled: (enabled: boolean) => void;
+  toggleCanvasEnabled: () => void;
+  setCanvasMode: (mode: CanvasMode) => void;
+  cycleCanvasMode: () => void;
+  setCanvasAllowOnline: (allow: boolean) => void;
+  setCurrentCanvas: (canvas: CanvasResult | null) => void;
 }
 
 export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 'vinyl';
-export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage';
+export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage' | 'spotify' | 'apple';
 export type TheaterModeDesign = 'stage' | 'zen' | 'studio' | 'vinyl' | 'poster' | 'scope';
 export type TheaterHudStyle = 'capsule' | 'master' | 'minimal' | 'analog';
+export type CanvasMode = 'off' | 'artwork' | 'backdrop' | 'both';
+
+export interface CanvasResult {
+  url: string;
+  fallback_url?: string | null;
+  source: 'local' | 'tidal' | 'apple' | string;
+  format: 'mp4' | 'hls' | string;
+  is_local: boolean;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+}
 
 // Design ids that existed before the 2026 home redesign. Stored values from
 // these are migrated to 'classic' on load.

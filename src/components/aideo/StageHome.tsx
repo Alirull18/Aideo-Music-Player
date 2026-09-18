@@ -20,7 +20,7 @@ const AMBIENT_MOODS: MoodConfig[] = [
   { id: 'lossless', label: 'Lossless Hi-Fi', icon: Flame, shelfFilter: ['tidal'], color: '#22d3ee' },
 ];
 
-export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search }: AideoHomeProps) {
+export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search, layoutFilter }: AideoHomeProps) {
   const [activeMood, setActiveMood] = useState<AmbientMood>('all');
 
   const feed = useMemo(() => buildTaggedFeed(discoveryData).filter(t => t.shelf !== 'recent'), [discoveryData]);
@@ -76,19 +76,22 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
               </div>
             </div>
 
-            {/* Resume Capsule */}
-            {resume && (
-              <div className="ah-resume-card" onClick={resume.onResume}>
-                <TrackCover src={resume.coverUrl} path={resume.coverPath} size={56} radius={10} />
-                <div className="ah-resume-meta">
-                  <div className="ah-resume-kicker">Resume · {resume.positionLabel}</div>
-                  <div className="ah-resume-title">{resume.title}</div>
-                  <div className="ah-resume-sub">{resume.artist}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              {layoutFilter}
+              {/* Resume Capsule */}
+              {resume && (
+                <div className="ah-resume-card" onClick={resume.onResume}>
+                  <TrackCover src={resume.coverUrl} path={resume.coverPath} size={56} radius={10} />
+                  <div className="ah-resume-meta">
+                    <div className="ah-resume-kicker">Resume · {resume.positionLabel}</div>
+                    <div className="ah-resume-title">{resume.title}</div>
+                    <div className="ah-resume-sub">{resume.artist}</div>
+                  </div>
+                  <PlayButton size={38} onClick={resume.onResume} />
+                  <button className="ah-resume-x" onClick={e => { e.stopPropagation(); resume.onDismiss(); }} title="Dismiss">×</button>
                 </div>
-                <PlayButton size={38} onClick={resume.onResume} />
-                <button className="ah-resume-x" onClick={e => { e.stopPropagation(); resume.onDismiss(); }} title="Dismiss">×</button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Pill Search */}
@@ -122,7 +125,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
               <div className="ah-soundstage-art-wrap">
                 <TrackCover
                   src={spotlightTrack.cover_url}
-                  path={spotlightTrack.url}
+                  path={spotlightTrack.path || spotlightTrack.url}
                   title={spotlightTrack.title}
                   artist={spotlightTrack.artist}
                   size={120}
@@ -187,7 +190,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                     <div key={item.track.id} className="ah-row ah-stage-glass-row" onClick={() => onPlayTrack(item.track)}>
                       <TrackCover
                         src={item.track.cover_url}
-                        path={item.track.url}
+                        path={item.track.path || item.track.url}
                         title={item.track.title}
                         artist={item.track.artist}
                         size={52}
@@ -219,7 +222,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
               {history.map(t => (
                 <div key={t.id} className="ah-hist ah-stage-hist" onClick={() => onPlayTrack(t)}>
                   <div className="ah-stage-hist-art">
-                    <TrackCover src={t.cover_url} path={t.url} title={t.title} artist={t.artist} size={132} radius={12} />
+                    <TrackCover src={t.cover_url} path={t.path || t.url} title={t.title} artist={t.artist} size={132} radius={12} />
                     <PlayButton size={34} onClick={() => onPlayTrack(t)} />
                   </div>
                   <div className="ah-card-title" title={t.title}>{t.title}</div>

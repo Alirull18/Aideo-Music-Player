@@ -3,16 +3,17 @@ import { sourceName } from '../utils/unifiedSources';
 import { useEffect, useState, useMemo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useStore } from '../store';
-import type { AudioTagData, Track } from '../store/types';
+import type { AudioTagData, Track, CanvasResult } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic, Sliders, X } from 'lucide-react';
+import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic, Sliders, X, Film } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
 import { Visualizer } from './Visualizer';
 import { LiquidBackground } from './LiquidBackground';
+import { CanvasVideoPlayer } from './CanvasVideoPlayer';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
 import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 import { baseName, getStreamName, isStreamTrack, isRadioStream } from '../utils';
@@ -130,8 +131,16 @@ export function NowPlayingView() {
     queue,
     visualizerExpanded,
     setVisualizerExpanded,
+    playbackStatus,
+    canvasEnabled,
+    canvasMode,
+    canvasAllowOnline,
+    currentCanvas,
+    cycleCanvasMode,
+    setCurrentCanvas,
   } = useStore(useShallow(s => ({
     playbackCurrentTrack: s.playback.current_track,
+    playbackStatus: s.playback.status,
     playbackBitPerfect: s.playback.bit_perfect,
     playbackDevRate: s.playback.dev_rate,
     playbackPosition: s.playback.position_secs,
@@ -162,6 +171,12 @@ export function NowPlayingView() {
     queue: s.queue,
     visualizerExpanded: s.visualizerExpanded,
     setVisualizerExpanded: s.setVisualizerExpanded,
+    canvasEnabled: s.canvasEnabled,
+    canvasMode: s.canvasMode,
+    canvasAllowOnline: s.canvasAllowOnline,
+    currentCanvas: s.currentCanvas,
+    cycleCanvasMode: s.cycleCanvasMode,
+    setCurrentCanvas: s.setCurrentCanvas,
   })));
   const current = currentTrack;
   const effectiveCover = coverArt || current?.cover_url || null;
@@ -285,6 +300,38 @@ export function NowPlayingView() {
     };
   }, [showArtInfo, artworkPath, artworkMetadata?.format, playbackFileFormat]);
 
+  // Resolve Animated Video Canvas when track or settings change
+  useEffect(() => {
+    if (!canvasEnabled || !current?.title) {
+      setCurrentCanvas(null);
+      return;
+    }
+
+    let isMounted = true;
+    invoke<CanvasResult | null>('get_track_canvas', {
+      title: current.title,
+      artist: current.artist || '',
+      album: current.album || null,
+      trackPath: current.path || null,
+      allowOnline: canvasAllowOnline,
+    })
+      .then(res => {
+        if (isMounted) {
+          setCurrentCanvas(res);
+        }
+      })
+      .catch(err => {
+        console.warn('[Canvas] Resolution failed:', err);
+        if (isMounted) {
+          setCurrentCanvas(null);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [current?.title, current?.artist, current?.album, current?.path, canvasEnabled, canvasAllowOnline, setCurrentCanvas]);
+
   useEffect(() => {
     let active = true;
     let lastUpdate = 0;
@@ -360,10 +407,20 @@ export function NowPlayingView() {
 
   return (
     <div className="nowplaying" style={{ gridTemplateColumns: showLyrics ? '1fr 1fr' : '1fr' }}>
-      {/* Dynamic Liquid Art Backdrop / Static Blurred Cover Art */}
-      <LiquidBackground />
-      {effectiveCover && (!liquidBackgroundEnabled || dsp.low_spec_mode) && (
-        <div className="np-bg" style={{ backgroundImage: `url(${effectiveCover})` }} />
+      {/* Ambient Backdrop: Motion Video Canvas or Liquid Visualizer / Static Blurred Cover */}
+      {canvasEnabled && !dsp.low_spec_mode && currentCanvas && (canvasMode === 'backdrop' || canvasMode === 'both') ? (
+        <CanvasVideoPlayer
+          canvas={currentCanvas}
+          isPlaying={playbackStatus === 'Playing'}
+          variant="backdrop"
+        />
+      ) : (
+        <>
+          <LiquidBackground />
+          {effectiveCover && (!liquidBackgroundEnabled || dsp.low_spec_mode) && (
+            <div className="np-bg" style={{ backgroundImage: `url(${effectiveCover})` }} />
+          )}
+        </>
       )}
 
       {/* Art + Meta — fixed left column */}
@@ -631,6 +688,70 @@ export function NowPlayingView() {
             <Sliders size={16} />
           </button>
 
+          {/* Motion Canvas Mode Cycle Button */}
+          <button
+            onClick={() => {
+              cycleCanvasMode();
+              const nextMode = useStore.getState().canvasMode;
+              window.dispatchEvent(new CustomEvent('ui-toast', {
+                detail: { message: `Canvas Mode: ${nextMode.charAt(0).toUpperCase() + nextMode.slice(1)}`, type: 'info' }
+              }));
+            }}
+            title={`Motion Canvas: ${canvasMode.charAt(0).toUpperCase() + canvasMode.slice(1)} (Click to cycle)`}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: currentCanvas && canvasEnabled && canvasMode !== 'off'
+                ? '1px solid rgba(var(--accent-rgb), 0.3)'
+                : '1px solid rgba(255, 255, 255, 0.08)',
+              background: currentCanvas && canvasEnabled && canvasMode !== 'off'
+                ? 'rgba(var(--accent-rgb), 0.15)'
+                : 'rgba(255, 255, 255, 0.03)',
+              color: currentCanvas && canvasEnabled && canvasMode !== 'off'
+                ? 'var(--accent)'
+                : 'var(--text-dim)',
+              cursor: 'pointer',
+              transition: 'all 0.25s ease',
+              boxShadow: currentCanvas && canvasEnabled && canvasMode !== 'off'
+                ? '0 0 10px rgba(var(--accent-rgb), 0.25)'
+                : 'none',
+              position: 'relative'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.08)';
+              if (!(currentCanvas && canvasEnabled && canvasMode !== 'off')) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)';
+                e.currentTarget.style.color = 'white';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'scale(1)';
+              if (!(currentCanvas && canvasEnabled && canvasMode !== 'off')) {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+                e.currentTarget.style.color = 'var(--text-dim)';
+              }
+            }}
+          >
+            <Film size={16} />
+            {currentCanvas && (
+              <span
+                style={{
+                  position: 'absolute',
+                  bottom: 3,
+                  right: 3,
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: canvasMode !== 'off' ? '#10b981' : '#6b7280',
+                }}
+              />
+            )}
+          </button>
+
           {/* Theater Fullscreen Toggle Button */}
           <button
             onClick={() => setView('fullscreen')}
@@ -693,6 +814,15 @@ export function NowPlayingView() {
             alt="cover"
             className={`np-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
           />
+          {canvasEnabled && !dsp.low_spec_mode && currentCanvas && (canvasMode === 'artwork' || canvasMode === 'both') && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 2, borderRadius: 'inherit', overflow: 'hidden' }}>
+              <CanvasVideoPlayer
+                canvas={currentCanvas}
+                isPlaying={playbackStatus === 'Playing'}
+                variant="artwork"
+              />
+            </div>
+          )}
 
           {showArtInfo && (
             <div

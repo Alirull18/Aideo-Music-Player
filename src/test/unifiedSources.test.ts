@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import type { Track } from '../store/types';
-import { groupRecordings, matchingSources, rankSources, sourceKey, resolveSource, clearSourceCache, searchSources, applySourcePreference, saveSourceChoice, isLikelySameRecording } from '../utils/unifiedSources';
+import { groupRecordings, matchingSources, rankSources, sourceKey, resolveSource, clearSourceCache, searchSources, applySourcePreference, saveSourceChoice, isLikelySameRecording, deduplicateSourcesForDisplay, sourceSearchQuery } from '../utils/unifiedSources';
 
 const track = (format: string, path: string, extra: Partial<Track> = {}): Track => ({
   id: 1, path, title: 'Song', artist: 'Artist', album: 'Album', duration: 180,
@@ -187,4 +187,166 @@ describe('Unified recordings and resolution', () => {
     expect(result.pending).toEqual([]);
     expect(invoke).not.toHaveBeenCalledWith('qobuz_search', expect.anything());
   });
+
+  describe('deduplicateSourcesForDisplay', () => {
+    it('collapses redundant identical releases for the same provider and quality', () => {
+      const tidal1 = { provider: 'tidal' as const, id: '101', metadata: { title: 'Levitating', artist: 'Dua Lipa', album: 'Future Nostalgia', duration: 203 }, catalog_quality: { lossless: true } };
+      const tidal2 = { provider: 'tidal' as const, id: '102', metadata: { title: 'Levitating', artist: 'Dua Lipa', album: 'Future Nostalgia', duration: 203 }, catalog_quality: { lossless: true } };
+      const tidal3 = { provider: 'tidal' as const, id: '103', metadata: { title: 'Levitating', artist: 'Dua Lipa', album: 'Future Nostalgia (Moonlight Edition)', duration: 203 }, catalog_quality: { lossless: true } };
+      const yt1 = { provider: 'youtube' as const, id: 'yt_1', metadata: { title: 'Dua Lipa - Levitating (Official Video)', artist: 'Dua Lipa', duration: 203 }, catalog_quality: { lossless: false } };
+      const yt2 = { provider: 'youtube' as const, id: 'yt_2', metadata: { title: 'Dua Lipa - Levitating (Official Video)', artist: 'Dua Lipa', duration: 203 }, catalog_quality: { lossless: false } };
+
+      const deduped = deduplicateSourcesForDisplay([tidal1, tidal2, tidal3, yt1, yt2]);
+      expect(deduped).toHaveLength(3);
+      expect(deduped.map(s => s.id)).toEqual(['101', '103', 'yt_1']);
+    });
+
+    it('always preserves the explicitly selected source even when identical to another candidate', () => {
+      const tidal1 = { provider: 'tidal' as const, id: '101', metadata: { title: 'Song', artist: 'Artist', album: 'Album', duration: 180 }, catalog_quality: { lossless: true } };
+      const tidal2 = { provider: 'tidal' as const, id: '102', metadata: { title: 'Song', artist: 'Artist', album: 'Album', duration: 180 }, catalog_quality: { lossless: true } };
+
+      const deduped = deduplicateSourcesForDisplay([tidal1, tidal2], { mode: 'explicit', source: tidal2 });
+      expect(deduped).toHaveLength(1);
+      expect(deduped[0].id).toBe('102');
+    });
+
+    it('discovers and links Tidal, YouTube, and Local copies when Tidal has explicit advisory', () => {
+      const local = track('FLAC', 'C:/Music/KillBill.flac', { title: 'Kill Bill', artist: 'SZA', duration: 153.8, recording_evidence: undefined });
+      const tidal = track('Tidal FLAC', '272719231', { title: 'Kill Bill', artist: 'SZA', duration: 153, recording_evidence: { isrc: 'USRC12204481', explicit: true } });
+      const youtube = track('YouTube Direct', 'https://www.youtube.com/watch?v=SQnc1QZ7U9Q', { title: 'Kill Bill', artist: 'SZA', duration: 155, recording_evidence: undefined });
+
+      const grouped = groupRecordings([local, tidal, youtube], 'Kill Bill');
+      expect(grouped).toHaveLength(1);
+
+      // Verify from Local perspective
+      const fromLocal = matchingSources(local, grouped).map(sourceKey);
+      expect(fromLocal).toContain('local:C:/Music/KillBill.flac');
+      expect(fromLocal).toContain('tidal:272719231');
+      expect(fromLocal).toContain('youtube:SQnc1QZ7U9Q');
+
+      // Verify from Tidal perspective
+      const fromTidal = matchingSources(tidal, grouped).map(sourceKey);
+      expect(fromTidal).toContain('tidal:272719231');
+      expect(fromTidal).toContain('local:C:/Music/KillBill.flac');
+      expect(fromTidal).toContain('youtube:SQnc1QZ7U9Q');
+
+      // Verify from YouTube perspective
+      const fromYt = matchingSources(youtube, grouped).map(sourceKey);
+      expect(fromYt).toContain('youtube:SQnc1QZ7U9Q');
+      expect(fromYt).toContain('local:C:/Music/KillBill.flac');
+      expect(fromYt).toContain('tidal:272719231');
+    });
+
+    it('preserves candidates across sources without mutual all-pairs wipeout when duration deltas vary', () => {
+      const local = track('FLAC', 'C:/Music/song.flac', { title: 'Song', artist: 'Artist', duration: 180 });
+      const tidal = track('Tidal FLAC', '101', { title: 'Song', artist: 'Artist', duration: 178 });
+      const youtube = track('YouTube Direct', 'https://www.youtube.com/watch?v=12345678901', { title: 'Song', artist: 'Artist', duration: 182 });
+
+      const grouped = groupRecordings([local, tidal, youtube], 'Song');
+      const sources = matchingSources(local, grouped).map(sourceKey);
+      expect(sources).toContain('local:C:/Music/song.flac');
+      expect(sources).toContain('tidal:101');
+      expect(sources).toContain('youtube:12345678901');
+    });
+
+    it('cross-source discovery: Local, Tidal (explicit), and YouTube (>3s duration video intro) mutually discover each other', () => {
+      const local = track('FLAC', 'C:/Music/Flowers.flac', { title: 'Flowers', artist: 'Miley Cyrus', duration: 200.4 });
+      const tidal = track('Tidal FLAC', '27012345', { title: 'Flowers', artist: 'Miley Cyrus', duration: 200, recording_evidence: { explicit: true } });
+      const youtube = track('YouTube Direct', 'https://www.youtube.com/watch?v=G7KNmW9a75Y', { title: 'Miley Cyrus - Flowers (Official Video)', artist: 'Miley Cyrus', duration: 208 });
+
+      const grouped = groupRecordings([local, tidal, youtube], 'Flowers');
+      expect(grouped).toHaveLength(1);
+      const row = grouped[0];
+      const allRowSources = [...(row.source_context?.sources || []), ...(row.source_context?.display_candidates || [])].map(sourceKey);
+      expect(allRowSources).toContain('local:C:/Music/Flowers.flac');
+      expect(allRowSources).toContain('tidal:27012345');
+      expect(allRowSources).toContain('youtube:G7KNmW9a75Y');
+
+      // Local perspective
+      const fromLocal = matchingSources(local, grouped).map(sourceKey);
+      expect(fromLocal).toContain('local:C:/Music/Flowers.flac');
+      expect(fromLocal).toContain('tidal:27012345');
+      expect(fromLocal).toContain('youtube:G7KNmW9a75Y');
+
+      // Tidal perspective
+      const fromTidal = matchingSources(tidal, grouped).map(sourceKey);
+      expect(fromTidal).toContain('local:C:/Music/Flowers.flac');
+      expect(fromTidal).toContain('tidal:27012345');
+      expect(fromTidal).toContain('youtube:G7KNmW9a75Y');
+
+      // YouTube perspective
+      const fromYt = matchingSources(youtube, grouped).map(sourceKey);
+      expect(fromYt).toContain('local:C:/Music/Flowers.flac');
+      expect(fromYt).toContain('tidal:27012345');
+      expect(fromYt).toContain('youtube:G7KNmW9a75Y');
+    });
+
+    it('cross-source discovery: aespa - Lemonade across Local, Tidal, and YouTube', () => {
+      const local = track('FLAC', 'C:/Music/aespa - Lemonade.flac', { title: 'Lemonade', artist: 'aespa (에스파)', duration: 195 });
+      const tidal = track('Tidal FLAC', '34567890', { title: 'LEMONADE', artist: 'aespa', duration: 195 });
+      const youtube = track('YouTube Direct', 'https://www.youtube.com/watch?v=lemonade123', {
+        title: "aespa 에스파 'Lemonade' MV",
+        artist: 'SMTOWN',
+        duration: 205,
+      });
+
+      const grouped = groupRecordings([local, tidal, youtube], 'aespa lemonade');
+      expect(grouped).toHaveLength(1);
+      const row = grouped[0];
+      const allRowSources = [...(row.source_context?.sources || []), ...(row.source_context?.display_candidates || [])].map(sourceKey);
+      expect(allRowSources).toContain('local:C:/Music/aespa - Lemonade.flac');
+      expect(allRowSources).toContain('tidal:34567890');
+      expect(allRowSources).toContain('youtube:lemonade123');
+
+      // Local perspective
+      const fromLocal = matchingSources(local, grouped).map(sourceKey);
+      expect(fromLocal).toContain('local:C:/Music/aespa - Lemonade.flac');
+      expect(fromLocal).toContain('tidal:34567890');
+      expect(fromLocal).toContain('youtube:lemonade123');
+
+      // Tidal perspective
+      const fromTidal = matchingSources(tidal, grouped).map(sourceKey);
+      expect(fromTidal).toContain('local:C:/Music/aespa - Lemonade.flac');
+      expect(fromTidal).toContain('tidal:34567890');
+      expect(fromTidal).toContain('youtube:lemonade123');
+
+      // YouTube perspective
+      const fromYt = matchingSources(youtube, grouped).map(sourceKey);
+      expect(fromYt).toContain('local:C:/Music/aespa - Lemonade.flac');
+      expect(fromYt).toContain('tidal:34567890');
+      expect(fromYt).toContain('youtube:lemonade123');
+
+      // Search query generated from all 3 perspectives
+      expect(sourceSearchQuery(local).toLowerCase()).toBe('aespa lemonade');
+      expect(sourceSearchQuery(tidal).toLowerCase()).toBe('aespa lemonade');
+      expect(sourceSearchQuery(youtube).toLowerCase()).toBe('aespa lemonade');
+    });
+
+    it('matches diverse YouTube video title patterns to clean track title', () => {
+      const canonical = track('Tidal FLAC', '34567890', { title: 'LEMONADE', artist: 'aespa', duration: 195 });
+      const titles = [
+        "aespa 에스파 'Lemonade' MV",
+        "aespa 'Lemonade' MV",
+        "[MV] aespa - Lemonade",
+        "aespa(에스파) 'Lemonade' M/V",
+        "aespa - Lemonade (Official Video)",
+        "aespa - Lemonade (Official Audio)",
+        "aespa 'LEMONADE' Track Video",
+      ];
+
+      for (let i = 0; i < titles.length; i++) {
+        const id = `lemonade00${i}`;
+        const yt = track('YouTube Direct', `https://www.youtube.com/watch?v=${id}`, {
+          title: titles[i],
+          artist: i % 2 === 0 ? 'SMTOWN' : 'aespa',
+          duration: 195,
+        });
+        const grouped = groupRecordings([canonical, yt], 'aespa lemonade');
+        expect(grouped).toHaveLength(1);
+        const matches = matchingSources(canonical, grouped).map(sourceKey);
+        expect(matches).toContain(`youtube:${id}`);
+      }
+    });
+  });
 });
+

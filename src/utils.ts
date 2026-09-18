@@ -125,6 +125,23 @@ export function pathsEqual(p1: string | null | undefined, p2: string | null | un
   const n2 = r2.replace(/\\/g, '/').toLowerCase();
   if (n1 === n2) return true;
 
+  // Check onlineTrackCache for bidirectional stream URL <-> track path/url mapping
+  const checkCache = (key: string, other: string) => {
+    if (onlineTrackCache.has(key)) {
+      const t = onlineTrackCache.get(key);
+      if (t?.path && t.path !== key) {
+        const np = t.path.replace(/\\/g, '/').toLowerCase();
+        if (np === other) return true;
+      }
+      if (t?.url && t.url !== key) {
+        const nu = t.url.replace(/\\/g, '/').toLowerCase();
+        if (nu === other) return true;
+      }
+    }
+    return false;
+  };
+  if (checkCache(p1, n2) || checkCache(r1, n2) || checkCache(p2, n1) || checkCache(r2, n1)) return true;
+
   // Handle Temp Cache Files (e.g. CloudCache/<hash>.tmp or aideo_cache_<hash>.wav)
   const isTemp1 = n1.includes('cloudcache') || n1.includes('aideo_cache_');
   const isTemp2 = n2.includes('cloudcache') || n2.includes('aideo_cache_');

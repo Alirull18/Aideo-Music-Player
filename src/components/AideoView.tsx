@@ -4,13 +4,15 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Waves } from 'lucide-react';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Waves, Headphones, Activity, BookOpen, ChevronDown } from 'lucide-react';
 import { YoutubeMix } from '../store/types';
 import './aideo/home.css';
 
 import { EditorialHome } from './aideo/EditorialHome';
 import { CommandDeckHome } from './aideo/CommandDeckHome';
 import { StageHome } from './aideo/StageHome';
+import { HorizonHome } from './aideo/HorizonHome';
+import { SpatialGlassHome } from './aideo/SpatialGlassHome';
 import { AideoHomeProps, SearchBarProps, HomeResumeInfo } from './aideo/HomeParts';
 import { classifyDiscoveryPlayback, pathsEqual } from '../utils';
 import { foldSearchText, simplifyPunctuation } from '../utils/searchParser';
@@ -278,18 +280,6 @@ import { mergeTidalIntoHub, tidalResultsToHubTracks } from '../utils/tidalHub';
 const coverArtCache = new SimpleLRU<string, string | null>(300);
 const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
 
-// Helper to get premium CSS class for recommendation source badges
-function getBadgeClass(source: string) {
-  const src = source.toLowerCase();
-  if (src.includes('tidal')) return 'badge-tidal';
-  if (src.includes('similar to') || src.includes('collaborative')) return 'badge-lastfm';
-  if (src.includes('fans of') || src.includes('from ') || src.includes('favorites') || src.includes('favourite')) return 'badge-favorites';
-  if (src.includes('listenbrainz')) return 'badge-listenbrainz';
-  if (src.includes('last.fm')) return 'badge-lastfm';
-  if (src.includes('youtube') || src.includes('trending') || src.includes('global') || src.includes('radio')) return 'badge-youtube';
-  if (src.includes('discovery') || src.includes('genre') || src.includes('top ') || src.includes('â€¢') || src.includes('recently played') || src.includes('recent') || src.includes('Î³Ã§Ã³') || src.includes('gÃ§Ã³')) return 'badge-recent';
-  return 'badge-default';
-}
 
 // Colored source-type indicator: one color per music source / quality tier
 function getSourceType(track: any): { color: string; label: string } {
@@ -311,7 +301,7 @@ function getSourceType(track: any): { color: string; label: string } {
     if (q === 'HI_RES') return { color: '#c4b5fd', label: 'Qobuz Studio · Hi-Res' };
     return { color: '#7fb8e6', label: 'Qobuz Studio · Lossless' };
   }
-  if (!localMatch && (p.startsWith('http://') || p.startsWith('https://'))) return { color: '#f87171', label: 'YouTube Stream' };
+  if (!localMatch && (p.startsWith('http://') || p.startsWith('https://'))) return { color: '#f87171', label: 'Webstream' };
   if (fmt === 'flac' || fmt === 'wav' || /\.(flac|wav|alac|aiff|dsd)$/.test(p)) return { color: '#c084fc', label: 'Local Hi-Res · Lossless' };
   return { color: '#34d399', label: 'Local File' };
 }
@@ -461,6 +451,7 @@ export function AideoView() {
     discoveryViewMode,
     setDiscoveryViewMode,
     aideoPageDesign,
+    setAideoPageDesign,
     tidalConnected,
     tidalSearching,
     tidalSearchResults,
@@ -506,6 +497,7 @@ export function AideoView() {
     discoveryViewMode: s.discoveryViewMode,
     setDiscoveryViewMode: s.setDiscoveryViewMode,
     aideoPageDesign: s.aideoPageDesign,
+    setAideoPageDesign: s.setAideoPageDesign,
     tidalConnected: s.tidalConnected,
     tidalSearching: s.tidalSearching,
     tidalSearchResults: s.tidalSearchResults,
@@ -910,6 +902,15 @@ export function AideoView() {
       try {
         const cached = await invoke<any>('get_cached_discovery_hub');
         if (cached) {
+          const isLocalMode = useStore.getState().appMode === 'local';
+          if (isLocalMode) {
+            const isLocalTrack = (t: any) => t && (!t.url || (!t.url.startsWith('http://') && !t.url.startsWith('https://')));
+            cached.recommendations = (cached.recommendations || []).filter(isLocalTrack);
+            cached.global_charts = (cached.global_charts || []).filter(isLocalTrack);
+            cached.recently_played = (cached.recently_played || []).filter(isLocalTrack);
+            cached.heavy_rotation = (cached.heavy_rotation || []).filter(isLocalTrack);
+            cached.forgotten_gems = (cached.forgotten_gems || []).filter(isLocalTrack);
+          }
           setDiscoveryData(cached);
           setIsLoadingRecs(false);
           setActiveDiscoveryTab('all');
@@ -1013,7 +1014,7 @@ export function AideoView() {
       // Fired in parallel with everything below; first manual refresh reuses the session
       // pool, repeated refreshes escalate to a fresh search.
       const latestStore = useStore.getState();
-      const tidalEligible = !!latestStore.tidalConnected;
+      const tidalEligible = latestStore.appMode !== 'local' && !!latestStore.tidalConnected;
       const wantFreshTidalSearch = forceRefresh
         ? tidalRefreshCountRef.current > 0 || tidalHubPoolRef.current.length === 0
         : tidalHubPoolRef.current.length === 0;
@@ -1082,7 +1083,7 @@ export function AideoView() {
           tidalPool = []; // silent omit
         }
       }
-      if (tidalPool.length > 0) {
+      if (tidalPool.length > 0 && useStore.getState().appMode !== 'local') {
         const currentHub = useStore.getState().discoveryData;
         if (currentHub) setDiscoveryData(mergeTidalIntoHub(currentHub, tidalPool));
       }
@@ -1105,7 +1106,7 @@ export function AideoView() {
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [tracks.length]);
+  }, [tracks.length, appMode]);
 
   const handleDownloadTrack = async (track: any) => {
     if (downloadingIds.has(track.id) || downloadedIds.has(track.id)) return;
@@ -1746,15 +1747,8 @@ export function AideoView() {
                   <p className="discovery-grid-artist" title={track.artist}>
                     <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
                   </p>
-                  {track.source_context ? (
+                  {track.source_context && (
                     <SongSources track={track} />
-                  ) : track.recommendation_source && (
-                    <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
-                      {(track.recommendation_source.includes('â€¢') || track.recommendation_source.includes('Î“Ã‡Ã³')) && (
-                        <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 3 }} />
-                      )}
-                      {track.recommendation_source}
-                    </span>
                   )}
                 </div>
 
@@ -1765,7 +1759,7 @@ export function AideoView() {
                     track,
                     track.format === 'Qobuz FLAC' ? handleDownloadQobuzTrack : handleDownloadTidalTrack,
                     track.format === 'Qobuz FLAC' ? qobuzDownloads : tidalDownloads
-                  ) : downloadedIds.has(track.id) ? (
+                  ) : (!track.url || (!track.url.startsWith('http://') && !track.url.startsWith('https://'))) ? null : downloadedIds.has(track.id) ? (
                     <div className="discovery-download-btn downloaded" title="Added to Offline Library">
                       <Check size={12} />
                     </div>
@@ -1854,15 +1848,8 @@ export function AideoView() {
                   <p className="discovery-artist" title={track.artist}>
                     <ArtistLink name={track.artist} onClick={() => triggerSearch(track.artist)} />
                   </p>
-                  {track.source_context ? (
+                  {track.source_context && (
                     <SongSources track={track} />
-                  ) : track.recommendation_source && (
-                    <span className={`discovery-source-badge ${getBadgeClass(track.recommendation_source)}`}>
-                      {(track.recommendation_source.includes('â€¢') || track.recommendation_source.includes('Î“Ã‡Ã³')) && (
-                        <span className="pulse" style={{ display: 'inline-block', width: 3, height: 3, borderRadius: '50%', background: '#10b981', marginRight: 4 }} />
-                      )}
-                      {track.recommendation_source}
-                    </span>
                   )}
                 </div>
 
@@ -1873,7 +1860,7 @@ export function AideoView() {
                     track,
                     track.format === 'Qobuz FLAC' ? handleDownloadQobuzTrack : handleDownloadTidalTrack,
                     track.format === 'Qobuz FLAC' ? qobuzDownloads : tidalDownloads
-                  ) : downloadedIds.has(track.id) ? (
+                  ) : (!track.url || (!track.url.startsWith('http://') && !track.url.startsWith('https://'))) ? null : downloadedIds.has(track.id) ? (
                     <div className="discovery-download-btn downloaded" title="Added to Offline Library">
                       <Check size={12} />
                     </div>
@@ -2254,9 +2241,9 @@ export function AideoView() {
                     <div className="discovery-shelf-header">
                       <div className="discovery-shelf-title-wrap">
                         <Compass size={17} color="#3b82f6" />
-                        <h3 className="discovery-shelf-title">Global Trends & Charts</h3>
+                        <h3 className="discovery-shelf-title">{appMode === 'local' ? 'Local Top Hits' : 'Global Trends & Charts'}</h3>
                       </div>
-                      <span className="discovery-shelf-badge">Last.fm Real-Time Discovery</span>
+                      <span className="discovery-shelf-badge">{appMode === 'local' ? 'Local Library Momentum' : 'Last.fm Real-Time Discovery'}</span>
                     </div>
                     {renderTrackCarousel(discoveryData.global_charts.slice(0, 12))}
                   </div>
@@ -2565,6 +2552,7 @@ export function AideoView() {
   };
 
   const aideoSearchProps: SearchBarProps = {
+    appMode,
     query: searchQuery,
     onQueryChange: setSearchQuery,
     focused: searchFocused,
@@ -2613,6 +2601,60 @@ export function AideoView() {
     );
   };
 
+  const renderLayoutFilter = () => {
+    const layoutItems = [
+      { id: 'classic' as const, label: 'Classic', icon: Layers, accent: '#3b82f6' },
+      { id: 'spotify' as const, label: 'Horizon', icon: Headphones, accent: '#1db954' },
+      { id: 'apple' as const, label: 'Spatial Glass', icon: Disc, accent: '#fa243c' },
+      { id: 'editorial' as const, label: 'Editorial', icon: BookOpen, accent: '#a855f7' },
+      { id: 'command' as const, label: 'Command', icon: Activity, accent: '#06b6d4' },
+      { id: 'stage' as const, label: 'Stage', icon: Sparkles, accent: '#f59e0b' },
+    ];
+
+    const currentLayout = layoutItems.find(item => item.id === aideoPageDesign) || layoutItems[0];
+    const CurrentIcon = currentLayout.icon;
+
+    return (
+      <details className="unified-layout-filter">
+        <summary>
+          <span className="layout-trigger-badge" aria-hidden="true" style={{ color: currentLayout.accent }}>
+            <CurrentIcon size={13} />
+          </span>
+          <span className="layout-trigger-text">Layout: {currentLayout.label}</span>
+          <ChevronDown size={12} className="layout-chevron" aria-hidden="true" />
+        </summary>
+        <div className="layout-filter-options">
+          {layoutItems.map(item => {
+            const ItemIcon = item.icon;
+            const isActive = aideoPageDesign === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`aideo-layout-pill pill-${item.id} ${isActive ? 'active' : ''}`}
+                onClick={(e) => {
+                  setAideoPageDesign(item.id);
+                  window.dispatchEvent(new CustomEvent('ui-toast', {
+                    detail: { message: `Switched layout to ${item.label}`, type: 'info' }
+                  }));
+                  const details = e.currentTarget.closest('details');
+                  if (details) details.open = false;
+                }}
+                aria-pressed={isActive}
+              >
+                <span className="layout-pill-icon" aria-hidden="true" style={{ color: isActive ? item.accent : 'currentColor' }}>
+                  <ItemIcon size={13} />
+                </span>
+                <span className="layout-pill-label">{item.label}</span>
+                {isActive && <span className="layout-active-dot" aria-hidden="true" style={{ background: item.accent }} />}
+              </button>
+            );
+          })}
+        </div>
+      </details>
+    );
+  };
+
   const aideoHomeProps: AideoHomeProps = {
     greeting,
     trackCount: tracks.length,
@@ -2625,61 +2667,71 @@ export function AideoView() {
     renderDownloadAction,
     resume: aideoResumeInfo,
     search: aideoSearchProps,
+    layoutFilter: renderLayoutFilter(),
   };
 
   return (
-    <div className="aideo-home-wrap" data-scroll-container="true">
+    <div className={`aideo-home-wrap layout-${aideoPageDesign} ${searchActive ? 'has-search-active' : ''}`} data-scroll-container="true">
       {/* Background tint overlay */}
-      <div className="aideo-bg-tint"></div>
+      {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
+        <div className="aideo-bg-tint"></div>
+      )}
 
       <div className="aideo-home-content-container">
+        {/* Collapsible Layout Filter (rendered here for classic and active search; modern layouts embed it directly in their top bar) */}
+        {(searchActive || aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
+          renderLayoutFilter()
+        )}
+
         {/* Premium Web Search Bar (classic design only; the other designs embed their own) */}
-      {(searchActive || aideoPageDesign === 'classic' || !['editorial', 'command', 'stage'].includes(aideoPageDesign)) && (
+      {(searchActive || aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
       <div style={{ marginBottom: 36, maxWidth: 640, position: 'relative' }} ref={dropdownRef}>
-        <details className="unified-source-filter">
-          <summary>Source filter: {musicSource === 'all' ? 'All sources' : musicSource === 'youtube' ? 'YouTube' : musicSource === 'tidal' ? 'Tidal' : 'Qobuz'}</summary>
-          <div className="source-filter-options">
-          {((['all', 'youtube', 'tidal'] as ('all' | 'youtube' | 'tidal' | 'qobuz')[]).concat(qobuzExperimentalEnabled ? ['qobuz'] : [])).map(src => (
-            <button
-              key={src}
-              type="button"
-              aria-pressed={musicSource === src}
-              onClick={() => {
-                setMusicSource(src);
-                if (src === 'tidal' && !tidalConnected) {
-                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal first in Settings > Library > Tidal.', type: 'warning' } }));
-                }
-                if (src === 'qobuz' && !qobuzConnected) {
-                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Qobuz first in Settings > Library > Qobuz (Experimental).', type: 'warning' } }));
-                }
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '5px 12px',
-                borderRadius: 999,
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: 0.3,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                border: musicSource === src ? '1px solid rgba(var(--accent-rgb), 0.45)' : '1px solid var(--glass-border)',
-                background: musicSource === src ? 'rgba(var(--accent-rgb), 0.14)' : 'var(--glass)',
-                color: musicSource === src ? 'var(--dynamic-accent)' : 'var(--text-dim)',
-              }}
-            >
-              {src === 'tidal' && (
-                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: tidalConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }} />
-              )}
-              {src === 'qobuz' && (
-                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: qobuzConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }} />
-              )}
-              {src === 'all' ? 'All sources' : src === 'youtube' ? 'YouTube' : src === 'tidal' ? 'Tidal' : 'Qobuz Î²'}
-            </button>
-          ))}
-          </div>
-        </details>
+        {appMode !== 'local' && (
+          <details className="unified-source-filter">
+            <summary>Source filter: {musicSource === 'all' ? 'All sources' : musicSource === 'youtube' ? 'Webstream' : musicSource === 'tidal' ? 'Tidal' : 'Qobuz'}</summary>
+            <div className="source-filter-options">
+            {((['all', 'youtube', 'tidal'] as ('all' | 'youtube' | 'tidal' | 'qobuz')[]).concat(qobuzExperimentalEnabled ? ['qobuz'] : [])).map(src => (
+              <button
+                key={src}
+                type="button"
+                aria-pressed={musicSource === src}
+                onClick={() => {
+                  setMusicSource(src);
+                  if (src === 'tidal' && !tidalConnected) {
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal first in Settings > Library > Tidal.', type: 'warning' } }));
+                  }
+                  if (src === 'qobuz' && !qobuzConnected) {
+                    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Qobuz first in Settings > Library > Qobuz (Experimental).', type: 'warning' } }));
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '5px 12px',
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  border: musicSource === src ? '1px solid rgba(var(--accent-rgb), 0.45)' : '1px solid var(--glass-border)',
+                  background: musicSource === src ? 'rgba(var(--accent-rgb), 0.14)' : 'var(--glass)',
+                  color: musicSource === src ? 'var(--dynamic-accent)' : 'var(--text-dim)',
+                }}
+              >
+                {src === 'tidal' && (
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: tidalConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }} />
+                )}
+                {src === 'qobuz' && (
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: qobuzConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }} />
+                )}
+                {src === 'all' ? 'All sources' : src === 'youtube' ? 'Webstream' : src === 'tidal' ? 'Tidal' : 'Qobuz β'}
+              </button>
+            ))}
+            </div>
+          </details>
+        )}
         <form onSubmit={handleAideoSearch} style={{ display: 'flex', gap: 12 }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <div style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', display: 'flex', alignItems: 'center' }}>
@@ -2687,7 +2739,7 @@ export function AideoView() {
             </div>
             <input
               type="text"
-              placeholder="Search songs, artists, or paste a link..."
+              placeholder={appMode === 'local' ? "Search local songs or artists..." : "Search songs, artists, or paste a link..."}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               onFocus={() => setSearchFocused(true)}
@@ -3548,7 +3600,11 @@ export function AideoView() {
 
           {aideoPageDesign === 'stage' && <StageHome {...aideoHomeProps} />}
 
-          {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage'].includes(aideoPageDesign)) && (
+          {aideoPageDesign === 'spotify' && <HorizonHome {...aideoHomeProps} />}
+
+          {aideoPageDesign === 'apple' && <SpatialGlassHome {...aideoHomeProps} />}
+
+          {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
             <>
               {/* Greeting Header */}
               <div className="aideo-greeting-header">

@@ -1,5 +1,5 @@
 import { RefObject } from 'react';
-import { Track, LyricLine, LyricsDisplayMode } from '../../store/types';
+import { Track, LyricLine, LyricsDisplayMode, CanvasResult, CanvasMode } from '../../store/types';
 
 export interface TheaterLayoutProps {
   currentTrack: Track | null;
@@ -22,4 +22,6 @@ export interface TheaterLayoutProps {
   scrollRef: RefObject<HTMLDivElement | null>;
   spectrumBands?: number[];
   lowSpecMode?: boolean;
+  canvas?: CanvasResult | null;
+  canvasMode?: CanvasMode;
 }

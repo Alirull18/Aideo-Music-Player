@@ -126,7 +126,7 @@ describe('Song-first search', () => {
     fireEvent.submit(input.closest('form')!);
     await screen.findByRole('region', { name: 'Unified search results' });
     fireEvent.click(screen.getByText('Source filter: All sources'));
-    fireEvent.click(screen.getByRole('button', { name: 'YouTube' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Webstream' }));
     expect(await screen.findByRole('button', { name: 'Play Song by Artist' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Tidal' }));
     expect(await screen.findByRole('button', { name: 'Play Song by Artist' })).toBeVisible();

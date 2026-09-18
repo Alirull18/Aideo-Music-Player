@@ -925,11 +925,14 @@ pub async fn search_youtube_internal_impl(
             .and_then(|renderer| renderer.get("text"))
             .and_then(|text| text.get("runs"))
             .and_then(|runs| runs.as_array())
-            .and_then(|runs| runs.first())
-            .and_then(|run| run.get("text"))
-            .and_then(|t| t.as_str())
-            .unwrap_or("Unknown Title")
-            .to_string();
+            .map(|runs| {
+                runs.iter()
+                    .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "Unknown Title".to_string());
 
         let duration_raw = extract_duration_safe(&item).unwrap_or_else(|| "0:00".to_string());
 
@@ -978,7 +981,8 @@ pub async fn search_youtube_internal_impl(
         // Reject third-party slop (reactions, fancams, karaoke, tutorials, etc.) unless user explicitly searched for them
         if is_third_party_or_instrumental(&title, &artist) {
             let explicitly_requested = [
-                "karaoke", "instrumental", "reaction", "cover", "remix", "fancam", "slowed", "nightcore", "tutorial", "lesson"
+                "karaoke", "instrumental", "reaction", "cover", "remix", "fancam", "slowed", "nightcore", "tutorial", "lesson",
+                "sped up", "speed up", "spedup", "speedup", "piano", "tribute",
             ].iter().any(|&term| query_lower.contains(term));
 
             if !explicitly_requested {
@@ -1002,6 +1006,12 @@ pub async fn search_youtube_internal_impl(
             ("nightcore", -6.0),
             ("fanmade", -6.0),
             ("cover art", -4.0),
+            ("sped up", -6.0),
+            ("speed up", -6.0),
+            ("spedup", -6.0),
+            ("speedup", -6.0),
+            ("piano cover", -6.0),
+            ("piano version", -6.0),
         ];
 
         let artist_lower = artist.to_lowercase();
@@ -1395,12 +1405,18 @@ pub fn is_third_party_or_instrumental(title: &str, artist: &str) -> bool {
         "sped up",
         "sped-up",
         "speed up",
+        "spedup",
+        "speedup",
         "slowed reverb",
         "slowed + reverb",
         "slowed+reverb",
         "slowed down",
+        "slowed",
         "nightcore",
         "8d audio",
+        "piano cover",
+        "acoustic cover",
+        "guitar cover",
         // Promotional/Live/Performance show filters
         "studio choom",
         "스튜디오 춤",
@@ -4663,7 +4679,7 @@ pub async fn get_personalized_discovery_hub(
             let _ = (unmatched_r, unmatched_t); // Offline: no network to resolve online counterparts
             (mixes, rec_p, heavy_r, forgot_g, p_mixes)
         };
-        return Ok(DiscoveryHubData {
+        let hub_data = DiscoveryHubData {
             recommendations: recs,
             global_charts: charts,
             mixed_for_you,
@@ -4671,7 +4687,15 @@ pub async fn get_personalized_discovery_hub(
             heavy_rotation,
             forgotten_gems,
             playlist_mixes,
-        });
+        };
+        if let Ok(app_data) = app_handle.path().app_data_dir() {
+            let cache_file = app_data.join("discovery_cache.json");
+            if let Ok(json_str) = serde_json::to_string(&hub_data) {
+                let _ = std::fs::create_dir_all(&app_data);
+                let _ = std::fs::write(cache_file, json_str);
+            }
+        }
+        return Ok(hub_data);
     }
 
     let api_key = fetch_innertube_key().await;
@@ -5557,6 +5581,47 @@ mod tests {
         assert!(is_third_party_or_instrumental("Vocal Coach Reacts to Song", "Coach"));
         assert!(is_third_party_or_instrumental("Karaoke Track", "Karaoke Channel"));
         assert!(is_third_party_or_instrumental("Backing Track in Am", "Backing Tracks"));
+        assert!(is_third_party_or_instrumental("Kill Bill (Sped Up)", "SZA"));
+        assert!(is_third_party_or_instrumental("Kill Bill - Speed Up", "SZA"));
+        assert!(is_third_party_or_instrumental("Kill Bill (Piano Cover)", "Unknown"));
+        assert!(is_third_party_or_instrumental("Song (Slowed + Reverb)", "Artist"));
+    }
+
+    #[test]
+    fn test_youtube_title_multi_runs_extraction() {
+        let json_item = serde_json::json!({
+            "flexColumns": [
+                {
+                    "musicResponsiveListItemFlexColumnRenderer": {
+                        "text": {
+                            "runs": [
+                                { "text": "Kill Bill" },
+                                { "text": " (Sped Up Version)" }
+                            ]
+                        }
+                    }
+                }
+            ]
+        });
+
+        let extracted_title = json_item.get("flexColumns")
+            .and_then(|cols| cols.as_array())
+            .and_then(|cols| cols.first())
+            .and_then(|col| col.get("musicResponsiveListItemFlexColumnRenderer"))
+            .and_then(|renderer| renderer.get("text"))
+            .and_then(|text| text.get("runs"))
+            .and_then(|runs| runs.as_array())
+            .map(|runs| {
+                runs.iter()
+                    .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "Unknown Title".to_string());
+
+        assert_eq!(extracted_title, "Kill Bill (Sped Up Version)");
+        assert!(is_third_party_or_instrumental(&extracted_title, "SZA"));
     }
 
     #[test]

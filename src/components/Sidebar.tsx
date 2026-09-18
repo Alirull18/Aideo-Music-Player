@@ -48,7 +48,7 @@ export function Sidebar() {
   })));
 
   useEffect(() => {
-    if (appMode === 'local' && view === 'loved_streams') {
+    if (appMode === 'local' && (view === 'loved_streams' || view === 'charts')) {
       setView('library');
     }
   }, [appMode, view, setView]);
@@ -132,7 +132,16 @@ export function Sidebar() {
   return (
     <aside className="app-sidebar">
       <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'space-between', padding: sidebarCollapsed ? '0' : '0 10px', marginBottom: 36, width: '100%' }}>
-        {!sidebarCollapsed && <span className="sidebar-logo-name">Aideo</span>}
+        {!sidebarCollapsed && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="sidebar-logo-name">Aideo</span>
+            {appMode === 'local' && (
+              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Local
+              </span>
+            )}
+          </div>
+        )}
         <button 
           className="sidebar-toggle-btn" 
           onClick={toggleSidebarCollapsed}

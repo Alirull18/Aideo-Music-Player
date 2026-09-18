@@ -60,9 +60,23 @@ pub fn get_lyrics_cache_path(audio_path: &str, ext: &str) -> std::path::PathBuf 
     get_lyrics_cache_dir().join(format!("{}.{}", hash, ext))
 }
 
+pub fn is_remote_or_virtual_uri(path: &str) -> bool {
+    let s = path.trim();
+    s.starts_with("http://")
+        || s.starts_with("https://")
+        || s.starts_with("youtube:")
+        || s.starts_with("tidal:")
+        || s.starts_with("qobuz:")
+        || s.starts_with("spotify:")
+        || (!s.starts_with('/')
+            && !s.starts_with('\\')
+            && !s.get(1..3).map_or(false, |m| m == ":\\" || m == ":/")
+            && s.contains(':'))
+}
+
 /// Returns the direct sidecar or cached file path for an audio path/URL with a given extension.
 pub fn get_lyrics_file_path(audio_path: &str, ext: &str) -> std::path::PathBuf {
-    if audio_path.starts_with("http://") || audio_path.starts_with("https://") {
+    if is_remote_or_virtual_uri(audio_path) {
         get_lyrics_cache_path(audio_path, ext)
     } else {
         std::path::Path::new(audio_path).with_extension(ext)
@@ -101,8 +115,8 @@ pub fn clean_stale_lyrics_cache(audio_path: &str, new_ext: &str) {
         let _ = std::fs::remove_file(appdata_alt);
     }
 
-    // 2. Local sidecar alt file (only if not a web stream)
-    if !audio_path.starts_with("http://") && !audio_path.starts_with("https://") {
+    // 2. Local sidecar alt file (only if not a web stream or virtual URI)
+    if !is_remote_or_virtual_uri(audio_path) {
         let sidecar_alt = get_lyrics_file_path(audio_path, alt_ext);
         if sidecar_alt.exists() {
             let _ = std::fs::remove_file(sidecar_alt);
@@ -175,8 +189,8 @@ pub fn extract_embedded_lyrics(audio_path: &str) -> Option<String> {
 
 /// Finds a .ttml or .lrc file next to the audio file, in AppData cache, or embedded in audio tags, and parses it.
 pub fn get_lyrics_for_track(audio_path: &str) -> Vec<LyricLine> {
-    if audio_path.starts_with("http://") || audio_path.starts_with("https://") {
-        // 1. Web stream AppData cache: .ttml first, then .lrc
+    if is_remote_or_virtual_uri(audio_path) {
+        // 1. Web stream / virtual URI AppData cache: .ttml first, then .lrc
         let ttml_cache = get_lyrics_cache_path(audio_path, "ttml");
         if ttml_cache.exists() {
             if let Ok(content) = std::fs::read_to_string(&ttml_cache) {

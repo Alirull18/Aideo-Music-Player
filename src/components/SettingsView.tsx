@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
 import { useUpdaterStore } from '../store/updaterStore';
-import { PlayerBarDesign, AideoPageDesign, TheaterModeDesign, TheaterHudStyle } from '../store/types';
+import { PlayerBarDesign, AideoPageDesign, TheaterModeDesign, TheaterHudStyle, StreamingQuality, PlaybackSource, CanvasMode } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -14,7 +14,7 @@ import {
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
   Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3, TrendingUp,
   Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen,
-  Tv2, Sliders, FileText, Type, Sun, Moon, Check
+  Tv2, Sliders, FileText, Type, Sun, Moon, Check, HardDrive, Globe
 } from 'lucide-react';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
@@ -91,6 +91,391 @@ function SlidingSwitch({ checked, onChange }: SlidingSwitchProps) {
   );
 }
 
+interface StreamingQualityControlProps {
+  streamingQuality: StreamingQuality;
+  setStreamingQuality: (q: StreamingQuality) => void;
+  preferredSource: PlaybackSource['provider'] | 'auto';
+  setPreferredSource: (s: PlaybackSource['provider'] | 'auto') => void;
+  tidalConnected: boolean;
+  qobuzConnected: boolean;
+  qobuzExperimentalEnabled: boolean;
+}
+
+interface StreamingPresetTier {
+  id: StreamingQuality;
+  title: string;
+  badge: string;
+  desc: string;
+  icon: React.ReactNode;
+  defaultSource: PlaybackSource['provider'] | 'auto';
+}
+
+const STREAMING_PRESET_TIERS: StreamingPresetTier[] = [
+  {
+    id: 'best_available',
+    title: 'Best Available',
+    badge: 'Up to 24-bit / 192 kHz',
+    desc: 'Prefers studio FLAC and master quality. Available streams request remote service master tier. Falls back automatically with notice.',
+    icon: <Zap size={18} />,
+    defaultSource: 'auto',
+  },
+  {
+    id: 'standard_lossless',
+    title: 'Standard Lossless',
+    badge: '16-bit / 44.1 kHz FLAC',
+    desc: 'Bit-perfect CD quality audio. Pure lossless fidelity with moderate bandwidth. Local files take priority when matching.',
+    icon: <Disc size={18} />,
+    defaultSource: 'auto',
+  },
+  {
+    id: 'data_saver',
+    title: 'Data Saver',
+    badge: 'Compressed Stream',
+    desc: 'Reduces streaming data usage and eliminates buffering on metered networks. Prioritizes efficient compressed streams.',
+    icon: <Radio size={18} />,
+    defaultSource: 'youtube',
+  },
+];
+
+export function StreamingQualityControl({
+  streamingQuality,
+  setStreamingQuality,
+  preferredSource,
+  setPreferredSource,
+  tidalConnected,
+  qobuzConnected,
+  qobuzExperimentalEnabled,
+}: StreamingQualityControlProps) {
+  const currentIndex = STREAMING_PRESET_TIERS.findIndex(t => t.id === streamingQuality);
+  const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+  const currentTier = STREAMING_PRESET_TIERS[safeIndex];
+  const isCustom = preferredSource !== currentTier.defaultSource;
+
+  const selectTier = (tier: StreamingPresetTier) => {
+    setStreamingQuality(tier.id);
+    setPreferredSource(tier.defaultSource);
+  };
+
+  const canGoUp = isCustom || safeIndex > 0;
+  const handleUp = () => {
+    if (isCustom) {
+      if (safeIndex > 0) {
+        selectTier(STREAMING_PRESET_TIERS[safeIndex - 1]);
+      } else {
+        selectTier(STREAMING_PRESET_TIERS[0]);
+      }
+    } else if (safeIndex > 0) {
+      selectTier(STREAMING_PRESET_TIERS[safeIndex - 1]);
+    }
+  };
+
+  const canGoDown = isCustom || safeIndex < STREAMING_PRESET_TIERS.length - 1;
+  const handleDown = () => {
+    if (isCustom) {
+      if (safeIndex < STREAMING_PRESET_TIERS.length - 1) {
+        selectTier(STREAMING_PRESET_TIERS[safeIndex + 1]);
+      } else {
+        selectTier(STREAMING_PRESET_TIERS[STREAMING_PRESET_TIERS.length - 1]);
+      }
+    } else if (safeIndex < STREAMING_PRESET_TIERS.length - 1) {
+      selectTier(STREAMING_PRESET_TIERS[safeIndex + 1]);
+    }
+  };
+
+  const getSourceDisplayName = (src: string) => {
+    switch (src) {
+      case 'auto': return 'Automatic';
+      case 'local': return 'Local files';
+      case 'youtube': return 'Webstream';
+      case 'tidal': return 'Tidal';
+      case 'qobuz': return 'Qobuz';
+      default: return src;
+    }
+  };
+
+  return (
+    <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Header / Subtitle */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 750, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.6 }}>
+          Preferred Source Quality
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {isCustom ? (
+            <span style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: '#f59e0b',
+              background: 'rgba(245, 158, 11, 0.12)',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              padding: '2px 8px',
+              borderRadius: 6
+            }}>
+              Custom Override
+            </span>
+          ) : (
+            <span style={{
+              fontSize: 10,
+              fontWeight: 650,
+              color: 'var(--accent)',
+              background: 'rgba(var(--accent-rgb), 0.1)',
+              border: '1px solid rgba(var(--accent-rgb), 0.25)',
+              padding: '2px 8px',
+              borderRadius: 6
+            }}>
+              Preset {safeIndex + 1} of {STREAMING_PRESET_TIERS.length}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Quality Stepper & Leader Card */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
+        {/* UP Button */}
+        <motion.button
+          type="button"
+          onClick={handleUp}
+          disabled={!canGoUp}
+          whileHover={canGoUp ? { translateY: -1 } : undefined}
+          whileTap={canGoUp ? { scale: 0.99 } : undefined}
+          aria-label="Increase streaming quality"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '9px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--glass-border)',
+            background: canGoUp ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 255, 255, 0.015)',
+            color: canGoUp ? 'var(--text)' : 'var(--text-dim)',
+            opacity: canGoUp ? 1 : 0.45,
+            cursor: canGoUp ? 'pointer' : 'not-allowed',
+            fontSize: 11,
+            fontWeight: 650,
+            transition: 'background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s',
+          }}
+        >
+          <ArrowUp size={13} strokeWidth={2.5} />
+          <span>
+            {isCustom && safeIndex === 0
+              ? `Reset to ${STREAMING_PRESET_TIERS[0].title}`
+              : safeIndex > 0
+                ? `Higher Quality (${STREAMING_PRESET_TIERS[safeIndex - 1].title})`
+                : 'Highest Quality Reached'}
+          </span>
+        </motion.button>
+
+        {/* LEADER HERO CARD */}
+        <div
+          style={{
+            padding: '16px 18px',
+            borderRadius: 12,
+            border: isCustom
+              ? '1.5px solid rgba(245, 158, 11, 0.45)'
+              : '1.5px solid var(--accent)',
+            background: isCustom
+              ? 'rgba(245, 158, 11, 0.06)'
+              : 'rgba(var(--accent-rgb), 0.07)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            position: 'relative',
+            transition: 'border-color 0.2s ease, background-color 0.2s ease',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                background: isCustom ? 'rgba(245, 158, 11, 0.2)' : 'var(--accent)',
+                color: isCustom ? '#f59e0b' : '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                transition: 'background 0.2s, color 0.2s',
+              }}>
+                {isCustom ? <Sliders size={18} /> : currentTier.icon}
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 15, fontWeight: 750, color: 'var(--text)' }}>
+                    {isCustom ? 'Custom Quality' : currentTier.title}
+                  </span>
+                  <span style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 8,
+                    background: isCustom ? 'rgba(245, 158, 11, 0.18)' : 'rgba(var(--accent-rgb), 0.16)',
+                    color: isCustom ? '#f59e0b' : 'var(--accent)',
+                    letterSpacing: 0.2,
+                  }}>
+                    {isCustom ? `Base: ${currentTier.title}` : currentTier.badge}
+                  </span>
+                  {!isCustom && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 3,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: 'var(--accent)',
+                      background: 'rgba(var(--accent-rgb), 0.12)',
+                      padding: '2px 7px',
+                      borderRadius: 12,
+                    }}>
+                      <Check size={11} strokeWidth={2.5} /> Active
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>
+                  {isCustom
+                    ? `Resolution: ${currentTier.badge} · Priority Source: ${getSourceDisplayName(preferredSource)}`
+                    : `Preferred target resolution: ${currentTier.badge}`}
+                </div>
+              </div>
+            </div>
+
+            {/* Step dots for quick visual feedback & direct tap */}
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 4 }}
+              role="tablist"
+              aria-label="Quality preset steps"
+            >
+              {STREAMING_PRESET_TIERS.map((tier, idx) => {
+                const isCurrent = !isCustom && safeIndex === idx;
+                const isBaseCustom = isCustom && safeIndex === idx;
+                return (
+                  <button
+                    key={tier.id}
+                    type="button"
+                    onClick={() => selectTier(tier)}
+                    title={`Select ${tier.title}`}
+                    style={{
+                      width: isCurrent ? 20 : 8,
+                      height: 8,
+                      borderRadius: 4,
+                      background: isCurrent
+                        ? 'var(--accent)'
+                        : isBaseCustom
+                          ? '#f59e0b'
+                          : 'rgba(255, 255, 255, 0.18)',
+                      border: 'none',
+                      padding: 0,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
+                    aria-label={`Select ${tier.title} (${idx + 1} of ${STREAMING_PRESET_TIERS.length})`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Folded Description & Fallback Info */}
+          <div style={{
+            fontSize: 11.5,
+            color: 'var(--text-dim)',
+            lineHeight: 1.5,
+            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+            paddingTop: 10,
+          }}>
+            {isCustom ? (
+              <span>
+                Manual source routing active. Remote streams target {currentTier.badge} from {currentTier.title}, while source resolution prioritizes <strong>{getSourceDisplayName(preferredSource)}</strong>. Use the arrows or preset dots above to return to a standard preset.
+              </span>
+            ) : (
+              <span>
+                {currentTier.desc} Source selection requests this matching tier from remote services without DSP upsampling. Local files take priority when meeting your audio fidelity criteria.
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* DOWN Button */}
+        <motion.button
+          type="button"
+          onClick={handleDown}
+          disabled={!canGoDown}
+          whileHover={canGoDown ? { translateY: 1 } : undefined}
+          whileTap={canGoDown ? { scale: 0.99 } : undefined}
+          aria-label="Decrease streaming quality"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '9px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--glass-border)',
+            background: canGoDown ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 255, 255, 0.015)',
+            color: canGoDown ? 'var(--text)' : 'var(--text-dim)',
+            opacity: canGoDown ? 1 : 0.45,
+            cursor: canGoDown ? 'pointer' : 'not-allowed',
+            fontSize: 11,
+            fontWeight: 650,
+            transition: 'background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s',
+          }}
+        >
+          <ArrowDown size={13} strokeWidth={2.5} />
+          <span>
+            {isCustom && safeIndex === STREAMING_PRESET_TIERS.length - 1
+              ? `Reset to ${STREAMING_PRESET_TIERS[STREAMING_PRESET_TIERS.length - 1].title}`
+              : safeIndex < STREAMING_PRESET_TIERS.length - 1
+                ? `Lower Quality (${STREAMING_PRESET_TIERS[safeIndex + 1].title})`
+                : 'Lowest Quality Reached'}
+          </span>
+        </motion.button>
+      </div>
+
+      {/* PREFERRED SOURCE DROPDOWN */}
+      <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <label htmlFor="preferred-source" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+            Preferred source when quality is equal
+          </label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {tidalConnected && (
+              <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                Tidal Connected
+              </span>
+            )}
+            {qobuzConnected && qobuzExperimentalEnabled && (
+              <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                Qobuz Connected
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.4 }}>
+          Determines which provider plays first when multiple sources offer identical audio resolution. Customizing this source turns the active quality profile into a Custom preset.
+        </div>
+        <select
+          id="preferred-source"
+          value={preferredSource}
+          onChange={e => setPreferredSource(e.target.value as typeof preferredSource)}
+          className="settings-select"
+        >
+          <option value="auto">Automatic (Smart Routing)</option>
+          <option value="local">Local files</option>
+          <option value="youtube">Webstream</option>
+          <option value="tidal" disabled={!tidalConnected}>
+            Tidal {!tidalConnected ? '(requires account connection)' : ''}
+          </option>
+          <option value="qobuz" disabled={!qobuzConnected || !qobuzExperimentalEnabled}>
+            Qobuz {!qobuzConnected || !qobuzExperimentalEnabled ? '(requires active integration)' : ''}
+          </option>
+        </select>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const streamingQuality = useStore(s => s.streamingQuality);
   const setStreamingQuality = useStore(s => s.setStreamingQuality);
@@ -116,6 +501,8 @@ export function SettingsView() {
     qobuzExperimentalEnabled, toggleQobuzExperimental,
     notificationsEnabled, developerNotifications,
     toggleNotificationsEnabled, toggleDeveloperNotifications,
+    osTrackNotificationsEnabled, osNotifyBackgroundOnly,
+    toggleOsTrackNotifications, toggleOsNotifyBackgroundOnly,
     subsonicUrl, subsonicUser, subsonicPass, subsonicConnected, subsonicLoading,
     jellyfinUrl, jellyfinConnected, jellyfinLoading,
     connectSubsonic, disconnectSubsonic, connectJellyfin, disconnectJellyfin,
@@ -135,7 +522,11 @@ export function SettingsView() {
     discoveryLayout, setDiscoveryLayout,
     visualizerMode, setVisualizerMode,
     visualizerDecayRate, setVisualizerDecayRate,
-    visualizerExpanded, setVisualizerExpanded
+    visualizerExpanded, setVisualizerExpanded,
+    appMode, setAppMode,
+    canvasEnabled, toggleCanvasEnabled,
+    canvasMode, setCanvasMode,
+    canvasAllowOnline, setCanvasAllowOnline,
   } = useStore(useShallow(s => ({
     scanDirs: s.scanDirs,
     addScanDir: s.addScanDir,
@@ -187,6 +578,10 @@ export function SettingsView() {
     developerNotifications: s.developerNotifications,
     toggleNotificationsEnabled: s.toggleNotificationsEnabled,
     toggleDeveloperNotifications: s.toggleDeveloperNotifications,
+    osTrackNotificationsEnabled: s.osTrackNotificationsEnabled,
+    osNotifyBackgroundOnly: s.osNotifyBackgroundOnly,
+    toggleOsTrackNotifications: s.toggleOsTrackNotifications,
+    toggleOsNotifyBackgroundOnly: s.toggleOsNotifyBackgroundOnly,
     subsonicUrl: s.subsonicUrl,
     subsonicUser: s.subsonicUser,
     subsonicPass: s.subsonicPass,
@@ -234,6 +629,14 @@ export function SettingsView() {
     setVisualizerDecayRate: s.setVisualizerDecayRate,
     visualizerExpanded: s.visualizerExpanded,
     setVisualizerExpanded: s.setVisualizerExpanded,
+    appMode: s.appMode,
+    setAppMode: s.setAppMode,
+    canvasEnabled: s.canvasEnabled,
+    toggleCanvasEnabled: s.toggleCanvasEnabled,
+    canvasMode: s.canvasMode,
+    setCanvasMode: s.setCanvasMode,
+    canvasAllowOnline: s.canvasAllowOnline,
+    setCanvasAllowOnline: s.setCanvasAllowOnline,
   })));
 
   // Tab navigation State
@@ -1060,9 +1463,9 @@ export function SettingsView() {
     },
     {
       id: 'system-notifications',
-      title: 'Toast Notifications',
-      description: 'Configure overlay toast alerts and developer diagnostic messaging.',
-      keywords: 'notifications toast popups alert messages appearance UI settings mute enable disable developer diagnostics debug error logs system level',
+      title: 'Notifications & Alerts',
+      description: 'Configure in-app toast alerts, background desktop notifications, and diagnostics.',
+      keywords: 'notifications toast popups alert messages appearance UI settings mute enable disable desktop os track change background minimized developer diagnostics debug error logs system level',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
@@ -1070,9 +1473,9 @@ export function SettingsView() {
             {/* Notifications Enabled Toggle */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 2px' }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>System Overlay Toasts</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>In-App Overlay Toasts</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                  Show real-time notifications for actions, playback events, and errors
+                  Show floating alerts for actions, queue changes, and playback errors
                 </div>
               </div>
               <SlidingSwitch 
@@ -1104,6 +1507,57 @@ export function SettingsView() {
                 <SlidingSwitch 
                   checked={developerNotifications} 
                   onChange={toggleDeveloperNotifications} 
+                />
+              </div>
+            </div>
+
+            {/* Desktop OS Track Notifications Toggle */}
+            <div 
+              style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                padding: '6px 2px', 
+                borderTop: '1px solid var(--glass-border)',
+              }}
+            >
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Desktop Track Notifications</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                  Send native desktop notifications when tracks change
+                </div>
+              </div>
+              <div style={{ marginTop: 6 }}>
+                <SlidingSwitch 
+                  checked={osTrackNotificationsEnabled} 
+                  onChange={toggleOsTrackNotifications} 
+                />
+              </div>
+            </div>
+
+            {/* Only When in Background or Minimized Toggle */}
+            <div 
+              style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                padding: '6px 2px 6px 14px', 
+                borderTop: '1px solid var(--glass-border)',
+                opacity: osTrackNotificationsEnabled ? 1 : 0.5,
+                transition: 'opacity 0.2s',
+                pointerEvents: osTrackNotificationsEnabled ? 'auto' : 'none'
+              }}
+            >
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>Only When in Background or Minimized</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                  Prevent disturbing desktop banners and chimes while Aideo is actively in focus
+                </div>
+              </div>
+              <div style={{ marginTop: 6 }}>
+                <SlidingSwitch 
+                  checked={osNotifyBackgroundOnly} 
+                  onChange={toggleOsNotifyBackgroundOnly} 
                 />
               </div>
             </div>
@@ -1523,6 +1977,103 @@ export function SettingsView() {
       )
     },
     {
+      id: 'canvas-motion-settings',
+      title: 'Motion Canvas (Video Artwork)',
+      description: 'Display synchronized looping video artwork backdrops in Now Playing and Theater layouts.',
+      keywords: 'canvas motion artwork video backdrop loop theater fullscreen tidal animation visualizer appearance UI',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Master Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Enable Motion Canvas</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                Show animated video artwork when available in Theater Mode & Fullscreen View.
+              </div>
+            </div>
+            <SlidingSwitch checked={canvasEnabled} onChange={toggleCanvasEnabled} />
+          </div>
+
+          {canvasEnabled && (
+            <>
+              {/* Display Mode Selection */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', color: 'var(--text-dim)', marginBottom: 10 }}>
+                  Display Presentation Mode
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+                  {[
+                    {
+                      id: 'artwork' as CanvasMode,
+                      name: 'Artwork Sleeve',
+                      desc: 'Smoothly cross-fades video over the album cover frame, keeping layout and lyrics intact.',
+                      icon: <Tv2 size={16} color="#8b5cf6" />
+                    },
+                    {
+                      id: 'backdrop' as CanvasMode,
+                      name: 'Cinema Backdrop',
+                      desc: 'Full-bleed edge-to-edge video backdrop with high-contrast vignette and subtle blur.',
+                      icon: <Sparkles size={16} color="#38bdf8" />
+                    },
+                    {
+                      id: 'both' as CanvasMode,
+                      name: 'Both (Hybrid)',
+                      desc: 'Plays motion artwork inside the album frame and expands as ambient backdrop.',
+                      icon: <LayoutGrid size={16} color="#10b981" />
+                    },
+                  ].map(m => {
+                    const isSelected = canvasMode === m.id;
+                    return (
+                      <div
+                        key={m.id}
+                        onClick={() => {
+                          setCanvasMode(m.id);
+                          window.dispatchEvent(new CustomEvent('ui-toast', {
+                            detail: { message: `Canvas mode set to: ${m.name}`, type: 'info' }
+                          }));
+                        }}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                          padding: 12,
+                          borderRadius: 10,
+                          border: isSelected ? '1.5px solid var(--accent, #8b5cf6)' : '1px solid var(--glass-border)',
+                          background: isSelected ? 'rgba(var(--accent-rgb, 139, 92, 246), 0.1)' : 'var(--glass)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {m.icon}
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{m.name}</span>
+                        </div>
+                        <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: 0, lineHeight: 1.4 }}>
+                          {m.desc}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Online Lookups Privacy Toggle */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTop: '1px solid var(--glass-border)' }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Allow Online Canvas Discovery</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    Query public Tidal & cloud catalog endpoints. If disabled, only local video files (e.g. canvas.mp4 in track folder) are loaded.
+                  </div>
+                </div>
+                <SlidingSwitch checked={canvasAllowOnline} onChange={() => setCanvasAllowOnline(!canvasAllowOnline)} />
+              </div>
+            </>
+          )}
+        </div>
+      )
+    },
+    {
       id: 'aideo-page-design',
       title: 'Home Page Layout',
       description: 'Select your visual layout for the main Aideo home screen.',
@@ -1557,6 +2108,64 @@ export function SettingsView() {
                     <div className="aideo-prev-recap-grid">
                       <div className="aideo-prev-recap-card" />
                       <div className="aideo-prev-recap-card" />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'spotify' as AideoPageDesign,
+                name: 'Horizon Grid',
+                badge: 'Emerald Grid',
+                badgeColor: '#1db954',
+                icon: <Headphones size={18} color="#1db954" />,
+                desc: 'Deep dark layout with signature emerald accents, 6-card quick launch favorites grid, and horizontal carousel shelves.',
+                visual: (
+                  <div className="aideo-prev-box prev-spotify" style={{ background: '#121212', padding: 8, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <div style={{ height: 6, width: 24, borderRadius: 500, background: '#1db954' }} />
+                      <div style={{ height: 6, width: 24, borderRadius: 500, background: '#333' }} />
+                      <div style={{ height: 6, width: 24, borderRadius: 500, background: '#333' }} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                      <div style={{ height: 16, background: '#242424', borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 4px', gap: 4 }}>
+                        <div style={{ width: 10, height: 10, background: '#383838', borderRadius: 2 }} />
+                        <div style={{ height: 4, width: '40%', background: '#666', borderRadius: 2 }} />
+                      </div>
+                      <div style={{ height: 16, background: '#242424', borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 4px', gap: 4 }}>
+                        <div style={{ width: 10, height: 10, background: '#383838', borderRadius: 2 }} />
+                        <div style={{ height: 4, width: '40%', background: '#666', borderRadius: 2 }} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                      <div style={{ width: 24, height: 24, background: '#181818', border: '1px solid #282828', borderRadius: 4 }} />
+                      <div style={{ width: 24, height: 24, background: '#181818', border: '1px solid #282828', borderRadius: 4 }} />
+                      <div style={{ width: 24, height: 24, background: '#181818', border: '1px solid #282828', borderRadius: 4 }} />
+                    </div>
+                  </div>
+                )
+              },
+              {
+                id: 'apple' as AideoPageDesign,
+                name: 'Spatial Glass',
+                badge: 'Crimson Glass',
+                badgeColor: '#fa243c',
+                icon: <Disc size={18} color="#fa243c" />,
+                desc: 'Frosted acrylic glassmorphism, crimson red accents, paged Spatial Hero Marquee carousel, and multi-row quick listen grid.',
+                visual: (
+                  <div className="aideo-prev-box prev-apple" style={{ background: 'linear-gradient(180deg, #1f1f23 0%, #121214 100%)', padding: 8, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ height: 24, background: 'rgba(250, 36, 60, 0.15)', border: '1px solid rgba(250, 36, 60, 0.3)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 6px' }}>
+                      <div style={{ height: 5, width: '45%', background: '#ffffff', borderRadius: 2 }} />
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#fa243c' }} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                      <div style={{ height: 14, background: 'rgba(255, 255, 255, 0.05)', borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 4px', gap: 4 }}>
+                        <div style={{ width: 8, height: 8, background: 'rgba(255, 255, 255, 0.1)', borderRadius: 2 }} />
+                        <div style={{ height: 3, width: '50%', background: 'rgba(255, 255, 255, 0.3)', borderRadius: 2 }} />
+                      </div>
+                      <div style={{ height: 14, background: 'rgba(255, 255, 255, 0.05)', borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 4px', gap: 4 }}>
+                        <div style={{ width: 8, height: 8, background: 'rgba(255, 255, 255, 0.1)', borderRadius: 2 }} />
+                        <div style={{ height: 3, width: '50%', background: 'rgba(255, 255, 255, 0.3)', borderRadius: 2 }} />
+                      </div>
                     </div>
                   </div>
                 )
@@ -1718,7 +2327,7 @@ export function SettingsView() {
       id: 'playerbar-design',
       title: 'Player Bar Style',
       description: 'Select the bottom playback bar layout: Classic, Floating Pill, Waveform, Minimal, or Vinyl.',
-      keywords: 'player bar playbar layout style design floating island waveform minimal vinyl deck classic spotify apple music tidal roon modern appearance',
+      keywords: 'player bar playbar layout style design floating island waveform minimal vinyl deck classic tidal roon modern appearance',
       tab: 'appearance',
       element: (
         <div className="settings-ctrl-card">
@@ -1749,7 +2358,7 @@ export function SettingsView() {
               {
                 id: 'floating' as PlayerBarDesign,
                 name: 'Floating Dynamic Island',
-                badge: 'Apple Music / macOS',
+                badge: 'Spatial Glass / macOS',
                 badgeColor: '#a855f7',
                 icon: <Radio size={18} color="#c084fc" />,
                 desc: 'Elevated glassmorphic pill capsule suspended cleanly above the canvas with centered fluid controls and ambient glow.',
@@ -2057,6 +2666,108 @@ export function SettingsView() {
               checked={visualizerExpanded} 
               onChange={() => setVisualizerExpanded(!visualizerExpanded)} 
             />
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'app-experience-mode',
+      title: 'Player Experience Mode',
+      description: 'Switch between pure offline Local File Only Mode and multi-source Hybrid Mode.',
+      keywords: 'mode local hybrid offline streaming cloud network catalog online experience playback',
+      tab: 'library',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            {/* Local File Only Mode */}
+            <div
+              onClick={() => {
+                if (appMode !== 'local') {
+                  setAppMode('local');
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Switched to Local File Only Mode.', type: 'success' } }));
+                }
+              }}
+              style={{
+                padding: '16px 20px',
+                borderRadius: 14,
+                cursor: 'pointer',
+                border: appMode === 'local' ? '2px solid var(--accent)' : '1px solid var(--glass-border)',
+                background: appMode === 'local' ? 'rgba(var(--accent-rgb), 0.08)' : 'var(--glass)',
+                boxShadow: appMode === 'local' ? '0 4px 20px rgba(var(--accent-rgb), 0.15)' : 'none',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: 12
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: appMode === 'local' ? 'var(--accent)' : 'var(--glass-border)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <HardDrive size={15} />
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Local File Only</span>
+                  </div>
+                  {appMode === 'local' && (
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Check size={11} /> Active
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.45, margin: 0 }}>
+                  Pure local audio playback. Suppresses network streaming, Webstream, and cloud resolution. Guarantees bit-perfect local playback and native gapless sequences.
+                </p>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: appMode === 'local' ? 'var(--accent)' : 'var(--text-dim)' }}>
+                {appMode === 'local' ? 'Currently Active' : 'Click to Enable Local Only'}
+              </div>
+            </div>
+
+            {/* Hybrid Explorer Mode */}
+            <div
+              onClick={() => {
+                if (appMode !== 'hybrid') {
+                  setAppMode('hybrid');
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Switched to Hybrid Explorer Mode.', type: 'success' } }));
+                }
+              }}
+              style={{
+                padding: '16px 20px',
+                borderRadius: 14,
+                cursor: 'pointer',
+                border: appMode === 'hybrid' ? '2px solid var(--accent)' : '1px solid var(--glass-border)',
+                background: appMode === 'hybrid' ? 'rgba(var(--accent-rgb), 0.08)' : 'var(--glass)',
+                boxShadow: appMode === 'hybrid' ? '0 4px 20px rgba(var(--accent-rgb), 0.15)' : 'none',
+                transition: 'all 0.2s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: 12
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: appMode === 'hybrid' ? 'var(--accent)' : 'var(--glass-border)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Globe size={15} />
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Hybrid Explorer</span>
+                  </div>
+                  {appMode === 'hybrid' && (
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Check size={11} /> Active
+                    </span>
+                  )}
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.45, margin: 0 }}>
+                  Combines your local high-resolution audio library with online discovery, streaming playback (Webstream, Tidal HiFi, Qobuz), and unified multi-source routing.
+                </p>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: appMode === 'hybrid' ? 'var(--accent)' : 'var(--text-dim)' }}>
+                {appMode === 'hybrid' ? 'Currently Active' : 'Click to Enable Hybrid Explorer'}
+              </div>
+            </div>
           </div>
         </div>
       )
@@ -2381,185 +3092,15 @@ export function SettingsView() {
       keywords: 'streaming quality best available standard lossless data saver sources',
       tab: 'plugins',
       element: (
-        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ fontSize: 11, fontWeight: 750, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.6 }}>
-                Preferred Source Quality
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Info size={12} /> Auto fallback enabled
-              </span>
-            </div>
-
-            <div
-              id="streaming-quality"
-              role="radiogroup"
-              aria-label="Preferred source quality"
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}
-            >
-              {[
-                {
-                  id: 'best_available' as const,
-                  title: 'Best Available',
-                  badge: 'Up to 24-bit / 192 kHz',
-                  desc: 'Prefers studio FLAC and master quality. Falls back automatically if unavailable.',
-                  icon: <Zap size={16} />
-                },
-                {
-                  id: 'standard_lossless' as const,
-                  title: 'Standard Lossless',
-                  badge: '16-bit / 44.1 kHz FLAC',
-                  desc: 'Bit-perfect CD quality audio. Pure lossless fidelity with moderate bandwidth.',
-                  icon: <Disc size={16} />
-                },
-                {
-                  id: 'data_saver' as const,
-                  title: 'Data Saver',
-                  badge: 'Compressed Stream',
-                  desc: 'Reduces streaming data usage and eliminates buffering on metered networks.',
-                  icon: <Radio size={16} />
-                }
-              ].map(tier => {
-                const active = streamingQuality === tier.id;
-                return (
-                  <motion.button
-                    key={tier.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => setStreamingQuality(tier.id)}
-                    whileHover={{ translateY: -1 }}
-                    whileTap={{ scale: 0.99 }}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      textAlign: 'left',
-                      padding: '14px 14px 12px 14px',
-                      borderRadius: 10,
-                      border: active ? '1.5px solid var(--accent)' : '1px solid var(--glass-border)',
-                      background: active ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(0, 0, 0, 0.2)',
-                      cursor: 'pointer',
-                      transition: 'border 0.18s ease-out, background 0.18s ease-out',
-                      outline: 'none',
-                      position: 'relative',
-                      minHeight: 112
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          background: active ? 'var(--accent)' : 'rgba(255, 255, 255, 0.05)',
-                          color: active ? '#ffffff' : 'var(--text-dim)',
-                          transition: 'background 0.18s, color 0.18s'
-                        }}>
-                          {tier.icon}
-                        </div>
-                        {active && (
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 3,
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: 'var(--accent)',
-                            background: 'rgba(var(--accent-rgb), 0.12)',
-                            padding: '2px 7px',
-                            borderRadius: 12
-                          }}>
-                            <Check size={11} strokeWidth={2.5} /> Active
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
-                        {tier.title}
-                      </div>
-
-                      <div style={{
-                        fontSize: 10,
-                        fontWeight: 600,
-                        color: active ? 'var(--accent)' : 'var(--text-dim)',
-                        letterSpacing: 0.2,
-                        marginBottom: 6
-                      }}>
-                        {tier.badge}
-                      </div>
-                    </div>
-
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.35 }}>
-                      {tier.desc}
-                    </div>
-                  </motion.button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 10,
-            padding: '10px 12px',
-            borderRadius: 8,
-            background: 'rgba(255, 255, 255, 0.02)',
-            border: '1px solid rgba(255, 255, 255, 0.05)',
-            fontSize: 11,
-            color: 'var(--text-dim)',
-            lineHeight: 1.45
-          }}>
-            <Info size={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--text-dim)' }} />
-            <span>
-              Source stream selection requests the matching tier from remote services. It does not upsample audio or modify DSP resamplers. Local files are always preferred when they meet your criteria.
-            </span>
-          </div>
-
-          <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-              <label htmlFor="preferred-source" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                Preferred source when quality is equal
-              </label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {tidalConnected && (
-                  <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-                    Tidal Connected
-                  </span>
-                )}
-                {qobuzConnected && qobuzExperimentalEnabled && (
-                  <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-                    Qobuz Connected
-                  </span>
-                )}
-              </div>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.4 }}>
-              Determines which provider plays first when multiple sources offer identical audio resolution.
-            </div>
-            <select
-              id="preferred-source"
-              value={preferredSource}
-              onChange={e => setPreferredSource(e.target.value as typeof preferredSource)}
-              className="settings-select"
-            >
-              <option value="auto">Automatic (Smart Routing)</option>
-              <option value="local">Local files</option>
-              <option value="youtube">YouTube</option>
-              <option value="tidal" disabled={!tidalConnected}>
-                Tidal {!tidalConnected ? '(requires account connection)' : ''}
-              </option>
-              <option value="qobuz" disabled={!qobuzConnected || !qobuzExperimentalEnabled}>
-                Qobuz {!qobuzConnected || !qobuzExperimentalEnabled ? '(requires active integration)' : ''}
-              </option>
-            </select>
-          </div>
-        </div>
+        <StreamingQualityControl
+          streamingQuality={streamingQuality}
+          setStreamingQuality={setStreamingQuality}
+          preferredSource={preferredSource}
+          setPreferredSource={setPreferredSource}
+          tidalConnected={tidalConnected}
+          qobuzConnected={qobuzConnected}
+          qobuzExperimentalEnabled={qobuzExperimentalEnabled}
+        />
       ),
     },
     {
@@ -2570,6 +3111,11 @@ export function SettingsView() {
       tab: 'plugins',
       element: (
         <div className="settings-ctrl-card">
+          {appMode === 'local' && (
+            <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', color: '#f59e0b', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Info size={14} /> Inactive in Local File Only Mode. Switch to Hybrid Explorer Mode in Settings &gt; Library to stream.
+            </div>
+          )}
           <TidalConnectCard />
         </div>
       )
@@ -2582,6 +3128,11 @@ export function SettingsView() {
       tab: 'plugins',
       element: (
         <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {appMode === 'local' && (
+            <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', color: '#f59e0b', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Info size={14} /> Inactive in Local File Only Mode. Switch to Hybrid Explorer Mode in Settings &gt; Library to stream.
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Enable Qobuz Integration</div>
@@ -3583,7 +4134,7 @@ export function SettingsView() {
       id: 'stream-engine-settings',
       title: 'Stream Downloader & Pre-Buffering',
       description: 'Select your web stream engine and configure look-ahead gapless background caching.',
-      keywords: 'stream engine youtube direct web stream yt-dlp reqwest fallback pre-buffer cache look-ahead seamless gapless',
+      keywords: 'stream engine webstream direct web stream yt-dlp reqwest fallback pre-buffer cache look-ahead seamless gapless',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
@@ -3984,7 +4535,7 @@ export function SettingsView() {
       id: 'cache-management',
       title: 'Storage & Cache Cleanup',
       description: 'Manage local streaming cache and temporary file storage limits.',
-      keywords: 'cache clear clean delete temp storage cloud cache cloudcache youtube ytdlp temporary disk space usage size',
+      keywords: 'cache clear clean delete temp storage cloud cache cloudcache webstream ytdlp temporary disk space usage size',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">

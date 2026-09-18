@@ -671,7 +671,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         expect(sourceName({ provider: 'local', id: '1' })).toBe('Local file');
         expect(sourceName({ provider: 'tidal', id: '1' })).toBe('Tidal');
         expect(sourceName({ provider: 'qobuz', id: '1' })).toBe('Qobuz');
-        expect(sourceName({ provider: 'youtube', id: '1' })).toBe('YouTube');
+        expect(sourceName({ provider: 'youtube', id: '1' })).toBe('Webstream');
       });
 
       it('F15.3: sourceMetadata copies relevant track metadata into source', () => {

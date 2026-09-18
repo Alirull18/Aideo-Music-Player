@@ -209,8 +209,21 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
   saveLyrics: async (path: string, lrc: string) => {
     try {
       await invoke('save_lyrics_file', { path, content: lrc });
+      const currentTrack = get().currentTrack;
+      const playbackCurrent = get().playback.current_track;
+      // Dual-key caching: also cache under playback.current_track if distinct so DesktopLyricBar matches immediately
+      if (playbackCurrent && !pathsEqual(playbackCurrent, path)) {
+        await invoke('save_lyrics_file', { path: playbackCurrent, content: lrc }).catch(() => {});
+      }
+      if (currentTrack?.path && !pathsEqual(currentTrack.path, path)) {
+        await invoke('save_lyrics_file', { path: currentTrack.path, content: lrc }).catch(() => {});
+      }
       const lines: any = await invoke('get_lyrics', { path });
-      if (pathsEqual(get().playback.current_track, path)) {
+      const trackUrl = (currentTrack as any)?.url;
+      const isCurrent = pathsEqual(playbackCurrent, path)
+        || pathsEqual(currentTrack?.path, path)
+        || (typeof trackUrl === 'string' && trackUrl ? pathsEqual(trackUrl, path) : false);
+      if (isCurrent) {
         if (Array.isArray(lines)) set({ lyrics: sortLyricLines(lines), lyricStatus: 'found' });
       }
     } catch (e) { console.error(e); }
@@ -218,6 +231,12 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   autoFetchLyricsOnline: async (track: any) => {
     if (!track || !track.title) return;
+    if (get().appMode === 'local') {
+      if (get().lyrics.length === 0) {
+        set({ lyricStatus: 'not_found' });
+      }
+      return;
+    }
 
     const { artist: cleanArtist, title: cleanTitle } = cleanSearchQuery(track.artist, track.title);
 
@@ -285,17 +304,19 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
           let syncBonus = 0.0;
           const raw = r.raw_lrc || '';
           const hasWordTiming = raw.includes('<span') || raw.includes('<tt') || raw.includes('(') || raw.includes('<');
-          if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison' || r.source === 'NetEase' || r.source === 'Kugou' || hasWordTiming) {
+          if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison' || r.source === 'Kugou' || hasWordTiming) {
             syncBonus = 0.40;
           } else if (r.synced || raw.includes('[')) {
             syncBonus = 0.15;
           }
 
-          // Provider cascade priority bonus: BiniLyrics / Better Lyrics (1) > NetEase / Kugou (2) > QQMusic (3) > LRCLIB (4)
+          // Provider cascade priority bonus: BiniLyrics / Better Lyrics / Unison (1) > Kugou (2) > QQMusic (3) > LRCLIB (4) > NetEase (5 - last choice)
           let sourceBonus = 0.0;
           if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison') sourceBonus = 0.25;
-          else if (r.source === 'NetEase' || r.source === 'Kugou') sourceBonus = 0.15;
-          else if (r.source === 'QQMusic') sourceBonus = 0.05;
+          else if (r.source === 'Kugou') sourceBonus = 0.20;
+          else if (r.source === 'QQMusic') sourceBonus = 0.15;
+          else if (r.source === 'LRCLIB') sourceBonus = 0.10;
+          else if (r.source === 'NetEase') sourceBonus = 0.0;
 
           const variantPenalty = getVariantPenalty(targetTitle, r.title);
           const rankBonus = Math.max(0, 0.15 - (index * 0.03));
@@ -308,32 +329,44 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         const validMatches = scoredResults.filter(sr => sr.titleScore > 0);
 
         let bestMatch = null;
+        let lrc = '';
         if (validMatches.length > 0) {
           validMatches.sort((a, b) => b.score - a.score);
-          bestMatch = validMatches[0].result;
+
+          for (const match of validMatches) {
+            const candidate = match.result;
+            let candidateLrc = candidate.raw_lrc ?? '';
+            if (!candidateLrc && (candidate.source === 'BiniLyrics' || candidate.source === 'Better Lyrics' || candidate.source === 'Unison')) {
+              candidateLrc = await invoke<string>('get_unison_ttml', {
+                song: candidate.title,
+                artist: candidate.artist || cleanArtist || undefined,
+                album: track.album || undefined,
+                duration: candidate.duration || track.duration || undefined,
+              }).catch(() => '');
+            }
+            if (!candidateLrc && candidate.source === 'Kugou' && candidate.content_id) {
+              candidateLrc = await invoke<string>('get_kugou_krc', { id: candidate.content_id, accesskey: candidate.id }).catch(() => '');
+            }
+            if (!candidateLrc && candidate.source === 'QQMusic' && candidate.content_id) {
+              candidateLrc = await invoke<string>('get_qqmusic_lrc', { mid: candidate.content_id }).catch(() => '');
+            }
+            if (!candidateLrc && candidate.source === 'NetEase' && candidate.content_id) {
+              candidateLrc = await invoke<string>('get_netease_lrc', { id: candidate.content_id }).catch(() => '');
+            }
+
+            if (candidateLrc && candidateLrc.trim().length > 0) {
+              bestMatch = candidate;
+              lrc = candidateLrc;
+              break;
+            }
+          }
+
+          if (!bestMatch && validMatches.length > 0) {
+            bestMatch = validMatches[0].result;
+          }
         }
 
-        if (bestMatch) {
-          let lrc = bestMatch.raw_lrc ?? '';
-          if (!lrc && (bestMatch.source === 'BiniLyrics' || bestMatch.source === 'Better Lyrics' || bestMatch.source === 'Unison')) {
-            lrc = await invoke<string>('get_unison_ttml', {
-              song: bestMatch.title,
-              artist: bestMatch.artist || cleanArtist || undefined,
-              album: track.album || undefined,
-              duration: bestMatch.duration || track.duration || undefined,
-            }).catch(() => '');
-          }
-          if (!lrc && bestMatch.source === 'Kugou' && bestMatch.content_id) {
-            lrc = await invoke<string>('get_kugou_krc', { id: bestMatch.content_id, accesskey: bestMatch.id }).catch(() => '');
-          }
-          if (!lrc && bestMatch.source === 'NetEase' && bestMatch.content_id) {
-            lrc = await invoke<string>('get_netease_lrc', { id: bestMatch.content_id }).catch(() => '');
-          }
-          if (!lrc && bestMatch.source === 'QQMusic' && bestMatch.content_id) {
-            lrc = await invoke<string>('get_qqmusic_lrc', { mid: bestMatch.content_id }).catch(() => '');
-          }
-
-          console.log('[lyrics] query=', query, 'results=', results?.length, 'bestMatch=', bestMatch?.title, 'lrc.len=', lrc?.length);
+        console.log('[lyrics] query=', query, 'results=', results?.length, 'bestMatch=', bestMatch?.title, 'lrc.len=', lrc?.length);
 
           if (lrc) {
             await get().saveLyrics(track.path, lrc);
@@ -341,7 +374,12 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             // Explicitly resolve status so it can never get stuck on 'loading'
             // if saveLyrics' internal read-back guard races with a track change.
             const lines: any = await invoke('get_lyrics', { path: track.path }).catch(() => []);
-            const stillCurrent = pathsEqual(get().playback.current_track, track.path);
+            const currentTrack = get().currentTrack;
+            const playbackCurrent = get().playback.current_track;
+            const trackUrl = (currentTrack as any)?.url;
+            const stillCurrent = pathsEqual(playbackCurrent, track.path)
+              || pathsEqual(currentTrack?.path, track.path)
+              || (typeof trackUrl === 'string' && trackUrl ? pathsEqual(trackUrl, track.path) : false);
             if (stillCurrent) {
               if (Array.isArray(lines) && lines.length > 0) {
                 set({ lyrics: sortLyricLines(lines), lyricStatus: 'found' });
@@ -363,7 +401,6 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             return;
           }
         }
-      }
       set({ lyricStatus: 'not_found' });
     } catch (e) {
       console.error('Auto lyric fetch failed:', e);
@@ -397,7 +434,12 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         };
       });
 
-      if (pathsEqual(get().playback.current_track, trackPath)) {
+      const currentTrack = get().currentTrack;
+      const trackUrl = (currentTrack as any)?.url;
+      const isCurrent = pathsEqual(get().playback.current_track, trackPath)
+        || pathsEqual(currentTrack?.path, trackPath)
+        || (typeof trackUrl === 'string' && trackUrl ? pathsEqual(trackUrl, trackPath) : false);
+      if (isCurrent) {
         safeSetStorage('aideo-show-translation', 'true');
         set({ lyrics: translated, showTranslation: true });
       }
@@ -430,7 +472,12 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
         };
       });
 
-      if (pathsEqual(get().playback.current_track, trackPath)) {
+      const currentTrack = get().currentTrack;
+      const trackUrl = (currentTrack as any)?.url;
+      const isCurrent = pathsEqual(get().playback.current_track, trackPath)
+        || pathsEqual(currentTrack?.path, trackPath)
+        || (typeof trackUrl === 'string' && trackUrl ? pathsEqual(trackUrl, trackPath) : false);
+      if (isCurrent) {
         safeSetStorage('aideo-show-romaji', 'true');
         set({ lyrics: withRomaji, showRomaji: true });
       }

@@ -1,7 +1,33 @@
 {
   "name": "aideo",
+  "productName": "Aideo Music Player",
+  "description": "Modern, lightweight open-source Windows 10 & 11 desktop music player with studio-grade sound, bit-perfect WASAPI Exclusive playback, synchronized karaoke lyrics, and YouTube Music streaming.",
+  "homepage": "https://alirull18.github.io/Aideo-Music-Player/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Alirull18/Aideo-Music-Player.git"
+  },
+  "keywords": [
+    "aideo",
+    "aideo-music-player",
+    "music-player",
+    "music-player-windows",
+    "windows-music-player",
+    "windows-11",
+    "windows-10",
+    "desktop-audio-player",
+    "audiophile",
+    "wasapi",
+    "karaoke-lyrics",
+    "synchronized-lyrics",
+    "autoeq",
+    "tauri",
+    "rust",
+    "open-source"
+  ],
   "private": true,
-  "version": "0.9.8",
+  "version": "0.9.9",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,6 +47,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.11.0",
     "framer-motion": "^12.38.0",
+    "hls.js": "^1.7.3",
     "lucide-react": "^1.14.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.1.0",

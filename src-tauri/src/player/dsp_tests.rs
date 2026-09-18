@@ -1883,4 +1883,74 @@ mod dsp_tests {
         assert_eq!(calculate_stream_eof_padding(500, 1024), 524);
         assert_eq!(calculate_stream_eof_padding(1023, 1024), 1);
     }
+
+    #[test]
+    fn test_frame_aligned_discard_preserves_stereo_channels() {
+        use ringbuf::RingBuffer;
+        let rb = RingBuffer::<f32>::new(64);
+        let (mut prod, mut cons) = rb.split();
+        // Push 10 stereo frames (20 samples: L=0, R=1, L=2, R=3...)
+        let interleaved: Vec<f32> = (0..20).map(|i| i as f32).collect();
+        assert_eq!(prod.push_slice(&interleaved), 20);
+
+        // Frame-aligned discard for stereo (ch_count = 2)
+        let ch_count = 2usize;
+        let l = cons.len();
+        let frames = l / ch_count;
+        let to_discard = frames * ch_count;
+        assert_eq!(to_discard, 20);
+        cons.discard(to_discard);
+        assert_eq!(cons.len(), 0);
+
+        // Push new stereo frames (4 samples: L=100.0, R=101.0, L=102.0, R=103.0)
+        let post_seek: Vec<f32> = vec![100.0, 101.0, 102.0, 103.0];
+        prod.push_slice(&post_seek);
+
+        let mut output = vec![0.0f32; 4];
+        let read = cons.pop_slice(&mut output);
+        assert_eq!(read, 4);
+        assert_eq!(output[0], 100.0, "Channel 0 must be Left channel");
+        assert_eq!(output[1], 101.0, "Channel 1 must be Right channel");
+        assert_eq!(output[2], 102.0, "Channel 0 must be Left channel");
+        assert_eq!(output[3], 103.0, "Channel 1 must be Right channel");
+    }
+
+    #[test]
+    fn test_seek_flush_handshake_prevents_post_seek_sample_drop() {
+        use ringbuf::RingBuffer;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let rb = RingBuffer::<f32>::new(128);
+        let (mut prod, mut cons) = rb.split();
+        let flush_signal = Arc::new(AtomicBool::new(false));
+
+        // Step 1: Pre-seek stale audio in ring buffer
+        let stale_audio = vec![0.5f32; 32];
+        prod.push_slice(&stale_audio);
+        assert_eq!(cons.len(), 32);
+
+        // Step 2: Seek arrives
+        flush_signal.store(true, Ordering::SeqCst);
+
+        // Step 3: Audio thread callback acknowledges flush before producer pushes new frames
+        let flush_signal_cons = Arc::clone(&flush_signal);
+        if flush_signal_cons.swap(false, Ordering::SeqCst) {
+            let ch_count = 2usize;
+            let l = cons.len();
+            cons.discard((l / ch_count) * ch_count);
+        }
+        assert_eq!(cons.len(), 0, "Stale pre-seek audio must be purged");
+
+        // Step 4: Producer verifies flush handshake is complete, then pushes seeked frames
+        assert!(!flush_signal.load(Ordering::SeqCst));
+        let post_seek_audio = vec![0.9f32; 16];
+        prod.push_slice(&post_seek_audio);
+
+        // Step 5: Consumer pulls new audio - post-seek frames are 100% intact!
+        let mut received = vec![0.0f32; 16];
+        let n = cons.pop_slice(&mut received);
+        assert_eq!(n, 16);
+        assert!(received.iter().all(|&s| s == 0.9f32), "Post-seek audio must not be discarded");
+    }
 }

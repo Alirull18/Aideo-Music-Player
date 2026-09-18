@@ -33,9 +33,9 @@ describe('Unified source controls', () => {
   it('saves an explicit source by entry ID and supports returning to Auto', async () => {
     render(createElement(SourceMenu, { track }));
     fireEvent.click(screen.getByRole('button', { name: 'Other sources' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Qobuz' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Qobuz/ })).toBeEnabled());
     expect(screen.getByRole('dialog')).toHaveAttribute('open');
-    fireEvent.click(screen.getByRole('button', { name: 'Qobuz' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Qobuz/ }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(invoke).toHaveBeenCalledWith('update_playlist_source', expect.objectContaining({ entryId: 12, sourceContext: expect.objectContaining({ selection: { mode: 'explicit', source: { provider: 'qobuz', id: '456' } } }) }));
     cleanup();
@@ -56,8 +56,8 @@ describe('Unified source controls', () => {
 
     render(createElement(SourceMenu, { track: current }));
     fireEvent.click(screen.getByRole('button', { name: 'Other sources' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Qobuz' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Qobuz' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Qobuz/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /^Qobuz/ }));
 
     await waitFor(() => expect(play).toHaveBeenCalledWith(
       expect.objectContaining({ source_context: expect.objectContaining({ selection: { mode: 'explicit', source: { provider: 'qobuz', id: '456' } } }) }),
@@ -82,8 +82,8 @@ describe('Unified source controls', () => {
 
     render(createElement(SourceMenu, { track: current }));
     fireEvent.click(screen.getByRole('button', { name: 'Other sources' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Qobuz' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Qobuz' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Qobuz/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /^Qobuz/ }));
     await waitFor(() => expect(finishSave).toBeTypeOf('function'));
     useStore.setState({ currentTrack: localTrack, playback: { ...useStore.getState().playback, position_secs: 91 } });
     finishSave();
@@ -100,8 +100,8 @@ describe('Unified source controls', () => {
     });
     render(createElement(SourceMenu, { track }));
     fireEvent.click(screen.getByRole('button', { name: 'Other sources' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Qobuz' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Qobuz' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Qobuz/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /^Qobuz/ }));
     expect(await screen.findByText(/Could not save source choice/)).toBeVisible();
     expect(useStore.getState().tracks[0].source_context?.selection.mode).toBe('auto');
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
@@ -109,7 +109,7 @@ describe('Unified source controls', () => {
   });
 
   it.each([
-    ['local file', localTrack, /^Tidal$/],
+    ['local file', localTrack, /^Tidal/],
     ['web stream', youtubeTrack, /^Local file/],
   ])('discovers other sources when opened from a %s', async (_name, sourceTrack, expectedSource) => {
     vi.mocked(invoke).mockImplementation(async cmd => sourceSearchResult(String(cmd)));
@@ -129,7 +129,7 @@ describe('Unified source controls', () => {
       render(createElement(SourceMenu, { track: sourceTrack }));
       fireEvent.click(screen.getByRole('button', { name: 'Other sources' }));
       await waitFor(() => expect(screen.queryByText('Checking available copies...')).toBeNull());
-      for (const name of [/^Local file/, /^Tidal$/, /^YouTube$/]) {
+      for (const name of [/^Local file/, /^Tidal/, /^Webstream/]) {
         expect(screen.getByRole('button', { name })).toBeEnabled();
       }
     },
@@ -154,7 +154,7 @@ describe('Unified source controls', () => {
     const tracks = groupRecordings([localTrack, { ...youtubeTrack, duration: 195 }], 'Song');
     rerender(createElement(UnifiedSearchResults, { result: { tracks, pending: [], errors: {} } }));
     expect(screen.getAllByRole('article')).toHaveLength(1);
-    expect(screen.getByText('Local file / YouTube')).toBeVisible();
+    expect(screen.getByText('Local file / Webstream')).toBeVisible();
     expect(screen.getByText('Playing from Local file')).toBeVisible();
   });
 
@@ -169,10 +169,10 @@ describe('Unified source controls', () => {
       if (cmd === 'get_tidal_hub_recommendations') return [];
       return String(cmd).includes('search') ? [] : null;
     });
-    useStore.setState({ tracks: [localTrack], discoveryData: hub, aideoPageDesign, appMode: 'local', isLoadingRecs: false });
+    useStore.setState({ tracks: [localTrack], discoveryData: hub, aideoPageDesign, appMode: 'hybrid', isLoadingRecs: false });
     const play = vi.spyOn(useStore.getState(), 'playTrack').mockResolvedValue(undefined);
     const { container } = render(createElement(AideoView));
-    await screen.findAllByText(/Local file.*Tidal.*YouTube/);
+    await waitFor(() => expect(container.querySelector('.home-song-sources')).not.toBeNull());
     expect(invoke).toHaveBeenCalledWith('get_tidal_hub_recommendations', expect.objectContaining({ excludeSignatures: [] }));
     expect(screen.queryByText('Tidal HiFi')).toBeNull();
     expect(screen.queryByText('Lossless Picks')).toBeNull();
@@ -251,7 +251,7 @@ describe('Unified source controls', () => {
 
     // Dialog should open immediately with options populated
     expect(await screen.findByRole('dialog')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Tidal' })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^Tidal/ })).toBeVisible();
     expect(screen.getByRole('button', { name: /Local file/ })).toBeVisible();
 
     // No background provider search was dispatched
@@ -293,4 +293,70 @@ describe('Unified source controls', () => {
 
     play.mockRestore();
   });
+
+  it('SourceMenu displays album metadata and collapses duplicate releases for the same provider', async () => {
+    const multiReleaseTrack: Track = {
+      id: 99,
+      path: 'tidal_standard',
+      title: 'Levitating',
+      artist: 'Dua Lipa',
+      duration: 203,
+      format: 'Tidal FLAC',
+      lyric_offset: 0,
+      source_context: {
+        recording_id: 'rec_levitating',
+        sources: [
+          {
+            provider: 'tidal',
+            id: 'tidal_std_1',
+            metadata: { title: 'Levitating', artist: 'Dua Lipa', album: 'Future Nostalgia', duration: 203 },
+            catalog_quality: { lossless: true },
+          },
+          {
+            provider: 'tidal',
+            id: 'tidal_std_2',
+            metadata: { title: 'Levitating', artist: 'Dua Lipa', album: 'Future Nostalgia', duration: 203 },
+            catalog_quality: { lossless: true },
+          },
+          {
+            provider: 'tidal',
+            id: 'tidal_moonlight',
+            metadata: { title: 'Levitating', artist: 'Dua Lipa', album: 'Future Nostalgia (Moonlight Edition)', duration: 203 },
+            catalog_quality: { lossless: true },
+          },
+          {
+            provider: 'youtube',
+            id: 'yt_mv',
+            metadata: { title: 'Dua Lipa - Levitating (Official Music Video)', artist: 'Dua Lipa', duration: 203 },
+            catalog_quality: { lossless: false },
+          },
+        ],
+        selection: { mode: 'auto' },
+      },
+    };
+
+    useStore.setState({
+      sourceRegistry: {
+        rec_levitating: multiReleaseTrack.source_context!,
+      },
+    });
+
+    render(createElement(SourceMenu, { track: multiReleaseTrack }));
+    fireEvent.click(screen.getByRole('button', { name: 'Other sources' }));
+
+    expect(await screen.findByRole('dialog')).toBeVisible();
+
+    // The two identical Future Nostalgia Tidal releases should be collapsed into 1
+    // Plus 1 Moonlight Edition Tidal release
+    const tidalButtons = screen.getAllByRole('button', { name: /^Tidal/ });
+    expect(tidalButtons).toHaveLength(2);
+
+    // Verify album titles are rendered
+    expect(screen.getByText('Future Nostalgia')).toBeVisible();
+    expect(screen.getByText('Future Nostalgia (Moonlight Edition)')).toBeVisible();
+
+    // Verify YouTube title is rendered
+    expect(screen.getByText('Dua Lipa - Levitating (Official Music Video)')).toBeVisible();
+  });
 });
+

@@ -3,6 +3,7 @@ import { FileText, Music } from 'lucide-react';
 import { TheaterLayoutProps } from './types';
 import { KaraokeActiveLine } from '../KaraokeActiveLine';
 import { baseName, getStreamName } from '../../utils';
+import { CanvasVideoPlayer } from '../CanvasVideoPlayer';
 
 export function EditorialPosterLayout({
   currentTrack,
@@ -20,6 +21,9 @@ export function EditorialPosterLayout({
   seek,
   scrollRef,
   lyricsDisplayMode,
+  canvas,
+  canvasMode,
+  lowSpecMode = false,
 }: TheaterLayoutProps) {
   return (
     <motion.div
@@ -92,6 +96,15 @@ export function EditorialPosterLayout({
             alt="Editorial Plate"
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
+          {!lowSpecMode && canvas && (canvasMode === 'artwork' || canvasMode === 'both') && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 3, borderRadius: 'inherit', overflow: 'hidden' }}>
+              <CanvasVideoPlayer
+                canvas={canvas}
+                isPlaying={playbackStatus === 'Playing'}
+                variant="artwork"
+              />
+            </div>
+          )}
         </div>
 
         {/* Liner Notes Grid */}
