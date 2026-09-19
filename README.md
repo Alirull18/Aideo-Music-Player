@@ -2,9 +2,9 @@
 
 **A fast, lightweight, open-source desktop music player for Windows 10 and Windows 11. Built with Rust and Tauri for bit-perfect WASAPI Exclusive sound, real-time synchronized karaoke lyrics, and a gorgeous glassmorphism interface.**
 
-[![Platform: Windows 10 | 11](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Alirul/Aideo-Music-Player/releases/latest)
+[![Platform: Windows 10 | 11](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Alirull18/Aideo-Music-Player/releases/latest)
 [![Website](https://img.shields.io/badge/Website-alirull18.github.io-8A2BE2?logo=googlechrome&logoColor=white)](https://alirull18.github.io/Aideo-Music-Player/)
-[![Download for Windows](https://img.shields.io/badge/Download-Windows%20x64-brightgreen?logo=windows&logoColor=white)](https://github.com/Alirul/Aideo-Music-Player/releases/latest)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20x64-brightgreen?logo=windows&logoColor=white)](https://github.com/Alirull18/Aideo-Music-Player/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-Backend-000000?logo=rust)](https://www.rust-lang.org)
