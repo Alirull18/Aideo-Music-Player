@@ -365,11 +365,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
     if (prevHistoryId !== null) {
       const duration = prevTrack?.duration || 0;
-      const skipped = duration > 0 ? currentPos < duration - 5.0 : false;
+      const skipped = duration > 0 ? (currentPos < 30.0 && currentPos < duration * 0.5) : false;
+      const completionRate = duration > 0 ? Math.min(1.0, Math.max(0.0, currentPos / duration)) : null;
       invoke('log_playback_end', {
         historyId: prevHistoryId,
         durationPlayed: currentPos,
         skipped,
+        completionRate,
       }).catch((e) => console.error("Failed to log playback end:", e));
       set({ currentHistoryId: null });
     }
@@ -380,15 +382,23 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         set({ autoplaySessionHistory: [...currentHistory, newTrack] });
       }
       try {
+        const pb = get().playback;
+        const sampleRate = pb.file_rate || pb.effective_audio_path?.source?.sample_rate || null;
+        const bitDepth = pb.effective_audio_path?.source?.bits_per_sample || pb.effective_audio_path?.source?.valid_bits_per_sample || null;
+        const bitPerfect = Boolean(pb.bit_perfect);
+
         const id = await invoke<number>('log_playback_start', {
           path: newTrack.path,
           title: newTrack.title || null,
           artist: newTrack.artist || null,
-          album: null,
+          album: newTrack.album || null,
           duration: newTrack.duration || null,
           format: newTrack.format || null,
-          genre: null,
+          genre: newTrack.genre || null,
           playbackSource: playbackSource || null,
+          sampleRate,
+          bitDepth,
+          bitPerfect,
         });
         set({ currentHistoryId: id });
       } catch (e) {
@@ -402,6 +412,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const requestedQuality = get().streamingQuality;
     track = applySourcePreference(track);
     cancelSourcePlayback();
+    if (get().playback.status === 'Playing') {
+      invoke('pause_track').catch(() => {});
+    }
     const request = playbackRequest();
     if (track.source_context) return playUnifiedTrack(set, get, track, isHistory, forceResetAutoplay, startPos, preservePlaybackSession);
     const isCurrentRequest = () => request === playbackRequest();
@@ -461,28 +474,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       await get().recordPlaybackTransition(track, playbackSource);
       if (!isCurrentRequest()) return;
 
-      // De-duplicate / consume track from queue when starting playback
-      const currentQueue = get().queue || [];
-      const matchingIndices: number[] = [];
-      currentQueue.forEach((t, i) => {
-        if (forceResetAutoplay && !t.source_context && pathsEqual(t.path, track.path) && matchingIndices.length === 0) {
-          matchingIndices.push(i);
-        }
-      });
-
-      if (matchingIndices.length > 0) {
-        const newQueue = currentQueue.filter((_, i) => !matchingIndices.includes(i));
-        set({ queue: newQueue });
-        localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
-        
-        // Remove from the Rust backend queue in reverse order sequentially
-        for (let i = matchingIndices.length - 1; i >= 0; i--) {
-          const indexToRemove = matchingIndices[i];
-          chainQueueOperation(async () => {
-            await invoke('remove_from_queue', { index: indexToRemove }).catch(console.error);
-          });
-        }
-        await chainQueueOperation(async () => {});
+      // Clear queue when starting playback of a new song
+      if (forceResetAutoplay) {
+        set({ queue: [] });
+        localStorage.setItem('aideo_queue', JSON.stringify([]));
+        await chainQueueOperation(async () => {
+          await invoke('clear_queue').catch(console.error);
+        });
       }
 
       if (!isCurrentRequest()) return;
@@ -698,9 +696,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
       get().triggerAutoplayRadio(track, forceResetAutoplay);
 
-      // Filter out autoplay recommendations from the queue if autoplay is disabled or if playing a local track
-      const isTrackOnline = isStreamTrack(track.path, track.format);
-      if (!get().autoplayEnabled || !isTrackOnline) {
+      // Filter out autoplay recommendations from the queue if autoplay is disabled
+      if (!get().autoplayEnabled) {
         const currentQueue = get().queue;
         const filtered = currentQueue.filter(t => !t.is_autoplay);
         if (filtered.length !== currentQueue.length) {
@@ -1217,7 +1214,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const seedTrack = forceReset ? track : (track || get().currentTrack || get().autoplaySeedTrack);
     if (!seedTrack) return;
     const isCurrentTrackOnline = isStreamTrack(seedTrack.path, seedTrack.format);
-    if (!isCurrentTrackOnline || !get().autoplayEnabled) return;
+    if (!get().autoplayEnabled) return;
 
     // Guard against degraded seed metadata (placeholder titles like "Web Audio Stream",
     // bare hostnames like "Lgf.audio.tidal.com", placeholder artists like "Online Stream").
@@ -1239,7 +1236,29 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const isTidal = seedTrack.format === 'Tidal FLAC' || seedTrack.path.includes('api.tidal.com');
       const isQobuz = seedTrack.format === 'Qobuz FLAC';
 
-      if (isTidal || isQobuz) {
+      if (!isCurrentTrackOnline) {
+        try {
+          const similar = await invoke<any[]>('get_similar_tracks', { path: seedTrack.path });
+          if (Array.isArray(similar) && similar.length > 0) {
+            recommendedTracks = similar.map((t: any) => ({
+              id: t.id,
+              path: t.path,
+              title: t.title || 'Unknown Title',
+              artist: t.artist || 'Unknown Artist',
+              album: t.album,
+              duration: t.duration,
+              format: t.format,
+              lyric_offset: t.lyric_offset || 0,
+              cover_url: t.cover_url || null,
+              is_autoplay: true
+            }));
+          }
+        } catch (err) {
+          console.warn('[autoplay] get_similar_tracks error for local track:', err);
+        }
+      }
+
+      if (recommendedTracks.length === 0 && (isTidal || isQobuz)) {
         const command = isQobuz ? 'get_qobuz_autoplay_recommendations' : 'get_tidal_autoplay_recommendations';
         const tracks = await invoke<any[]>(command, {
           artist: safeSeedArtist,
@@ -1258,7 +1277,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
             is_autoplay: true
           }));
         }
-      } else {
+      } else if (recommendedTracks.length === 0 && (isCurrentTrackOnline || get().appMode !== 'local')) {
         let videoId = '';
         if (/^[a-zA-Z0-9_-]{11}$/.test(seedTrack.path)) {
           videoId = seedTrack.path;
@@ -1355,7 +1374,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
 
       const currentQueue = get().queue;
-      const manualQueue = currentQueue.filter(t => !t.is_autoplay);
+      const manualQueue = forceReset ? [] : currentQueue.filter(t => !t.is_autoplay);
       const existingAutoplay = forceReset ? [] : currentQueue.filter(t => t.is_autoplay);
 
       const cleanText = (str: string | null) => {

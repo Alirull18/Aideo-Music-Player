@@ -58,6 +58,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
           PROTOC: ${{ env.PROTOC }}
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         with:
           tagName: v__VERSION__
           releaseName: "AIDEO v__VERSION__"

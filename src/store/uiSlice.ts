@@ -1,5 +1,5 @@
 import { StateCreator } from 'zustand';
-import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId, VisualizerMode, VisualizerDecayRate, CanvasMode, CanvasResult } from './types';
+import { PlayerState, LEGACY_AIDEO_PAGE_DESIGNS, SidebarNavItemConfig, SidebarNavItemId, VisualizerMode, VisualizerDecayRate, CanvasMode, CanvasResult, LibraryDesign, AlbumViewMode } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { cancelSourcePlayback } from './sourcePlayback';
@@ -170,6 +170,12 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     if (!stored) return 'classic' as const;
     return LEGACY_AIDEO_PAGE_DESIGNS.includes(stored as any) ? 'classic' as const : stored;
   })(),
+  libraryDesign: (safeGetStorage('aideo-library-design') as LibraryDesign) || 'classic',
+  albumViewMode: (() => {
+    const stored = safeGetStorage('aideo-album-view-mode');
+    if (stored === 'audiophile') return 'compact';
+    return (stored as AlbumViewMode) || 'classic';
+  })(),
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
   theaterModeDesign: (safeGetStorage('aideo-theater-design') as any) || (safeGetStorage('aideo-fullscreen-layout') as any) || 'stage',
   theaterHudStyle: (safeGetStorage('aideo-theater-hud-style') as any) || 'capsule',
@@ -184,6 +190,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   coverArtModalTrack: null,
   setCoverArtModalTrack: (track: any) => set({ coverArtModalTrack: track }),
+
+  playlistModalTrack: null,
+  setPlaylistModalTrack: (track: any) => set({ playlistModalTrack: track }),
 
   tagEditorTrack: null,
   tagEditorBatchTracks: [],
@@ -532,6 +541,16 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   setAideoPageDesign: (design: any) => {
     safeSetStorage('aideo-page-design', design);
     set({ aideoPageDesign: design });
+  },
+
+  setLibraryDesign: (design: LibraryDesign) => {
+    safeSetStorage('aideo-library-design', design);
+    set({ libraryDesign: design });
+  },
+
+  setAlbumViewMode: (mode: AlbumViewMode) => {
+    safeSetStorage('aideo-album-view-mode', mode);
+    set({ albumViewMode: mode });
   },
 
   setTheaterModeDesign: (design: any) => {

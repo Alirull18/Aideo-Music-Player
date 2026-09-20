@@ -5,7 +5,7 @@ import type { RecordingSources, SourceSelection, Track } from '../store/types';
 import { applySourcePreference, deduplicateSourcesForDisplay, groupRecordings, matchingSources, saveSourceChoice, searchSources, sourceFor, sourceKey, sourceName, sourceSearchQuery } from '../utils/unifiedSources';
 import './UnifiedSources.css';
 
-export function SourceMenu({ track, compact = false, onChange, renderTrigger }: { track: Track; compact?: boolean; onChange?: (track: Track) => void; renderTrigger?: (onClick: () => void) => React.ReactNode }) {
+export function SourceMenu({ track, compact = false, initialOpen = false, onChange, onClose, renderTrigger }: { track: Track; compact?: boolean; initialOpen?: boolean; onChange?: (track: Track) => void; onClose?: () => void; renderTrigger?: ((onClick: () => void) => React.ReactNode) | null }) {
   const request = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const selectionKey = JSON.stringify(track.source_context?.selection);
@@ -61,8 +61,22 @@ export function SourceMenu({ track, compact = false, onChange, renderTrigger }: 
     }
   }, [registryContext]);
 
-  useEffect(() => { if (open) dialog.current?.showModal(); }, [open]);
-  const close = () => { request.current++; setOpen(false); };
+  useEffect(() => {
+    if (initialOpen) {
+      void load();
+    }
+  }, [initialOpen]);
+
+  useEffect(() => {
+    if (open && dialog.current && !dialog.current.open) {
+      dialog.current.showModal();
+    }
+  }, [open]);
+  const close = () => {
+    request.current++;
+    setOpen(false);
+    onClose?.();
+  };
   const load = async () => {
     const token = ++request.current;
     if (open) { close(); return; }
@@ -129,6 +143,7 @@ export function SourceMenu({ track, compact = false, onChange, renderTrigger }: 
       onChange?.(next);
       request.current++;
       setOpen(false);
+      onClose?.();
       if (shouldSwitch && currentTrack) {
         try {
           await state.playTrack(currentTrack, true, false, undefined, position, true);
@@ -152,7 +167,7 @@ export function SourceMenu({ track, compact = false, onChange, renderTrigger }: 
   return <div className="source-menu" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') close(); }}>
     {renderTrigger ? (
       renderTrigger(() => void load())
-    ) : (
+    ) : initialOpen ? null : (
       <button type="button" className="source-button" aria-label={compact ? `Change source for ${track.title}` : undefined} aria-expanded={open} onClick={() => void load()}>{compact ? context?.selection.mode === 'explicit' ? sourceName(context.selection.source) : 'Auto' : 'Other sources'}</button>
     )}
     {open && createPortal(<dialog ref={dialog} onCancel={close} onClose={close} className="source-options" aria-label={`Sources for ${track.title || 'this recording'}`}>

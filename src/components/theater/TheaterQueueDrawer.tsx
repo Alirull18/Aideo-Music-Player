@@ -21,13 +21,21 @@ export interface TheaterQueueDrawerProps {
   onClose: () => void;
 }
 
+function TheaterQueueElapsed({ duration }: { duration?: number | null }) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  return (
+    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+      {fmt(positionSecs)} / {fmt(duration ?? null)}
+    </span>
+  );
+}
+
 export function TheaterQueueDrawer({ isOpen, onClose }: TheaterQueueDrawerProps) {
   const {
     queue,
     currentTrack,
     coverArt,
     playbackStatus,
-    playbackPositionSecs,
     accentColor,
     playFromQueue,
     removeFromQueue,
@@ -40,7 +48,6 @@ export function TheaterQueueDrawer({ isOpen, onClose }: TheaterQueueDrawerProps)
       currentTrack: s.currentTrack,
       coverArt: s.coverArt,
       playbackStatus: s.playback.status,
-      playbackPositionSecs: s.playback.position_secs,
       accentColor: s.accentColor,
       playFromQueue: s.playFromQueue,
       removeFromQueue: s.removeFromQueue,
@@ -363,9 +370,7 @@ export function TheaterQueueDrawer({ isOpen, onClose }: TheaterQueueDrawerProps)
                         color: 'rgba(255, 255, 255, 0.4)'
                       }}
                     >
-                      <span>
-                        {fmt(playbackPositionSecs)} / {fmt(currentTrack.duration)}
-                      </span>
+                      <TheaterQueueElapsed duration={currentTrack.duration} />
                       {currentTrack.format && (
                         <span
                           style={{

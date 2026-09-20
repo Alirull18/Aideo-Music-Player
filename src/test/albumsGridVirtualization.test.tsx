@@ -37,4 +37,30 @@ describe('AlbumsView 2D Grid Virtualization', () => {
     expect(virtualRows.length).toBeGreaterThan(0);
     expect(virtualRows.length).toBeLessThanOrEqual(60);
   });
+
+  it('correctly initializes and renders virtualized albums when tracks load asynchronously after initial empty mount (Issue #47)', () => {
+    const { container, rerender } = render(<AlbumsView tracks={[]} />);
+    expect(screen.getByText(/No albums found/i)).toBeInTheDocument();
+
+    const tracks: Track[] = [];
+    for (let i = 1; i <= 60; i++) {
+      tracks.push({
+        id: i,
+        path: `C:/Music/Artist ${i}/Album ${i}/01 - Song.flac`,
+        title: `Song ${i}`,
+        artist: `Artist ${i}`,
+        album: `Album ${i}`,
+        duration: 200,
+        format: 'FLAC',
+        loved: 0,
+        disliked: 0,
+        lyric_offset: 0,
+      });
+    }
+
+    rerender(<AlbumsView tracks={tracks} />);
+    expect(screen.queryByText(/No albums found/i)).not.toBeInTheDocument();
+    const virtualRows = container.querySelectorAll('.album-virtual-row');
+    expect(virtualRows.length).toBeGreaterThan(0);
+  });
 });

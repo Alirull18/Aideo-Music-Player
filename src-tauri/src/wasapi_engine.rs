@@ -308,7 +308,13 @@ where
             for &(bits, valid_bits, is_float) in &test_formats {
                 let mut test_client = match device.get_iaudioclient() {
                     Ok(c) => c,
-                    Err(_) => continue,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        match device.get_iaudioclient() {
+                            Ok(c) => c,
+                            Err(_) => continue,
+                        }
+                    }
                 };
 
                 let sample_type = if is_float { SampleType::Float } else { SampleType::Int };
@@ -346,6 +352,27 @@ where
                     };
 
                     let mut init_res = test_client.initialize_client(&format, &Direction::Render, &mode);
+
+                    // Handle AUDCLNT_E_DEVICE_IN_USE recovery:
+                    // When transitioning from Shared to Exclusive mode (or between exclusive streams),
+                    // Windows audiosrv can take 50-250ms to finish releasing the previous endpoint handle.
+                    if let Err(wasapi::WasapiError::Windows(ref werr)) = init_res {
+                        if werr.code().0 == windows::Win32::Media::Audio::AUDCLNT_E_DEVICE_IN_USE.0 {
+                            for _ in 1..=4 {
+                                std::thread::sleep(std::time::Duration::from_millis(60));
+                                if let Ok(mut fresh_client) = device.get_iaudioclient() {
+                                    let retry_res = fresh_client.initialize_client(&format, &Direction::Render, &mode);
+                                    if retry_res.is_ok() {
+                                        test_client = fresh_client;
+                                        init_res = Ok(());
+                                        break;
+                                    } else {
+                                        init_res = retry_res;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     
                     // Handle AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED recovery
                     if let Err(wasapi::WasapiError::Windows(ref werr)) = init_res {

@@ -1815,7 +1815,7 @@
   left: 0;
   right: 0;
   height: 380px;
-  background: radial-gradient(ellipse at 20% 0%, rgba(29, 185, 84, 0.18) 0%, rgba(18, 18, 18, 0) 72%);
+  background: radial-gradient(ellipse at 20% 0%, rgba(var(--accent-rgb, 29, 185, 84), 0.18) 0%, rgba(18, 18, 18, 0) 72%);
   pointer-events: none;
   z-index: 0;
 }
@@ -1898,7 +1898,7 @@
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: #1db954;
+  color: var(--accent, #1db954);
 }
 
 .sp-resume-title {
@@ -1922,8 +1922,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #1db954;
-  color: #000000;
+  background: var(--accent, #1db954);
+  color: #ffffff;
   border: none;
   border-radius: 500px;
   padding: 8px 18px;
@@ -2085,9 +2085,9 @@
   transform: translateY(0);
 }
 
-/* Green Floating Play Badge */
+/* Floating Play Badge */
 .sp-play-badge {
-  background: #1db954;
+  background: var(--accent, #1db954);
   border: none;
   border-radius: 50%;
   display: flex;
@@ -2275,7 +2275,7 @@
   left: 0;
   right: 0;
   height: 440px;
-  background: radial-gradient(ellipse at 15% 10%, rgba(250, 36, 60, 0.15) 0%, rgba(24, 24, 27, 0) 70%);
+  background: radial-gradient(ellipse at 15% 10%, rgba(var(--accent-rgb, 250, 36, 60), 0.15) 0%, rgba(24, 24, 27, 0) 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -2356,7 +2356,7 @@
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.1em;
-  color: #fa243c;
+  color: var(--accent, #fa243c);
   margin-bottom: 2px;
 }
 
@@ -2387,7 +2387,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #fa243c;
+  background: var(--accent, #fa243c);
   border: none;
   color: #ffffff;
   padding: 8px 18px;
@@ -2432,7 +2432,7 @@
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.12em;
-  color: #fa243c;
+  color: var(--accent, #fa243c);
   display: block;
   margin-bottom: 4px;
 }
@@ -2545,7 +2545,7 @@
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.14em;
-  color: #fa243c;
+  color: var(--accent, #fa243c);
   margin-bottom: 6px;
 }
 
@@ -2585,7 +2585,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #fa243c;
+  background: var(--accent, #fa243c);
   color: #ffffff;
   border: none;
   border-radius: 8px;
@@ -2658,7 +2658,7 @@
 .am-hero-dot.active {
   width: 24px;
   border-radius: 500px;
-  background: #fa243c;
+  background: var(--accent, #fa243c);
 }
 
 .am-hero-arrows {
@@ -2730,7 +2730,7 @@
 
 .am-track-row:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(250, 36, 60, 0.3);
+  border-color: rgba(var(--accent-rgb, 250, 36, 60), 0.3);
 }
 
 .am-row-idx {
@@ -2883,14 +2883,14 @@
 }
 
 .am-play-badge {
-  background: #fa243c;
+  background: var(--accent, #fa243c);
   border: none;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(250, 36, 60, 0.4);
+  box-shadow: 0 6px 16px rgba(var(--accent-rgb, 250, 36, 60), 0.4);
   transition: transform 0.18s ease;
   padding-left: 2px;
 }
@@ -3251,8 +3251,8 @@
   border-color: rgba(255, 255, 255, 0.07);
 }
 .ah-spotify .sp-empty-lossless .ah-empty-lossless-icon {
-  background: rgba(29, 185, 84, 0.12);
-  color: #1db954;
+  background: rgba(var(--accent-rgb, 29, 185, 84), 0.12);
+  color: var(--accent, #1db954);
 }
 
 /* Spatial Glass (Apple) layout theme */
@@ -3262,8 +3262,8 @@
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 .ah-apple .am-empty-lossless .ah-empty-lossless-icon {
-  background: rgba(250, 36, 60, 0.12);
-  color: #fa243c;
+  background: rgba(var(--accent-rgb, 250, 36, 60), 0.12);
+  color: var(--accent, #fa243c);
 }
 
 .light-theme .ah-empty-lossless-state {
@@ -3277,5 +3277,63 @@
   color: #4b5563;
 }
 
+/* ── Track Context Menu 3-Dots Buttons ── */
+.discovery-card-more-btn,
+.ah-card-more-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease;
+  z-index: 5;
+}
 
+.discovery-grid-cover-wrap:hover .discovery-card-more-btn,
+.carousel-cover-wrap:hover .discovery-card-more-btn,
+.ah-card:hover .ah-card-more-btn,
+.ah-card-more-btn:focus-visible,
+.discovery-card-more-btn:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
 
+.discovery-card-more-btn:hover,
+.ah-card-more-btn:hover {
+  background: rgba(0, 0, 0, 0.85);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--accent, #a855f7);
+}
+
+.discovery-row-more-btn,
+.ah-row-more-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim, #9ca3af);
+  cursor: pointer;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+  margin-left: 4px;
+}
+
+.discovery-row-more-btn:hover,
+.ah-row-more-btn:hover {
+  color: var(--text, #ffffff);
+  background: var(--glass-h, rgba(255, 255, 255, 0.08));
+}

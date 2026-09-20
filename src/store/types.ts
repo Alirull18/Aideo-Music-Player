@@ -47,6 +47,7 @@ export interface Track {
   album?: string | null;
   duration: number | null;
   format: string | null;
+  genre?: string | null;
   lyric_offset: number;
   cover_url?: string | null;
   duration_raw?: string | null;
@@ -491,9 +492,12 @@ export interface PlayerState {
   desktopLyricsOpen: boolean;
   desktopLyricsLocked: boolean;
 
+  playlistModalTrack: Track | null;
+
   // actions
   setCustomPrompt: (prompt: Partial<CustomPromptState>) => void;
   setCoverArtModalTrack: (track: Track | null) => void;
+  setPlaylistModalTrack: (track: Track | null) => void;
   setTagEditorTrack: (track: Track | null) => void;
   setTagEditorBatchTracks: (tracks: Track[]) => void;
   toggleDesktopLyrics: () => Promise<void>;
@@ -748,6 +752,14 @@ export interface PlayerState {
   theaterHudStyle: TheaterHudStyle;
   setTheaterHudStyle: (style: TheaterHudStyle) => void;
 
+  // Library Page Design Layout
+  libraryDesign: LibraryDesign;
+  setLibraryDesign: (design: LibraryDesign) => void;
+
+  // Album Page View Mode
+  albumViewMode: AlbumViewMode;
+  setAlbumViewMode: (mode: AlbumViewMode) => void;
+
   // Player Bar Transparency (Glassmorphism)
   playerBarTransparent: boolean;
   setPlayerBarTransparent: (transparent: boolean) => void;
@@ -768,6 +780,8 @@ export interface PlayerState {
 
 export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 'vinyl';
 export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage' | 'spotify' | 'apple';
+export type LibraryDesign = 'classic' | 'studio' | 'editorial' | 'crate' | 'ambient' | 'brutalist';
+export type AlbumViewMode = 'classic' | 'compact' | 'editorial';
 export type TheaterModeDesign = 'stage' | 'zen' | 'studio' | 'vinyl' | 'poster' | 'scope';
 export type TheaterHudStyle = 'capsule' | 'master' | 'minimal' | 'analog';
 export type CanvasMode = 'off' | 'artwork' | 'backdrop' | 'both';
@@ -788,3 +802,70 @@ export interface CanvasResult {
 export const LEGACY_AIDEO_PAGE_DESIGNS = ['bento', 'audiophile', 'cinematic'] as const;
 
 export { extractAccentColor as extractDominantColor } from '../utils/colorExtractor';
+
+export interface TopSong {
+  title: string;
+  artist: string;
+  track_path: string;
+  play_count: number;
+}
+
+export interface TopArtist {
+  artist: string;
+  play_count: number;
+}
+
+export interface TopAlbum {
+  album: string;
+  artist: string;
+  cover_url?: string | null;
+  play_count: number;
+}
+
+export interface TopGenre {
+  genre: string;
+  play_count: number;
+}
+
+export interface HourActivity {
+  hour: number;
+  play_count: number;
+}
+
+export interface DayActivity {
+  day: number;
+  play_count: number;
+}
+
+export interface AudiophileStats {
+  lossless_count: number;
+  hires_count: number;
+  standard_count: number;
+  bit_perfect_count: number;
+  bit_perfect_rate: number;
+  avg_sample_rate: number;
+  top_resolution?: string | null;
+}
+
+export interface SourceDistribution {
+  local_count: number;
+  tidal_count: number;
+  qobuz_count: number;
+  webstream_count: number;
+  youtube_count?: number;
+}
+
+export interface ListeningInsightsPayload {
+  total_listening_time_secs: number;
+  total_plays: number;
+  skip_count: number;
+  skip_rate: number;
+  top_songs: TopSong[];
+  top_artists: TopArtist[];
+  top_albums: TopAlbum[];
+  top_genres: TopGenre[];
+  hourly_activity: HourActivity[];
+  daily_activity: DayActivity[];
+  audiophile: AudiophileStats;
+  sources: SourceDistribution;
+}

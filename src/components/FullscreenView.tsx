@@ -3,7 +3,6 @@ import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import {
   Play,
   Pause,
@@ -174,24 +173,6 @@ export function FullscreenView() {
 
   const effectiveCover = coverArt || currentTrack?.cover_url || defaultCover;
   const trackDuration = currentTrack?.duration || 0;
-
-  const [spectrumBands, setSpectrumBands] = useState<number[]>([]);
-  useEffect(() => {
-    let active = true;
-    let lastUpdate = 0;
-    const unlistenPromise = listen<number[]>('audio-spectrum', event => {
-      const now = performance.now();
-      // Throttle telemetry/meter state updates to ~15fps to eliminate React render thrashing
-      if (active && now - lastUpdate >= 65) {
-        lastUpdate = now;
-        setSpectrumBands(event.payload);
-      }
-    });
-    return () => {
-      active = false;
-      unlistenPromise.then(fn => fn()).catch(() => {});
-    };
-  }, []);
 
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(true);
   const [isHUDHidden, setIsHUDHidden] = useState(false);
@@ -635,7 +616,6 @@ export function FullscreenView() {
         vizMode={vizMode}
         seek={seek}
         scrollRef={scrollRef}
-        spectrumBands={spectrumBands}
         lowSpecMode={dsp.low_spec_mode}
         canvas={canvasEnabled ? currentCanvas : null}
         canvasMode={canvasMode}
@@ -970,7 +950,6 @@ export function FullscreenView() {
       <TheaterSignalPathModal
         isOpen={isSignalPathOpen}
         onClose={() => setIsSignalPathOpen(false)}
-        spectrumBands={spectrumBands}
       />
     </div>
   );

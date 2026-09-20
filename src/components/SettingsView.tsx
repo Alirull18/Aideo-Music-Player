@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
 import { useUpdaterStore } from '../store/updaterStore';
-import { PlayerBarDesign, AideoPageDesign, TheaterModeDesign, TheaterHudStyle, StreamingQuality, PlaybackSource, CanvasMode } from '../store/types';
+import { PlayerBarDesign, AideoPageDesign, LibraryDesign, TheaterModeDesign, TheaterHudStyle, StreamingQuality, PlaybackSource, CanvasMode } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -516,6 +516,7 @@ export function SettingsView() {
     globalHotkeys, setGlobalHotkey,
     playerBarDesign, setPlayerBarDesign,
     aideoPageDesign, setAideoPageDesign,
+    libraryDesign, setLibraryDesign,
     theaterModeDesign, setTheaterModeDesign,
     theaterHudStyle, setTheaterHudStyle,
     playerBarTransparent, togglePlayerBarTransparent, setPlayerBarTransparent,
@@ -614,6 +615,8 @@ export function SettingsView() {
     setPlayerBarDesign: s.setPlayerBarDesign,
     aideoPageDesign: s.aideoPageDesign,
     setAideoPageDesign: s.setAideoPageDesign,
+    libraryDesign: s.libraryDesign,
+    setLibraryDesign: s.setLibraryDesign,
     theaterModeDesign: s.theaterModeDesign,
     setTheaterModeDesign: s.setTheaterModeDesign,
     theaterHudStyle: s.theaterHudStyle,
@@ -2116,13 +2119,13 @@ export function SettingsView() {
                 id: 'spotify' as AideoPageDesign,
                 name: 'Horizon Grid',
                 badge: 'Emerald Grid',
-                badgeColor: '#1db954',
-                icon: <Headphones size={18} color="#1db954" />,
-                desc: 'Deep dark layout with signature emerald accents, 6-card quick launch favorites grid, and horizontal carousel shelves.',
+                badgeColor: 'var(--accent, #1db954)',
+                icon: <Headphones size={18} color="var(--accent, #1db954)" />,
+                desc: 'Deep dark layout with adaptive accents, 6-card quick launch favorites grid, and horizontal carousel shelves.',
                 visual: (
                   <div className="aideo-prev-box prev-spotify" style={{ background: '#121212', padding: 8, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <div style={{ height: 6, width: 24, borderRadius: 500, background: '#1db954' }} />
+                      <div style={{ height: 6, width: 24, borderRadius: 500, background: 'var(--accent, #1db954)' }} />
                       <div style={{ height: 6, width: 24, borderRadius: 500, background: '#333' }} />
                       <div style={{ height: 6, width: 24, borderRadius: 500, background: '#333' }} />
                     </div>
@@ -2148,14 +2151,14 @@ export function SettingsView() {
                 id: 'apple' as AideoPageDesign,
                 name: 'Spatial Glass',
                 badge: 'Crimson Glass',
-                badgeColor: '#fa243c',
-                icon: <Disc size={18} color="#fa243c" />,
-                desc: 'Frosted acrylic glassmorphism, crimson red accents, paged Spatial Hero Marquee carousel, and multi-row quick listen grid.',
+                badgeColor: 'var(--accent, #fa243c)',
+                icon: <Disc size={18} color="var(--accent, #fa243c)" />,
+                desc: 'Frosted acrylic glassmorphism, adaptive accents, paged Spatial Hero Marquee carousel, and multi-row quick listen grid.',
                 visual: (
                   <div className="aideo-prev-box prev-apple" style={{ background: 'linear-gradient(180deg, #1f1f23 0%, #121214 100%)', padding: 8, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ height: 24, background: 'rgba(250, 36, 60, 0.15)', border: '1px solid rgba(250, 36, 60, 0.3)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 6px' }}>
+                    <div style={{ height: 24, background: 'rgba(var(--accent-rgb, 250, 36, 60), 0.15)', border: '1px solid rgba(var(--accent-rgb, 250, 36, 60), 0.3)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 6px' }}>
                       <div style={{ height: 5, width: '45%', background: '#ffffff', borderRadius: 2 }} />
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#fa243c' }} />
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--accent, #fa243c)' }} />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
                       <div style={{ height: 14, background: 'rgba(255, 255, 255, 0.05)', borderRadius: 4, display: 'flex', alignItems: 'center', padding: '0 4px', gap: 4 }}>
@@ -2316,6 +2319,143 @@ export function SettingsView() {
                   </div>
 
                   {d.visual}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'library-design',
+      title: 'Library Page Style',
+      description: 'Choose your music library layout archetype: Classic, Studio Pro, Editorial Archive, Crate Digger, Ambient Flow, or Industrial Brutalist.',
+      keywords: 'library design style layout archetype studio pro editorial archive crate digger ambient flow industrial brutalist appearance UI',
+      tab: 'appearance',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {[
+              {
+                id: 'classic' as LibraryDesign,
+                name: 'Classic Table',
+                badge: 'Desktop Default',
+                badgeColor: '#3b82f6',
+                icon: <LayoutGrid size={18} color="#60a5fa" />,
+                desc: 'Balanced table and album grid layout with verified contrast, virtualized 52px rows, and quick filter chips.',
+              },
+              {
+                id: 'studio' as LibraryDesign,
+                name: 'Studio Pro (Audiophile Rack)',
+                badge: 'High Density / 38px',
+                badgeColor: '#06b6d4',
+                icon: <Sliders size={18} color="#22d3ee" />,
+                desc: 'Compact technical rack layout with audio codec chips (FLAC, DSD), monospace tabular numbers, and studio telemetry.',
+              },
+              {
+                id: 'editorial' as LibraryDesign,
+                name: 'Editorial Archive',
+                badge: 'Vinyl & Liner Notes',
+                badgeColor: '#f59e0b',
+                icon: <Disc size={18} color="#fbbf24" />,
+                desc: 'Spacious 68px editorial rows with serif typography, embossed vinyl sleeve album art, and release year tags.',
+              },
+              {
+                id: 'crate' as LibraryDesign,
+                name: 'Compact Crate Digger',
+                badge: 'Split-Pane Explorer',
+                badgeColor: '#8b5cf6',
+                icon: <Layers size={18} color="#a78bfa" />,
+                desc: 'Two-column workstation with instant artist/album tree on the left and rapid 42px virtualized tracklist on the right.',
+              },
+              {
+                id: 'ambient' as LibraryDesign,
+                name: 'Modern Ambient Flow',
+                badge: 'Sleek Minimalist',
+                badgeColor: '#ec4899',
+                icon: <Radio size={18} color="#f472b6" />,
+                desc: 'Tidal & Apple Music inspired silky dark glass, dynamic album-tinted backdrop blur, and floating capsule action pills.',
+              },
+              {
+                id: 'brutalist' as LibraryDesign,
+                name: 'Industrial Brutalist',
+                badge: 'Cassette Terminal',
+                badgeColor: '#eab308',
+                icon: <Terminal size={18} color="#fde047" />,
+                desc: 'Raw mechanical Swiss grid interface with high-visibility safety amber/cyan indicators and cassette transport glyphs.',
+              },
+            ].map((d) => {
+              const isSelected = libraryDesign === d.id;
+              return (
+                <div
+                  key={d.id}
+                  onClick={() => {
+                    setLibraryDesign(d.id);
+                    window.dispatchEvent(new CustomEvent('ui-toast', {
+                      detail: { message: `Switched library layout to ${d.name}!`, type: 'success' }
+                    }));
+                  }}
+                  className={`settings-design-card ${isSelected ? 'active' : ''}`}
+                  style={{
+                    padding: 16,
+                    borderRadius: 14,
+                    background: isSelected ? 'rgba(var(--accent-rgb), 0.08)' : 'var(--glass)',
+                    border: isSelected ? '1.5px solid var(--accent, #8b5cf6)' : '1px solid var(--glass-border)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    position: 'relative',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: isSelected ? '0 8px 24px rgba(var(--accent-rgb), 0.2)' : 'none'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ 
+                          width: 32, 
+                          height: 32, 
+                          borderRadius: 8, 
+                          background: isSelected ? 'rgba(var(--accent-rgb), 0.2)' : 'var(--glass-h)', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center' 
+                        }}>
+                          {d.icon}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{d.name}</div>
+                          <span style={{ 
+                            fontSize: 9, 
+                            fontWeight: 700, 
+                            color: d.badgeColor, 
+                            background: `${d.badgeColor}18`, 
+                            padding: '2px 6px', 
+                            borderRadius: 6,
+                            marginTop: 2,
+                            display: 'inline-block'
+                          }}>
+                            {d.badge}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: '50%',
+                        border: isSelected ? '5px solid var(--accent, #8b5cf6)' : '2px solid var(--glass-border)',
+                        background: isSelected ? '#ffffff' : 'transparent',
+                        transition: 'all 0.2s ease',
+                        flexShrink: 0
+                      }} />
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.45, marginTop: 10 }}>
+                      {d.desc}
+                    </div>
+                  </div>
                 </div>
               );
             })}

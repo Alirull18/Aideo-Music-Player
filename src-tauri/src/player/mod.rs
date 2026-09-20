@@ -2903,6 +2903,7 @@ pub struct Player {
     pub exclusive_mode: Arc<AtomicBool>,
     pub dsp_state: Arc<Mutex<DSPState>>,
     pub target_device: Arc<Mutex<Option<String>>>,
+    pub preferred_device: Arc<Mutex<Option<String>>>,
     pub queue: Arc<Mutex<VecDeque<String>>>,
     pub app_handle: tauri::AppHandle,
     pub current_process: Arc<Mutex<Option<std::process::Child>>>,
@@ -3029,6 +3030,7 @@ impl Player {
         let exclusive_mode = Arc::new(AtomicBool::new(false));
         let dsp_state = Arc::new(Mutex::new(DSPState::default()));
         let target_device = Arc::new(Mutex::new(None::<String>));
+        let preferred_device = Arc::new(Mutex::new(None::<String>));
         let queue = Arc::new(Mutex::new(VecDeque::new()));
         let current_process = Arc::new(Mutex::new(None::<std::process::Child>));
         let ffmpeg_path = find_ffmpeg_path();
@@ -3119,7 +3121,7 @@ impl Player {
             .spawn(move || player_loop(cmd_rx, cmd_tx_clone, s, c, p, v, exc, bp, dr, ca, dsp, dev, qt, cp, app, fft_tx, ds, fr, fc, fmt, audio_path))
             .expect("Failed to spawn player thread");
 
-        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache, decode_shutdown, file_rate, file_ch, file_format, effective_audio_path }
+        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, preferred_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache, decode_shutdown, file_rate, file_ch, file_format, effective_audio_path }
     }
 }
 
@@ -4716,6 +4718,87 @@ pub fn find_best_matching_device_name<'a>(
     None
 }
 
+pub fn should_restore_preferred_device(
+    preferred: Option<&str>,
+    current_target: Option<&str>,
+    available_devices: &[String],
+) -> Option<String> {
+    let pref = preferred?;
+    if pref.is_empty()
+        || pref == "[System Default Device]"
+        || pref == "Default Device"
+        || pref == "System Default Device"
+    {
+        return None;
+    }
+
+    // Only restore if current_target is None (i.e. currently in fallback mode)
+    if current_target.is_some() {
+        return None;
+    }
+
+    // 1. Direct exact match in available_devices
+    if available_devices.iter().any(|d| d == pref) {
+        return Some(pref.to_string());
+    }
+
+    // 2. Strip [WASAPI] / [ASIO] prefix and match using find_best_matching_device_name
+    let clean_pref = pref
+        .trim_start_matches("[WASAPI] ")
+        .trim_start_matches("[ASIO] ");
+
+    let clean_candidates: Vec<String> = available_devices
+        .iter()
+        .map(|d| {
+            d.trim_start_matches("[WASAPI] ")
+                .trim_start_matches("[ASIO] ")
+                .to_string()
+        })
+        .collect();
+
+    if let Some(matched_clean) = find_best_matching_device_name(clean_pref, &clean_candidates) {
+        if let Some(full) = available_devices.iter().find(|d| {
+            d.trim_start_matches("[WASAPI] ")
+                .trim_start_matches("[ASIO] ")
+                == matched_clean
+        }) {
+            return Some(full.clone());
+        }
+    }
+
+    None
+}
+
+pub fn should_switch_default_device(
+    preferred: Option<&str>,
+    last_default: Option<&str>,
+    current_default: Option<&str>,
+) -> bool {
+    let is_system_default = match preferred {
+        None => true,
+        Some(p) => {
+            p.is_empty()
+                || p == "[System Default Device]"
+                || p == "Default Device"
+                || p == "System Default Device"
+        }
+    };
+
+    if !is_system_default {
+        return false;
+    }
+
+    let cur = match current_default {
+        Some(c) if !c.is_empty() => c,
+        _ => return false,
+    };
+
+    match last_default {
+        Some(last) => last != cur,
+        None => false, // Initial state, don't trigger switch on startup
+    }
+}
+
 pub fn should_bypass_ram_cache(file_bytes: u64, duration_secs: f64, file_rate: usize, file_ch: usize) -> bool {
     if file_bytes > 150 * 1024 * 1024 || duration_secs > 900.0 {
         return true;
@@ -5275,6 +5358,10 @@ fn play_file(
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "Audio device disconnected. Falling back to default.",
                 "type": "warning"
+            }));
+            let _ = app_handle.emit("audio-device-fallback", serde_json::json!({
+                "fallback": true,
+                "device": "[System Default Device]"
             }));
         }
 
@@ -6291,6 +6378,7 @@ fn play_file(
                     next_track_info = Some((p, pos, a_id));
                     is_manual_change = true;
                     flush_signal.store(true, Ordering::SeqCst);
+                    pending.iter_mut().for_each(|ch| ch.clear());
                     break;
                 }
                 Ok(PlayerCommand::Seek(secs)) => {
@@ -6878,6 +6966,8 @@ fn play_file(
                         next_track_info = Some((p, pos, a_id));
                         is_manual_change = true;
                         flush_signal.store(true, Ordering::SeqCst);
+                        pending.iter_mut().for_each(|ch| ch.clear());
+                        interleaved.clear();
                         break;
                     }
                     Ok(PlayerCommand::Seek(secs)) => {
@@ -7048,6 +7138,7 @@ fn play_file(
                     next_track_info = Some((p, pos, a_id));
                     is_manual_change = true;
                     flush_signal.store(true, Ordering::SeqCst);
+                    pending.iter_mut().for_each(|ch| ch.clear());
                     break;
                 }
                 PlayerCommand::Seek(secs) => {

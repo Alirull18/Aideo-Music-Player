@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { RefreshCw, Play, Radio, Activity } from 'lucide-react';
+import { RefreshCw, Play, Radio, Activity, MoreVertical } from 'lucide-react';
 import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
 import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, ShelfId, SongSources } from './HomeParts';
@@ -35,7 +35,7 @@ function qualitySpec(track: any): string {
   return ext ? `${ext} · Local` : 'Local';
 }
 
-export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, renderDownloadAction, resume, search, layoutFilter }: AideoHomeProps) {
+export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, renderDownloadAction, resume, search, layoutFilter, onContextMenu }: AideoHomeProps) {
   const [feed, setFeed] = useState<FeedTab>('all');
   const feedItems = useMemo(() => buildTaggedFeed(discoveryData), [discoveryData]);
   const visible = useMemo(() => feed === 'all' ? feedItems : feedItems.filter(t => t.shelf === feed), [feed, feedItems]);
@@ -166,9 +166,30 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
                   key={`spotlight-${item.track.id}-${idx}`}
                   className="ah-spotlight-card"
                   onClick={() => onPlayTrack(item.track)}
+                  onContextMenu={(e) => {
+                    if (onContextMenu) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onContextMenu(item.track, { x: e.clientX, y: e.clientY });
+                    }
+                  }}
                 >
                   <div className="ah-spotlight-cover-container">
                     <TrackCover src={item.track.cover_url} path={item.track.path || item.track.url} title={item.track.title} artist={item.track.artist} size={74} radius={10} />
+                    {onContextMenu && (
+                      <button
+                        type="button"
+                        className="ah-card-more-btn"
+                        title="More options"
+                        aria-label="More options"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onContextMenu(item.track, e.currentTarget.getBoundingClientRect());
+                        }}
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                    )}
                     <div className="ah-spotlight-play-overlay">
                       <PlayButton size={34} onClick={() => onPlayTrack(item.track)} />
                     </div>
@@ -215,7 +236,18 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
 
             <div className="ah-tbody">
               {visible.map((item, i) => (
-                <div key={`${item.track.id}-${i}`} className="ah-trow" onClick={() => onPlayTrack(item.track)}>
+                <div
+                  key={`${item.track.id}-${i}`}
+                  className="ah-trow"
+                  onClick={() => onPlayTrack(item.track)}
+                  onContextMenu={(e) => {
+                    if (onContextMenu) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onContextMenu(item.track, { x: e.clientX, y: e.clientY });
+                    }
+                  }}
+                >
                   <div className="ah-row-idx">{i + 1}</div>
                   <div className="ah-row-cover">
                     <TrackCover src={item.track.cover_url} path={item.track.path || item.track.url} title={item.track.title} artist={item.track.artist} size={42} radius={7} />
@@ -236,6 +268,20 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
                   <div className="ah-row-actions" onClick={e => e.stopPropagation()}>
                     {renderDownloadAction(item.track)}
                     <PlayButton size={32} onClick={() => onPlayTrack(item.track)} />
+                    {onContextMenu && (
+                      <button
+                        type="button"
+                        className="ah-row-more-btn"
+                        title="More options"
+                        aria-label="More options"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onContextMenu(item.track, e.currentTarget.getBoundingClientRect());
+                        }}
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

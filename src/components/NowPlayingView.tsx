@@ -7,7 +7,6 @@ import type { AudioTagData, Track, CanvasResult } from '../store/types';
 import { useShallow } from 'zustand/react/shallow';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { MessageSquare, Activity, Maximize2, Minimize2, Tv2, Heart, ThumbsDown, CheckCircle2, ListMusic, Sliders, X, Film } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
 import { LyricsPanel } from './LyricsPanel';
@@ -27,6 +26,15 @@ function formatArtworkTime(seconds: number | null | undefined): string {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
     : `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+function ArtworkTimeDisplay({ totalDuration }: { totalDuration?: number | null }) {
+  const playbackPosition = useStore(s => s.playback.position_secs);
+  return (
+    <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
+      {formatArtworkTime(playbackPosition)} / {formatArtworkTime(totalDuration)}
+    </strong>
+  );
 }
 
 function formatArtworkRate(rate: number | null | undefined): string {
@@ -121,7 +129,6 @@ export function NowPlayingView() {
     playbackCurrentTrack,
     playbackBitPerfect,
     playbackDevRate,
-    playbackPosition,
     playbackFileRate,
     playbackFileChannels,
     playbackFileFormat,
@@ -143,7 +150,6 @@ export function NowPlayingView() {
     playbackStatus: s.playback.status,
     playbackBitPerfect: s.playback.bit_perfect,
     playbackDevRate: s.playback.dev_rate,
-    playbackPosition: s.playback.position_secs,
     playbackFileRate: s.playback.file_rate,
     playbackFileChannels: s.playback.file_ch,
     playbackFileFormat: s.playback.file_format,
@@ -264,7 +270,6 @@ export function NowPlayingView() {
   const [showLyrics, setShowLyrics] = useState(true);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
   const [isSignalPathOpen, setIsSignalPathOpen] = useState(false);
-  const [spectrumBands, setSpectrumBands] = useState<number[]>([]);
 
   useEffect(() => {
     const isOnlineSource = isStreamTrack(
@@ -332,22 +337,7 @@ export function NowPlayingView() {
     };
   }, [current?.title, current?.artist, current?.album, current?.path, canvasEnabled, canvasAllowOnline, setCurrentCanvas]);
 
-  useEffect(() => {
-    let active = true;
-    let lastUpdate = 0;
-    const unlistenPromise = listen<number[]>('audio-spectrum', event => {
-      const now = performance.now();
-      if (active && now - lastUpdate >= 65) {
-        lastUpdate = now;
-        setSpectrumBands(event.payload);
-      }
-    });
 
-    return () => {
-      active = false;
-      unlistenPromise.then(fn => fn()).catch(() => {});
-    };
-  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -866,7 +856,7 @@ export function NowPlayingView() {
 
                 <div className="np-art-progress-row">
                   <span>Track progress</span>
-                  <strong>{formatArtworkTime(playbackPosition)} / {formatArtworkTime(artworkTagDetails?.duration_secs ?? artworkMetadata?.duration)}</strong>
+                  <ArtworkTimeDisplay totalDuration={artworkTagDetails?.duration_secs ?? artworkMetadata?.duration} />
                 </div>
 
                 {artworkTagLoading && (
@@ -1299,7 +1289,6 @@ export function NowPlayingView() {
       <TheaterSignalPathModal
         isOpen={isSignalPathOpen}
         onClose={() => setIsSignalPathOpen(false)}
-        spectrumBands={spectrumBands}
       />
     </div>
   );

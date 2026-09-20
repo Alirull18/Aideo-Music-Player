@@ -2589,6 +2589,7 @@ async fn add_downloaded_track_to_library(
                 replaygain_gain: None,
                 track_number: None,
                 disc_number: None,
+                genre: None,
             }
         }
     };

@@ -353,7 +353,7 @@ async fn get_unison_ttml(
         );
         if let Ok(resp) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
             .send()
             .await
         {
@@ -407,7 +407,7 @@ async fn get_unison_ttml(
             if let Ok(resp) = client
                 .get(&url)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
                 .send()
                 .await
             {
@@ -524,7 +524,7 @@ async fn search_lyrics_online(
         );
         if let Ok(res) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
             .send()
             .await
         {
@@ -607,7 +607,7 @@ async fn search_lyrics_online(
         for u in urls {
             if let Ok(res) = client.get(&u)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.9")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
                 .send()
                 .await
             {
@@ -1095,15 +1095,7 @@ async fn listenbrainz_scrobble(artist: String, track: String, timestamp: i64, to
 }
 
 // ── Device Commands ────────────────────────────────────────────────────────
-#[tauri::command]
-fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let _is_playing = {
-        let player = safe_lock(&state.player);
-        player.status.load(Ordering::Relaxed) != 0
-    };
-
-    let mut cache = safe_lock(&state.cached_devices);
-
+pub fn enumerate_audio_devices(_cached_devices: &[String], _is_playing: bool) -> Vec<String> {
     let mut all_names = Vec::new();
     let host = cpal::default_host();
     if let Ok(devices) = host.output_devices() {
@@ -1118,7 +1110,7 @@ fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> 
     #[cfg(feature = "asio")]
     #[cfg(target_os = "windows")]
     {
-        if !_is_playing || cache.is_empty() {
+        if !_is_playing || _cached_devices.is_empty() {
             if let Ok(asio_host) = cpal::host_from_id(cpal::HostId::Asio) {
                 if let Ok(devices) = asio_host.output_devices() {
                     for d in devices {
@@ -1130,7 +1122,7 @@ fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> 
                 }
             }
         } else {
-            for name in cache.iter() {
+            for name in _cached_devices.iter() {
                 if name.starts_with("[ASIO]") && !all_names.contains(name) {
                     all_names.push(name.clone());
                 }
@@ -1159,6 +1151,18 @@ fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> 
         }
     }
 
+    final_devices
+}
+
+#[tauri::command]
+fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let is_playing = {
+        let player = safe_lock(&state.player);
+        player.status.load(Ordering::Relaxed) != 0
+    };
+
+    let mut cache = safe_lock(&state.cached_devices);
+    let final_devices = enumerate_audio_devices(&cache, is_playing);
     *cache = final_devices.clone();
     Ok(final_devices)
 }
@@ -1167,13 +1171,129 @@ fn get_audio_devices(state: State<'_, AppState>) -> Result<Vec<String>, String> 
 fn set_audio_device(state: State<'_, AppState>, name: String) -> Result<(), String> {
     let player = safe_lock(&state.player);
     let mut target_device = safe_lock(&player.target_device);
+    let mut preferred_device = safe_lock(&player.preferred_device);
     if name == "[System Default Device]" || name.is_empty() || name == "Default Device" || name == "System Default Device" {
         *target_device = None;
+        *preferred_device = None;
     } else {
-        *target_device = Some(name);
+        *target_device = Some(name.clone());
+        *preferred_device = Some(name);
     }
     let _ = player.cmd_tx.send(PlayerCommand::RestartStream);
     Ok(())
+}
+
+pub fn start_audio_device_watcher(
+    app_handle: tauri::AppHandle,
+    player: Arc<Mutex<player::Player>>,
+    cached_devices: Arc<Mutex<Vec<String>>>,
+) {
+    std::thread::Builder::new()
+        .name("audio-device-watcher".into())
+        .spawn(move || {
+            #[allow(deprecated)]
+            let mut last_default: Option<String> = cpal::default_host()
+                .default_output_device()
+                .and_then(|d| d.name().ok());
+            let mut last_devices = {
+                let cache = safe_lock(&cached_devices);
+                cache.clone()
+            };
+
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+
+                let host = cpal::default_host();
+                #[allow(deprecated)]
+                let current_default = host.default_output_device().and_then(|d| d.name().ok());
+
+                let (pref_device_arc, target_device_arc, is_playing, cmd_tx) = {
+                    let p = safe_lock(&player);
+                    (
+                        p.preferred_device.clone(),
+                        p.target_device.clone(),
+                        p.status.load(Ordering::Relaxed) == 1,
+                        p.cmd_tx.clone(),
+                    )
+                };
+                let pref_device = safe_lock(&pref_device_arc).clone();
+                let current_target = safe_lock(&target_device_arc).clone();
+
+                // Query current devices
+                let current_devices = {
+                    let cache = safe_lock(&cached_devices);
+                    enumerate_audio_devices(&cache, is_playing)
+                };
+
+                // Check 1: Should we restore user's preferred device that reconnected?
+                if let Some(matched_dev) = player::should_restore_preferred_device(
+                    pref_device.as_deref(),
+                    current_target.as_deref(),
+                    &current_devices,
+                ) {
+                    crate::log_info!("AUDIO", "Preferred audio device reconnected: {}", matched_dev);
+                    {
+                        let p = safe_lock(&player);
+                        *safe_lock(&p.target_device) = Some(matched_dev.clone());
+                    }
+
+                    if is_playing {
+                        let _ = cmd_tx.send(player::PlayerCommand::RestartStream);
+                    }
+
+                    let dev_display = matched_dev
+                        .trim_start_matches("[WASAPI] ")
+                        .trim_start_matches("[ASIO] ");
+                    let _ = app_handle.emit("ui-toast", serde_json::json!({
+                        "message": format!("Audio device reconnected: {}. Output restored.", dev_display),
+                        "type": "success"
+                    }));
+
+                    let _ = app_handle.emit("audio-device-changed", serde_json::json!({
+                        "device": matched_dev,
+                        "is_default": false
+                    }));
+                }
+                // Check 2: Did Windows default device change while in System Default mode?
+                else if player::should_switch_default_device(
+                    pref_device.as_deref(),
+                    last_default.as_deref(),
+                    current_default.as_deref(),
+                ) {
+                    let new_def = current_default.clone();
+                    crate::log_info!("AUDIO", "Windows default audio device changed to: {:?}", new_def);
+                    last_default = new_def.clone();
+
+                    if is_playing {
+                        let _ = cmd_tx.send(player::PlayerCommand::RestartStream);
+                    }
+
+                    if let Some(ref def_name) = new_def {
+                        let _ = app_handle.emit("ui-toast", serde_json::json!({
+                            "message": format!("Audio output routed to default device: {}", def_name),
+                            "type": "info"
+                        }));
+                    }
+
+                    let _ = app_handle.emit("audio-device-changed", serde_json::json!({
+                        "device": "",
+                        "is_default": true
+                    }));
+                } else if current_default != last_default {
+                    last_default = current_default.clone();
+                }
+
+                // Check 3: Did the list of available devices change?
+                if current_devices != last_devices {
+                    last_devices = current_devices.clone();
+                    *safe_lock(&cached_devices) = current_devices.clone();
+                    let _ = app_handle.emit("audio-devices-changed", serde_json::json!({
+                        "devices": current_devices
+                    }));
+                }
+            }
+        })
+        .expect("Failed to spawn audio device watcher thread");
 }
 
 // ── Scanner commands ──────────────────────────────────────────────────────────
@@ -1200,8 +1320,8 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
                 if let Ok(tx) = conn.transaction() {
                     for track in &chunk {
                         let _ = tx.execute(
-                            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, track_number, disc_number)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, track_number, disc_number, genre)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                              ON CONFLICT(path) DO UPDATE SET 
                                  title = COALESCE(NULLIF(excluded.title, ''), tracks.title),
                                  artist = COALESCE(NULLIF(excluded.artist, ''), tracks.artist),
@@ -1209,7 +1329,8 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
                                  duration = COALESCE(excluded.duration, tracks.duration),
                                  format = COALESCE(excluded.format, tracks.format),
                                  track_number = COALESCE(excluded.track_number, tracks.track_number),
-                                 disc_number = COALESCE(excluded.disc_number, tracks.disc_number)",
+                                 disc_number = COALESCE(excluded.disc_number, tracks.disc_number),
+                                 genre = COALESCE(NULLIF(excluded.genre, ''), tracks.genre)",
                             rusqlite::params![
                                 track.path,
                                 track.title,
@@ -1220,6 +1341,7 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
                                 track.lyric_offset,
                                 track.track_number,
                                 track.disc_number,
+                                track.genre,
                             ],
                         );
                     }
@@ -1312,6 +1434,7 @@ fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), 
                 replaygain_gain: None,
                 track_number: None,
                 disc_number: None,
+                genre: None,
             }
         }
     };
@@ -2068,6 +2191,9 @@ fn log_playback_start(
     format: Option<String>,
     genre: Option<String>,
     playback_source: Option<String>,
+    sample_rate: Option<i32>,
+    bit_depth: Option<i32>,
+    bit_perfect: Option<i32>,
     state: State<'_, AppState>,
 ) -> Result<i64, String> {
     let mut conn = safe_lock(&state.db);
@@ -2078,21 +2204,12 @@ fn log_playback_start(
     
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute(
-        "INSERT INTO playback_history (track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, synced, genre, playback_source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0.0, 0, 0, ?8, ?9)",
-        rusqlite::params![path, title, artist, album, duration, format, now, genre, playback_source],
+        "INSERT INTO playback_history (track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, synced, genre, playback_source, sample_rate, bit_depth, bit_perfect, completion_rate)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0.0, 0, 0, ?8, ?9, ?10, ?11, ?12, 1.0)",
+        rusqlite::params![path, title, artist, album, duration, format, now, genre, playback_source, sample_rate, bit_depth, bit_perfect.unwrap_or(0)],
     ).map_err(|e| e.to_string())?;
     
     let id = tx.last_insert_rowid();
-
-    // Bound unsynced offline scrobble entries to 1,000 max (MIN-08)
-    let _ = tx.execute(
-        "DELETE FROM playback_history 
-         WHERE synced = 0 AND id NOT IN (
-             SELECT id FROM playback_history WHERE synced = 0 ORDER BY timestamp DESC LIMIT 1000
-         )",
-        [],
-    );
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(id)
@@ -2103,16 +2220,18 @@ fn log_playback_end(
     history_id: i64,
     duration_played: f64,
     skipped: bool,
+    completion_rate: Option<f64>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let conn = safe_lock(&state.db);
     let skipped_val = if skipped { 1 } else { 0 };
+    let comp_rate = completion_rate.unwrap_or(1.0);
     
     conn.execute(
         "UPDATE playback_history 
-         SET duration_played = ?1, skipped = ?2 
-         WHERE id = ?3",
-        rusqlite::params![duration_played, skipped_val, history_id],
+         SET duration_played = ?1, skipped = ?2, completion_rate = ?3
+         WHERE id = ?4",
+        rusqlite::params![duration_played, skipped_val, comp_rate, history_id],
     ).map_err(|e| e.to_string())?;
     
     Ok(())
@@ -2204,6 +2323,28 @@ pub struct TopGenre {
 }
 
 #[derive(Serialize, Clone, Debug)]
+pub struct TopAlbum {
+    pub album: String,
+    pub artist: String,
+    pub play_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct AudiophileStats {
+    pub lossless_count: i64,
+    pub hi_res_count: i64,
+    pub bit_perfect_count: i64,
+    pub total_analyzed: i64,
+    pub avg_sample_rate: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SourceDistribution {
+    pub source: String,
+    pub play_count: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
 pub struct HourActivity {
     pub hour: i32,
     pub play_count: i64,
@@ -2223,9 +2364,12 @@ pub struct ListeningInsightsPayload {
     pub skip_rate: f64,
     pub top_songs: Vec<TopSong>,
     pub top_artists: Vec<TopArtist>,
+    pub top_albums: Vec<TopAlbum>,
     pub top_genres: Vec<TopGenre>,
     pub hourly_activity: Vec<HourActivity>,
     pub daily_activity: Vec<DayActivity>,
+    pub audiophile_stats: AudiophileStats,
+    pub source_distribution: Vec<SourceDistribution>,
 }
 
 #[tauri::command]
@@ -2328,6 +2472,34 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
         }
     }
 
+    // 3b. Fetch top albums
+    let mut stmt = conn.prepare(
+        "SELECT 
+            COALESCE(album, ''),
+            COALESCE(artist, ''),
+            COUNT(*) as play_count
+         FROM playback_history
+         WHERE timestamp >= ?1 AND album IS NOT NULL AND album != ''
+         GROUP BY album, artist
+         ORDER BY play_count DESC
+         LIMIT 10"
+    ).map_err(|e| e.to_string())?;
+    
+    let album_rows = stmt.query_map(rusqlite::params![filter_timestamp], |row| {
+        Ok(TopAlbum {
+            album: row.get(0)?,
+            artist: row.get(1)?,
+            play_count: row.get(2)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    
+    let mut top_albums = Vec::new();
+    for r in album_rows {
+        if let Ok(item) = r {
+            top_albums.push(item);
+        }
+    }
+
     // 4. Fetch top genres
     let mut stmt = conn.prepare(
         "SELECT 
@@ -2404,6 +2576,64 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
         }
     }
 
+    // 7. Fetch audiophile stats
+    let mut stmt = conn.prepare(
+        "SELECT 
+            COALESCE(SUM(CASE WHEN UPPER(format) IN ('FLAC', 'WAV', 'AIFF', 'ALAC', 'DSF', 'DFF', 'TIDAL FLAC', 'QOBUZ FLAC') THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN sample_rate >= 88200 OR bit_depth >= 24 OR UPPER(format) IN ('DSF', 'DFF') THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN bit_perfect = 1 THEN 1 ELSE 0 END), 0),
+            COUNT(id),
+            COALESCE(AVG(CASE WHEN sample_rate > 0 THEN sample_rate END), 44100.0)
+         FROM playback_history
+         WHERE timestamp >= ?1"
+    ).map_err(|e| e.to_string())?;
+
+    let mut audiophile_stats = AudiophileStats {
+        lossless_count: 0,
+        hi_res_count: 0,
+        bit_perfect_count: 0,
+        total_analyzed: 0,
+        avg_sample_rate: 44100,
+    };
+
+    let mut ap_rows = stmt.query(rusqlite::params![filter_timestamp]).map_err(|e| e.to_string())?;
+    if let Some(row) = ap_rows.next().map_err(|e| e.to_string())? {
+        audiophile_stats.lossless_count = row.get(0).unwrap_or(0);
+        audiophile_stats.hi_res_count = row.get(1).unwrap_or(0);
+        audiophile_stats.bit_perfect_count = row.get(2).unwrap_or(0);
+        audiophile_stats.total_analyzed = row.get(3).unwrap_or(0);
+        let avg_sr: f64 = row.get(4).unwrap_or(44100.0);
+        audiophile_stats.avg_sample_rate = avg_sr as i64;
+    }
+
+    // 8. Fetch source distribution
+    let mut stmt = conn.prepare(
+        "SELECT 
+            CASE 
+                WHEN LOWER(COALESCE(playback_source, 'local')) = 'youtube' THEN 'webstream'
+                ELSE LOWER(COALESCE(playback_source, 'local'))
+            END as src,
+            COUNT(*)
+         FROM playback_history
+         WHERE timestamp >= ?1
+         GROUP BY src
+         ORDER BY COUNT(*) DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let src_rows = stmt.query_map(rusqlite::params![filter_timestamp], |row| {
+        Ok(SourceDistribution {
+            source: row.get(0)?,
+            play_count: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut source_distribution = Vec::new();
+    for r in src_rows {
+        if let Ok(item) = r {
+            source_distribution.push(item);
+        }
+    }
+
     Ok(ListeningInsightsPayload {
         total_listening_time_secs,
         total_plays,
@@ -2411,9 +2641,12 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
         skip_rate,
         top_songs,
         top_artists,
+        top_albums,
         top_genres,
         hourly_activity,
         daily_activity,
+        audiophile_stats,
+        source_distribution,
     })
 }
 
@@ -3945,17 +4178,19 @@ pub fn run() {
             });
 
             let app_state_clone = Arc::new(AppState {
-                player: player_arc,
+                player: player_arc.clone(),
                 db: db_arc,
                 db_pool,
                 media_controls: media_controls_arc,
-                cached_devices: cached_devices_arc,
+                cached_devices: cached_devices_arc.clone(),
             });
 
             let app_handle_for_server = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 crate::remote_server::start_remote_server(app_handle_for_server, app_state_clone).await;
             });
+
+            start_audio_device_watcher(app.handle().clone(), player_arc.clone(), cached_devices_arc.clone());
 
             // Spawn background task to heal cover art for YouTube/online tracks with high-res square thumbnails
             let app_handle_clone = app.handle().clone();

@@ -1,0 +1,1552 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   AIDEO MUSIC PLAYER — LIBRARY DESIGN ARCHETYPES (Anti-UI-Slop Edition)
+   1. Classic      (Polished original)
+   2. Studio Pro   (Audiophile Rack, 38px rows, audio tech chips, monospace)
+   3. Editorial    (Vinyl & Liner Notes, 68px rows, rich typography, warm foil)
+   4. Crate Digger (Split-pane artist/album explorer, 42px rows, high speed)
+   5. Ambient Flow (Tidal/Apple fluid glass, 56px rows, floating capsules)
+   6. Brutalist    (Swiss grid terminal, 40px rows, safety amber/cyan)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Common Design Switcher Pill ── */
+.library-design-switcher-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 5px 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.library-design-switcher-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(var(--accent-rgb, 139, 92, 246), 0.4);
+}
+
+.library-design-menu-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1000;
+  background: rgba(14, 14, 22, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 8px;
+  width: 250px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.library-design-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.library-design-option:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.library-design-option.active {
+  background: rgba(var(--accent-rgb, 139, 92, 246), 0.18);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.library-design-option-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.library-design-option.active .library-design-option-icon {
+  background: var(--accent);
+  color: white;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   1. STUDIO PRO (Audiophile Rack)
+   ───────────────────────────────────────────────────────────────────────────── */
+.library-wrap.design-studio {
+  background: radial-gradient(circle at 50% 0%, #0d121c 0%, #06080d 100%);
+  --studio-line: rgba(148, 163, 184, 0.12);
+  --studio-cyan: #38bdf8;
+  --studio-meter: #10b981;
+}
+
+.design-studio .library-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 32px;
+  letter-spacing: -0.5px;
+  text-transform: uppercase;
+  color: #f1f5f9;
+}
+
+.design-studio .track-table {
+  border-collapse: collapse;
+}
+
+.design-studio .track-table thead th {
+  font-family: ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  padding: 6px 8px;
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.4);
+  border-top: 1px solid var(--studio-line);
+  border-bottom: 1px solid var(--studio-line);
+}
+
+.design-studio .track-row td {
+  padding: 4px 8px;
+  height: 38px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.06);
+  font-size: 12px;
+}
+
+.design-studio .track-row:hover td {
+  background: rgba(56, 189, 248, 0.04);
+}
+
+.design-studio .track-row.playing td {
+  background: rgba(56, 189, 248, 0.09);
+  border-left: 2px solid var(--studio-cyan);
+}
+
+.design-studio .studio-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.design-studio .studio-codec-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: #7dd3fc;
+}
+
+.design-studio .studio-codec-badge.dsd {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.2));
+  border-color: rgba(251, 191, 36, 0.4);
+  color: #fcd34d;
+}
+
+.design-studio .studio-codec-badge.flac {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   2. EDITORIAL ARCHIVE (Vinyl & Liner Notes)
+   ───────────────────────────────────────────────────────────────────────────── */
+.library-wrap.design-editorial {
+  background: radial-gradient(circle at 50% 0%, #161219 0%, #0a090d 100%);
+  --editorial-gold: #f59e0b;
+  --editorial-gold-rgb: 245, 158, 11;
+  --editorial-ink: #fdf8f4;
+  --editorial-dim: #a89f91;
+}
+
+.design-editorial .library-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--editorial-ink);
+  font-style: italic;
+}
+
+.design-editorial .track-row td {
+  padding: 14px 12px;
+  height: 68px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.design-editorial .track-row:hover td {
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.design-editorial .track-row.playing td {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.design-editorial .track-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--editorial-ink);
+}
+
+.design-editorial .track-sub {
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--editorial-dim);
+}
+
+.design-editorial .editorial-sleeve-thumb {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.design-editorial .editorial-sleeve-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.2);
+  pointer-events: none;
+}
+
+.design-editorial .editorial-year-tag {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--editorial-gold);
+  border: 1px solid rgba(var(--editorial-gold-rgb), 0.25);
+  padding: 2px 6px;
+  border-radius: 12px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   3. COMPACT CRATE DIGGER (Split-Pane Explorer)
+   ───────────────────────────────────────────────────────────────────────────── */
+.library-wrap.design-crate {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 32px calc(var(--player-h) + 16px) 32px;
+  background: #08090e;
+}
+
+.design-crate .crate-container {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.design-crate .crate-sidebar {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - var(--player-h) - 40px);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.design-crate .crate-sidebar-header {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.design-crate .crate-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: calc(100vh - var(--player-h) - 140px);
+  padding: 6px;
+}
+
+.design-crate .crate-artist-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.12s;
+  height: 34px;
+  box-sizing: border-box;
+}
+
+.design-crate .crate-artist-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.design-crate .crate-artist-item.active {
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+
+.design-crate .crate-artist-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.design-crate .crate-main-pane {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-width: 0;
+}
+
+.design-crate .track-row td {
+  padding: 6px 8px;
+  height: 42px;
+  font-size: 13px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   4. MODERN AMBIENT FLOW (Sleek Minimalist)
+   ───────────────────────────────────────────────────────────────────────────── */
+.library-wrap.design-ambient {
+  background: radial-gradient(ellipse at 50% 10%, rgba(var(--accent-rgb, 139, 92, 246), 0.08), transparent 60%), #07070c;
+}
+
+.design-ambient .track-table thead th {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.design-ambient .track-row td {
+  padding: 10px 14px;
+  height: 56px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s;
+}
+
+.design-ambient .track-row:hover td {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.design-ambient .track-row:hover td:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.design-ambient .track-row:hover td:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.design-ambient .track-row.playing td {
+  background: rgba(var(--accent-rgb, 139, 92, 246), 0.12);
+}
+
+.design-ambient .ambient-capsule-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   5. INDUSTRIAL BRUTALIST (Cassette Terminal)
+   ───────────────────────────────────────────────────────────────────────────── */
+.library-wrap.design-brutalist {
+  background: #050508;
+  --brutal-amber: #f59e0b;
+  --brutal-cyan: #06b6d4;
+  --brutal-border: rgba(255, 255, 255, 0.14);
+}
+
+.design-brutalist .library-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 900;
+  font-size: 34px;
+  letter-spacing: -1px;
+  text-transform: uppercase;
+  color: #ffffff;
+  border-left: 6px solid var(--brutal-amber);
+  padding-left: 14px;
+}
+
+.design-brutalist .track-table {
+  border: 1px solid var(--brutal-border);
+  border-collapse: collapse;
+}
+
+.design-brutalist .track-table thead th {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--brutal-amber);
+  background: #0d0d14;
+  border: 1px solid var(--brutal-border);
+  padding: 8px 10px;
+  text-transform: uppercase;
+}
+
+.design-brutalist .track-row td {
+  padding: 6px 10px;
+  height: 40px;
+  border: 1px solid var(--brutal-border);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.design-brutalist .track-row:hover td {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.design-brutalist .track-row.playing td {
+  background: rgba(245, 158, 11, 0.16);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.design-brutalist .brutalist-tag {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  border: 1px solid var(--brutal-cyan);
+  color: var(--brutal-cyan);
+  background: rgba(6, 182, 212, 0.08);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   ALBUM VIEW: LAYOUT MODES & STUDIO GALLERY (Anti-UI-Slop Physical Media)
+   - Layout 1: Classic Grid (Clean balanced virtualized album cards)
+   - Layout 2: Studio Gallery (Hero Spotlight, Curated Shelves, Era Catalog, Gatefold Drawer)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Layout Switcher Pill Controls ── */
+.album-layout-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 3px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.album-layout-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.album-layout-toggle-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.album-layout-toggle-btn.active {
+  background: rgba(var(--accent-rgb, 139, 92, 246), 0.2);
+  color: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   STUDIO GALLERY: HERO SPOTLIGHT
+   ───────────────────────────────────────────────────────────────────────────── */
+.studio-gallery-container {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  width: 100%;
+  padding-bottom: 48px;
+}
+
+.studio-hero-spotlight {
+  position: relative;
+  display: flex;
+  gap: 32px;
+  padding: 28px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(25, 24, 38, 0.85) 0%, rgba(14, 14, 22, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+@media (max-width: 860px) {
+  .studio-hero-spotlight {
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+  }
+}
+
+.hero-cover-wrap {
+  position: relative;
+  width: 230px;
+  height: 230px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0d0c12;
+}
+
+@media (max-width: 860px) {
+  .hero-cover-wrap {
+    width: 160px;
+    height: 160px;
+  }
+}
+
+.hero-cover-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hero-content {
+  display: flex;
+  flex-direction: column;
+  justifyContent: space-between;
+  flex: 1;
+  min-width: 0;
+  gap: 16px;
+}
+
+.hero-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hero-badge-spotlight {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(var(--accent-rgb, 139, 92, 246), 0.18);
+  border: 1px solid rgba(var(--accent-rgb, 139, 92, 246), 0.35);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.hero-badge-telemetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.hero-badge-lossless {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.hero-title {
+  font-size: 28px;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-artist {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.2s;
+  display: inline-block;
+  margin-top: -6px;
+}
+
+.hero-artist:hover {
+  color: var(--accent);
+}
+
+.hero-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hero-sneak-peek {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  max-width: 480px;
+}
+
+.sneak-peek-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+}
+
+.sneak-peek-track {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text);
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sneak-peek-track:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   STUDIO GALLERY: CURATED SHELVES
+   ───────────────────────────────────────────────────────────────────────────── */
+.studio-shelf-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.studio-shelf-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 8px;
+}
+
+.studio-shelf-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.studio-shelf-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.3px;
+  margin: 0;
+}
+
+.studio-shelf-subtitle {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.studio-shelf-scroll-row {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  padding-top: 4px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.studio-shelf-scroll-row::-webkit-scrollbar {
+  height: 6px;
+}
+
+.studio-shelf-scroll-row::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.studio-shelf-card {
+  flex: 0 0 170px;
+  width: 170px;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  position: relative;
+}
+
+.shelf-card-art-wrap {
+  position: relative;
+  width: 100%;
+  padding-top: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0f0f16;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.studio-shelf-card:hover .shelf-card-art-wrap {
+  border-color: rgba(var(--accent-rgb, 139, 92, 246), 0.4);
+  box-shadow: 0 10px 24px -4px rgba(var(--accent-rgb, 139, 92, 246), 0.25), 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.shelf-card-art-inner {
+  position: absolute;
+  inset: 0;
+}
+
+.shelf-card-art-inner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.shelf-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shelf-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-card-artist {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   STUDIO GALLERY: ERA / DECADE CATALOG
+   ───────────────────────────────────────────────────────────────────────────── */
+.studio-era-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  width: 100%;
+}
+
+.studio-era-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.studio-era-header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.studio-era-header-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.studio-era-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.studio-era-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: #ffffff;
+}
+
+.studio-era-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.studio-era-chevron {
+  color: var(--text-dim);
+  transition: transform 0.2s ease;
+}
+
+.studio-era-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 22px;
+  width: 100%;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   TACTILE PHYSICAL SLEEVE CARD (.studio-sleeve-card)
+   (Anti-UI-Slop: crisp 1px borders, sleeve depth, NO hover image scaling)
+   ───────────────────────────────────────────────────────────────────────────── */
+.studio-sleeve-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(18, 18, 26, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.studio-sleeve-card:hover {
+  border-color: rgba(var(--accent-rgb, 139, 92, 246), 0.4);
+  background: rgba(24, 24, 34, 0.95);
+  box-shadow: 0 10px 26px -6px rgba(0, 0, 0, 0.6), 0 0 16px -4px rgba(var(--accent-rgb, 139, 92, 246), 0.25);
+}
+
+.sleeve-art-container {
+  position: relative;
+  width: 100%;
+  padding-top: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0a0a0f;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 10px;
+}
+
+.sleeve-art-container img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.sleeve-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sleeve-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.2px;
+}
+
+.sleeve-artist {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.sleeve-artist:hover {
+  color: var(--accent);
+}
+
+.sleeve-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.sleeve-format-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   ALBUM VIEW MODES (Anti-UI-Slop & Antislop Edition)
+   Mode 1: Classic Wall (`classic`)
+   Mode 2: Audiophile Studio Vault (`audiophile`)
+   Mode 3: Editorial Magazine (`editorial`)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Header Segmented Mode Switcher ── */
+.album-view-mode-toggle {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 3px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  gap: 2px;
+}
+
+.album-view-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.album-view-mode-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.album-view-mode-btn.active {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MODE 1: CLASSIC WALL (`classic`)
+   Fast, clean, high-density virtualized 2D grid
+   ───────────────────────────────────────────────────────────────────────────── */
+.album-card,
+.album-card-classic {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.2s, background 0.2s;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.album-card:hover,
+.album-card-classic:hover {
+  border-color: rgba(var(--accent-rgb, 139, 92, 246), 0.4);
+  background: var(--glass-h);
+}
+
+.classic-card-art-wrap {
+  position: relative;
+  width: 100%;
+  padding-top: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0e0e14;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.classic-card-art-wrap img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.classic-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.classic-card-artist {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.classic-card-artist:hover {
+  color: var(--accent);
+}
+
+.classic-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.classic-format-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MODE 2: AUDIOPHILE STUDIO VAULT (`audiophile`)
+   Technical archiving layout for music connoisseurs
+   ───────────────────────────────────────────────────────────────────────────── */
+.audiophile-vault-container {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+  padding-bottom: 48px;
+}
+
+.audiophile-master-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.85) 0%, rgba(10, 15, 26, 0.95) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.audiophile-telemetry-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  align-items: center;
+}
+
+.audiophile-metric-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audiophile-metric-label {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.audiophile-metric-value {
+  font-family: ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.5px;
+}
+
+.audiophile-ratio-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: rgba(148, 163, 184, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.audiophile-ratio-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #38bdf8 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.audiophile-format-distribution {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.audiophile-format-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7dd3fc;
+}
+
+.audiophile-format-pill.lossless {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MODE 2: COMPACT TABLE WITH INLINE ACCORDION (`compact`)
+   Dense, sortable table with inline expandable tracklists
+   ───────────────────────────────────────────────────────────────────────────── */
+.compact-table-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: rgba(14, 14, 22, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  margin-bottom: 32px;
+}
+
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.compact-table thead th {
+  background: rgba(20, 20, 32, 0.85);
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.compact-th-sortable {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.compact-th-sortable:hover {
+  color: #f1f5f9;
+}
+
+.compact-table-row {
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.15s;
+}
+
+.compact-table-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.compact-table-row.expanded {
+  background: rgba(var(--accent-rgb, 139, 92, 246), 0.08);
+  border-bottom-color: transparent;
+}
+
+.compact-table-row td {
+  padding: 8px 14px;
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+.compact-cover-wrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #111;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 0 auto;
+}
+
+.compact-cover-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.compact-play-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+
+.compact-table-row:hover .compact-play-overlay {
+  opacity: 1;
+}
+
+.compact-album-title {
+  font-weight: 600;
+  color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.compact-album-artist {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  max-width: 220px;
+  transition: color 0.15s;
+}
+
+.compact-album-artist:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.compact-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+
+.compact-accordion-row td {
+  padding: 0 14px 16px 14px;
+  background: rgba(var(--accent-rgb, 139, 92, 246), 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.compact-accordion-drawer {
+  display: flex;
+  gap: 24px;
+  padding: 16px 20px;
+  background: rgba(10, 10, 16, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.compact-accordion-left {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.compact-accordion-cover {
+  width: 140px;
+  height: 140px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.compact-accordion-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.compact-accordion-right {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.compact-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.compact-track-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s;
+  color: var(--text);
+}
+
+.compact-track-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.compact-track-item.playing {
+  background: rgba(var(--accent-rgb, 139, 92, 246), 0.15);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MODE 3: EDITORIAL MAGAZINE (`editorial`)
+   Visual-first storytelling layout with spotlight, shelves & spacious catalog
+   ───────────────────────────────────────────────────────────────────────────── */
+.editorial-magazine-container {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  width: 100%;
+  padding-bottom: 48px;
+}
+
+.editorial-catalog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.editorial-catalog-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+}
+
+.editorial-catalog-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fdf8f4;
+  letter-spacing: -0.3px;
+  margin: 0;
+}
+
+.editorial-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 28px;
+  width: 100%;
+}
+
+.editorial-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(22, 18, 25, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.editorial-card:hover {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(30, 24, 34, 0.9);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 16px rgba(245, 158, 11, 0.1);
+}
+
+.editorial-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fdf8f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.2px;
+}
+
+.editorial-card-artist {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.editorial-card-artist:hover {
+  color: #f59e0b;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   GATEFOLD INSPECTION DRAWER
+   ───────────────────────────────────────────────────────────────────────────── */
+.gatefold-drawer {
+  background: #0e0d14 !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.7) !important;
+}
+
+.gatefold-telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 10px;
+}
+
+.gatefold-telemetry-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gatefold-telemetry-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.gatefold-telemetry-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+

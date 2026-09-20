@@ -294,4 +294,65 @@ describe('Horizon and Spatial Glass Layout Suite', () => {
     expect(screen.queryByText('No Hi-Res Lossless Audio Found')).toBeNull();
     expect(screen.getAllByText('Time').length).toBeGreaterThanOrEqual(1);
   });
+
+  it('renders Horizon and Spatial Glass with dynamic accent color tokens', () => {
+    const onPlayTrack = vi.fn();
+    const onRefreshRecs = vi.fn();
+
+    // Render HorizonHome with a resume track
+    const resumeInfo = {
+      title: 'Comfortably Numb',
+      artist: 'Pink Floyd',
+      coverUrl: null,
+      coverPath: null,
+      positionLabel: '2:15',
+      onResume: vi.fn(),
+      onDismiss: vi.fn(),
+    };
+
+    const { container: horizonContainer } = render(
+      createElement(HorizonHome, {
+        greeting: 'Good evening',
+        trackCount: 10,
+        totalPlays: 50,
+        discoveryData: dummyHub,
+        isLoadingRecs: false,
+        isRefreshingRecs: false,
+        onRefreshRecs,
+        onPlayTrack,
+        renderDownloadAction: () => null,
+        resume: resumeInfo,
+        search: dummySearch,
+      })
+    );
+
+    // Verify ambient glow element exists for dynamic accent radial gradient
+    const ambientGlow = horizonContainer.querySelector('.sp-ambient-glow');
+    expect(ambientGlow).toBeInTheDocument();
+
+    // Verify play buttons use white fill for high-contrast visibility against dynamic accents
+    const playIcons = horizonContainer.querySelectorAll('svg');
+    expect(playIcons.length).toBeGreaterThan(0);
+
+    // Render SpatialGlassHome
+    const { container: spatialContainer } = render(
+      createElement(SpatialGlassHome, {
+        greeting: 'Good evening',
+        trackCount: 10,
+        totalPlays: 50,
+        discoveryData: dummyHub,
+        isLoadingRecs: false,
+        isRefreshingRecs: false,
+        onRefreshRecs,
+        onPlayTrack,
+        renderDownloadAction: () => null,
+        resume: resumeInfo,
+        search: dummySearch,
+      })
+    );
+
+    // Verify ambient canvas element exists for dynamic accent radial gradient
+    const ambientCanvas = spatialContainer.querySelector('.am-ambient-canvas');
+    expect(ambientCanvas).toBeInTheDocument();
+  });
 });

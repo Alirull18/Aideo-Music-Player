@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player — Modern Windows Music Player (v0.9.9)
+# 💎 Aideo Music Player — Modern Windows Music Player (v0.9.10)
 
 **A fast, lightweight, open-source desktop music player for Windows 10 and Windows 11. Built with Rust and Tauri for bit-perfect WASAPI Exclusive sound, real-time synchronized karaoke lyrics, and a gorgeous glassmorphism interface.**
 
@@ -14,7 +14,7 @@
   <p>
     <a href="https://alirull18.github.io/Aideo-Music-Player/"><strong>🌐 Official Website</strong></a> &nbsp;•&nbsp;
     <a href="https://github.com/Alirul/Aideo-Music-Player/releases/latest"><strong>📥 Download for Windows (.exe / .msi)</strong></a> &nbsp;•&nbsp;
-    <a href="docs/RELEASE_NOTES_v0.9.9.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
+    <a href="docs/RELEASE_NOTES_v0.9.10.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
     <a href="https://www.producthunt.com/products/aideo-music-player"><strong>🚀 Product Hunt</strong></a>
   </p>
   <br/>
@@ -76,46 +76,57 @@
 
 ---
 
-## ✨ What's New in v0.9.9
+## ✨ What's New in v0.9.10
 
-Version **0.9.9** delivers our largest architectural update yet, introducing the **Reliable Unified Music Sources Architecture**, **6 Signature Home Screen Experiences**, native **Direct Webstream Audio Pipeline**, **Motion Canvas (Video Artwork Loops)**, a high-performance **Library View Overhaul**, complete **Settings View Overhaul**, and a massive verification suite of **1,107 frontend unit tests** and **315 backend tests**:
+Version **0.9.10** delivers major architectural updates across album and library browsing, track interactions, audio transition hardening, and visual appearance consistency:
 
-* 🔗 **Reliable Unified Music Sources Architecture (Milestones 1–4)**:
-  * **Unified Multi-Source Catalog**: Harmonious playback across Local lossless files, Tidal, Qobuz, and Webstream without source collision or catalog fragmentation.
-  * **Streaming Quality Leader**: Automatically plays the highest-fidelity lossless stream available (Qobuz 24-bit Hi-Res > Tidal Max FLAC > Webstream Opus) with instantaneous manual override.
-  * **Interactive Source Switcher (`SourceMenu`)**: Switch playback between Local, Tidal, Qobuz, and Webstream streams with real-time audio format, sample rate, and bitrate badges.
-  * **Conservative Recording Matcher Contract**: Unicode NFKC normalization, presentation wrapper stripping (`- Topic`, `Official Audio`, `Lyric Video`), version qualifier preservation (Remix, Acoustic, Live, Edit), 3-second duration corroboration, and ISRC conflict rejection.
-  * **Strict Offline / Local-Only Mode**: 1-click toggle ensuring zero outbound network calls, 100% offline privacy, and zero external telemetry.
-  * **Centralized Reactive Store & Progressive Enrichment**: Shared source state across Search, Home, and Queue; fast sources render immediately while high-res sources enrich cards without row jumping or layout shift.
-  * **Playback Attempt Lifecycle & Native Decoder Readiness**: Cryptographic `attempt_id` tracking, Symphonia native decoder readiness gating, 15s timeout bounds, and safe automatic fallback on provider failure.
-  * **Queue Occurrence Decoupling & SQLite Persistence**: Isolated `queue_occurrence_id` preserving intentional track duplicates, native gapless audio retention for local tracks, and additive SQLite persistence with a 32-source ceiling.
-* 🎨 **6 Signature Home Screen Experiences & Quick Switcher**:
-  * Seamlessly toggle between **Classic**, **Horizon** (fluid card grid & banner hero), **Spatial Glass** (frosted acrylic glass & dynamic artwork glow), **Editorial** (Swiss poster typography), **Command Deck** (pro audio telemetry console), and **Stage** (arena concert lighting) via the new collapsible top-bar Layout Filter.
-* ⚡ **Direct Webstream Audio Pipeline**:
-  * Direct audio stream extraction with high-efficiency Opus audio via ffmpeg.
-  * In-memory/disk URL caching and background prefetching for near-instant track start.
-  * Webstream duration cap (20 minutes / 1200s) and non-music content filtering.
-* 🎬 **Motion Canvas (Video Artwork Loops) Integration**:
-  * High-definition video canvas loops rendering in Now Playing and Fullscreen/Theater Mode.
-  * Hardware-accelerated background decoding with an in-app toggle in Settings.
-* 📚 **High-Performance Library View & Portal Action Menu**:
-  * Overhauled `LibraryView` featuring anchored `TrackActionMenu` portals, instant category filter chips, glass search bar, and silky 60 FPS scrolling across 10,000+ tracks.
-* 🖼️ **Local Artwork Engine & Sidecar Disk Caching**:
-  * Pure Rust embedded cover art reader for FLAC, MP3, WAV, ALAC, and AAC files with `{stem}.jpg` sidecar disk caching.
-* 📊 **Universal Scrobbling Engine (Last.fm & ListenBrainz)**:
-  * Unified scrobbler supporting Local tracks, Tidal, Qobuz, and Webstream with normalized metadata and smart duration thresholds.
-* 🔔 **Interactive Toast Notification Overhaul**:
-  * Glassmorphic notification stack with status icons, interactive action triggers, and audio engine state announcements.
-* 🎛️ **Settings View Overhaul**:
-  * Redesigned modular layout with dedicated sections for Audio Output & WASAPI Exclusive mode, Audio Visualizer presets, Music Sources management, and App Updates.
-* ⚖️ **Open-Source License**:
-  * Officially licensed under the **GNU General Public License v3 or later** (`GPL-3.0-or-later`).
+* 💿 **3 Distinct Album Layout Architectures (`AlbumsView`)**:
+  * Replaced superficial card gimmicks with 3 complete full-page layout experiences: **Classic Wall** (`classic`: fast, virtualized 2D grid for rapid browsing), **Compact Table** (`compact`: dense sortable table with clickable headers and in-place expandable multi-disc accordion tracklists), and **Editorial Magazine** (`editorial`: visual storytelling with hero spotlight and curated shelves).
+* 📚 **6 Signature Library Layout Designs (`LibraryView`)**:
+  * Seamlessly toggle between **Classic**, **Studio Pro** (audiophile rack with 38px rows and audio tech chips), **Editorial Archive** (rich serif typography and liner notes), **Crate Digger** (split-pane artist/album explorer), **Ambient Flow** (fluid glass capsules), and **Industrial Brutalist** (Swiss terminal with safety amber/cyan).
+* 🖱️ **Universal Track Context Menu (`TrackContextMenu`)**:
+  * Rich right-click controls anywhere in the app: Play Next, Add to Queue, Add to Playlist, View Album, View Artist, Edit Tags, Show in File Explorer, and Switch Audio Source, rendered via detached React portals.
+* 📑 **Dedicated Add-to-Playlist Modal (`AddToPlaylistModal`)**:
+  * Instant modal dialog to add tracks to existing playlists or create new playlists on the fly without interrupting playback.
+* ⚡ **Zero Audio Bleed on Manual Track Transitions**:
+  * Eliminated the brief audio bleed when selecting a track outside the queue via immediate upfront pause dispatch and backend ringbuffer flush signals.
+* 🎨 **Adaptive Appearance Synchronization in Home Feeds (`home.css`)**:
+  * Horizon and Spatial Glass home layouts now dynamically inherit the application's active album color palette or Settings > Appearance accent colors.
+* 📊 **Local Listening Insights V2 (`ListeningInsightsView`)**:
+  * Enhanced listening heatmaps, peak hours, habit radar charts, and skip rate tracking powered by zero-telemetry local database queries.
+* 💀 **High-Performance View Skeletons (`ViewSkeleton`)**:
+  * Shimmering placeholder skeletons across Library, Albums, and Insights for zero perceived layout shift during initial load.
 
-> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.9 Release Notes**](docs/RELEASE_NOTES_v0.9.9.md).*
+> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.10 Release Notes**](docs/RELEASE_NOTES_v0.9.10.md).*
 
 ---
 
 ## 📜 Previous Release Highlights
+
+<details>
+<summary><strong>✨ What Was New in v0.9.9 (Click to expand)</strong></summary>
+<br />
+
+* 🔗 **Reliable Unified Music Sources Architecture (Milestones 1–4)**:
+  * Unified Multi-Source Catalog across Local, Tidal, Qobuz, and Webstream.
+  * Streaming Quality Leader (Qobuz 24-bit Hi-Res > Tidal Max FLAC > Webstream Opus).
+  * Interactive Source Switcher (`SourceMenu`) with format/bitrate badges.
+  * Conservative Recording Matcher Contract (Unicode NFKC, wrapper stripping, version qualifier protection, 3s duration rule).
+  * Strict Offline / Local-Only Mode with zero external telemetry.
+* 🎨 **6 Signature Home Screen Experiences & Quick Switcher**: Classic, Horizon, Spatial Glass, Editorial, Command Deck, and Stage.
+* ⚡ **Direct Webstream Audio Pipeline**: Direct Opus streaming via ffmpeg, URL caching, and background prefetching.
+* 🎬 **Motion Canvas (Video Artwork Loops)**: High-definition looping video artwork in Now Playing and Theater Mode.
+* 📚 **High-Performance Library View & Portal Action Menu**: Anchored portal action menu, filter chips, and 60 FPS virtualization.
+* 🖼️ **Local Artwork Engine & Sidecar Disk Caching**: Rust embedded cover reader and `{stem}.jpg` caching.
+* 📊 **Universal Scrobbler**: Unified Last.fm and ListenBrainz scrobbling across all sources.
+* 🔔 **Interactive Toast Notification Overhaul**: Glassmorphic toast stack with status icons and animated timers.
+* 🎛️ **Settings View Overhaul**: Modular settings for Audio Output, Visualizer, Sources, and Updates.
+* ⚖️ **GPL-3.0-or-later License**.
+
+> 📖 *Read the [**v0.9.9 Release Notes**](docs/RELEASE_NOTES_v0.9.9.md).*
+
+</details>
+<br />
 
 <details>
 <summary><strong>✨ What Was New in v0.9.8 (Click to expand)</strong></summary>

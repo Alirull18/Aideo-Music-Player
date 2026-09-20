@@ -344,6 +344,7 @@ fn parse_dsf_metadata(path: &Path) -> Option<Track> {
         replaygain_gain: None,
         track_number: final_track_number,
         disc_number: final_disc_number,
+        genre: None,
     })
 }
 
@@ -419,6 +420,7 @@ fn parse_dff_metadata(path: &Path) -> Option<Track> {
         replaygain_gain: None,
         track_number: path_track,
         disc_number: path_disc,
+        genre: None,
     })
 }
 
@@ -562,6 +564,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
     let mut track_number = None;
     let mut disc_number = None;
     let mut replaygain_gain = None;
+    let mut genre = None;
     // True when replaygain_gain came from an R128-named tag (−23 LUFS ref).
     let mut rg_from_r128 = false;
 
@@ -577,6 +580,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                     replaygain_gain = parse_replaygain_value(&tag.value);
                     rg_from_r128 = false;
                 }
+                Some(symphonia::core::meta::StandardTagKey::Genre) => genre = Some(tag.value.to_string()),
                 _ => {
                     let key_upper = tag.key.to_uppercase();
                     if track_number.is_none() && (key_upper == "TRACKNUMBER" || key_upper == "TRACK" || key_upper == "TRCK") {
@@ -586,6 +590,8 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                     } else if replaygain_gain.is_none() && (key_upper == "REPLAYGAIN_TRACK_GAIN" || key_upper == "R128_TRACK_GAIN" || key_upper == "REPLAYGAIN_TRACK_GAIN_DB") {
                         replaygain_gain = parse_replaygain_value(&tag.value);
                         rg_from_r128 = key_upper == "R128_TRACK_GAIN";
+                    } else if genre.is_none() && (key_upper == "GENRE" || key_upper == "TCON") {
+                        genre = Some(tag.value.to_string());
                     }
                 }
             }
@@ -603,6 +609,7 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                         Some(symphonia::core::meta::StandardTagKey::TrackNumber) => if track_number.is_none() { track_number = parse_number_value(&tag.value); },
                         Some(symphonia::core::meta::StandardTagKey::DiscNumber) => if disc_number.is_none() { disc_number = parse_number_value(&tag.value); },
                         Some(symphonia::core::meta::StandardTagKey::ReplayGainTrackGain) => if replaygain_gain.is_none() { replaygain_gain = parse_replaygain_value(&tag.value); },
+                        Some(symphonia::core::meta::StandardTagKey::Genre) => if genre.is_none() { genre = Some(tag.value.to_string()); },
                         _ => {
                             let key_upper = tag.key.to_uppercase();
                             if track_number.is_none() && (key_upper == "TRACKNUMBER" || key_upper == "TRACK" || key_upper == "TRCK") {
@@ -612,6 +619,8 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
                             } else if replaygain_gain.is_none() && (key_upper == "REPLAYGAIN_TRACK_GAIN" || key_upper == "R128_TRACK_GAIN" || key_upper == "REPLAYGAIN_TRACK_GAIN_DB") {
                                 replaygain_gain = parse_replaygain_value(&tag.value);
                                 rg_from_r128 = key_upper == "R128_TRACK_GAIN";
+                            } else if genre.is_none() && (key_upper == "GENRE" || key_upper == "TCON") {
+                                genre = Some(tag.value.to_string());
                             }
                         }
                     }
@@ -657,5 +666,6 @@ pub fn extract_metadata(path: &Path) -> Option<Track> {
         replaygain_gain,
         track_number: final_track_number,
         disc_number: final_disc_number,
+        genre,
     })
 }

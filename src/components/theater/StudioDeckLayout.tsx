@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Sliders, Cpu, Activity } from 'lucide-react';
+import { listen } from '@tauri-apps/api/event';
 import { TheaterLayoutProps } from './types';
 import { baseName, getStreamName } from '../../utils';
 
@@ -19,6 +20,28 @@ export function StudioDeckLayout({
   const leftCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rightCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const oscCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const spectrumRef = useRef<number[]>(spectrumBands);
+
+  useEffect(() => {
+    if (spectrumBands && spectrumBands.length > 0) {
+      spectrumRef.current = spectrumBands;
+    }
+  }, [spectrumBands]);
+
+  // Direct live subscription to audio-spectrum without triggering React re-renders
+  useEffect(() => {
+    let active = true;
+    const unlistenPromise = listen<number[]>('audio-spectrum', (event) => {
+      if (active && event.payload && event.payload.length > 0) {
+        spectrumRef.current = event.payload;
+      }
+    });
+
+    return () => {
+      active = false;
+      unlistenPromise.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
 
   // Ballistic needle state
   const physicsRef = useRef({
@@ -35,19 +58,20 @@ export function StudioDeckLayout({
 
     const renderMeters = () => {
       const isPlaying = playbackStatus === 'Playing';
+      const bands = spectrumRef.current;
 
       // Compute channel levels from spectrum bands
       let leftLevel = 0;
       let rightLevel = 0;
 
-      if (isPlaying && spectrumBands && spectrumBands.length > 0) {
+      if (isPlaying && bands && bands.length > 0) {
         // Lower half for left, upper half for right, with some bass sharing
-        const half = Math.floor(spectrumBands.length / 2);
+        const half = Math.floor(bands.length / 2);
         for (let i = 0; i < half; i++) {
-          leftLevel += spectrumBands[i] || 0;
+          leftLevel += bands[i] || 0;
         }
-        for (let i = half; i < spectrumBands.length; i++) {
-          rightLevel += spectrumBands[i] || 0;
+        for (let i = half; i < bands.length; i++) {
+          rightLevel += bands[i] || 0;
         }
         leftLevel = Math.min(1.2, (leftLevel / (half * 0.45)));
         rightLevel = Math.min(1.2, (rightLevel / (half * 0.45)));
@@ -77,7 +101,7 @@ export function StudioDeckLayout({
       drawVUMeter(rightCanvasRef.current, p.rightAngle, p.rightPeak, 'CH 2 · RIGHT');
       // Draw Oscilloscope (skip in low spec mode)
       if (!lowSpecMode) {
-        drawOscilloscope(oscCanvasRef.current, spectrumBands, isPlaying, accentColor);
+        drawOscilloscope(oscCanvasRef.current, bands, isPlaying, accentColor);
       }
 
       animId = requestAnimationFrame(renderMeters);
@@ -85,7 +109,7 @@ export function StudioDeckLayout({
 
     animId = requestAnimationFrame(renderMeters);
     return () => cancelAnimationFrame(animId);
-  }, [playbackStatus, spectrumBands, accentColor]);
+  }, [playbackStatus, accentColor, lowSpecMode]);
 
   const drawVUMeter = (
     canvas: HTMLCanvasElement | null,

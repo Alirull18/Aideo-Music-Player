@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Waves, Headphones, Activity, BookOpen, ChevronDown } from 'lucide-react';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Waves, Headphones, Activity, BookOpen, ChevronDown, MoreVertical } from 'lucide-react';
 import { YoutubeMix } from '../store/types';
 import './aideo/home.css';
 
@@ -21,6 +21,7 @@ import { UnifiedSearchResults } from './UnifiedSearchResults';
 import { catalogTrack, groupRecordings, searchSources, type SourceSearch } from '../utils/unifiedSources';
 import { SongSources } from './aideo/HomeParts';
 import { discoveryTrack, unifyDiscoveryHub } from '../utils/discoveryFeed';
+import { TrackContextMenu } from './TrackContextMenu';
 
 // Format track duration
 function fmt(s: number | null) {
@@ -554,6 +555,7 @@ export function AideoView() {
   const [resolvingTrackId, setResolvingTrackId] = useState<string | null>(null);
   const [showFullBio, setShowFullBio] = useState(false);
   const [artistHeroImage, setArtistHeroImage] = useState<string | null>(null);
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<{ track: any; anchor: DOMRect | { x: number; y: number } } | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Load search history, click outside, and remote trigger handler
@@ -1702,6 +1704,11 @@ export function AideoView() {
               <div
                 key={track.id}
                 className={`aideo-discovery-grid-card ${isPlaying ? 'is-playing' : ''}`}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenuAnchor({ track, anchor: { x: e.clientX, y: e.clientY } });
+                }}
               >
                 <div className="discovery-grid-cover-wrap" style={coverOutlineStyle(track)}>
                   <TrackCardThumbnail
@@ -1712,6 +1719,19 @@ export function AideoView() {
                     className="discovery-grid-cover-img"
                     fallbackIconSize={24}
                   />
+
+                  <button
+                    type="button"
+                    className="discovery-card-more-btn"
+                    title="More options"
+                    aria-label="More options"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setContextMenuAnchor({ track, anchor: e.currentTarget.getBoundingClientRect() });
+                    }}
+                  >
+                    <MoreVertical size={16} />
+                  </button>
 
                   {isPlaying && (
                     <div className="discovery-eq-indicator" title="Currently Playing">
@@ -1803,6 +1823,11 @@ export function AideoView() {
               <div
                 key={track.id}
                 className={`aideo-discovery-list-item ${isPlaying ? 'is-playing' : ''}`}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenuAnchor({ track, anchor: { x: e.clientX, y: e.clientY } });
+                }}
               >
                 <div className="discovery-cover-wrap" style={coverOutlineStyle(track)}>
                   <TrackCardThumbnail
@@ -1896,6 +1921,19 @@ export function AideoView() {
                       <Download size={12} />
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    className="discovery-row-more-btn"
+                    title="More options"
+                    aria-label="More options"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setContextMenuAnchor({ track, anchor: e.currentTarget.getBoundingClientRect() });
+                    }}
+                  >
+                    <MoreVertical size={15} />
+                  </button>
                 </div>
               </div>
             );
@@ -2351,6 +2389,11 @@ export function AideoView() {
                 key={t.id || t.path}
                 className="aideo-recap-item"
                 onClick={() => { playTrack(t); setView('nowplaying'); }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenuAnchor({ track: t, anchor: { x: e.clientX, y: e.clientY } });
+                }}
               >
                 <div className="aideo-item-cover-wrap" style={coverOutlineStyle(t)}>
                   <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
@@ -2373,6 +2416,18 @@ export function AideoView() {
                     {playCounts[t.path]} {playCounts[t.path] === 1 ? 'play' : 'plays'}
                   </div>
                 )}
+                <button
+                  type="button"
+                  className="discovery-row-more-btn"
+                  title="More options"
+                  aria-label="More options"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setContextMenuAnchor({ track: t, anchor: e.currentTarget.getBoundingClientRect() });
+                  }}
+                >
+                  <MoreVertical size={15} />
+                </button>
               </div>
             ))}
           </div>
@@ -2401,9 +2456,26 @@ export function AideoView() {
                 whileHover={{ scale: 1.03 }}
                 className="aideo-carousel-card"
                 onClick={() => { playTrack(t); setView('nowplaying'); }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenuAnchor({ track: t, anchor: { x: e.clientX, y: e.clientY } });
+                }}
               >
                 <div className="carousel-cover-wrap" style={coverOutlineStyle(t)}>
                   <TrackCardThumbnail path={t.path} coverUrl={t.cover_url} />
+                  <button
+                    type="button"
+                    className="discovery-card-more-btn"
+                    title="More options"
+                    aria-label="More options"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setContextMenuAnchor({ track: t, anchor: e.currentTarget.getBoundingClientRect() });
+                    }}
+                  >
+                    <MoreVertical size={16} />
+                  </button>
                   <div className="carousel-play-overlay">
                     <div className="carousel-play-btn-circle">
                       <Play size={20} fill="white" color="white" />
@@ -2570,6 +2642,7 @@ export function AideoView() {
     onDeleteHistory: handleDeleteHistory,
     onPlayQuickTrack: handlePlayQuickTrack,
     isSearching,
+    onTrackContextMenu: (track, anchor) => setContextMenuAnchor({ track, anchor }),
   };
 
   const aideoResumeInfo: HomeResumeInfo | null = (resumePosition > 0 && currentTrack) ? {
@@ -2604,8 +2677,8 @@ export function AideoView() {
   const renderLayoutFilter = () => {
     const layoutItems = [
       { id: 'classic' as const, label: 'Classic', icon: Layers, accent: '#3b82f6' },
-      { id: 'spotify' as const, label: 'Horizon', icon: Headphones, accent: '#1db954' },
-      { id: 'apple' as const, label: 'Spatial Glass', icon: Disc, accent: '#fa243c' },
+      { id: 'spotify' as const, label: 'Horizon', icon: Headphones, accent: 'var(--accent, #1db954)' },
+      { id: 'apple' as const, label: 'Spatial Glass', icon: Disc, accent: 'var(--accent, #fa243c)' },
       { id: 'editorial' as const, label: 'Editorial', icon: BookOpen, accent: '#a855f7' },
       { id: 'command' as const, label: 'Command', icon: Activity, accent: '#06b6d4' },
       { id: 'stage' as const, label: 'Stage', icon: Sparkles, accent: '#f59e0b' },
@@ -2668,6 +2741,7 @@ export function AideoView() {
     resume: aideoResumeInfo,
     search: aideoSearchProps,
     layoutFilter: renderLayoutFilter(),
+    onContextMenu: (track, anchor) => setContextMenuAnchor({ track, anchor }),
   };
 
   return (
@@ -3545,6 +3619,11 @@ export function AideoView() {
                           <div
                             key={t.id || t.path}
                             onClick={() => playTrack(t)}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setContextMenuAnchor({ track: t, anchor: { x: e.clientX, y: e.clientY } });
+                            }}
                             style={{
                               display: 'flex',
                               alignItems: 'center',
@@ -3569,6 +3648,18 @@ export function AideoView() {
                             <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
                               {fmt(t.duration)}
                             </div>
+                            <button
+                              type="button"
+                              className="discovery-row-more-btn"
+                              title="More options"
+                              aria-label="More options"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setContextMenuAnchor({ track: t, anchor: e.currentTarget.getBoundingClientRect() });
+                              }}
+                            >
+                              <MoreVertical size={15} />
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -3641,6 +3732,14 @@ export function AideoView() {
         </>
       )}
       </div>
+
+      {contextMenuAnchor && (
+        <TrackContextMenu
+          track={contextMenuAnchor.track}
+          anchor={contextMenuAnchor.anchor}
+          onClose={() => setContextMenuAnchor(null)}
+        />
+      )}
     </div>
   );
 }

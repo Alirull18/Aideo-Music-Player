@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, startTransition } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3, TrendingUp, Download, DownloadCloud, Upload, Wand2 } from 'lucide-react';
@@ -57,13 +57,19 @@ export function Sidebar() {
 
   const goLibrary = () => {
     useStore.setState({ currentPlaylist: null });
-    loadLibrary();
-    setView('library');
+    if (useStore.getState().tracks.length === 0) {
+      loadLibrary();
+    }
+    startTransition(() => {
+      setView('library');
+    });
   };
 
   const goPlaylist = (id: number) => {
     loadPlaylistTracks(id);
-    setView('library');
+    startTransition(() => {
+      setView('library');
+    });
   };
 
   const handleCreate = (e: React.FormEvent) => {
@@ -166,12 +172,12 @@ export function Sidebar() {
           case 'aideo':
             icon = <Sparkles size={18} />;
             isActive = view === 'aideo';
-            onClick = () => setView('aideo');
+            onClick = () => startTransition(() => setView('aideo'));
             break;
           case 'charts':
             icon = <TrendingUp size={18} />;
             isActive = view === 'charts';
-            onClick = () => setView('charts');
+            onClick = () => startTransition(() => setView('charts'));
             break;
           case 'library':
             icon = <Library size={18} />;
@@ -181,37 +187,43 @@ export function Sidebar() {
           case 'nowplaying':
             icon = <Headphones size={18} />;
             isActive = view === 'nowplaying';
-            onClick = () => setView('nowplaying');
+            onClick = () => startTransition(() => setView('nowplaying'));
             break;
           case 'loved_streams':
             icon = <Heart size={18} />;
             isActive = view === 'loved_streams';
-            onClick = () => { useStore.setState({ currentPlaylist: null }); loadLibrary(); setView('loved_streams'); };
+            onClick = () => {
+              useStore.setState({ currentPlaylist: null });
+              if (useStore.getState().tracks.length === 0) {
+                loadLibrary();
+              }
+              startTransition(() => setView('loved_streams'));
+            };
             break;
           case 'downloaded':
             icon = <DownloadCloud size={18} />;
             isActive = view === 'downloaded';
-            onClick = () => setView('downloaded');
+            onClick = () => startTransition(() => setView('downloaded'));
             break;
           case 'aideo_lab':
             icon = <Activity size={18} />;
             isActive = view === 'aideo_lab';
-            onClick = () => setView('aideo_lab');
+            onClick = () => startTransition(() => setView('aideo_lab'));
             break;
           case 'insights':
             icon = <BarChart3 size={18} />;
             isActive = view === 'insights';
-            onClick = () => setView('insights');
+            onClick = () => startTransition(() => setView('insights'));
             break;
           case 'lastfm':
             icon = <Radio size={18} />;
             isActive = view === 'lastfm';
-            onClick = () => setView('lastfm');
+            onClick = () => startTransition(() => setView('lastfm'));
             break;
           case 'listenbrainz':
             icon = <Radio size={18} style={{ color: 'rgba(235, 116, 59, 0.95)' }} />;
             isActive = view === 'listenbrainz';
-            onClick = () => setView('listenbrainz');
+            onClick = () => startTransition(() => setView('listenbrainz'));
             break;
         }
 
@@ -360,7 +372,7 @@ export function Sidebar() {
       )}
 
       {/* Settings */}
-      <div style={{ marginTop: 'auto' }} className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')} title={sidebarCollapsed ? "Settings" : undefined}>
+      <div style={{ marginTop: 'auto' }} className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => startTransition(() => setView('settings'))} title={sidebarCollapsed ? "Settings" : undefined}>
         <Settings size={18} />
         {!sidebarCollapsed && <span>Settings</span>}
       </div>

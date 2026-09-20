@@ -1347,24 +1347,32 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       console.warn('[stream] navigator.onLine reported false; continuing playback attempt via native backend.');
     }
     try {
-      // De-duplicate / consume track from queue when starting playback
-      const currentQueue = get().queue;
-      const matchingIndices: number[] = [];
-      currentQueue.forEach((t, i) => {
-        if (pathsEqual(t.path, url)) {
-          matchingIndices.push(i);
-        }
-      });
+      // Clear or de-duplicate queue when starting playback
+      if (triggerAutoplay) {
+        set({ queue: [] });
+        localStorage.setItem('aideo_queue', JSON.stringify([]));
+        await chainQueueOperation(async () => {
+          await invoke('clear_queue').catch(console.error);
+        });
+      } else {
+        const currentQueue = get().queue;
+        const matchingIndices: number[] = [];
+        currentQueue.forEach((t, i) => {
+          if (pathsEqual(t.path, url)) {
+            matchingIndices.push(i);
+          }
+        });
 
-      if (matchingIndices.length > 0) {
-        const newQueue = currentQueue.filter(t => !pathsEqual(t.path, url));
-        set({ queue: newQueue });
-        localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+        if (matchingIndices.length > 0) {
+          const newQueue = currentQueue.filter(t => !pathsEqual(t.path, url));
+          set({ queue: newQueue });
+          localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
 
-        // Remove from the Rust backend queue in reverse order
-        for (let i = matchingIndices.length - 1; i >= 0; i--) {
-          const indexToRemove = matchingIndices[i];
-          chainQueueOperation(() => invoke('remove_from_queue', { index: indexToRemove }));
+          // Remove from the Rust backend queue in reverse order
+          for (let i = matchingIndices.length - 1; i >= 0; i--) {
+            const indexToRemove = matchingIndices[i];
+            chainQueueOperation(() => invoke('remove_from_queue', { index: indexToRemove }));
+          }
         }
       }
 

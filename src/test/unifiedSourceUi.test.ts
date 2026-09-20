@@ -358,5 +358,21 @@ describe('Unified source controls', () => {
     // Verify YouTube title is rendered
     expect(screen.getByText('Dua Lipa - Levitating (Official Music Video)')).toBeVisible();
   });
+
+  it('supports initialOpen without rendering trigger button and fires onClose when dismissed', async () => {
+    const onClose = vi.fn();
+    render(createElement(SourceMenu, { track, initialOpen: true, onClose }));
+
+    // Should not render the inline trigger button
+    expect(screen.queryByRole('button', { name: 'Other sources' })).toBeNull();
+
+    // Dialog should open automatically
+    expect(await screen.findByRole('dialog')).toBeVisible();
+
+    // Clicking close should call onClose
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
 });
 

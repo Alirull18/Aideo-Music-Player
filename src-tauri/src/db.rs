@@ -72,6 +72,7 @@ pub struct Track {
     pub replaygain_gain: Option<f64>,
     pub track_number: Option<i32>,
     pub disc_number: Option<i32>,
+    pub genre: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -256,6 +257,9 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     if !column_exists(&conn, "tracks", "disc_number") {
         conn.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER", [])?;
     }
+    if !column_exists(&conn, "tracks", "genre") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN genre TEXT", [])?;
+    }
 
     // Create playlist tables
     conn.execute(
@@ -385,6 +389,10 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN synced INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN genre TEXT", []);
     let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN playback_source TEXT", []);
+    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN sample_rate INTEGER", []);
+    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN bit_depth INTEGER", []);
+    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN bit_perfect INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN completion_rate REAL", []);
 
     // Migration: Recover missing playlist tracks
     if let Ok(mut stmt) = conn.prepare(
@@ -551,8 +559,8 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
         let hash = track.path_hash.clone().unwrap_or_else(|| format!("{:x}", md5::compute(track.path.as_bytes())));
         track.path_hash = Some(hash.clone());
         tx.execute(
-            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash, replaygain_gain)
-             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash, :replaygain_gain)
+            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash, replaygain_gain, genre)
+             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash, :replaygain_gain, :genre)
              ON CONFLICT(path) DO UPDATE SET
                  title = excluded.title,
                  artist = excluded.artist,
@@ -563,7 +571,8 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                  track_number = COALESCE(excluded.track_number, tracks.track_number),
                  disc_number = COALESCE(excluded.disc_number, tracks.disc_number),
                  path_hash = COALESCE(excluded.path_hash, tracks.path_hash),
-                 replaygain_gain = COALESCE(excluded.replaygain_gain, tracks.replaygain_gain)",
+                 replaygain_gain = COALESCE(excluded.replaygain_gain, tracks.replaygain_gain),
+                 genre = COALESCE(excluded.genre, tracks.genre)",
             rusqlite::named_params! {
                 ":path": &track.path,
                 ":title": &track.title,
@@ -578,6 +587,7 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
                 ":disc_number": &track.disc_number,
                 ":path_hash": &hash,
                 ":replaygain_gain": &track.replaygain_gain,
+                ":genre": &track.genre,
             },
         )?;
     }
@@ -617,7 +627,7 @@ pub fn update_track_tags(
 
 pub fn get_track_by_path(conn: &Connection, path: &str) -> Result<Track> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number 
+        "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number, genre 
          FROM tracks WHERE path = ?1"
     )?;
     stmt.query_row(rusqlite::params![path], |row| {
@@ -644,6 +654,7 @@ pub fn get_track_by_path(conn: &Connection, path: &str) -> Result<Track> {
             replaygain_gain: row.get(15).ok(),
             track_number: row.get(17).ok(),
             disc_number: row.get(18).ok(),
+            genre: row.get(19).ok(),
         })
     })
 }
@@ -665,7 +676,7 @@ pub fn update_track_sonic_profile(conn: &Connection, path: &str, bpm: f64, energ
 }
 
 pub fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
-    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number FROM tracks")?;
+    let mut stmt = conn.prepare("SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number, genre FROM tracks")?;
     let track_iter = stmt.query_map([], row_to_track)?;
 
     let mut tracks = Vec::new();
@@ -699,6 +710,7 @@ fn row_to_track(row: &rusqlite::Row<'_>) -> Result<Track> {
         replaygain_gain: row.get(15).ok(),
         track_number: row.get(17).ok(),
         disc_number: row.get(18).ok(),
+        genre: row.get(19).ok(),
     })
 }
 
@@ -747,7 +759,7 @@ pub fn get_tracks_paginated(
     let tracks = if let Some(query) = search.filter(|s| !s.trim().is_empty()) {
         let pattern = format!("%{}%", query.trim());
         let sql = format!(
-            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number
+            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number, genre
              FROM tracks
              WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1
              {} LIMIT ?2 OFFSET ?3",
@@ -759,7 +771,7 @@ pub fn get_tracks_paginated(
         rows
     } else {
         let sql = format!(
-            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number
+            "SELECT id, path, title, artist, album, duration, format, lyric_offset, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio, replaygain_gain, path_hash, track_number, disc_number, genre
              FROM tracks
              {} LIMIT ?1 OFFSET ?2",
             order_clause
@@ -890,7 +902,7 @@ pub fn get_playlist_tracks(conn: &Connection, playlist_id: i32) -> Result<Vec<Tr
 
 pub fn get_playlist_entries(conn: &Connection, playlist_id: i32) -> Result<Vec<PlaylistEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.path_hash, t.track_number, t.disc_number,
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.path_hash, t.track_number, t.disc_number, t.genre,
                 pt.entry_id, pt.source_context, pt.metadata_json
          FROM playlist_tracks pt 
          LEFT JOIN tracks t ON pt.track_path = t.path
@@ -898,19 +910,19 @@ pub fn get_playlist_entries(conn: &Connection, playlist_id: i32) -> Result<Vec<P
          ORDER BY pt.position ASC, pt.entry_id ASC"
     )?;
     let track_iter = stmt.query_map(params![playlist_id], |row| {
-        let json: Option<String> = row.get(20)?;
+        let json: Option<String> = row.get(21)?;
         let source_context: Option<RecordingSources> = json.map(|json| serde_json::from_str(&json)
-            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(20, rusqlite::types::Type::Text, Box::new(e))))
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(21, rusqlite::types::Type::Text, Box::new(e))))
             .transpose()?;
         let track = if let Some(context) = &source_context {
             context.to_json()?;
-            let metadata: String = row.get(21)?;
+            let metadata: String = row.get(22)?;
             serde_json::from_str(&metadata)
-                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(21, rusqlite::types::Type::Text, Box::new(e)))?
+                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(22, rusqlite::types::Type::Text, Box::new(e)))?
         } else { row_to_track(row)? };
         Ok(PlaylistEntry {
             track,
-            playlist_entry_id: row.get(19)?,
+            playlist_entry_id: row.get(20)?,
             source_context,
         })
     })?;
@@ -1178,7 +1190,7 @@ pub fn execute_smart_rules(conn: &Connection, rules_json: &str) -> Result<Vec<Tr
     };
 
     let query_str = format!(
-        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.track_number, t.disc_number FROM tracks t WHERE ({}) ORDER BY t.title ASC{}",
+        "SELECT t.id, t.path, t.title, t.artist, t.album, t.duration, t.format, t.lyric_offset, t.loved, t.disliked, t.cover_url, t.bpm, t.energy, t.bass_ratio, t.treble_ratio, t.replaygain_gain, t.track_number, t.disc_number, t.genre FROM tracks t WHERE ({}) ORDER BY t.title ASC{}",
         where_sql, limit_clause
     );
 
@@ -1207,6 +1219,7 @@ pub fn execute_smart_rules(conn: &Connection, rules_json: &str) -> Result<Vec<Tr
             replaygain_gain: row.get(15).ok(),
             track_number: row.get(16).ok(),
             disc_number: row.get(17).ok(),
+            genre: row.get(18).ok(),
         })
     })?;
 

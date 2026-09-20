@@ -1,9 +1,19 @@
 import { memo, useMemo } from 'react';
-import { RefreshCw, Play, Disc, Sparkles, BookOpen } from 'lucide-react';
+import { RefreshCw, Play, Disc, Sparkles, BookOpen, MoreVertical } from 'lucide-react';
 import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId, SongSources } from './HomeParts';
 
-const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay: (t: any) => void }) => (
-  <div className="ah-row ah-editorial-row" onClick={() => onPlay(track)}>
+const ShelfRow = memo(({ track, idx, onPlay, onContextMenu }: { track: any; idx: number; onPlay: (t: any) => void; onContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void }) => (
+  <div
+    className="ah-row ah-editorial-row"
+    onClick={() => onPlay(track)}
+    onContextMenu={(e) => {
+      if (onContextMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(track, { x: e.clientX, y: e.clientY });
+      }
+    }}
+  >
     <div className="ah-row-idx">{idx + 1}</div>
     <TrackCover src={track.cover_url} path={track.path || track.url} title={track.title} artist={track.artist} size={48} radius={8} />
     <div className="ah-row-meta">
@@ -13,14 +23,52 @@ const ShelfRow = memo(({ track, idx, onPlay }: { track: any; idx: number; onPlay
     </div>
     <div className="ah-editorial-tag">VOL. {(idx + 1).toString().padStart(2, '0')}</div>
     <span className="ah-row-dur">{track.duration_raw}</span>
+    {onContextMenu && (
+      <button
+        type="button"
+        className="ah-row-more-btn"
+        title="More options"
+        aria-label="More options"
+        onClick={(e) => {
+          e.stopPropagation();
+          onContextMenu(track, e.currentTarget.getBoundingClientRect());
+        }}
+      >
+        <MoreVertical size={15} />
+      </button>
+    )}
     <PlayButton onClick={() => onPlay(track)} />
   </div>
 ));
 
-const ArtCard = memo(({ track, onPlay, badge }: { track: any; onPlay: (t: any) => void; badge?: string }) => (
-  <div className="ah-card ah-editorial-card" onClick={() => onPlay(track)}>
+const ArtCard = memo(({ track, onPlay, onContextMenu, badge }: { track: any; onPlay: (t: any) => void; onContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void; badge?: string }) => (
+  <div
+    className="ah-card ah-editorial-card"
+    onClick={() => onPlay(track)}
+    onContextMenu={(e) => {
+      if (onContextMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(track, { x: e.clientX, y: e.clientY });
+      }
+    }}
+  >
     <div className="ah-card-cover">
       <TrackCover src={track.cover_url} path={track.path || track.url} title={track.title} artist={track.artist} size={176} radius={14} />
+      {onContextMenu && (
+        <button
+          type="button"
+          className="ah-card-more-btn"
+          title="More options"
+          aria-label="More options"
+          onClick={(e) => {
+            e.stopPropagation();
+            onContextMenu(track, e.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <MoreVertical size={16} />
+        </button>
+      )}
       {badge && <span className="ah-editorial-badge">{badge}</span>}
       <div className="ah-editorial-vinyl-peek">
         <Disc size={64} className="ah-vinyl-groove" />
@@ -33,7 +81,7 @@ const ArtCard = memo(({ track, onPlay, badge }: { track: any; onPlay: (t: any) =
   </div>
 ));
 
-export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search, layoutFilter }: AideoHomeProps) {
+export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search, layoutFilter, onContextMenu }: AideoHomeProps) {
   const shelfIds: ShelfId[] = ['recs', 'tidal', 'rotation', 'gems', 'charts'];
   const history = tracksForShelf(discoveryData, 'recent').slice(0, 6);
 
@@ -93,7 +141,17 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
 
       {/* ── COVER STORY / LEAD FEATURE SPREAD ── */}
       {!isLoadingRecs && leadTrack && (
-        <section className="ah-editorial-cover-story" onClick={() => onPlayTrack(leadTrack)}>
+        <section
+          className="ah-editorial-cover-story"
+          onClick={() => onPlayTrack(leadTrack)}
+          onContextMenu={(e) => {
+            if (onContextMenu) {
+              e.preventDefault();
+              e.stopPropagation();
+              onContextMenu(leadTrack, { x: e.clientX, y: e.clientY });
+            }
+          }}
+        >
           <div className="ah-cover-story-plate">
             <div className="ah-cover-story-art">
               <TrackCover
@@ -104,6 +162,20 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
                 size={220}
                 radius={16}
               />
+              {onContextMenu && (
+                <button
+                  type="button"
+                  className="ah-card-more-btn"
+                  title="More options"
+                  aria-label="More options"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onContextMenu(leadTrack, e.currentTarget.getBoundingClientRect());
+                  }}
+                >
+                  <MoreVertical size={16} />
+                </button>
+              )}
               <div className="ah-cover-vinyl-disc">
                 <Disc size={180} />
               </div>
@@ -169,6 +241,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
                     key={t.id}
                     track={t}
                     onPlay={onPlayTrack}
+                    onContextMenu={onContextMenu}
                     badge={idx === 0 ? 'ESSENTIAL' : idx === 1 ? 'DEEP CUT' : undefined}
                   />
                 ))}
@@ -189,7 +262,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
             </div>
           </div>
           <div className="ah-rows">
-            {history.map((t, i) => <ShelfRow key={t.id} track={t} idx={i} onPlay={onPlayTrack} />)}
+            {history.map((t, i) => <ShelfRow key={t.id} track={t} idx={i} onPlay={onPlayTrack} onContextMenu={onContextMenu} />)}
           </div>
         </section>
       )}

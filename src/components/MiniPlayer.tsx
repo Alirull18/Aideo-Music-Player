@@ -7,6 +7,92 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import defaultCover from '../assets/default_cover.png';
 import { baseName } from '../utils';
+import type { Track, LyricLine } from '../store/types';
+
+function MiniPlayerLyricTicker({
+  current,
+  lyrics,
+  lyricOffset,
+  showTranslation,
+  showRomaji,
+}: {
+  current: Track | null;
+  lyrics: LyricLine[];
+  lyricOffset: number;
+  showTranslation: boolean;
+  showRomaji: boolean;
+}) {
+  const playbackPositionSecs = useStore(s => s.playback.position_secs);
+
+  const activeLyric = useMemo(() => {
+    if (!lyrics || !lyrics.length) return null;
+    const now = playbackPositionSecs + lyricOffset / 1000;
+    let currentLine = null;
+    for (let i = 0; i < lyrics.length; i++) {
+      if (lyrics[i].time_secs <= now) {
+        currentLine = lyrics[i];
+      } else {
+        break;
+      }
+    }
+    return currentLine;
+  }, [lyrics, playbackPositionSecs, lyricOffset]);
+
+  const displayLyricText = useMemo(() => {
+    if (!activeLyric) return '';
+    if (showTranslation && activeLyric.translation) {
+      return activeLyric.translation;
+    }
+    if (showRomaji && activeLyric.romaji && activeLyric.romaji !== activeLyric.text) {
+      return activeLyric.romaji;
+    }
+    return activeLyric.text;
+  }, [activeLyric, showTranslation, showRomaji]);
+
+  const lyricTooltip = useMemo(() => {
+    if (!activeLyric) return current?.album || '';
+    const parts = [activeLyric.text];
+    if (activeLyric.romaji && activeLyric.romaji !== activeLyric.text) {
+      parts.push(`🈳 Romaji: ${activeLyric.romaji}`);
+    }
+    if (activeLyric.translation) {
+      parts.push(`🌐 Translation: ${activeLyric.translation}`);
+    }
+    return parts.join('\n');
+  }, [activeLyric, current?.album]);
+
+  return (
+    <div className="mini-lyric-ticker" title={lyricTooltip}>
+      <AnimatePresence mode="wait">
+        {activeLyric ? (
+          <motion.div
+            key={`${activeLyric.time_secs}-${showTranslation ? 'tr' : showRomaji ? 'ro' : 'orig'}`}
+            initial={{ opacity: 0, y: 3 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -3 }}
+            transition={{ duration: 0.15 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, width: '100%', overflow: 'hidden' }}
+          >
+            <Music size={10} style={{ color: 'var(--dynamic-accent, #8b5cf6)', flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {displayLyricText}
+            </span>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="no-lyric"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.6 }}
+            exit={{ opacity: 0 }}
+            style={{ fontSize: 10, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {lyrics.length > 0 ? '♫ Instrumental ♫' : (current?.album || '')}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 export function MiniPlayer() {
   const [isLocked, setIsLocked] = useState<boolean>(() => {
@@ -42,13 +128,11 @@ export function MiniPlayer() {
     toggleDesktopLyrics,
     desktopLyricsLocked,
     toggleDesktopLyricsLocked,
-    playbackPositionSecs,
     playbackCurrentTrack,
     playbackStatus,
     playbackVolume,
     playbackIsBuffering
   } = useStore(useShallow(s => ({
-    playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
     playbackStatus: s.playback.status,
     playbackIsBuffering: Boolean(s.playback.is_buffering),
@@ -147,44 +231,6 @@ export function MiniPlayer() {
     invoke('set_window_resizable', { resizable: !nextLocked }).catch(() => {});
   };
 
-  const activeLyric = useMemo(() => {
-    if (!lyrics || !lyrics.length) return null;
-    const now = playbackPositionSecs + lyricOffset / 1000;
-    let currentLine = null;
-    for (let i = 0; i < lyrics.length; i++) {
-      if (lyrics[i].time_secs <= now) {
-        currentLine = lyrics[i];
-      } else {
-        break;
-      }
-    }
-    return currentLine;
-  }, [lyrics, playbackPositionSecs, lyricOffset]);
-
-  // Determine displayed text honoring active Romaji and Translation preferences
-  const displayLyricText = useMemo(() => {
-    if (!activeLyric) return '';
-    if (showTranslation && activeLyric.translation) {
-      return activeLyric.translation;
-    }
-    if (showRomaji && activeLyric.romaji && activeLyric.romaji !== activeLyric.text) {
-      return activeLyric.romaji;
-    }
-    return activeLyric.text;
-  }, [activeLyric, showTranslation, showRomaji]);
-
-  const lyricTooltip = useMemo(() => {
-    if (!activeLyric) return current?.album || '';
-    const parts = [activeLyric.text];
-    if (activeLyric.romaji && activeLyric.romaji !== activeLyric.text) {
-      parts.push(`🈳 Romaji: ${activeLyric.romaji}`);
-    }
-    if (activeLyric.translation) {
-      parts.push(`🌐 Translation: ${activeLyric.translation}`);
-    }
-    return parts.join('\n');
-  }, [activeLyric, current?.album]);
-
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isLocked || e.button !== 0) return;
     const target = e.target as HTMLElement;
@@ -243,35 +289,13 @@ export function MiniPlayer() {
             <div className="mini-artist" title={current?.artist || 'Unknown Artist'}>
               {current?.artist || 'Unknown Artist'}
             </div>
-            <div className="mini-lyric-ticker" title={lyricTooltip}>
-              <AnimatePresence mode="wait">
-                {activeLyric ? (
-                  <motion.div
-                    key={`${activeLyric.time_secs}-${showTranslation ? 'tr' : showRomaji ? 'ro' : 'orig'}`}
-                    initial={{ opacity: 0, y: 3 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -3 }}
-                    transition={{ duration: 0.15 }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, width: '100%', overflow: 'hidden' }}
-                  >
-                    <Music size={10} style={{ color: 'var(--dynamic-accent, #8b5cf6)', flexShrink: 0 }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {displayLyricText}
-                    </span>
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="no-lyric"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 0.6 }}
-                    exit={{ opacity: 0 }}
-                    style={{ fontSize: 10, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {lyrics.length > 0 ? '♫ Instrumental ♫' : (current?.album || '')}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            <MiniPlayerLyricTicker 
+              current={current} 
+              lyrics={lyrics} 
+              lyricOffset={lyricOffset} 
+              showTranslation={showTranslation} 
+              showRomaji={showRomaji} 
+            />
           </div>
 
           {/* Controls Row */}

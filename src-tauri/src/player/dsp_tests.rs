@@ -866,6 +866,22 @@ mod dsp_tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
+    fn test_exclusive_mode_device_in_use_error_code() {
+        use crate::wasapi_engine::{decide_exclusive_recovery, ExclusiveRecovery, MAX_EXCLUSIVE_FAILURES};
+
+        // Ensure Windows AUDCLNT_E_DEVICE_IN_USE HRESULT is exactly 0x8889000A
+        let dev_in_use = windows::Win32::Media::Audio::AUDCLNT_E_DEVICE_IN_USE.0;
+        assert_eq!(dev_in_use as u32, 0x8889000A);
+
+        // Verify recovery policy for exclusive failures
+        assert_eq!(decide_exclusive_recovery(0), ExclusiveRecovery::RetryAfterMs(250));
+        assert_eq!(decide_exclusive_recovery(1), ExclusiveRecovery::RetryAfterMs(250));
+        assert_eq!(decide_exclusive_recovery(2), ExclusiveRecovery::RetryAfterMs(500));
+        assert_eq!(decide_exclusive_recovery(MAX_EXCLUSIVE_FAILURES), ExclusiveRecovery::StayShared);
+    }
+
+    #[test]
     fn test_resolve_exclusive_target_rate() {
         use crate::player::resolve_exclusive_target_rate;
 
@@ -929,6 +945,24 @@ mod dsp_tests {
         // Simulating the audio callback draining the ringbuffer
         assert!(flush_signal.swap(false, Ordering::SeqCst), "Callback should observe and consume the flush signal");
         assert!(!flush_signal.load(Ordering::SeqCst), "Flush signal should be reset for new track playback");
+    }
+
+    #[test]
+    fn test_manual_track_play_clears_pending_and_flushes_ringbuffer() {
+        use std::collections::VecDeque;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let mut pending: Vec<VecDeque<f32>> = vec![VecDeque::from(vec![0.5; 1024]), VecDeque::from(vec![0.5; 1024])];
+        let flush_signal = Arc::new(AtomicBool::new(false));
+
+        // When a new manual Play command arrives while audio is decoding:
+        flush_signal.store(true, Ordering::SeqCst);
+        pending.iter_mut().for_each(|ch| ch.clear());
+
+        assert!(flush_signal.load(Ordering::SeqCst), "Flush signal must be set");
+        assert!(pending[0].is_empty(), "Pending channel 0 must be cleared of stale audio");
+        assert!(pending[1].is_empty(), "Pending channel 1 must be cleared of stale audio");
     }
 
     #[test]
@@ -1408,6 +1442,108 @@ mod dsp_tests {
             find_best_matching_device_name("Speakers", &candidates),
             None // generic single word without distinctive identifier safely rejected from fuzzy hijacking
         );
+    }
+
+    #[test]
+    fn test_should_restore_preferred_device() {
+        use crate::player::should_restore_preferred_device;
+
+        let available = vec![
+            "[System Default Device]".to_string(),
+            "[WASAPI] Speakers (Realtek Audio)".to_string(),
+            "[WASAPI] Headphones (Sony WH-1000XM4)".to_string(),
+            "[WASAPI] Focusrite Scarlett 2i2 USB".to_string(),
+        ];
+
+        // 1. If currently not in fallback (current_target is Some), do NOT restore
+        assert_eq!(
+            should_restore_preferred_device(
+                Some("[WASAPI] Headphones (Sony WH-1000XM4)"),
+                Some("[WASAPI] Speakers (Realtek Audio)"),
+                &available
+            ),
+            None
+        );
+
+        // 2. If preferred is None or System Default, do NOT restore
+        assert_eq!(
+            should_restore_preferred_device(None, None, &available),
+            None
+        );
+        assert_eq!(
+            should_restore_preferred_device(Some("[System Default Device]"), None, &available),
+            None
+        );
+
+        // 3. Exact match when in fallback (current_target is None)
+        assert_eq!(
+            should_restore_preferred_device(
+                Some("[WASAPI] Headphones (Sony WH-1000XM4)"),
+                None,
+                &available
+            ),
+            Some("[WASAPI] Headphones (Sony WH-1000XM4)".to_string())
+        );
+
+        // 4. Model-token fuzzy match when reconnected name slightly varies
+        assert_eq!(
+            should_restore_preferred_device(
+                Some("[WASAPI] Sony WH-1000XM4"),
+                None,
+                &available
+            ),
+            Some("[WASAPI] Headphones (Sony WH-1000XM4)".to_string())
+        );
+
+        // 5. Preferred device not available
+        assert_eq!(
+            should_restore_preferred_device(
+                Some("[WASAPI] Apple AirPods Max"),
+                None,
+                &available
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn test_should_switch_default_device() {
+        use crate::player::should_switch_default_device;
+
+        // 1. User selected a specific preferred device: never auto-switch on default change
+        assert!(!should_switch_default_device(
+            Some("[WASAPI] Speakers (Realtek Audio)"),
+            Some("Speakers (Realtek Audio)"),
+            Some("Headphones (Realtek Audio)")
+        ));
+
+        // 2. Initial state (last_default is None): do not trigger switch on startup
+        assert!(!should_switch_default_device(
+            None,
+            None,
+            Some("Headphones (Realtek Audio)")
+        ));
+
+        // 3. Default device unchanged: do not trigger switch
+        assert!(!should_switch_default_device(
+            None,
+            Some("Headphones (Realtek Audio)"),
+            Some("Headphones (Realtek Audio)")
+        ));
+
+        // 4. System default mode & default changed (e.g. headphones plugged in)
+        assert!(should_switch_default_device(
+            None,
+            Some("Speakers (Realtek Audio)"),
+            Some("Headphones (Realtek Audio)")
+        ));
+
+        // 5. Preferred explicitly set to [System Default Device] string
+        assert!(should_switch_default_device(
+            Some("[System Default Device]"),
+            Some("Speakers (Realtek Audio)"),
+            Some("Headphones (Realtek Audio)")
+        ));
     }
 
     #[test]

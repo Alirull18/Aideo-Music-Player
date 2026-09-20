@@ -1,5 +1,5 @@
 import { useState, useMemo, memo } from 'react';
-import { Play, ChevronLeft, ChevronRight, RefreshCw, Disc3 } from 'lucide-react';
+import { Play, ChevronLeft, ChevronRight, RefreshCw, Disc3, MoreVertical } from 'lucide-react';
 import { useStore } from '../../store';
 import {
   AideoHomeProps,
@@ -35,14 +35,23 @@ const SpatialTrackRow = memo(({
   track,
   idx,
   onPlay,
+  onContextMenu,
 }: {
   track: any;
   idx: number;
   onPlay: (t: any) => void;
+  onContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void;
 }) => (
   <div
     className="am-track-row"
     onClick={() => onPlay(track)}
+    onContextMenu={(e) => {
+      if (onContextMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(track, { x: e.clientX, y: e.clientY });
+      }
+    }}
     role="button"
     tabIndex={0}
     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onPlay(track); }}
@@ -68,6 +77,20 @@ const SpatialTrackRow = memo(({
       <SongSources track={track} />
     </div>
     {track.duration_raw && <div className="am-row-duration">{track.duration_raw}</div>}
+    {onContextMenu && (
+      <button
+        type="button"
+        className="ah-row-more-btn"
+        title="More options"
+        aria-label="More options"
+        onClick={(e) => {
+          e.stopPropagation();
+          onContextMenu(track, e.currentTarget.getBoundingClientRect());
+        }}
+      >
+        <MoreVertical size={15} />
+      </button>
+    )}
   </div>
 ));
 
@@ -75,13 +98,22 @@ const SpatialTrackRow = memo(({
 const SpatialAlbumCard = memo(({
   track,
   onPlay,
+  onContextMenu,
 }: {
   track: any;
   onPlay: (t: any) => void;
+  onContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void;
 }) => (
   <div
     className="am-card"
     onClick={() => onPlay(track)}
+    onContextMenu={(e) => {
+      if (onContextMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(track, { x: e.clientX, y: e.clientY });
+      }
+    }}
     role="button"
     tabIndex={0}
     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onPlay(track); }}
@@ -96,6 +128,20 @@ const SpatialAlbumCard = memo(({
         size={168}
         radius={10}
       />
+      {onContextMenu && (
+        <button
+          type="button"
+          className="ah-card-more-btn"
+          title="More options"
+          aria-label="More options"
+          onClick={(e) => {
+            e.stopPropagation();
+            onContextMenu(track, e.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <MoreVertical size={16} />
+        </button>
+      )}
       <div className="am-card-play-hover">
         <SpatialPlayButton onClick={() => onPlay(track)} size={44} />
       </div>
@@ -119,6 +165,7 @@ export function SpatialGlassHome({
   isRefreshingRecs,
   onRefreshRecs,
   onPlayTrack,
+  onContextMenu,
   resume,
   search,
   layoutFilter,
@@ -289,7 +336,17 @@ export function SpatialGlassHome({
 
       {/* ── PAGED SPATIAL HERO MARQUEE ── */}
       {currentHeroTrack && (
-        <section className="am-hero-section" aria-label="Featured spotlight carousel">
+        <section
+          className="am-hero-section"
+          aria-label="Featured spotlight carousel"
+          onContextMenu={(e) => {
+            if (onContextMenu && currentHeroTrack) {
+              e.preventDefault();
+              e.stopPropagation();
+              onContextMenu(currentHeroTrack, { x: e.clientX, y: e.clientY });
+            }
+          }}
+        >
           <div className="am-hero-card">
             {/* Ambient Blurred Background Art */}
             <div
@@ -324,6 +381,20 @@ export function SpatialGlassHome({
                     <Play size={16} fill="#ffffff" color="#ffffff" />
                     <span>Listen Now</span>
                   </button>
+                  {onContextMenu && (
+                    <button
+                      type="button"
+                      className="ah-row-more-btn"
+                      title="More options"
+                      aria-label="More options"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onContextMenu(currentHeroTrack, e.currentTarget.getBoundingClientRect());
+                      }}
+                    >
+                      <MoreVertical size={16} />
+                    </button>
+                  )}
                   <SongSources track={currentHeroTrack} />
                 </div>
               </div>
@@ -407,6 +478,7 @@ export function SpatialGlassHome({
                 track={track}
                 idx={idx}
                 onPlay={onPlayTrack}
+                onContextMenu={onContextMenu}
               />
             ))}
           </div>
@@ -479,6 +551,7 @@ export function SpatialGlassHome({
                       key={`am-${shelf.id}-${track.id || track.url || idx}`}
                       track={track}
                       onPlay={onPlayTrack}
+                      onContextMenu={onContextMenu}
                     />
                   ))}
                 </div>

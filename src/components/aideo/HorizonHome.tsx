@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, memo } from 'react';
-import { Play, ChevronLeft, ChevronRight, RefreshCw, Disc3 } from 'lucide-react';
+import { Play, ChevronLeft, ChevronRight, RefreshCw, Disc3, MoreVertical } from 'lucide-react';
 import { useStore } from '../../store';
 import {
   AideoHomeProps,
@@ -53,15 +53,22 @@ const HorizonPlayButton = memo(({ onClick, size = 44 }: { onClick: () => void; s
     aria-label="Play track"
     style={{ width: size, height: size }}
   >
-    <Play size={Math.round(size * 0.44)} fill="#000000" color="#000000" />
+    <Play size={Math.round(size * 0.44)} fill="#ffffff" color="#ffffff" />
   </button>
 ));
 
 // Quick-Launch 6-Pack Card
-const HorizonQuickCard = memo(({ track, onPlay }: { track: any; onPlay: (t: any) => void }) => (
+const HorizonQuickCard = memo(({ track, onPlay, onContextMenu }: { track: any; onPlay: (t: any) => void; onContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void }) => (
   <div
     className="sp-quick-card"
     onClick={() => onPlay(track)}
+    onContextMenu={(e) => {
+      if (onContextMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(track, { x: e.clientX, y: e.clientY });
+      }
+    }}
     role="button"
     tabIndex={0}
     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onPlay(track); }}
@@ -81,17 +88,38 @@ const HorizonQuickCard = memo(({ track, onPlay }: { track: any; onPlay: (t: any)
       <div className="sp-quick-title" title={track.title}>{track.title}</div>
       <div className="sp-quick-sub">{track.artist || 'Unknown Artist'}</div>
     </div>
-    <div className="sp-quick-play-wrap">
+    <div className="sp-quick-play-wrap" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {onContextMenu && (
+        <button
+          type="button"
+          className="ah-row-more-btn"
+          title="More options"
+          aria-label="More options"
+          onClick={(e) => {
+            e.stopPropagation();
+            onContextMenu(track, e.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <MoreVertical size={15} />
+        </button>
+      )}
       <HorizonPlayButton onClick={() => onPlay(track)} size={40} />
     </div>
   </div>
 ));
 
 // Square Card for Horizontal Carousel Shelves
-const HorizonShelfCard = memo(({ track, onPlay }: { track: any; onPlay: (t: any) => void }) => (
+const HorizonShelfCard = memo(({ track, onPlay, onContextMenu }: { track: any; onPlay: (t: any) => void; onContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void }) => (
   <div
     className="sp-card"
     onClick={() => onPlay(track)}
+    onContextMenu={(e) => {
+      if (onContextMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(track, { x: e.clientX, y: e.clientY });
+      }
+    }}
     role="button"
     tabIndex={0}
     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onPlay(track); }}
@@ -106,6 +134,20 @@ const HorizonShelfCard = memo(({ track, onPlay }: { track: any; onPlay: (t: any)
         size={160}
         radius={6}
       />
+      {onContextMenu && (
+        <button
+          type="button"
+          className="ah-card-more-btn"
+          title="More options"
+          aria-label="More options"
+          onClick={(e) => {
+            e.stopPropagation();
+            onContextMenu(track, e.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <MoreVertical size={16} />
+        </button>
+      )}
       <div className="sp-card-play-hover">
         <HorizonPlayButton onClick={() => onPlay(track)} size={44} />
       </div>
@@ -130,6 +172,7 @@ export function HorizonHome({
   resume,
   search,
   layoutFilter,
+  onContextMenu,
 }: AideoHomeProps) {
   const [filter, setFilter] = useState<HorizonFilter>('all');
 
@@ -246,7 +289,7 @@ export function HorizonHome({
             onClick={resume.onResume}
             aria-label="Resume playback"
           >
-            <Play size={14} fill="#000000" color="#000000" />
+            <Play size={14} fill="#ffffff" color="#ffffff" />
             <span>Resume</span>
           </button>
           <button
@@ -304,6 +347,7 @@ export function HorizonHome({
                 key={`quick-${track.id || track.url || track.title}`}
                 track={track}
                 onPlay={onPlayTrack}
+                onContextMenu={onContextMenu}
               />
             ))}
           </div>
@@ -360,6 +404,7 @@ export function HorizonHome({
                       key={`sp-${shelf.id}-${track.id || track.url || idx}`}
                       track={track}
                       onPlay={onPlayTrack}
+                      onContextMenu={onContextMenu}
                     />
                   ))}
                 </div>

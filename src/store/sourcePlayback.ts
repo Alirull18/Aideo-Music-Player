@@ -92,6 +92,9 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
   const token = sequence;
   const current = () => token === sequence;
   const overallDeadline = Date.now() + 15000;
+  if (get().playback.status === 'Playing') {
+    invoke('pause_track').catch(() => {});
+  }
   let track: Track = { ...applySourcePreference(original), active_source: undefined, active_quality: undefined };
   let context = track.source_context!;
   const quality = get().streamingQuality;

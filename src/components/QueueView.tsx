@@ -22,7 +22,6 @@ export function QueueView() {
   })));
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   const {
     containerRef,
@@ -213,8 +212,7 @@ export function QueueView() {
                       <div
                         key={`${t.path}-${i}`}
                         data-queue-index={i}
-                        onMouseEnter={() => setHoveredIdx(i)}
-                        onMouseLeave={() => setHoveredIdx(null)}
+                        className="queue-item"
                         style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -236,6 +234,7 @@ export function QueueView() {
                       >
                         <div 
                           onPointerDown={(e) => startPointerDrag(i, e)}
+                          className="queue-grip"
                           style={{ 
                             color: 'var(--text-dim)', 
                             cursor: 'grab', 
@@ -246,7 +245,7 @@ export function QueueView() {
                           }}
                           title="Drag to reorder"
                         >
-                          <GripVertical size={15} style={{ opacity: hoveredIdx === i || isDraggingThis ? 1 : 0.4, color: (hoveredIdx === i || isDraggingThis) ? 'var(--accent)' : 'inherit', transition: 'opacity 0.2s' }} />
+                          <GripVertical size={15} style={{ opacity: isDraggingThis ? 1 : undefined, color: isDraggingThis ? 'var(--accent)' : undefined }} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -264,37 +263,34 @@ export function QueueView() {
                           </div>
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {hoveredIdx === i ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              {i > 0 && (
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); reorderQueue(i, i - 1); }}
-                                  title="Move Up"
-                                  style={{ background: 'var(--glass-h)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'var(--text)', display: 'flex' }}
-                                >
-                                  <ArrowUp size={13} />
-                                </button>
-                              )}
-                              {i < queue.length - 1 && (
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); reorderQueue(i, i + 1); }}
-                                  title="Move Down"
-                                  style={{ background: 'var(--glass-h)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'var(--text)', display: 'flex' }}
-                                >
-                                  <ArrowDown size={13} />
-                                </button>
-                              )}
+                          <div className="queue-actions" style={{ display: 'none', alignItems: 'center', gap: 4 }}>
+                            {i > 0 && (
                               <button 
-                                onClick={(e) => { e.stopPropagation(); removeFromQueue(i); }}
-                                title="Remove from queue"
-                                style={{ background: 'rgba(255,50,50,0.2)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: '#ff6b6b', display: 'flex' }}
+                                onClick={(e) => { e.stopPropagation(); reorderQueue(i, i - 1); }}
+                                title="Move Up"
+                                style={{ background: 'var(--glass-h)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'var(--text)', display: 'flex' }}
                               >
-                                <X size={14} />
+                                <ArrowUp size={13} />
                               </button>
-                            </div>
-                          ) : (
-                            <span>{fmt(t.duration)}</span>
-                          )}
+                            )}
+                            {i < queue.length - 1 && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); reorderQueue(i, i + 1); }}
+                                title="Move Down"
+                                style={{ background: 'var(--glass-h)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: 'var(--text)', display: 'flex' }}
+                              >
+                                <ArrowDown size={13} />
+                              </button>
+                            )}
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); removeFromQueue(i); }}
+                              title="Remove from queue"
+                              style={{ background: 'rgba(255,50,50,0.2)', border: 'none', borderRadius: 4, padding: 4, cursor: 'pointer', color: '#ff6b6b', display: 'flex' }}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                          <span className="queue-duration tabular-nums">{fmt(t.duration)}</span>
                         </div>
                       </div>
                     );

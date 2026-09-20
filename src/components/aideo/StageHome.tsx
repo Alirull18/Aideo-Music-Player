@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { RefreshCw, Play, Sparkles, Radio, Moon, Coffee, Disc, Flame, Waves } from 'lucide-react';
+import { RefreshCw, Play, Sparkles, Radio, Moon, Coffee, Disc, Flame, Waves, MoreVertical } from 'lucide-react';
 import { AideoHomeProps, AideoSearchBar, TrackCover, PlayButton, SHELVES, buildTaggedFeed, tracksForShelf, ShelfId, SongSources } from './HomeParts';
 
 type AmbientMood = 'all' | 'midnight' | 'focus' | 'warmth' | 'lossless';
@@ -20,7 +20,7 @@ const AMBIENT_MOODS: MoodConfig[] = [
   { id: 'lossless', label: 'Lossless Hi-Fi', icon: Flame, shelfFilter: ['tidal'], color: '#22d3ee' },
 ];
 
-export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search, layoutFilter }: AideoHomeProps) {
+export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search, layoutFilter, onContextMenu }: AideoHomeProps) {
   const [activeMood, setActiveMood] = useState<AmbientMood>('all');
 
   const feed = useMemo(() => buildTaggedFeed(discoveryData).filter(t => t.shelf !== 'recent'), [discoveryData]);
@@ -121,7 +121,17 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
 
           {/* ── FLOATING GLASS SOUNDSTAGE (CENTERPIECE) ── */}
           {!isLoadingRecs && spotlightTrack && (
-            <div className="ah-soundstage-centerpiece" onClick={() => onPlayTrack(spotlightTrack)}>
+            <div
+              className="ah-soundstage-centerpiece"
+              onClick={() => onPlayTrack(spotlightTrack)}
+              onContextMenu={(e) => {
+                if (onContextMenu) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onContextMenu(spotlightTrack, { x: e.clientX, y: e.clientY });
+                }
+              }}
+            >
               <div className="ah-soundstage-art-wrap">
                 <TrackCover
                   src={spotlightTrack.cover_url}
@@ -131,6 +141,20 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                   size={120}
                   radius={16}
                 />
+                {onContextMenu && (
+                  <button
+                    type="button"
+                    className="ah-card-more-btn"
+                    title="More options"
+                    aria-label="More options"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onContextMenu(spotlightTrack, e.currentTarget.getBoundingClientRect());
+                    }}
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+                )}
                 <div className="ah-soundstage-vinyl-orbit">
                   <Disc size={96} className="ah-orbit-disc" />
                 </div>
@@ -187,7 +211,18 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                 </div>
                 <div className="ah-grid2">
                   {g.items.map(item => (
-                    <div key={item.track.id} className="ah-row ah-stage-glass-row" onClick={() => onPlayTrack(item.track)}>
+                    <div
+                      key={item.track.id}
+                      className="ah-row ah-stage-glass-row"
+                      onClick={() => onPlayTrack(item.track)}
+                      onContextMenu={(e) => {
+                        if (onContextMenu) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onContextMenu(item.track, { x: e.clientX, y: e.clientY });
+                        }
+                      }}
+                    >
                       <TrackCover
                         src={item.track.cover_url}
                         path={item.track.path || item.track.url}
@@ -201,7 +236,23 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
                         <div className="ah-row-artist" title={item.track.artist}>{item.track.artist}</div>
                         <SongSources track={item.track} />
                       </div>
-                      <PlayButton onClick={() => onPlayTrack(item.track)} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <PlayButton onClick={() => onPlayTrack(item.track)} />
+                        {onContextMenu && (
+                          <button
+                            type="button"
+                            className="ah-row-more-btn"
+                            title="More options"
+                            aria-label="More options"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onContextMenu(item.track, e.currentTarget.getBoundingClientRect());
+                            }}
+                          >
+                            <MoreVertical size={15} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -220,9 +271,34 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
             </div>
             <div className="ah-strip">
               {history.map(t => (
-                <div key={t.id} className="ah-hist ah-stage-hist" onClick={() => onPlayTrack(t)}>
+                <div
+                  key={t.id}
+                  className="ah-hist ah-stage-hist"
+                  onClick={() => onPlayTrack(t)}
+                  onContextMenu={(e) => {
+                    if (onContextMenu) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onContextMenu(t, { x: e.clientX, y: e.clientY });
+                    }
+                  }}
+                >
                   <div className="ah-stage-hist-art">
                     <TrackCover src={t.cover_url} path={t.path || t.url} title={t.title} artist={t.artist} size={132} radius={12} />
+                    {onContextMenu && (
+                      <button
+                        type="button"
+                        className="ah-card-more-btn"
+                        title="More options"
+                        aria-label="More options"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onContextMenu(t, e.currentTarget.getBoundingClientRect());
+                        }}
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                    )}
                     <PlayButton size={34} onClick={() => onPlayTrack(t)} />
                   </div>
                   <div className="ah-card-title" title={t.title}>{t.title}</div>

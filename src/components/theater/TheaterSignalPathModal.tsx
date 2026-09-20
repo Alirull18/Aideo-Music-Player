@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -90,9 +91,31 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
     return list;
   }, [effectivePath, dsp, playback.volume]);
 
+  const [internalBands, setInternalBands] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    let lastUpdate = 0;
+    const unlistenPromise = listen<number[]>('audio-spectrum', event => {
+      const now = performance.now();
+      if (active && now - lastUpdate >= 65) {
+        lastUpdate = now;
+        setInternalBands(event.payload);
+      }
+    });
+
+    return () => {
+      active = false;
+      unlistenPromise.then(fn => fn()).catch(() => {});
+    };
+  }, [isOpen]);
+
+  const activeSpectrum = spectrumBands && spectrumBands.length > 0 ? spectrumBands : internalBands;
+
   // Real-time peak & headroom telemetry calculation
   const { peakDbStr, headroomDbStr, isClipping, isNearLimit, peakRatio } = useMemo(() => {
-    if (!spectrumBands || spectrumBands.length === 0) {
+    if (!activeSpectrum || activeSpectrum.length === 0) {
       return {
         peakDbStr: '-12.0',
         headroomDbStr: '+12.0',
@@ -101,7 +124,7 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
         peakRatio: 0.25
       };
     }
-    const maxAmp = Math.max(0.001, Math.min(1.0, Math.max(...spectrumBands)));
+    const maxAmp = Math.max(0.001, Math.min(1.0, Math.max(...activeSpectrum)));
     const db = 20 * Math.log10(maxAmp);
     const headroom = Math.max(0, -db);
     return {
@@ -111,7 +134,7 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
       isNearLimit: maxAmp >= 0.89 && maxAmp < 0.98,
       peakRatio: maxAmp
     };
-  }, [spectrumBands]);
+  }, [activeSpectrum]);
 
   return (
     <AnimatePresence>

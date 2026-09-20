@@ -13,20 +13,328 @@ import { CastSelector } from './CastSelector';
 import { fmt, parseDuration, baseName, getStreamName, isRadioStream } from '../utils';
 import { generateWaveformPeaks } from '../utils/waveform';
 import { getAudioPathPresentation } from '../utils/audioPath';
+import type { LyricLine } from '../store/types';
+
+function PlayerBarLyricPreview({
+  lyrics,
+  lyricOffset,
+  className,
+  onClick,
+  icon,
+}: {
+  lyrics: LyricLine[];
+  lyricOffset: number;
+  className?: string;
+  onClick?: () => void;
+  icon?: React.ReactNode;
+}) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  const activeLyric = useMemo(() => {
+    if (!lyrics.length) return null;
+    const now = positionSecs + lyricOffset / 1000;
+    let current = null;
+    for (let i = 0; i < lyrics.length; i++) {
+      if (lyrics[i].time_secs <= now) current = lyrics[i];
+    }
+    return current;
+  }, [lyrics, positionSecs, lyricOffset]);
+
+  if (!activeLyric) return null;
+  return (
+    <div className={className} onClick={onClick}>
+      {icon}
+      <span>{activeLyric.text}</span>
+    </div>
+  );
+}
+
+function ClassicProgressRow({
+  duration,
+  isLive,
+  waveformPeaks,
+  onSeek,
+}: {
+  duration: number;
+  isLive: boolean;
+  waveformPeaks: number[];
+  onSeek: (pct: number) => void;
+}) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onSeek(clickPct * duration);
+  };
+
+  return (
+    <div className="progress-row">
+      <span className="prog-time" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(positionSecs)}</span>
+      {isLive ? (
+        <div className="prog-track stream-active">
+          <motion.div 
+            className="stream-progress-fill"
+            animate={{ x: ['-100%', '100%'] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+          />
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, letterSpacing: 2, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+            Streaming Live
+          </div>
+        </div>
+      ) : (
+        <div className="prog-track" onClick={handleSeek} style={{ position: 'relative', overflow: 'hidden' }}>
+          {waveformPeaks.length > 0 ? (
+            <div className="waveform-bar-container" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, padding: '0 4px', pointerEvents: 'none', zIndex: 1 }}>
+              {waveformPeaks.map((peak, idx) => {
+                const barPct = (idx / waveformPeaks.length) * 100;
+                const isPlayed = barPct <= pct;
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      flex: 1,
+                      height: `${Math.max(25, peak * 100)}%`,
+                      background: isPlayed ? 'var(--accent)' : 'var(--wave-idle)',
+                      borderRadius: 1,
+                      transition: 'background 0.1s ease',
+                    }}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ position: 'absolute', inset: 0, background: 'var(--wave-idle)' }} />
+          )}
+          <div className="prog-fill" style={{ width: `${pct}%`, opacity: 0.25 }} />
+        </div>
+      )}
+      <span className="prog-time" style={{ fontVariantNumeric: 'tabular-nums' }}>{isLive ? 'LIVE' : fmt(duration)}</span>
+    </div>
+  );
+}
+
+function FloatingSeekRow({
+  duration,
+  isLive,
+  onSeek,
+}: {
+  duration: number;
+  isLive: boolean;
+  onSeek: (pct: number) => void;
+}) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
+  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onSeek(clickPct * duration);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverSeekPct(p);
+  };
+
+  return (
+    <div className="floating-seek-row">
+      <span className="floating-time-num" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(positionSecs)}</span>
+      <div 
+        className="floating-progress-track"
+        onClick={handleSeek}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverSeekPct(null)}
+      >
+        <div className="floating-progress-fill" style={{ width: `${pct}%` }} />
+        {hoverSeekPct !== null && (
+          <div className="floating-hover-indicator" style={{ left: `${hoverSeekPct * 100}%` }} />
+        )}
+      </div>
+      <span className="floating-time-num" style={{ fontVariantNumeric: 'tabular-nums' }}>{isLive ? 'LIVE' : fmt(duration)}</span>
+    </div>
+  );
+}
+
+function WaveformStudioTimeDisplay({ duration, isLive }: { duration: number; isLive: boolean }) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  return (
+    <div className="studio-time-display">
+      <span className="studio-time-current" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(positionSecs)}</span>
+      <span className="studio-time-sep">/</span>
+      <span className="studio-time-total" style={{ fontVariantNumeric: 'tabular-nums' }}>{isLive ? 'LIVE' : fmt(duration)}</span>
+    </div>
+  );
+}
+
+function WaveformDeckTopScrubber({
+  duration,
+  waveformPeaks,
+  onSeek,
+}: {
+  duration: number;
+  waveformPeaks: number[];
+  onSeek: (pct: number) => void;
+}) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
+  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onSeek(clickPct * duration);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverSeekPct(p);
+  };
+
+  return (
+    <div 
+      className="waveform-deck-top"
+      onClick={handleSeek}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setHoverSeekPct(null)}
+      title="Interactive High-Definition Waveform Scrubber"
+    >
+      {waveformPeaks.length > 0 ? (
+        <div className="waveform-full-bars">
+          {waveformPeaks.map((peak, idx) => {
+            const barPct = (idx / waveformPeaks.length) * 100;
+            const isPlayed = barPct <= pct;
+            const isHovered = hoverSeekPct !== null && barPct <= hoverSeekPct * 100;
+            return (
+              <div
+                key={idx}
+                className="waveform-peak-bar"
+                style={{
+                  height: `${Math.max(18, peak * 100)}%`,
+                  background: isPlayed 
+                    ? 'linear-gradient(180deg, var(--accent, #8b5cf6), rgba(var(--accent-rgb), 0.7))' 
+                    : isHovered 
+                    ? 'var(--wave-hover)' 
+                    : 'var(--wave-idle)',
+                  boxShadow: isPlayed ? '0 0 6px rgba(var(--accent-rgb), 0.35)' : 'none'
+                }}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <div className="waveform-flat-line" />
+      )}
+      <div className="waveform-cursor-line" style={{ left: `${pct}%` }} />
+      {hoverSeekPct !== null && (
+        <div className="waveform-hover-tag" style={{ left: `${hoverSeekPct * 100}%` }}>
+          {fmt(hoverSeekPct * duration)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MinimalHairlineScrubber({ duration, onSeek }: { duration: number; onSeek: (pct: number) => void }) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
+  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onSeek(clickPct * duration);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverSeekPct(p);
+  };
+
+  return (
+    <div 
+      className="minimal-hairline-scrubber"
+      onClick={handleSeek}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setHoverSeekPct(null)}
+      title="Scrub Track"
+    >
+      <div className="minimal-hairline-fill" style={{ width: `${pct}%` }} />
+      {hoverSeekPct !== null && (
+        <div className="minimal-hairline-hover" style={{ left: `${hoverSeekPct * 100}%` }} />
+      )}
+    </div>
+  );
+}
+
+function MinimalTimeReadout({ duration, isLive }: { duration: number; isLive: boolean }) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  return (
+    <div className="minimal-time-readout" style={{ fontVariantNumeric: 'tabular-nums' }}>
+      <span>{fmt(positionSecs)}</span>
+      <span style={{ opacity: 0.4 }}>/</span>
+      <span>{isLive ? 'LIVE' : fmt(duration)}</span>
+    </div>
+  );
+}
+
+function VinylProgressRow({ duration, isLive, onSeek }: { duration: number; isLive: boolean; onSeek: (pct: number) => void }) {
+  const positionSecs = useStore((s) => s.playback.position_secs);
+  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
+  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    onSeek(clickPct * duration);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverSeekPct(p);
+  };
+
+  return (
+    <div className="vinyl-progress-row">
+      <span className="vinyl-amber-time" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(positionSecs)}</span>
+      <div className="vinyl-prog-track" onClick={handleSeek} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverSeekPct(null)} title="Scrub Track">
+        <div className="vinyl-prog-grooves">
+          {Array.from({ length: 32 }).map((_, i) => (
+            <div key={i} className="vinyl-tick" style={{ opacity: (i / 32) * 100 <= pct ? 0.9 : 0.25 }} />
+          ))}
+        </div>
+        <div className="vinyl-prog-fill" style={{ width: `${pct}%` }} />
+        {hoverSeekPct !== null && (
+          <div className="vinyl-prog-hover" style={{ left: `${hoverSeekPct * 100}%` }} />
+        )}
+      </div>
+      <span className="vinyl-amber-time" style={{ fontVariantNumeric: 'tabular-nums' }}>{isLive ? 'LIVE' : fmt(duration)}</span>
+    </div>
+  );
+}
 
 export function PlayerBar() {
   const {
-    view, playback, isMuted, toggleMute, coverArt, lyrics, lyricOffset,
+    view, isMuted, toggleMute, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
     dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
     autoplayEnabled, toggleAutoplay, toggleLoveTrack, toggleDislikeTrack,
     setMiniPlayerMode, desktopLyricsOpen, toggleDesktopLyrics,
     desktopLyricsLocked, toggleDesktopLyricsLocked,
-    playerBarDesign
+    playerBarDesign,
+    playbackStatus,
+    playbackCurrentTrack,
+    playbackIsBuffering,
+    playbackVolume,
+    playbackEffectiveAudioPath,
   } = useStore(useShallow(s => ({
     view: s.view,
-    playback: s.playback,
     isMuted: s.isMuted,
     toggleMute: s.toggleMute,
     coverArt: s.coverArt,
@@ -59,26 +367,22 @@ export function PlayerBar() {
     desktopLyricsLocked: s.desktopLyricsLocked,
     toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
     playerBarDesign: s.playerBarDesign,
+    playbackStatus: s.playback.status,
+    playbackCurrentTrack: s.playback.current_track,
+    playbackIsBuffering: s.playback.is_buffering,
+    playbackVolume: s.playback.volume,
+    playbackEffectiveAudioPath: s.playback.effective_audio_path,
   })));
 
-  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
-  const audioPathPresentation = getAudioPathPresentation(playback);
-
-  const activeLyric = useMemo(() => {
-    if (!lyrics.length) return null;
-    const now = playback.position_secs + lyricOffset / 1000;
-    let current = null;
-    for (let i = 0; i < lyrics.length; i++) {
-      if (lyrics[i].time_secs <= now) current = lyrics[i];
-    }
-    return current;
-  }, [lyrics, playback.position_secs, lyricOffset]);
+  const audioPathPresentation = getAudioPathPresentation({
+    effective_audio_path: playbackEffectiveAudioPath,
+    status: playbackStatus,
+  } as any);
 
   const current = currentTrack;
   const duration = current?.duration || (current?.duration_raw ? parseDuration(current.duration_raw) : 0);
-  const pct = duration > 0 ? (playback.position_secs / duration) * 100 : 0;
-  const isPlaying = playback.status === 'Playing';
-  const isBuffering = Boolean(playback.is_buffering);
+  const isPlaying = playbackStatus === 'Playing';
+  const isBuffering = Boolean(playbackIsBuffering);
   const effectiveCover = coverArt || current?.cover_url || defaultCover;
 
   const waveformPeaks = useMemo(() => {
@@ -86,25 +390,9 @@ export function PlayerBar() {
     return generateWaveformPeaks(current?.path || current?.title || 'aideo', barCount);
   }, [current?.path, current?.title, playerBarDesign]);
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    seek(clickPct * duration);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setHoverSeekPct(p);
-  };
-
-  const handleMouseLeave = () => {
-    setHoverSeekPct(null);
-  };
-
-  const trackTitle = current?.title || (playback.current_track?.startsWith('http') ? getStreamName(playback.current_track) : baseName(playback.current_track)) || 'No Media Loaded';
-  const trackArtist = current?.artist || (playback.current_track?.startsWith('http') ? 'Online Stream' : '—');
-  const isLive = isRadioStream(current, playback.current_track, duration);
+  const trackTitle = current?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack)) || 'No Media Loaded';
+  const trackArtist = current?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—');
+  const isLive = isRadioStream(current, playbackCurrentTrack, duration);
 
   // Render Quality Tag Helper
   const renderQualityTag = () => {
@@ -159,7 +447,7 @@ export function PlayerBar() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            transition: 'all 0.2s ease',
+            transition: 'color 0.2s ease, transform 0.2s ease',
           }}
           title={current.loved === 1 ? "Remove from Loved Streams" : "Add to Loved Streams"}
         >
@@ -180,7 +468,7 @@ export function PlayerBar() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            transition: 'all 0.2s ease',
+            transition: 'color 0.2s ease, transform 0.2s ease',
           }}
           title={current.disliked === 1 ? "Undislike track" : "Dislike track"}
         >
@@ -197,12 +485,12 @@ export function PlayerBar() {
         <button
           className="pb-btn pb-btn-vol"
           onClick={toggleMute}
-          title={isMuted || playback.volume === 0 ? "Unmute (M)" : "Mute (M)"}
+          title={isMuted || playbackVolume === 0 ? "Unmute (M)" : "Mute (M)"}
           style={{ padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          {isMuted || playback.volume === 0 ? (
+          {isMuted || playbackVolume === 0 ? (
             <VolumeX size={16} color="var(--accent, #8b5cf6)" />
-          ) : playback.volume < 0.5 ? (
+          ) : playbackVolume < 0.5 ? (
             <Volume1 size={16} color="var(--text-dim)" />
           ) : (
             <Volume2 size={16} color="var(--text-dim)" />
@@ -215,7 +503,7 @@ export function PlayerBar() {
           max={1} 
           step={0.01} 
           style={{ width: compact ? 65 : 85 }}
-          value={playback.volume} 
+          value={playbackVolume} 
           onChange={e => setVolume(+e.target.value)} 
         />
       </div>
@@ -237,7 +525,7 @@ export function PlayerBar() {
             {badge.label}
           </span>
         )}
-        {!badge && playback.effective_audio_path?.active && playback.effective_audio_path.resampling && dsp.upsample_rate > 0 && (
+        {!badge && playbackEffectiveAudioPath?.active && playbackEffectiveAudioPath.resampling && dsp.upsample_rate > 0 && (
           <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #a855f7, #6366f1)' }}>
             HI-RES · {audioPathPresentation.outputRate / 1000}kHz
           </span>
@@ -345,10 +633,13 @@ export function PlayerBar() {
 
         {/* CENTER */}
         <div className="pb-center">
-          {activeLyric && view !== 'nowplaying' && (
-            <div className="pb-lyric" onClick={() => setView('nowplaying')}>
-              {activeLyric.text}
-            </div>
+          {view !== 'nowplaying' && (
+            <PlayerBarLyricPreview
+              lyrics={lyrics}
+              lyricOffset={lyricOffset}
+              className="pb-lyric"
+              onClick={() => setView('nowplaying')}
+            />
           )}
           <div className="pb-buttons">
             <button className={`pb-btn ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
@@ -373,48 +664,7 @@ export function PlayerBar() {
               <InfinityIcon size={18} />
             </button>
           </div>
-          <div className="progress-row">
-            <span className="prog-time">{fmt(playback.position_secs)}</span>
-            {isLive ? (
-              <div className="prog-track stream-active">
-                <motion.div 
-                  className="stream-progress-fill"
-                  animate={{ x: ['-100%', '100%'] }}
-                  transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                />
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, letterSpacing: 2, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-                  Streaming Live
-                </div>
-              </div>
-            ) : (
-              <div className="prog-track" onClick={handleSeek} style={{ position: 'relative', overflow: 'hidden' }}>
-                {waveformPeaks.length > 0 ? (
-                  <div className="waveform-bar-container" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, padding: '0 4px', pointerEvents: 'none', zIndex: 1 }}>
-                    {waveformPeaks.map((peak, idx) => {
-                      const barPct = (idx / waveformPeaks.length) * 100;
-                      const isPlayed = barPct <= pct;
-                      return (
-                        <div
-                          key={idx}
-                          style={{
-                            flex: 1,
-                            height: `${Math.max(25, peak * 100)}%`,
-                            background: isPlayed ? 'var(--accent)' : 'var(--wave-idle)',
-                            borderRadius: 1,
-                            transition: 'background 0.1s ease',
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div style={{ position: 'absolute', inset: 0, background: 'var(--wave-idle)' }} />
-                )}
-                <div className="prog-fill" style={{ width: `${pct}%`, opacity: 0.25 }} />
-              </div>
-            )}
-            <span className="prog-time">{isLive ? 'LIVE' : fmt(duration)}</span>
-          </div>
+          <ClassicProgressRow duration={duration} isLive={isLive} waveformPeaks={waveformPeaks} onSeek={seek} />
         </div>
 
         {/* RIGHT */}
@@ -452,11 +702,14 @@ export function PlayerBar() {
 
           {/* CENTER: Main Floating Controls & Progress */}
           <div className="floating-island-center">
-            {activeLyric && view !== 'nowplaying' && (
-              <div className="floating-mini-lyric" onClick={() => setView('nowplaying')}>
-                <Sparkles size={11} color="var(--accent)" />
-                <span>{activeLyric.text}</span>
-              </div>
+            {view !== 'nowplaying' && (
+              <PlayerBarLyricPreview
+                lyrics={lyrics}
+                lyricOffset={lyricOffset}
+                className="floating-mini-lyric"
+                onClick={() => setView('nowplaying')}
+                icon={<Sparkles size={11} color="var(--accent)" />}
+              />
             )}
             <div className="floating-ctrl-row">
               <button className={`pb-btn mini ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
@@ -485,21 +738,7 @@ export function PlayerBar() {
                 <InfinityIcon size={15} />
               </button>
             </div>
-            <div className="floating-seek-row">
-              <span className="floating-time-num">{fmt(playback.position_secs)}</span>
-              <div 
-                className="floating-progress-track"
-                onClick={handleSeek}
-                onMouseMove={handleMouseMove}
-                onMouseLeave={handleMouseLeave}
-              >
-                <div className="floating-progress-fill" style={{ width: `${pct}%` }} />
-                {hoverSeekPct !== null && (
-                  <div className="floating-hover-indicator" style={{ left: `${hoverSeekPct * 100}%` }} />
-                )}
-              </div>
-              <span className="floating-time-num">{isLive ? 'LIVE' : fmt(duration)}</span>
-            </div>
+            <FloatingSeekRow duration={duration} isLive={isLive} onSeek={seek} />
           </div>
 
           {/* RIGHT: Volume & Floating Tools */}
@@ -520,46 +759,7 @@ export function PlayerBar() {
     return (
       <div className="player-bar design-waveform">
         {/* UPPER DECK: Full-Width Audio Waveform Scrubber */}
-        <div 
-          className="waveform-deck-top"
-          onClick={handleSeek}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-          title="Interactive High-Definition Waveform Scrubber"
-        >
-          {waveformPeaks.length > 0 ? (
-            <div className="waveform-full-bars">
-              {waveformPeaks.map((peak, idx) => {
-                const barPct = (idx / waveformPeaks.length) * 100;
-                const isPlayed = barPct <= pct;
-                const isHovered = hoverSeekPct !== null && barPct <= hoverSeekPct * 100;
-                return (
-                  <div
-                    key={idx}
-                    className="waveform-peak-bar"
-                    style={{
-                      height: `${Math.max(18, peak * 100)}%`,
-                      background: isPlayed 
-                        ? 'linear-gradient(180deg, var(--accent, #8b5cf6), rgba(var(--accent-rgb), 0.7))' 
-                        : isHovered 
-                        ? 'var(--wave-hover)' 
-                        : 'var(--wave-idle)',
-                      boxShadow: isPlayed ? '0 0 6px rgba(var(--accent-rgb), 0.35)' : 'none'
-                    }}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <div className="waveform-flat-line" />
-          )}
-          <div className="waveform-cursor-line" style={{ left: `${pct}%` }} />
-          {hoverSeekPct !== null && (
-            <div className="waveform-hover-tag" style={{ left: `${hoverSeekPct * 100}%` }}>
-              {fmt(hoverSeekPct * duration)}
-            </div>
-          )}
-        </div>
+        <WaveformDeckTopScrubber duration={duration} waveformPeaks={waveformPeaks} onSeek={seek} />
 
         {/* LOWER DECK: 3-Column Studio Console */}
         <div className="waveform-deck-bottom">
@@ -580,11 +780,7 @@ export function PlayerBar() {
 
           {/* Center Transport & Studio Clocks */}
           <div className="waveform-deck-center">
-            <div className="studio-time-display">
-              <span className="studio-time-current">{fmt(playback.position_secs)}</span>
-              <span className="studio-time-sep">/</span>
-              <span className="studio-time-total">{isLive ? 'LIVE' : fmt(duration)}</span>
-            </div>
+            <WaveformStudioTimeDisplay duration={duration} isLive={isLive} />
             <div className="studio-transport-buttons">
               <button className={`pb-btn ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
                 <Shuffle size={15} />
@@ -632,18 +828,7 @@ export function PlayerBar() {
     return (
       <div className="player-bar design-minimal">
         {/* Hairline Progress Scrubber on Top Border */}
-        <div 
-          className="minimal-hairline-scrubber"
-          onClick={handleSeek}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-          title="Scrub Track"
-        >
-          <div className="minimal-hairline-fill" style={{ width: `${pct}%` }} />
-          {hoverSeekPct !== null && (
-            <div className="minimal-hairline-hover" style={{ left: `${hoverSeekPct * 100}%` }} />
-          )}
-        </div>
+        <MinimalHairlineScrubber duration={duration} onSeek={seek} />
 
         {/* Single Row Minimalist Bar */}
         <div className="minimal-bar-row">
@@ -684,11 +869,7 @@ export function PlayerBar() {
 
           {/* Right: Tabular Time & Compact Actions */}
           <div className="minimal-right">
-            <div className="minimal-time-readout">
-              <span>{fmt(playback.position_secs)}</span>
-              <span style={{ opacity: 0.4 }}>/</span>
-              <span>{isLive ? 'LIVE' : fmt(duration)}</span>
-            </div>
+            <MinimalTimeReadout duration={duration} isLive={isLive} />
             {renderVolume(true)}
             <button className={`pb-btn mini ${showQueue ? 'active' : ''}`} onClick={toggleQueue} title="Queue">
               <ListMusic size={16} />
@@ -746,11 +927,12 @@ export function PlayerBar() {
               <Disc size={12} color="var(--accent)" className={isPlaying ? 'icon-spin-slow' : ''} />
               <span>{isPlaying ? 'TURNTABLE ROTATING' : 'DECK STANDBY'}</span>
             </span>
-            {activeLyric && (
-              <span className="vinyl-lyric-glow" onClick={() => setView('nowplaying')}>
-                {activeLyric.text}
-              </span>
-            )}
+            <PlayerBarLyricPreview
+              lyrics={lyrics}
+              lyricOffset={lyricOffset}
+              className="vinyl-lyric-glow"
+              onClick={() => setView('nowplaying')}
+            />
           </div>
 
           <div className="vinyl-buttons-row">
@@ -772,26 +954,12 @@ export function PlayerBar() {
             <button className={`vinyl-btn ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title="Repeat">
               {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
             </button>
-            <button className={`vinyl-btn ${autoplayEnabled ? 'active' : ''}`} onClick={toggleAutoplay} title="Autoplay">
+            <button className={`vinyl-btn ${autoplayEnabled ? 'active autoplay-active' : ''}`} onClick={toggleAutoplay} title="Autoplay">
               <InfinityIcon size={16} />
             </button>
           </div>
 
-          <div className="vinyl-progress-row">
-            <span className="vinyl-amber-time">{fmt(playback.position_secs)}</span>
-            <div className="vinyl-prog-track" onClick={handleSeek} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} title="Scrub Track">
-              <div className="vinyl-prog-grooves">
-                {Array.from({ length: 32 }).map((_, i) => (
-                  <div key={i} className="vinyl-tick" style={{ opacity: (i / 32) * 100 <= pct ? 0.9 : 0.25 }} />
-                ))}
-              </div>
-              <div className="vinyl-prog-fill" style={{ width: `${pct}%` }} />
-              {hoverSeekPct !== null && (
-                <div className="vinyl-prog-hover" style={{ left: `${hoverSeekPct * 100}%` }} />
-              )}
-            </div>
-            <span className="vinyl-amber-time">{isLive ? 'LIVE' : fmt(duration)}</span>
-          </div>
+          <VinylProgressRow duration={duration} isLive={isLive} onSeek={seek} />
         </div>
 
         {/* RIGHT: Warm Analog LED Badges & Vintage Master Dial */}

@@ -29,7 +29,7 @@ In PowerShell, run:
 winget install Microsoft.WingetCreate
 
 # 2. Automatically generate the package manifest from your latest release
-wingetcreate new https://github.com/Alirul/Aideo-Music-Player/releases/download/v0.9.9/Aideo_0.9.9_x64-setup.exe
+wingetcreate new https://github.com/Alirul/Aideo-Music-Player/releases/download/v0.9.10/Aideo_0.9.10_x64-setup.exe
 ```
 
 When prompted:

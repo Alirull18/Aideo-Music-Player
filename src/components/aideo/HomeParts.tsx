@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, memo } from 'react';
-import { Search, X, History, Music, Play, Loader2 } from 'lucide-react';
+import { Search, X, History, Music, Play, Loader2, MoreVertical } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
@@ -262,6 +262,7 @@ export interface AideoHomeProps {
   resume: HomeResumeInfo | null;
   search: SearchBarProps;
   layoutFilter?: React.ReactNode;
+  onContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void;
 }
 
 export interface SearchBarProps {
@@ -283,6 +284,7 @@ export interface SearchBarProps {
   onDeleteHistory: (e: React.MouseEvent, q: string) => void;
   onPlayQuickTrack: (track: any) => void;
   isSearching: boolean;
+  onTrackContextMenu?: (track: any, anchor: DOMRect | { x: number; y: number }) => void;
 }
 
 // ── Search bar (new design language; classic keeps its own markup) ──
@@ -293,6 +295,7 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
     query, onQueryChange, focused, onFocusChange, suggestions, quickResults, history,
     source, onSourceChange, tidalConnected, qobuzEnabled, qobuzConnected,
     onSubmit, onPickQuery, onDeleteHistory, onPlayQuickTrack, isSearching,
+    onTrackContextMenu,
   } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -375,13 +378,50 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
             <>
               <div className="ah-dd-section">Songs</div>
               {quickResults.map(track => (
-                <div key={`quick-${track.id}`} className="ah-dd-item" onClick={() => onPlayQuickTrack(track)}>
+                <div
+                  key={`quick-${track.id}`}
+                  className="ah-dd-item"
+                  onClick={() => onPlayQuickTrack(track)}
+                  onContextMenu={(e) => {
+                    if (onTrackContextMenu) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onTrackContextMenu(track, { x: e.clientX, y: e.clientY });
+                    }
+                  }}
+                >
                   <TrackCover src={track.cover_url} path={track.path || track.url} title={track.title} artist={track.artist} size={30} radius={6} />
                   <span className="ah-dd-label" style={{ flex: 1 }}>
                     <span className="ah-dd-title">{track.title}</span>
                     <span className="ah-dd-sub">{track.artist}</span>
                   </span>
                   <span className="ah-dd-dur">{track.duration_raw}</span>
+                  {onTrackContextMenu && (
+                    <button
+                      type="button"
+                      className="ah-dd-more"
+                      title="More options"
+                      aria-label="More options"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTrackContextMenu(track, e.currentTarget.getBoundingClientRect());
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-dim)',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 4,
+                        marginLeft: 6,
+                      }}
+                    >
+                      <MoreVertical size={14} />
+                    </button>
+                  )}
                 </div>
               ))}
             </>

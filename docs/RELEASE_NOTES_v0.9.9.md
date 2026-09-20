@@ -53,13 +53,57 @@ Aideo v0.9.9 completely eliminates fragmented music libraries by seamlessly unit
 
 ---
 
-### 🎨 Theater Mode & UI Polish
-* **High-Fidelity Fullscreen Archetypes**:
-  * Enhanced **Editorial Poster Layout** with bold Swiss typography and liner notes.
-  * Polished **Stage Layout** with real-time responsive ambient lighting reactive to track palette and canvas animations.
-  * Integrated track telemetry and audio signal path inspector.
-* **Interactive Source Switcher (`src/components/SourceMenu.tsx`)**:
-  * Instant popover menu on any track card or row to switch between Local, Tidal, Qobuz, or Webstream streams, with live bitrate and format indicators.
+### 🎨 6 Signature Home Screen Experiences & Collapsible Quick Switcher
+* **6 Bespoke Architectural Layouts (`src/components/AideoView.tsx`)**:
+  * **Classic**: Clean, versatile multi-shelf studio catalog with quick mix access.
+  * **Horizon (`src/components/aideo/HorizonHome.tsx`)**: Dynamic visual flow featuring wide responsive hero banners, contextual pill filters, and fluid media grids.
+  * **Spatial Glass (`src/components/aideo/SpatialGlassHome.tsx`)**: Liquid acrylic glass aesthetic with vibrant dynamic ambient artwork bloom and elegant typography.
+  * **Editorial (`src/components/aideo/EditorialHome.tsx`)**: High-contrast Swiss magazine layout with bold serif headlines and typography-led hierarchy.
+  * **Command Deck (`src/components/aideo/CommandDeckHome.tsx`)**: Pro audio engineer console displaying real-time audio statistics, meters, and compact quick-access channels.
+  * **Stage (`src/components/aideo/StageHome.tsx`)**: Live arena concert aesthetic with responsive ambient lighting reacting to track palettes and video canvas.
+* **Collapsible Top-Bar Layout Filter**:
+  * One-click switching between layouts directly from the home header with zero reload or layout jitter.
+
+---
+
+### 🏆 Streaming Quality Leader & Local-Only Privacy Mode
+* **Automated Quality Leader Selection (`src/utils/unifiedSources.ts`, `src/test/streamingQualityLeader.test.tsx`)**:
+  * When a track is available across multiple providers, Aideo automatically resolves and streams the highest available fidelity (`Qobuz 24-bit Hi-Res` > `Tidal Max FLAC` > `Webstream Opus`) without manual intervention.
+  * Interactive `SourceMenu` popover provides instant manual override with live bitrate, sample rate, and format badges.
+* **1-Click Local-Only Mode (`src/test/localModeOnly.test.tsx`)**:
+  * Complete privacy-first offline toggle that instantly disables all outbound network queries, guaranteeing zero telemetry and pure local playback.
+
+---
+
+### 📚 High-Performance Library View & Portal Action Menu
+* **Decoupled Portal TrackActionMenu (`src/components/LibraryView.tsx`)**:
+  * Replaced heavy per-row inline menus with a centralized, floating portal action menu (`activeMenu`).
+  * Drastically reduces DOM node overhead, memory consumption, and layout recalculations.
+* **Silky 60 FPS Virtualized Scrolling**:
+  * Effortlessly scales to handle libraries exceeding 10,000+ tracks with zero frame drops.
+  * Clean category filter chips, glass search bar, batch tag editing, and multi-track playlist actions.
+
+---
+
+### 🖼️ Local Artwork Engine & Sidecar Disk Caching
+* **Pure Rust Embedded Cover Art Extraction (`src-tauri/src/artwork.rs`)**:
+  * High-speed native extraction of embedded ID3v2, FLAC, Vorbis, and MP4 cover art directly from audio files.
+* **Sidecar Disk Caching (`{stem}.jpg`)**:
+  * High-resolution sidecar cache saves extracted covers to local disk alongside tracks, eliminating repetitive decoding and guaranteeing instant, stutter-free artwork loads.
+
+---
+
+### 📊 Universal Scrobbler (Last.fm & ListenBrainz)
+* **Unified Multi-Source Scrobbling (`src/test/lastfmTidalScrobble.test.ts`)**:
+  * Scrobble listening history seamlessly across Local tracks, Tidal, Qobuz, and Webstream.
+  * Metadata is cleaned and normalized before transmission (stripping video suffixes like `(Official Audio)` and `- Topic`) to ensure 100% accurate match rates on Last.fm and ListenBrainz.
+
+---
+
+### 🔔 Interactive Toast Notification Overhaul
+* **Modern Glassmorphic Toast Stack (`src/components/Toast.tsx`, `src/utils/notifications.ts`)**:
+  * Sleek frosted glass notifications with animated progress bars, status icons, and interactive action buttons.
+  * Real-time audio engine state alerts for WASAPI Exclusive activation, fallback transitions, and queue events.
 
 ---
 
@@ -92,12 +136,17 @@ Aideo v0.9.9 completely eliminates fragmented music libraries by seamlessly unit
 ## 📋 Detailed Commit History (v0.9.8 → v0.9.9)
 
 * `feat(sources)`: implement Reliable Unified Music Sources architecture with M1 recording matcher, M2 discovery, M3 lifecycle, and M4 queue persistence
+* `feat(home)`: add 6 signature home screen experiences (Classic, Horizon, Spatial Glass, Editorial, Command Deck, Stage) with collapsible top-bar layout switcher
 * `feat(webstream)`: add native Opus direct audio pipeline with URL caching, prefetching, and duration filtering
 * `feat(canvas)`: add Motion Canvas video artwork extraction, caching, and `CanvasVideoPlayer` component
+* `feat(library)`: overhaul `LibraryView` with decoupled floating `TrackActionMenu` portal, filter chips, and 60 FPS virtualization
+* `feat(artwork)`: add pure Rust embedded cover art reader and sidecar disk caching (`{stem}.jpg`)
+* `feat(scrobble)`: implement universal Last.fm and ListenBrainz scrobbling across local and streaming sources
+* `feat(toast)`: overhaul glassmorphic toast notification stack with interactive actions and animated timers
 * `feat(ui)`: add interactive `SourceMenu` popover with Auto/Manual selection and format badges
 * `feat(settings)`: comprehensive redesign of `SettingsView.tsx` with tabs for Audio, Visualizer, Sources, and Updates
 * `feat(theater)`: enhance `EditorialPosterLayout` and `StageLayout` with Canvas video backdrop integration
 * `feat(lyrics)`: expand multi-tier lyrics fallback with word-by-word TTML and romanization
-* `test`: add `e2e_unified_sources.test.ts` (235 tests), `milestone1_matching.test.ts`, `milestone4_queue_persistence.test.ts`, `m1_adversarial_matcher.test.ts`, `sourcePlayback.test.ts`, and `canvas.test.ts`
+* `test`: add `e2e_unified_sources.test.ts` (235 tests), `milestone1_matching.test.ts`, `milestone4_queue_persistence.test.ts`, `m1_adversarial_matcher.test.ts`, `sourcePlayback.test.ts`, `canvas.test.ts`, `horizonAndSpatialLayouts.test.tsx`, `toastOverhaul.test.tsx`, and `localArtworkRetrieval.test.ts`
 * `license`: update project license to GPL-3.0-or-later across repository manifests
 * `chore`: bump version to v0.9.9 across `package.json`, `Cargo.toml`, `tauri.conf.json`, and documentation

@@ -11,6 +11,7 @@
   - [📑 Table of Contents](#-table-of-contents)
   - [📊 Quick Release Index \& Evolution Matrix](#-quick-release-index--evolution-matrix)
   - [🚀 Version-by-Version Detailed Breakdown](#-version-by-version-detailed-breakdown)
+    - [💎 v0.9.10 — Album Archetypes, Advanced Library Architecture & Audiophile Control](#-v0910--album-archetypes-advanced-library-architecture--audiophile-control)
     - [💎 v0.9.9 — Reliable Unified Music Sources, Direct Webstream Audio & Motion Canvas](#-v099--reliable-unified-music-sources-direct-webstream-audio--motion-canvas)
     - [💎 v0.9.8 — Aideo Connect Mobile Remote, Official Tauri v2 Updater \& Next-Gen Discovery Hubs](#-v098--aideo-connect-mobile-remote-official-tauri-v2-updater--next-gen-discovery-hubs)
     - [💎 v0.9.7 — Theater Archetypes, Audiophile Signal Path \& Visualizer Overhaul](#-v097--theater-archetypes-audiophile-signal-path--visualizer-overhaul)
@@ -52,6 +53,7 @@
 
 | Version | Release Date | Codename / Focus | Primary Capabilities Added |
 |:---|:---:|:---|:---|
+| **v0.9.10** | 2026-09-20 | Album Architectures & Library Designs | 3 distinct album layout architectures (Classic Wall, Compact Table with Inline Accordion, Editorial Magazine), 6 signature Library designs, universal right-click TrackContextMenu, AddToPlaylistModal, zero audio bleed transitions, and Listening Insights V2. |
 | **v0.9.9** | 2026-09-18 | Reliable Unified Sources & Motion Canvas | Reliable Unified Music Sources architecture with conservative recording identity, direct Webstream Opus audio pipeline, Motion Canvas video artwork loops, 6 signature home screen layouts, interactive Source Switcher, Settings overhaul, GPL-3.0 licensing, 1,107 frontend + 315 backend tests. |
 | **v0.9.8** | 2026-09-07 | Aideo Connect & Tauri v2 Updater | Mobile web LAN remote control, Minisign cryptographically verified in-app updater, Next-gen Discovery Hubs (Editorial, Stage), 5-mode visualizer physics. |
 | **v0.9.7** | 2026-09-05 | Theater Archetypes & Signal Path | 5 Theater Archetypes (Hi-Fi Deck, Vinyl Turntable, Stage, Swiss Poster, Zen), Live Signal Path Inspector HUD, PureScope visualizer overhaul, true gapless stream pipeline, EcoQoS opt-out. |
@@ -643,6 +645,38 @@
 3. **Multi-Engine Lyric Scraper:** Integrated NetEase and QQ Music scraping with automatic Romaji transliteration.
 4. **Online Cover Art Resolver:** Automated search and assignment of missing album artwork.
 5. **10-Band Studio Equalizer:** Graphic equalizer with soft-limiting DSP.
+
+### 💎 v0.9.10 — Album Layout Architectures, Library Designs & Audio Engine Hardening
+- **Tag:** `v0.9.10`
+- **Release Date:** 2026-09-20
+- **Full Title:** *Aideo Music Player v0.9.10 — Album Layout Architectures, Library Designs & Audio Engine Hardening*
+- **Primary Goals:** Replace superficial card gimmicks with 3 distinct full-page album layout architectures, introduce 6 signature Library designs, universal right-click TrackContextMenu, AddToPlaylistModal, zero audio bleed transitions, and Listening Insights V2.
+
+#### 🌟 Key Additions & Features
+1. **3 Distinct Album Layout Architectures (`AlbumsView.tsx`):**
+   - **Classic Wall (`classic`)**: Fast, high-density virtualized 2D grid for rapid collection scanning and instant 1-click playback.
+   - **Compact Table (`compact`)**: Dense, sortable table with clickable headers and in-place expandable accordion tracklists with multi-disc support.
+   - **Editorial Magazine (`editorial`)**: Visual storytelling with hero spotlight, sneak-peek tracklists, and curated horizontal shelves.
+2. **6 Signature Library Layout Designs (`LibraryView.tsx`):**
+   - **Classic**: Original balanced table and album grid.
+   - **Studio Pro**: Audiophile rack with compact 38px rows and audio tech chips.
+   - **Editorial Archive**: Rich serif typography with liner notes and vinyl aesthetic.
+   - **Crate Digger**: Split-pane artist/album explorer with 42px rows.
+   - **Ambient Flow**: Fluid glass interface with floating pill capsules.
+   - **Industrial Brutalist**: Swiss typographic terminal with high-contrast amber/cyan.
+3. **Universal Track Context Menu (`TrackContextMenu.tsx`):**
+   - Unified right-click context menu across Library, Albums, Playlists, Queue, Unified Search, and Now Playing.
+   - Play Next, Add to Queue, Add to Playlist, View Album, View Artist, Edit Tags, Show in File Explorer, Switch Audio Source.
+4. **Dedicated Add-to-Playlist Modal (`AddToPlaylistModal.tsx`):**
+   - Quick track assignment to existing playlists or instant new playlist creation.
+5. **Zero Audio Bleed on Manual Track Transitions:**
+   - Eliminated audio bleed when playing a track outside the queue via immediate upfront pause dispatch and backend ringbuffer flush signals.
+6. **Adaptive Appearance Synchronization (`home.css`):**
+   - Horizon and Spatial Glass layouts dynamically follow `var(--accent)` album palette or Settings > Appearance accent colors.
+7. **Local Listening Insights V2 (`ListeningInsightsView.tsx`):**
+   - Interactive listening heatmaps, peak hours, habit radar charts, and skip rate tracking.
+8. **High-Performance View Skeletons (`ViewSkeleton.tsx`):**
+   - Shimmering placeholders for zero layout shifts during initial load.
 
 ---
 
