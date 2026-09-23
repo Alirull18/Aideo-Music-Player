@@ -2,6 +2,10 @@
 
 Welcome to **Aideo v0.9.10**! This milestone delivers major architectural upgrades across album and library browsing, user interactions, audio engine transition hardening, and visual design consistency.
 
+> [!IMPORTANT]
+> **Notice for v0.9.9 Users (One-Time Manual Install Required):**
+> If you are upgrading from v0.9.9, please download and run the v0.9.10 installer (`.exe` or `.msi`) directly from GitHub Releases or via `winget upgrade Alirul.Aideo`. In v0.9.9, the embedded updater public key did not match the GitHub Actions signing keypair, causing signature verification to fail. v0.9.10 permanently aligns the embedded public key with our release signing keypair, so all subsequent updates (v0.9.10 and newer) will update automatically inside the app.
+
 ---
 
 ## 🌟 Highlights & Key Additions

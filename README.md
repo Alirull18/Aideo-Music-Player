@@ -5,6 +5,8 @@
 [![Platform: Windows 10 | 11](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://github.com/Alirull18/Aideo-Music-Player/releases/latest)
 [![Website](https://img.shields.io/badge/Website-alirull18.github.io-8A2BE2?logo=googlechrome&logoColor=white)](https://alirull18.github.io/Aideo-Music-Player/)
 [![Download for Windows](https://img.shields.io/badge/Download-Windows%20x64-brightgreen?logo=windows&logoColor=white)](https://github.com/Alirull18/Aideo-Music-Player/releases/latest)
+[![Total Downloads](https://img.shields.io/github/downloads/Alirull18/Aideo-Music-Player/total?label=Total%20Downloads&logo=github&logoColor=white&color=2ea44f)](https://github.com/Alirull18/Aideo-Music-Player/releases)
+[![Latest Downloads](https://img.shields.io/github/downloads/Alirull18/Aideo-Music-Player/latest/total?label=Latest%20Downloads&logo=github&logoColor=white&color=0078D6)](https://github.com/Alirull18/Aideo-Music-Player/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-Backend-000000?logo=rust)](https://www.rust-lang.org)
@@ -13,7 +15,7 @@
 <div align="center">
   <p>
     <a href="https://alirull18.github.io/Aideo-Music-Player/"><strong>🌐 Official Website</strong></a> &nbsp;•&nbsp;
-    <a href="https://github.com/Alirul/Aideo-Music-Player/releases/latest"><strong>📥 Download for Windows (.exe / .msi)</strong></a> &nbsp;•&nbsp;
+    <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest"><strong>📥 Download for Windows (.exe / .msi)</strong></a> &nbsp;•&nbsp;
     <a href="docs/RELEASE_NOTES_v0.9.10.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
     <a href="https://www.producthunt.com/products/aideo-music-player"><strong>🚀 Product Hunt</strong></a>
   </p>
@@ -288,9 +290,9 @@ Aideo Music Player is designed natively for 64-bit **Windows 10** and **Windows 
 ### 📥 Direct Windows Installers
 | Package | Format | Architecture | Download Link | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Windows Setup Installer** | `.exe` | `x64` | [**Download Aideo Setup .exe**](https://github.com/Alirul/Aideo-Music-Player/releases/latest) | Recommended for most Windows users (automatic updates) |
-| **Windows MSI Installer** | `.msi` | `x64` | [**Download Aideo .msi**](https://github.com/Alirul/Aideo-Music-Player/releases/latest) | Clean enterprise & silent installation |
-| **All Release Assets** | Multi | `x64` | [**GitHub Releases**](https://github.com/Alirul/Aideo-Music-Player/releases) | Standalone archives, changelogs, and checksums |
+| **Windows Setup Installer** | `.exe` | `x64` | [**Download Aideo Setup .exe**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest) | Recommended for most Windows users (automatic updates) |
+| **Windows MSI Installer** | `.msi` | `x64` | [**Download Aideo .msi**](https://github.com/Alirull18/Aideo-Music-Player/releases/latest) | Clean enterprise & silent installation |
+| **All Release Assets** | Multi | `x64` | [**GitHub Releases**](https://github.com/Alirull18/Aideo-Music-Player/releases) | Standalone archives, changelogs, and checksums |
 
 ### ⚡ Quick Start
 1. **Download & Run**: Grab the `.exe` or `.msi` installer above and run it on your Windows 10/11 PC.
