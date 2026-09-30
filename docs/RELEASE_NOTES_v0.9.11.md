@@ -73,7 +73,7 @@ Welcome to **Aideo v0.9.11**! This milestone delivers critical reliability and p
 | **Frontend TypeScript Typecheck** | `PASSED (0 errors)` | `npx tsc --noEmit` across all React 19 / TS components |
 | **Frontend Unit & Integration Tests** | `PASSED (1,204/1,204)` | `npx vitest run src/test` across **116 test files** (100% passing) |
 | **Backend Rust Check** | `PASSED (0 errors)` | `cargo check --quiet --manifest-path src-tauri/Cargo.toml` |
-| **Backend Rust Test Suite** | `PASSED (343/345)` | `cargo test --quiet --manifest-path src-tauri/Cargo.toml` (343 passed, 2 ignored, 0 failed) |
+| **Backend Rust Test Suite** | `PASSED (341/345)` | `cargo test --quiet --manifest-path src-tauri/Cargo.toml` (341 passed, 4 ignored [2 live network, 2 host audio device], 0 failed) |
 
 ---
 
