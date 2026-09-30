@@ -26,6 +26,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Verify WINGET_TOKEN Secret
+        shell: pwsh
+        run: |
+          if (-not "${{ secrets.WINGET_TOKEN }}") {
+            Write-Error "WINGET_TOKEN secret is not set in repository Secrets! Please create a Personal Access Token (classic with 'public_repo' scope) and add it as WINGET_TOKEN in Settings > Secrets and variables > Actions."
+            exit 1
+          }
+
       - name: Initial WinGet Registration (v0.9.10)
         if: github.event.inputs.action == 'submit-initial'
         shell: pwsh

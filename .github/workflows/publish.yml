@@ -25,6 +25,7 @@ jobs:
         uses: step-security/setup-protoc@v3
         with:
           version: '25.1'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Protoc
         run: |

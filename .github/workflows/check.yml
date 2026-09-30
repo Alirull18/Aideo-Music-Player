@@ -27,12 +27,15 @@ jobs:
 
   check-backend:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Install Protoc
         uses: step-security/setup-protoc@v3
         with:
           version: '25.1'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
       - name: Rust cache
