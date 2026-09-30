@@ -16,6 +16,7 @@ import { CanvasVideoPlayer } from './CanvasVideoPlayer';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
 import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 import { baseName, getStreamName, isStreamTrack, isRadioStream } from '../utils';
+import { getAudioPathPresentation } from '../utils/audioPath';
 
 function formatArtworkTime(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '--:--';
@@ -120,20 +121,17 @@ type ArtworkTrackMetadata = Track & {
 
 export function NowPlayingView() {
   const {
-    currentDevice, coverArt, dsp,
+    coverArt, dsp,
     liquidBackgroundEnabled, toggleLiquidBackground, currentTrack, autoplayEnabled,
     setView, toggleLoveTrack, toggleDislikeTrack,
     albumArtFit, cachedCloudHashes, setLibrarySearchQuery,
     desktopLyricsOpen, toggleDesktopLyrics, desktopLyricsLocked, toggleDesktopLyricsLocked,
     setMiniPlayerMode,
     playbackCurrentTrack,
-    playbackBitPerfect,
-    playbackDevRate,
+    playback,
     playbackFileRate,
     playbackFileChannels,
     playbackFileFormat,
-    playbackExclusive,
-    playbackDriverType,
     playbackEffectiveAudioPath,
     queue,
     visualizerExpanded,
@@ -148,15 +146,11 @@ export function NowPlayingView() {
   } = useStore(useShallow(s => ({
     playbackCurrentTrack: s.playback.current_track,
     playbackStatus: s.playback.status,
-    playbackBitPerfect: s.playback.bit_perfect,
-    playbackDevRate: s.playback.dev_rate,
+    playback: s.playback,
     playbackFileRate: s.playback.file_rate,
     playbackFileChannels: s.playback.file_ch,
     playbackFileFormat: s.playback.file_format,
-    playbackExclusive: s.playback.exclusive,
-    playbackDriverType: s.playback.driver_type,
     playbackEffectiveAudioPath: s.playback.effective_audio_path,
-    currentDevice: s.currentDevice,
     coverArt: s.coverArt,
     dsp: s.dsp,
     liquidBackgroundEnabled: s.liquidBackgroundEnabled,
@@ -205,15 +199,14 @@ export function NowPlayingView() {
     || playbackFileRate
     || artworkTagDetails?.sample_rate
     || artworkMetadata?.sample_rate
-    || (current?.source_context ? null : playbackDevRate)
     || null;
-  const artworkOutputRate = liveAudioPath?.output.sample_rate || playbackDevRate || artworkSourceRate;
+  const artworkOutputRate = liveAudioPath?.output.sample_rate || null;
   const artworkSourceChannels = liveAudioPath?.source.channels
     || playbackFileChannels
     || artworkTagDetails?.channels
     || artworkMetadata?.channels
     || null;
-  const artworkOutputChannels = liveAudioPath?.output.channels || artworkSourceChannels;
+  const artworkOutputChannels = liveAudioPath?.output.channels || null;
   const artworkSourceBits = liveAudioPath?.source.valid_bits_per_sample
     || liveAudioPath?.source.bits_per_sample
     || artworkTagDetails?.bit_depth
@@ -243,17 +236,18 @@ export function NowPlayingView() {
     artworkMetadata?.bpm != null ? `${Math.round(artworkMetadata.bpm)} BPM` : null,
     formatArtworkRatio(artworkMetadata?.energy),
   ].filter((value): value is string => Boolean(value));
-  const artworkDevice = liveAudioPath?.engine?.toUpperCase() || currentDevice || playbackDriverType || 'WASAPI';
+  const audioPath = getAudioPathPresentation(playback);
+  const artworkDevice = liveAudioPath?.engine?.toUpperCase() || 'Unknown';
   const artworkShareMode = liveAudioPath?.share_mode
     ? titleCaseTechnicalValue(liveAudioPath.share_mode)
-    : playbackExclusive ? 'Exclusive' : 'Shared';
+    : 'Pending';
   const artworkRoute = `${artworkDevice} · ${artworkShareMode}`;
-  const artworkBitPerfect = liveAudioPath ? Boolean(liveAudioPath.strict_bit_perfect) : playbackBitPerfect;
+  const artworkBitPerfect = audioPath.isBitPerfect;
   const artworkProcessing = artworkBitPerfect
     ? 'Bit-perfect'
     : liveAudioPath?.resampling
       ? 'Resampled'
-      : (liveAudioPath?.active_transforms.length || dsp.enabled) ? 'Processed' : 'Direct output';
+      : liveAudioPath ? liveAudioPath.active_transforms.length ? 'Processed' : 'No active transforms' : 'Path pending';
   const artworkOutput = `${formatArtworkResolution(artworkOutputRate, artworkOutputBits, artworkOutputContainerBits)} · ${formatArtworkChannels(artworkOutputChannels)}`;
   const artworkRelease = [artworkTagDetails?.genre, artworkTagDetails?.year].filter(Boolean).join(' · ');
   const artworkFileSize = formatArtworkFileSize(artworkTagDetails?.file_size_bytes);
@@ -1162,56 +1156,14 @@ export function NowPlayingView() {
             {isRadioStream(current, playbackCurrentTrack, current?.duration) && (
               <span className="live-badge" style={{ flexShrink: 0 }}>LIVE</span>
             )}
-            {playbackBitPerfect && (
-              <span
-                className="bit-badge"
-                onClick={() => setIsSignalPathOpen(true)}
-                style={{
-                  flexShrink: 0,
-                  background: 'linear-gradient(135deg, #06b6d4, #3b82f6)',
-                  boxShadow: '0 0 12px rgba(6, 182, 212, 0.4)',
-                  cursor: 'pointer'
-                }}
-                title="Inspect Audio Signal Path & Telemetry"
-              >
-                {currentDevice?.startsWith('[ASIO]') ? 'ASIO BIT-PERFECT' : 'BIT-PERFECT'} {playbackDevRate > 0 ? `· ${playbackDevRate / 1000}kHz` : ''} 🎛️
-              </span>
-            )}
-            {dsp.upsample_rate > 0 && !playbackBitPerfect && (
-              <span
-                className="bit-badge"
-                onClick={() => setIsSignalPathOpen(true)}
-                style={{
-                  flexShrink: 0,
-                  background: 'linear-gradient(135deg, #a855f7, #6366f1)',
-                  boxShadow: '0 0 12px rgba(168, 85, 247, 0.4)',
-                  cursor: 'pointer'
-                }}
-                title="Inspect Audio Signal Path & Telemetry"
-              >
-                HI-RES · {dsp.upsample_rate / 1000}kHz 🎛️
-              </span>
-            )}
-            {!playbackBitPerfect && dsp.upsample_rate <= 0 && (
-              <span
-                className="bit-badge"
-                onClick={() => setIsSignalPathOpen(true)}
-                style={{
-                  flexShrink: 0,
-                  background: 'linear-gradient(135deg, #374151, #4b5563)',
-                  boxShadow: '0 0 8px rgba(0,0,0,0.2)',
-                  cursor: 'pointer',
-                  fontSize: 10,
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  color: '#9ca3af',
-                  border: '1px solid rgba(255,255,255,0.05)'
-                }}
-                title="View Audio Signal Path"
-              >
-                SIGNAL PATH 🎛️
-              </span>
-            )}
+            <span
+              className="bit-badge"
+              onClick={() => setIsSignalPathOpen(true)}
+              style={{ flexShrink: 0, cursor: 'pointer' }}
+              title="Inspect Audio Signal Path & Telemetry"
+            >
+              {audioPath.badge?.label || (dsp.upsample_rate > 0 ? `UPSAMPLE REQUESTED · ${dsp.upsample_rate / 1000}kHz` : audioPath.hudLabel)} 🎛️
+            </span>
             {autoplayEnabled && (current?.path.startsWith('http') || current?.format === 'Tidal FLAC' || current?.format === 'Qobuz FLAC') && (
               <span
                 className="quality-tag autoplay-active"

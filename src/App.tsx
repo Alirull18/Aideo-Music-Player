@@ -419,10 +419,17 @@ function AideoApp() {
       if (isCancelled) { uStateChanged(); return; }
       cleanups.push(uStateChanged);
 
-      const uSourceError = await listen<{ path: string; error: string }>('source-playback-error', event => {
+      const uSourceError = await listen<{ path: string; error: string; attempt_id?: string }>('source-playback-error', event => {
         if (isCancelled) return;
-        if (useStore.getState().currentTrack?.source_context) handleSourceFailure(event.payload.path, event.payload.error);
-        else if (useStore.getState().sourceQueueManaged) useStore.getState().playNext();
+        const state = useStore.getState();
+        if (!state.currentTrack || !event.payload.attempt_id || event.payload.attempt_id !== state.currentAttemptId
+          || ((state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && event.payload.path !== state.playback.current_track)) return;
+        if (state.currentTrack.source_context) {
+          handleSourceFailure(event.payload.path, event.payload.error, event.payload.attempt_id);
+        } else {
+          trackIdToStreamUrl.clear();
+          state.playNext();
+        }
       });
       if (isCancelled) { uSourceError(); return; }
       cleanups.push(uSourceError);
@@ -430,10 +437,8 @@ function AideoApp() {
         if (isCancelled) return;
         const state = useStore.getState();
         const incomingAttemptId = event.payload?.attempt_id;
-        if (incomingAttemptId && state.currentAttemptId && incomingAttemptId !== state.currentAttemptId) {
-          console.log('[App] Discarding playback-ready for superseded attempt:', incomingAttemptId);
-          return;
-        }
+        if (!state.currentTrack || !state.currentAttemptId || incomingAttemptId !== state.currentAttemptId
+          || (event.payload?.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && event.payload.path !== state.playback.current_track)) return;
         const recId = state.currentTrack?.source_context?.recording_id;
         useStore.setState(s => {
           const updates: any = {
@@ -450,54 +455,54 @@ function AideoApp() {
       if (isCancelled) { uPlaybackReady(); return; }
       cleanups.push(uPlaybackReady);
 
+      const uTransitioned = await listen<{ previous_path?: string; previous_attempt_id?: string; path: string; attempt_id: string }>('track-transitioned', async (event) => {
+        if (isCancelled) return;
+        const payload = event?.payload;
+        const state = useStore.getState();
+        if (!payload?.path || !payload.attempt_id || !payload.previous_attempt_id
+          || payload.previous_attempt_id !== state.currentAttemptId
+          || (payload.previous_path && payload.previous_path !== state.playback.current_track)) return;
+        console.log('[App] Received track-transitioned event from native backend:', payload);
+        await state.handleNativeTrackTransition(payload.path, payload.attempt_id);
+      });
+      if (isCancelled) { uTransitioned(); return; }
+      cleanups.push(uTransitioned);
+
       let lastHandledAttemptId: string | null = null;
-      let lastHandledEndedTimestamp = 0;
       const uEnded = await listen<{ attempt_id?: string; path?: string } | undefined>('track-ended', event => {
         if (isCancelled) return;
         const state = useStore.getState();
         const currentAttempt = state.currentAttemptId;
         const eventAttempt = event?.payload?.attempt_id;
-        if (eventAttempt && currentAttempt && eventAttempt !== currentAttempt) {
-          console.log('[App] Discarding stale track-ended event for attempt:', eventAttempt);
-          return;
-        }
+        if (!state.currentTrack || !currentAttempt || eventAttempt !== currentAttempt
+          || (event?.payload?.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && event.payload.path !== state.playback.current_track)) return;
         if (eventAttempt && eventAttempt === lastHandledAttemptId) {
           console.log('[App] Discarding duplicate track-ended event for attempt:', eventAttempt);
           return;
         }
-        if (state.playback.status === 'Stopped' || (state.playback.last_stop_time && Date.now() - state.playback.last_stop_time < 1500)) {
-          console.log('[App] Discarding track-ended event received while playback is stopped or recently stopped');
+        if (state.playback.status === 'Stopped') {
+          console.log('[App] Discarding track-ended event received while playback is stopped');
           return;
-        }
-        const now = Date.now();
-        if (!eventAttempt && now - lastHandledEndedTimestamp < 500) {
-          return;
-        }
-        lastHandledEndedTimestamp = now;
-        if (eventAttempt) {
-          lastHandledAttemptId = eventAttempt;
         }
         if (state.currentTrack?.source_context && state.playback.is_buffering) return;
+        lastHandledAttemptId = currentAttempt;
         console.log('[App] Received track-ended event from backend. Calling playNext()...');
         state.playNext();
       });
       if (isCancelled) { uEnded(); return; }
       cleanups.push(uEnded);
 
-      const uPlaybackError = await listen<string>('playback-error', (event) => {
+      const uPlaybackError = await listen<string | { path?: string; attempt_id?: string; error: string }>('playback-error', (event) => {
         if (isCancelled) return;
-        const { currentTrack, playNext } = useStore.getState();
-        if (currentTrack?.source_context) {
-          useStore.getState().stopTrack();
-          useStore.setState({ playbackError: event.payload });
-          window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: event.payload, type: 'error' } }));
-          return;
-        }
-        console.warn('[playback] Stream decode failed, auto-advancing:', event.payload);
-        if (currentTrack) {
-          trackIdToStreamUrl.clear();
-          playNext();
-        }
+        const state = useStore.getState();
+        const payload = event.payload;
+        const error = typeof payload === 'string' ? payload : payload.error;
+        const incomingAttemptId = typeof payload === 'string' ? undefined : payload.attempt_id;
+        if (!state.currentTrack || !state.currentAttemptId || incomingAttemptId !== state.currentAttemptId
+          || (typeof payload !== 'string' && payload.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
+        void state.stopTrack();
+        useStore.setState({ playbackError: error });
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: error, type: 'error' } }));
       });
       if (isCancelled) { uPlaybackError(); return; }
       cleanups.push(uPlaybackError);
@@ -608,20 +613,24 @@ function AideoApp() {
       if (isCancelled) { uDesktopLockStatus(); return; }
       cleanups.push(uDesktopLockStatus);
 
-      const uBufferingStart = await listen('stream-buffering-start', () => {
+      const uBufferingStart = await listen<string | { path: string; attempt_id?: string }>('stream-buffering-start', (event) => {
         if (isCancelled) return;
-        useStore.setState((s) => ({
-          playback: { ...s.playback, is_buffering: true }
-        }));
+        const state = useStore.getState();
+        const payload = event.payload;
+        if (!state.currentTrack || !state.currentAttemptId || typeof payload === 'string' || payload.attempt_id !== state.currentAttemptId
+          || ((state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
+        useStore.setState((s) => ({ playback: { ...s.playback, is_buffering: true } }));
       });
       if (isCancelled) { uBufferingStart(); return; }
       cleanups.push(uBufferingStart);
 
-      const uBufferingEnd = await listen('stream-buffering-end', () => {
+      const uBufferingEnd = await listen<string | { path: string; attempt_id?: string }>('stream-buffering-end', (event) => {
         if (isCancelled) return;
-        useStore.setState((s) => ({
-          playback: { ...s.playback, is_buffering: false }
-        }));
+        const state = useStore.getState();
+        const payload = event.payload;
+        if (!state.currentTrack || !state.currentAttemptId || typeof payload === 'string' || payload.attempt_id !== state.currentAttemptId
+          || ((state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
+        useStore.setState((s) => ({ playback: { ...s.playback, is_buffering: false } }));
       });
       if (isCancelled) { uBufferingEnd(); return; }
       cleanups.push(uBufferingEnd);

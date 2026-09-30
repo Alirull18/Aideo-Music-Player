@@ -42,6 +42,7 @@ import { TheaterModeDesign, TheaterHudStyle, LyricsDisplayMode, CanvasMode, Canv
 import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
 import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
+import { getAudioPathPresentation } from '../utils/audioPath';
 
 const THEATER_NAMES: Record<TheaterModeDesign, string> = {
   stage: 'Stage View',
@@ -72,7 +73,6 @@ export function FullscreenView() {
     setLyricsDisplayMode,
     accentColor,
     dsp,
-    currentDevice,
     setView,
     seek,
     setVolume,
@@ -96,8 +96,8 @@ export function FullscreenView() {
     playbackCurrentTrack,
     playbackStatus,
     playbackVolume,
-    playbackBitPerfect,
-    playbackDevRate,
+    playback,
+    chromecastConnected,
     playbackIsBuffering,
     queue,
     shuffle,
@@ -119,8 +119,8 @@ export function FullscreenView() {
     playbackStatus: s.playback.status,
     playbackIsBuffering: Boolean(s.playback.is_buffering),
     playbackVolume: s.playback.volume,
-    playbackBitPerfect: s.playback.bit_perfect,
-    playbackDevRate: s.playback.dev_rate,
+    playback: s.playback,
+    chromecastConnected: s.chromecast_connected,
     isMuted: s.isMuted,
     toggleMute: s.toggleMute,
     currentTrack: s.currentTrack,
@@ -132,7 +132,6 @@ export function FullscreenView() {
     setLyricsDisplayMode: s.setLyricsDisplayMode,
     accentColor: s.accentColor,
     dsp: s.dsp,
-    currentDevice: s.currentDevice,
     setView: s.setView,
     seek: s.seek,
     setVolume: s.setVolume,
@@ -348,7 +347,7 @@ export function FullscreenView() {
         handleRomajiToggle();
       } else if (key === 'm') {
         e.preventDefault();
-        state.toggleMute();
+        if (!state.chromecast_connected) state.toggleMute();
       } else if (key === 's') {
         e.preventDefault();
         state.toggleShuffle();
@@ -365,11 +364,11 @@ export function FullscreenView() {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const nextVol = Math.min(1, Math.round((state.playback.volume + 0.05) * 100) / 100);
-        state.setVolume(nextVol);
+        if (!state.chromecast_connected) state.setVolume(nextVol);
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         const nextVol = Math.max(0, Math.round((state.playback.volume - 0.05) * 100) / 100);
-        state.setVolume(nextVol);
+        if (!state.chromecast_connected) state.setVolume(nextVol);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -418,18 +417,16 @@ export function FullscreenView() {
       if (fmtLower.includes('dsf') || fmtLower.includes('dff') || fmtLower.includes('dsd')) {
         return `DSD · ${currentTrack.format.toUpperCase()}`;
       }
-      if (playbackBitPerfect) {
-        const rate = playbackDevRate > 0 ? `· ${playbackDevRate / 1000}kHz` : '';
-        return `BIT-PERFECT ${currentDevice?.startsWith('[ASIO]') ? 'ASIO' : 'WASAPI'} ${rate}`;
-      }
+      const path = getAudioPathPresentation(playback);
+      if (path.badge) return path.badge.label;
       if (dsp.upsample_rate > 0) {
-        return `TRANSCODED · ${dsp.upsample_rate / 1000}kHz`;
+        return `UPSAMPLE REQUESTED · ${dsp.upsample_rate / 1000}kHz`;
       }
       const upperFmt = currentTrack.format.toUpperCase();
       return upperFmt === 'YOUTUBE DIRECT' ? 'WEB STREAM' : upperFmt;
     }
     return 'STANDARD AUDIO';
-  }, [currentTrack, playbackBitPerfect, playbackDevRate, currentDevice, dsp.upsample_rate]);
+  }, [currentTrack, playback, dsp.upsample_rate]);
 
   // Lyrics indexing & smooth scroll
   const activeIdx = useMemo(() => {
@@ -463,7 +460,7 @@ export function FullscreenView() {
 
   // Mute volume helper
   const handleMuteToggle = () => {
-    toggleMute();
+    if (!chromecastConnected) toggleMute();
   };
 
   // Romaji toggle handler
@@ -866,7 +863,7 @@ export function FullscreenView() {
 
             {/* Volume slider */}
             <div className="fullscreen-hud-volume-wrap">
-              <button className="fullscreen-hud-btn" onClick={handleMuteToggle} title="Mute/Unmute">
+              <button className="fullscreen-hud-btn" onClick={handleMuteToggle} disabled={chromecastConnected} title={chromecastConnected ? 'Cast receiver volume unavailable' : 'Mute/Unmute'}>
                 {isMuted || playbackVolume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
               </button>
               <input
@@ -874,6 +871,7 @@ export function FullscreenView() {
                 min={0}
                 max={1}
                 step={0.01}
+                disabled={chromecastConnected}
                 value={isMuted ? 0 : playbackVolume}
                 onChange={(e) => {
                   const vol = parseFloat(e.target.value);
@@ -884,6 +882,7 @@ export function FullscreenView() {
                   background: `linear-gradient(to right, ${accentColor} ${(isMuted ? 0 : playbackVolume) * 100}%, rgba(255, 255, 255, 0.15) ${(isMuted ? 0 : playbackVolume) * 100}%)`
                 }}
               />
+              {chromecastConnected && <span title="Cast receiver volume unavailable">Cast volume unavailable</span>}
             </div>
 
             {/* Up Next Queue Drawer Toggle */}

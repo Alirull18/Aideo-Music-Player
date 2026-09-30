@@ -237,8 +237,8 @@ describe('Stream Buffering & Clock Stabilization', () => {
 
     await playPromise;
 
-    // Once play_track completes in backend, is_buffering should clear
-    expect(useStore.getState().playback.is_buffering).toBe(false);
+    // Native invoke only enqueues playback; buffering clears on playback-ready.
+    expect(useStore.getState().playback.is_buffering).toBe(true);
   });
 
   it('keeps position at 0 in pollStatus while stream is buffering and backend has not output audio', async () => {

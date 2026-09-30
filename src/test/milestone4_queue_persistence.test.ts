@@ -135,7 +135,7 @@ describe('Milestone 4: Queue Ownership, Persistence & Output Safety (Features 35
       expect(queue[0].queue_occurrence_id).not.toBe(queue[1].queue_occurrence_id);
     });
 
-    it('F36.7: playUnifiedTrack removes only the targeted occurrence when identical duplicates exist in queue', async () => {
+    it('F36.7: playing a queued unified track removes only the targeted occurrence when duplicates exist', async () => {
       const track1 = createTrack({
         path: 'C:/Music/song.flac',
         title: 'Song',
@@ -163,7 +163,7 @@ describe('Milestone 4: Queue Ownership, Persistence & Output Safety (Features 35
       });
 
       // Play the first occurrence specifically
-      await playUnifiedTrack(useStore.setState, useStore.getState, targetOccurrence);
+      await useStore.getState().playFromQueue(0);
 
       const queueAfter = useStore.getState().queue;
       expect(queueAfter).toHaveLength(1);
@@ -187,7 +187,7 @@ describe('Milestone 4: Queue Ownership, Persistence & Output Safety (Features 35
         return null;
       });
 
-      await playUnifiedTrack(useStore.setState, useStore.getState, currentLocal);
+      await playUnifiedTrack(useStore.setState, useStore.getState, currentLocal, false, false);
 
       // Should NOT enable sourceQueueManaged
       expect(useStore.getState().sourceQueueManaged).toBe(false);

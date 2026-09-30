@@ -482,7 +482,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         });
         useStore.setState({ currentTrack: track, playback: { ...useStore.getState().playback, position_secs: 75 } });
         await useStore.getState().playTrack(track, true, false, undefined, 75, true);
-        expect(invoke).toHaveBeenCalledWith('play_track', { path: track.path, startPos: 75 });
+        expect(invoke).toHaveBeenCalledWith('play_track', { path: track.path, startPos: 75, attemptId: useStore.getState().currentAttemptId });
       });
 
       it('F10.4: playUnifiedTrack preserves current session lyrics and history when switching', async () => {

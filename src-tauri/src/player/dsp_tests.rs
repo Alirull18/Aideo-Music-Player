@@ -752,11 +752,11 @@ mod dsp_tests {
         assert!(!should_bypass_dsp_for_bit_perfect(false, true)); // Run DSP when BP off and DSP on
         assert!(should_bypass_dsp_for_bit_perfect(false, false));
 
-        // 2. Volume Rule: Bit-Perfect locks volume to 1.0 (unity gain) when not paused
+        // Bit-perfect preserves unity gain for nonzero volume, but mute must silence the device.
         assert_eq!(resolve_stream_volume(true, false, 0.45), 1.0);
-        assert_eq!(resolve_stream_volume(true, false, 0.0), 1.0);
-        assert_eq!(resolve_stream_volume(true, true, 0.45), 0.0); // Paused is silent
-        assert_eq!(resolve_stream_volume(false, false, 0.45), 0.45); // Normal volume
+        assert_eq!(resolve_stream_volume(true, false, 0.0), 0.0);
+        assert_eq!(resolve_stream_volume(true, true, 0.45), 0.0);
+        assert_eq!(resolve_stream_volume(false, false, 0.45), 0.45);
 
         // 3. Upsample & Dither: Bit-Perfect disables upsampling and dither
         let (upsample, dither) = resolve_hardware_upsample_and_dither(true, 192000, true);
@@ -1615,23 +1615,31 @@ mod dsp_tests {
     fn test_cache_reuse_and_decode_shutdown_safety() {
         use crate::player::{can_reuse_cached_track, should_mark_decode_complete};
 
-        // 1. Same track, already fully decoded into RAM: always reusable
-        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", true, false));
-        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", true, true));
+        // 1. Same track, matching rate & channels, fully decoded into RAM: always reusable
+        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", 44100, 44100, 2, 2, true, false));
+        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", 44100, 44100, 2, 2, true, true));
 
         // 2. Same track, partially decoded, background decoder thread STILL ACTIVE:
         // Must be reused so mode toggles / stream restarts don't abort decoding or truncate buffer!
-        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", false, true));
+        assert!(can_reuse_cached_track("track_a.flac", "track_a.flac", 44100, 44100, 2, 2, false, true));
 
         // 3. Same track, partially decoded, but background decoder thread was ABORTED:
         // Must NOT be reused (stale truncated buffer), must rebuild cache fresh!
-        assert!(!can_reuse_cached_track("track_a.flac", "track_a.flac", false, false));
+        assert!(!can_reuse_cached_track("track_a.flac", "track_a.flac", 44100, 44100, 2, 2, false, false));
 
         // 4. Different tracks: never reusable
-        assert!(!can_reuse_cached_track("track_a.flac", "track_b.flac", true, true));
-        assert!(!can_reuse_cached_track("track_a.flac", "track_b.flac", false, true));
+        assert!(!can_reuse_cached_track("track_a.flac", "track_b.flac", 44100, 44100, 2, 2, true, true));
+        assert!(!can_reuse_cached_track("track_a.flac", "track_b.flac", 44100, 44100, 2, 2, false, true));
 
-        // 5. Aborted background decodes must NEVER be marked as complete (prevents false EOF / premature next-track skip)
+        // 5. Rate mismatch (e.g. 44100 cached vs 96000 requested or 22050 core vs 44100 container):
+        // Reusing mismatched rates causes forward jump and pitch/speed desync! Must reject!
+        assert!(!can_reuse_cached_track("track_a.flac", "track_a.flac", 44100, 96000, 2, 2, true, true));
+        assert!(!can_reuse_cached_track("track_a.flac", "track_a.flac", 22050, 44100, 2, 2, true, true));
+
+        // 6. Channel count mismatch (e.g. stereo vs multichannel): must reject!
+        assert!(!can_reuse_cached_track("track_a.flac", "track_a.flac", 44100, 44100, 2, 6, true, true));
+
+        // 7. Aborted background decodes must NEVER be marked as complete (prevents false EOF / premature next-track skip)
         assert!(!should_mark_decode_complete(true));
         assert!(should_mark_decode_complete(false));
     }
@@ -2010,15 +2018,6 @@ mod dsp_tests {
         let _ = std::fs::remove_file(&test_file);
     }
 
-    #[test]
-    fn test_calculate_stream_eof_padding() {
-        use crate::player::calculate_stream_eof_padding;
-        assert_eq!(calculate_stream_eof_padding(0, 1024), 0);
-        assert_eq!(calculate_stream_eof_padding(1024, 1024), 0);
-        assert_eq!(calculate_stream_eof_padding(2500, 1024), 0);
-        assert_eq!(calculate_stream_eof_padding(500, 1024), 524);
-        assert_eq!(calculate_stream_eof_padding(1023, 1024), 1);
-    }
 
     #[test]
     fn test_frame_aligned_discard_preserves_stereo_channels() {

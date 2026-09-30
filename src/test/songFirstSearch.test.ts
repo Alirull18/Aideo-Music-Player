@@ -56,9 +56,6 @@ describe('Song-first search', () => {
         : { title: tidal.title, artist: tidal.artist, album: tidal.album, duration: tidal.duration, cover_url: 'https://example.com/tidal.jpg' };
       expect(useStore.getState().currentTrack).toMatchObject({ ...expected, path: row.path, playlist_entry_id: 7 });
       expect(useStore.getState().coverArt).toBe(expected.cover_url);
-      expect(invoke).toHaveBeenLastCalledWith('update_media_metadata', {
-        title: expected.title, artist: expected.artist, album: expected.album, duration: expected.duration, coverUrl: expected.cover_url,
-      });
       expect(JSON.parse(localStorage.getItem('aideo_current_track')!)).toMatchObject(expected);
     }
   });

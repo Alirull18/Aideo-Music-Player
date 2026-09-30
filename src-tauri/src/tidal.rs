@@ -1273,6 +1273,39 @@ pub(crate) fn build_radio_queue<T: RadioCandidate + Clone>(
     final_queue
 }
 
+fn match_tidal_related_track(related: &serde_json::Value, search: Vec<TidalTrackResult>) -> Option<TidalTrackResult> {
+    let title = related["name"].as_str()?.trim();
+    let artist = related["artist"]["name"].as_str()?.trim();
+    let normalized_artist = crate::youtube::normalize_artist_name(artist);
+    let normalized_title = title.to_lowercase();
+    if title.is_empty() || normalized_artist.is_empty() || artist.eq_ignore_ascii_case("Unknown Artist") {
+        return None;
+    }
+    search.into_iter().find(|track| {
+        track.title.trim().to_lowercase() == normalized_title
+            && crate::youtube::normalize_artist_name(&track.artist) == normalized_artist
+            && track.duration > 0 && track.duration <= 900
+            && !crate::youtube::is_third_party_or_instrumental(&track.title, &track.artist)
+    })
+}
+
+fn related_artist_candidates(
+    mut related: Vec<serde_json::Value>,
+    artist_tracks: Vec<(String, Vec<serde_json::Value>)>,
+) -> Vec<serde_json::Value> {
+    if related.is_empty() {
+        let max_tracks = artist_tracks.iter().map(|(_, tracks)| tracks.len()).max().unwrap_or(0);
+        for index in 0..max_tracks {
+            for (artist, tracks) in &artist_tracks {
+                if let Some(title) = tracks.get(index).and_then(|track| track["name"].as_str()) {
+                    related.push(serde_json::json!({ "name": title, "artist": { "name": artist } }));
+                }
+            }
+        }
+    }
+    related
+}
+
 #[tauri::command]
 pub async fn get_tidal_autoplay_recommendations(
     state: State<'_, Arc<TidalState>>,
@@ -1280,32 +1313,40 @@ pub async fn get_tidal_autoplay_recommendations(
     artist: String,
     title: String,
 ) -> Result<Vec<TidalTrackResult>, String> {
-    println!("[tidal] Aideo Autoplay Engine v2: Resolving Tidal Radio for '{}' by '{}'", title, artist);
-
-    let query = if !artist.is_empty() && artist != "Unknown Artist" {
-        format!("{} Radio", artist)
-    } else if !title.is_empty() && title != "Unknown Title" {
-        title.clone()
-    } else {
-        "Top Tracks".to_string()
-    };
-
-    let mut search_results = tidal_search(state.clone(), app_handle.clone(), query, None).await;
-    if search_results.as_ref().map(|t| t.is_empty()).unwrap_or(true) && !artist.is_empty() && artist != "Unknown Artist" {
-        search_results = tidal_search(state, app_handle, artist.clone(), None).await;
+    let mut related = crate::lastfm_api::get_similar_tracks(&artist, &title).await?;
+    if related.is_empty() && !artist.trim().is_empty() && artist != "Unknown Artist" {
+        let related_artists = crate::lastfm_api::get_similar_artists(&artist).await?;
+        let top_tracks = futures::stream::iter(related_artists.into_iter().take(5).map(|related_artist| async move {
+            let tracks = crate::lastfm_api::get_artist_top_tracks(&related_artist).await.unwrap_or_default();
+            (related_artist, tracks)
+        })).buffered(4).collect::<Vec<_>>().await;
+        related = related_artist_candidates(related, top_tracks);
     }
-
-    match search_results {
-        Ok(tracks) => {
-            let final_queue = build_radio_queue(tracks, &artist, &title);
-            println!("[autoplay] Engine v2 finalized Tidal queue with {} highly matching tracks.", final_queue.len());
-            Ok(final_queue)
+    let searches = futures::stream::iter(related.into_iter().take(15).map(|candidate| {
+        let state = state.clone();
+        let app_handle = app_handle.clone();
+        async move {
+            let Some(candidate_title) = candidate["name"].as_str() else { return None };
+            let Some(candidate_artist) = candidate["artist"]["name"].as_str() else { return None };
+            if candidate_title.trim().is_empty() || candidate_artist.trim().is_empty()
+                || candidate_artist.eq_ignore_ascii_case("Unknown Artist") { return None }
+            let query = format!("{} {}", candidate_artist, candidate_title);
+            let results = tidal_search(state, app_handle, query, None).await.ok()?;
+            match_tidal_related_track(&candidate, results)
         }
-        Err(e) => {
-            eprintln!("[tidal] Autoplay search failed: {}", e);
-            Err(e)
+    })).buffered(4).collect::<Vec<_>>().await;
+
+    let seed_signature = tidal_track_signature(&artist, &title);
+    let mut seen = std::collections::HashSet::new();
+    let mut queue = Vec::new();
+    for track in searches.into_iter().flatten() {
+        let signature = tidal_track_signature(&track.artist, &track.title);
+        if signature != seed_signature && seen.insert(signature) {
+            queue.push(track);
+            if queue.len() == 8 { break; }
         }
     }
+    Ok(queue)
 }
 
 /// Clamps polling interval to safe bounds (1..=60) and computes iteration count for 300-second timeout.
@@ -1433,6 +1474,48 @@ pub async fn get_tidal_hub_recommendations(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tidal_radio_matches_only_the_related_song() {
+        let related = serde_json::json!({ "name": "Bintang Kehidupan", "artist": { "name": "Nike Ardilla" } });
+        let search = vec![
+            hub_track("1", "Bintang Kehidupan", "Other Artist", 240),
+            hub_track("2", "Bintang Kehidupan (Live)", "Nike Ardilla", 260),
+            hub_track("3", "Bintang Kehidupan", "Nike Ardilla", 245),
+        ];
+        assert_eq!(match_tidal_related_track(&related, search).map(|t| t.id), Some("3".to_string()));
+    }
+
+    #[test]
+    fn tidal_radio_does_not_pad_unrelated_search_results() {
+        let related = serde_json::json!({ "name": "Bintang Kehidupan", "artist": { "name": "Nike Ardilla" } });
+        assert!(match_tidal_related_track(&related, vec![hub_track("1", "Midnight Techno", "Other Artist", 210)]).is_none());
+    }
+
+    #[test]
+    fn tidal_radio_rejects_degraded_related_metadata() {
+        let related = serde_json::json!({ "name": "Bintang Kehidupan", "artist": { "name": "Unknown Artist" } });
+        assert!(match_tidal_related_track(&related, vec![hub_track("1", "Bintang Kehidupan", "Unknown Artist", 210)]).is_none());
+    }
+
+    #[test]
+    fn tidal_radio_uses_related_artists_when_song_feed_is_empty() {
+        let top = vec![serde_json::json!({ "name": "Cinta Dalam Hati", "artist": { "name": "Ungu" } })];
+        let candidates = related_artist_candidates(Vec::new(), vec![("Ungu".to_string(), top)]);
+        assert_eq!(candidates[0]["name"], "Cinta Dalam Hati");
+        assert_eq!(candidates[0]["artist"]["name"], "Ungu");
+    }
+
+    #[test]
+    fn tidal_radio_interleaves_related_artists() {
+        let top = |artist: &str| (artist.to_string(), vec![
+            serde_json::json!({ "name": "First" }),
+            serde_json::json!({ "name": "Second" }),
+        ]);
+        let candidates = related_artist_candidates(Vec::new(), vec![top("Ungu"), top("Zivilia")]);
+        let artists: Vec<_> = candidates.iter().map(|track| track["artist"]["name"].as_str().unwrap()).collect();
+        assert_eq!(artists, ["Ungu", "Zivilia", "Ungu", "Zivilia"]);
+    }
 
     #[test]
     fn test_tidal_poll_interval_zero_clamps_to_1() {

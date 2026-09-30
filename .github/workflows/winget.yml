@@ -1,0 +1,59 @@
+name: "Publish to WinGet"
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        type: choice
+        required: true
+        default: 'update'
+        options:
+          - 'update'
+          - 'submit-initial'
+      version:
+        description: 'Version without v prefix (e.g. 0.9.11) - only needed for update'
+        required: false
+        default: ''
+
+jobs:
+  winget:
+    name: WinGet Automation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initial WinGet Registration (v0.9.10)
+        if: github.event.inputs.action == 'submit-initial'
+        shell: pwsh
+        run: |
+          winget install --id Microsoft.WingetCreate --exact --accept-source-agreements --accept-package-agreements
+          wingetcreate submit "winget/0.9.10" --token "${{ secrets.WINGET_TOKEN }}"
+
+      - name: Extract target version
+        if: github.event.inputs.action != 'submit-initial'
+        id: target
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.event.inputs.version }}" -ne "") {
+            $ver = "${{ github.event.inputs.version }}".TrimStart('v')
+          } else {
+            $ver = "${{ github.event.release.tag_name }}".TrimStart('v')
+          }
+          if (-not $ver) {
+            throw "Version could not be determined."
+          }
+          Write-Host "Publishing version $ver to WinGet"
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Update existing package in WinGet
+        if: github.event.inputs.action != 'submit-initial'
+        uses: vedantmgoyal2009/winget-releaser@v2
+        with:
+          identifier: Alirul.Aideo
+          version: ${{ steps.target.outputs.version }}
+          installer-url: https://github.com/Alirull18/Aideo-Music-Player/releases/download/v${{ steps.target.outputs.version }}/Aideo_${{ steps.target.outputs.version }}_x64-setup.exe
+          token: ${{ secrets.WINGET_TOKEN }}

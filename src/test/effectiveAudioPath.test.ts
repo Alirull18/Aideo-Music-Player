@@ -92,6 +92,14 @@ describe('effective audio path presentation', () => {
     expect(result.hudLabel).toBe('AUDIO PATH PENDING');
   });
 
+  it('does not claim a shared engine when stopped without an active path', () => {
+    const stopped = { ...playback(null), status: 'Stopped' as const };
+    const result = getAudioPathPresentation(stopped);
+
+    expect(result.badge).toBeNull();
+    expect(result.hudLabel).toBe('NO ACTIVE AUDIO PATH');
+  });
+
   it('keeps the player bar bit-perfect badge hidden until verification succeeds', () => {
     const unverifiedPath = effectivePath({
       strict_bit_perfect: false,

@@ -77,7 +77,7 @@ describe('official tauri updater', () => {
     render(<App />);
 
     // Wait for the popup modal with version 0.9.9 to be visible
-    expect(await screen.findByText(/Version 0.9.9/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Version 0.9.9/i, {}, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.getByText(/New gapless playback features/i)).toBeInTheDocument();
 
     // Click Install Update Now

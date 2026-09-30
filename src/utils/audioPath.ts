@@ -26,7 +26,7 @@ export const getAudioPathPresentation = (playback: PlaybackState): AudioPathPres
   if (!path?.active) {
     return {
       badge: null,
-      hudLabel: playback.status === 'Stopped' ? 'SHARED ENGINE' : 'AUDIO PATH PENDING',
+      hudLabel: playback.status === 'Stopped' ? 'NO ACTIVE AUDIO PATH' : 'AUDIO PATH PENDING',
       outputRate: 0,
       isBitPerfect: false,
       isExclusive: false,

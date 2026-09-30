@@ -29,6 +29,7 @@ import {
   generateSvgCurvePath,
   formatFrequency,
 } from '../utils/audioMath';
+import { getAudioPathPresentation } from '../utils/audioPath';
 
 type TabType = 'dsp_eq' | 'hardware_signal' | 'telemetry_utils';
 
@@ -64,7 +65,7 @@ export function AudioControlCenter() {
     playbackFileFormat,
     playbackExclusive,
     playbackDevRate,
-    playbackBitPerfect,
+    playbackPath,
   } = useStore(
     useShallow(s => ({
       dsp: s.dsp,
@@ -76,7 +77,7 @@ export function AudioControlCenter() {
       playbackFileFormat: s.playback.file_format,
       playbackExclusive: s.playback.exclusive,
       playbackDevRate: s.playback.dev_rate,
-      playbackBitPerfect: s.playback.bit_perfect,
+      playbackPath: s.playback,
       toggleExclusive: s.toggleExclusive,
       devices: s.devices,
       currentDevice: s.currentDevice,
@@ -97,9 +98,9 @@ export function AudioControlCenter() {
   const [devOpen, setDevOpen] = useState(false);
   const [hoveredBand, setHoveredBand] = useState<number | null>(null);
 
-  const fileRate = playbackFileRate || 44100;
-  const fileCh = playbackFileCh || 2;
-  const fileFormat = playbackFileFormat || 'PCM';
+  const fileRate = playbackFileRate || 0;
+  const fileCh = playbackFileCh || 0;
+  const fileFormat = playbackFileFormat || 'Unknown';
 
   const dspActive =
     dsp.enabled &&
@@ -114,10 +115,9 @@ export function AudioControlCenter() {
       dsp.width !== 1.0 ||
       (dsp.preamp_gain !== undefined && dsp.preamp_gain !== 0.0));
 
-  const isAsio = currentDevice?.startsWith('[ASIO]');
-  const isWasapiExclusive = playbackExclusive;
-  const outputMode = isAsio ? 'ASIO Bit-Perfect' : isWasapiExclusive ? 'WASAPI Exclusive' : 'Shared Mixer';
-  const outputRate = playbackDevRate || fileRate;
+  const audioPath = getAudioPathPresentation(playbackPath);
+  const outputMode = audioPath.hudLabel;
+  const outputRate = audioPath.outputRate;
 
   const formatHz = (hz: number) => {
     if (hz >= 1000) {
@@ -127,10 +127,10 @@ export function AudioControlCenter() {
   };
 
   useEffect(() => {
-    if (showControlCenter && devices.length === 0) {
+    if (showControlCenter && (!devices || devices.length === 0)) {
       fetchDevices();
     }
-  }, [showControlCenter, devices.length, fetchDevices]);
+  }, [showControlCenter, devices, fetchDevices]);
 
   // Handle keyboard shortcut 'B' while control center is open
   useEffect(() => {
@@ -291,14 +291,14 @@ export function AudioControlCenter() {
                 </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                {outputMode} · {formatHz(outputRate)} · 32-bit Float Processing
+                {outputMode}{outputRate > 0 ? ` · ${formatHz(outputRate)}` : ''}
               </div>
             </div>
           </div>
 
           {/* Master Controls: A/B Compare + Reset + Close */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {playbackBitPerfect && (
+            {audioPath.badge?.kind === 'bit-perfect' && (
               <div
                 style={{
                   background: 'rgba(6, 182, 212, 0.12)',
@@ -311,7 +311,7 @@ export function AudioControlCenter() {
                   letterSpacing: 0.8,
                 }}
               >
-                BIT-PERFECT DIRECT
+                {audioPath.badge.label}
               </div>
             )}
 
@@ -338,7 +338,7 @@ export function AudioControlCenter() {
               }}
             >
               <Zap size={14} style={{ color: dsp.enabled ? '#34d399' : '#38bdf8' }} />
-              <span>{dsp.enabled ? 'Mode B: DSP Active' : 'Mode A: Raw Direct'}</span>
+              <span>{dsp.enabled ? 'Mode B: DSP Active' : 'Mode A: DSP Bypassed'}</span>
               <span
                 style={{
                   fontSize: 9,
@@ -1153,7 +1153,7 @@ export function AudioControlCenter() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>Exclusive Mode</span>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Request Exclusive Mode</span>
                       <span
                         style={{
                           fontSize: 10,
@@ -1164,44 +1164,44 @@ export function AudioControlCenter() {
                           color: playbackExclusive ? '#fff' : 'var(--text-dim)',
                         }}
                       >
-                        {playbackExclusive ? 'ON' : 'OFF'}
+                        {playbackExclusive ? 'REQUESTED' : 'OFF'}
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                      Direct exclusive hardware access.
+                      Requests exclusive hardware access; effective output is shown above.
                     </div>
                   </div>
 
                   <div
-                    className={`exclusive-toggle ${playbackBitPerfect ? 'active' : ''}`}
+                    className={`exclusive-toggle ${playbackPath.bit_perfect ? 'active' : ''}`}
                     onClick={() => useStore.getState().toggleBitPerfect()}
                     style={{
                       padding: '14px',
                       borderRadius: 10,
-                      border: playbackBitPerfect
+                      border: playbackPath.bit_perfect
                         ? '1px solid rgba(6, 182, 212, 0.4)'
                         : '1px solid rgba(255, 255, 255, 0.08)',
-                      background: playbackBitPerfect ? 'rgba(6, 182, 212, 0.1)' : 'rgba(0, 0, 0, 0.2)',
+                      background: playbackPath.bit_perfect ? 'rgba(6, 182, 212, 0.1)' : 'rgba(0, 0, 0, 0.2)',
                       cursor: 'pointer',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>Bit-Perfect</span>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Request bit-perfect bypass</span>
                       <span
                         style={{
                           fontSize: 10,
                           fontWeight: 700,
                           padding: '2px 6px',
                           borderRadius: 8,
-                          background: playbackBitPerfect ? '#06b6d4' : 'rgba(255, 255, 255, 0.08)',
-                          color: playbackBitPerfect ? '#fff' : 'var(--text-dim)',
+                          background: playbackPath.bit_perfect ? '#06b6d4' : 'rgba(255, 255, 255, 0.08)',
+                          color: playbackPath.bit_perfect ? '#fff' : 'var(--text-dim)',
                         }}
                       >
-                        {playbackBitPerfect ? 'ACTIVE' : 'OFF'}
+                        {playbackPath.bit_perfect ? 'REQUESTED' : 'OFF'}
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                      Bypasses volume, DSP, & resampler.
+                      Requests bypass of volume, DSP, and resampler. Effective path shown above.
                     </div>
                   </div>
                 </div>
@@ -1235,14 +1235,9 @@ export function AudioControlCenter() {
                           fontWeight: dsp.upsample_rate === rate ? 700 : 500,
                           transition: 'all 0.15s',
                         }}
-                        onClick={() => {
-                          setDSP({ upsample_rate: rate });
-                          if (rate > 0 && playbackBitPerfect) {
-                            useStore.getState().toggleBitPerfect();
-                          }
-                        }}
+                        onClick={() => setDSP({ upsample_rate: rate })}
                       >
-                        {rate === 0 ? 'OFF (Direct)' : `${rate / 1000}k`}
+                        {rate === 0 ? 'OFF' : `${rate / 1000}k`}
                       </button>
                     ))}
                   </div>
@@ -1304,9 +1299,9 @@ export function AudioControlCenter() {
                     </div>
                     <div>
                       <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 800 }}>1. Source Stream</div>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>{fileFormat} Stream</div>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{fileFormat} Source</div>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                        {formatHz(fileRate)} · {fileCh === 1 ? 'Mono' : fileCh === 2 ? 'Stereo' : `${fileCh} Ch`}
+                        {fileRate > 0 ? formatHz(fileRate) : 'Unknown rate'} · {fileCh > 0 ? fileCh === 1 ? 'Mono' : fileCh === 2 ? 'Stereo' : `${fileCh} Ch` : 'Unknown channels'}
                       </div>
                     </div>
                   </div>
@@ -1322,7 +1317,7 @@ export function AudioControlCenter() {
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 800 }}>2. DSP Processing</div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: dspActive ? 'var(--text)' : 'var(--text-dim)' }}>
-                        {dspActive ? 'DSP Active' : 'Lossless Direct Bypass'}
+                        {dspActive ? 'DSP Requested' : 'DSP Bypass Requested'}
                       </div>
                       {dspActive && (
                         <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 2 }}>
@@ -1358,10 +1353,10 @@ export function AudioControlCenter() {
                         <div>
                           <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 800 }}>3. Resampling Stage</div>
                           <div style={{ fontSize: 13, fontWeight: 700 }}>
-                            {isUpsampling ? 'Rubato Sinc Upsampling' : isSharedResampling ? 'Mixer Sample Match' : 'Bit-Perfect Direct Rate'}
+                            {isUpsampling ? 'Rubato Sinc Upsampling Requested' : isSharedResampling ? 'Rate mismatch' : 'No resampling requested'}
                           </div>
                           <div style={{ fontSize: 11, color: isResampling ? '#22d3ee' : 'var(--text-dim)', marginTop: 2 }}>
-                            {isResampling ? `${formatHz(fileRate)} → ${formatHz(targetRate)}` : 'Direct bitstream'}
+                            {isResampling ? `${fileRate > 0 ? formatHz(fileRate) : 'Unknown rate'} → ${formatHz(targetRate)} requested` : 'Effective route shown above'}
                           </div>
                         </div>
                       </div>
@@ -1382,7 +1377,7 @@ export function AudioControlCenter() {
                         {currentDevice || 'Default Audio Device'}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                        {outputMode} · {formatHz(outputRate)}
+                        {outputMode}{outputRate > 0 ? ` · ${formatHz(outputRate)}` : ''}
                       </div>
                     </div>
                   </div>

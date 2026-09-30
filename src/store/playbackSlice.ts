@@ -17,6 +17,7 @@ let pendingDspState: any = null;
 let chromecastTickCount = 0;
 let queueOperationPromise = Promise.resolve();
 let audioModesRestored = false;
+let radioAttemptSequence = 0;
 
 const EXCLUSIVE_MODE_STORAGE_KEY = 'aideo_exclusive_mode';
 const BIT_PERFECT_MODE_STORAGE_KEY = 'aideo_bit_perfect_mode';
@@ -27,6 +28,18 @@ export const chainQueueOperation = (op: () => Promise<any>): Promise<any> => {
   }));
   return queueOperationPromise;
 };
+
+export function getContiguousLocalPrefix(queue: Track[]): string[] {
+  const localPaths: string[] = [];
+  for (const track of queue) {
+    if (track && !isStreamTrack(track.path, track.format) && !track.source_context) {
+      localPaths.push(track.path);
+    } else {
+      break;
+    }
+  }
+  return localPaths;
+}
 
 const THROTTLE_MS = 50; // 20Hz update rate — imperceptibly fast for DSP but prevents IPC flooding on slower machines
 
@@ -388,9 +401,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     cancelSourcePlayback();
     const stopTime = Date.now();
     set(s => ({
+      currentAttemptId: undefined,
       playback: {
         ...s.playback,
         status: 'Stopped',
+        attempt_id: undefined,
+        effective_audio_path: null,
         last_stop_time: stopTime,
         backend_stop_detected_at: 0,
       }
@@ -427,26 +443,23 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   setVolume: async (vol: number) => {
     const clampedVol = Math.max(0, Math.min(1, vol));
-    if (get().playback.bit_perfect && clampedVol < 1.0) {
-      toast.warning('Bit-Perfect Mode is active — Volume is fixed at 100% to preserve lossless dynamic range.', {
-        title: 'Bit-Perfect Mode',
-        dedupKey: 'bit-perfect-vol-warn',
-        action: {
-          label: 'Disable Bit-Perfect',
-          onClick: () => {
-            get().toggleBitPerfect();
-          },
-        },
+    if (get().chromecast_connected) {
+      toast.warning('Cast receiver volume is unavailable in this app.', { title: 'Cast Volume', dedupKey: 'cast-volume-unavailable' });
+      return;
+    }
+    if (!get().upnp_connected && get().playback.bit_perfect && clampedVol > 0 && clampedVol < 1) {
+      toast.warning('Bit-Perfect Mode uses unity gain; only mute is available. Disable it to adjust volume.', {
+        title: 'Bit-Perfect Mode', dedupKey: 'bit-perfect-vol-warn',
       });
+      return;
     }
     try {
-      if (clampedVol > 0) {
-        safeSetStorage('aideo_volume', String(clampedVol));
-      }
       if (get().upnp_connected) {
         await invoke('upnp_control', { action: 'volume', value: clampedVol * 100 });
+      } else {
+        await invoke('set_volume', { volume: clampedVol });
       }
-      await invoke('set_volume', { volume: clampedVol });
+      if (clampedVol > 0) safeSetStorage('aideo_volume', String(clampedVol));
       set(s => ({
         playback: { ...s.playback, volume: clampedVol },
         isMuted: clampedVol === 0 ? true : false,
@@ -458,12 +471,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   toggleMute: async () => {
     const state = get();
     if (state.isMuted) {
-      const restoreVol = state.mutedPrevVolume > 0 ? state.mutedPrevVolume : 0.5;
-      set({ isMuted: false });
+      const restoreVol = state.playback.bit_perfect ? 1 : (state.mutedPrevVolume > 0 ? state.mutedPrevVolume : 0.5);
       await state.setVolume(restoreVol);
     } else {
-      const currentVol = state.playback.volume;
-      set({ mutedPrevVolume: currentVol > 0 ? currentVol : 0.5, isMuted: true });
       await state.setVolume(0);
     }
   },
@@ -514,13 +524,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         const lastSeekTime = get().playback.last_seek_time || 0;
         const lastSkipTime = get().playback.last_skip_time || 0;
         const now = Date.now();
+        const activeDevice = get().chromecast_active_device;
 
         // If we recently seeked or skipped (within the last 2 seconds), don't overwrite position with stale Chromecast status
         const isTransitioning = (now - lastSeekTime < 2000) || (now - lastSkipTime < 2500);
 
         try {
           const status: any = await invoke('chromecast_get_status');
-          if (status) {
+          if (status && get().chromecast_connected && get().chromecast_active_device === activeDevice) {
             set(s => {
               const nextStatus = status.status;
               const nextPos = isTransitioning ? s.playback.position_secs : status.position_secs;
@@ -554,6 +565,27 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
       return;
     }
+    if (get().upnp_connected) {
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        const status = await invoke<{ active_device_id: string | null; is_playing: boolean; position_secs: number }>('upnp_get_status');
+        if (get().upnp_connected && status.active_device_id === get().upnp_active_device) {
+          if (!status.is_playing && Date.now() - (get().playback.last_skip_time || 0) < 2500) return;
+          if (get().playback.status === 'Stopped' && Date.now() - (get().playback.last_stop_time || 0) < 3000) return;
+          set(s => ({ playback: {
+            ...s.playback,
+            status: status.is_playing ? 'Playing' : s.playback.status === 'Playing' ? 'Paused' : s.playback.status,
+            position_secs: status.position_secs,
+          } }));
+        }
+      } catch (e) {
+        console.error('Failed to get UPnP status:', e);
+      } finally {
+        isPolling = false;
+      }
+      return;
+    }
     if (isPolling) return;
     isPolling = true;
     try {
@@ -569,8 +601,15 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       }
 
       const status: any = await invoke('get_playback_status');
+      if (get().chromecast_connected || get().upnp_connected
+        || get().playback.current_track !== state.playback.current_track
+        || get().playback.attempt_id !== state.playback.attempt_id) return;
       if (!status) return;
+      const lastStopTime = get().playback.last_stop_time;
+      if (lastStopTime && Date.now() - lastStopTime < 3000
+        && get().playback.status === 'Stopped' && status.status === 'Playing') return;
       if (get().currentTrack?.source_context && ((get().playback.is_buffering && status.status === 'Stopped') || get().playbackError)) return;
+      if (get().currentAttemptId && get().playback.is_buffering) return;
 
       const prevTrack = get().playback.current_track;
       const newTrack = status.current_track;
@@ -905,11 +944,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     });
 
     if (isActivatingDSP && get().playback.bit_perfect) {
-      try {
-        await get().toggleBitPerfect();
-      } catch (e) {
-        console.error('Failed to toggle bit-perfect off:', e);
-      }
+      await get().toggleBitPerfect(false);
+      if (get().playback.bit_perfect) return;
       newDSP.enabled = true;
     }
 
@@ -1094,13 +1130,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         safeSetStorage(BIT_PERFECT_MODE_STORAGE_KEY, 'false');
       }
       if (nextMode) {
-        toast.success('WASAPI Exclusive Mode Enabled — Outputting bit-perfect audio directly to your DAC (bypasses Windows Mixer).', {
-          title: 'Exclusive Mode',
-        });
+        toast.info('WASAPI Exclusive Mode requested. Output and sample integrity depend on the negotiated path.', { title: 'Exclusive Mode' });
       } else {
-        toast.info('WASAPI Shared Mode Active — Standard Windows audio routing enabled.', {
-          title: 'Exclusive Mode',
-        });
+        toast.info('WASAPI Shared Mode requested.', { title: 'Exclusive Mode' });
       }
     } catch (e) {
       console.error(e);
@@ -1129,13 +1161,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         safeSetStorage(EXCLUSIVE_MODE_STORAGE_KEY, 'true');
       }
       if (nextMode) {
-        toast.success('Bit-Perfect Mode Active — Volume is fixed at 100% and DSP effects are bypassed for pure bit-exact output.', {
-          title: 'Bit-Perfect Mode',
-        });
+        toast.info('Bit-perfect output requested. Sample integrity is unverified until the effective path confirms it.', { title: 'Bit-Perfect Mode' });
       } else {
-        toast.info('Bit-Perfect Mode Disabled — Volume and DSP controls restored.', {
-          title: 'Bit-Perfect Mode',
-        });
+        toast.info('Bit-perfect output request disabled.', { title: 'Bit-Perfect Mode' });
       }
     } catch (e) {
       console.error(e);
@@ -1347,6 +1375,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       console.warn('[stream] navigator.onLine reported false; continuing playback attempt via native backend.');
     }
     try {
+      const attemptId = `radio_attempt_${Date.now()}_${++radioAttemptSequence}`;
+      set(s => ({ currentAttemptId: attemptId, playback: { ...s.playback,
+        attempt_id: attemptId, effective_audio_path: null } }));
       // Clear or de-duplicate queue when starting playback
       if (triggerAutoplay) {
         set({ queue: [] });
@@ -1391,6 +1422,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         cover_url: metadata?.cover_url || null
       };
       await get().recordPlaybackTransition(virtualTrack);
+      if (get().currentAttemptId !== attemptId) return;
       setOnlineTrackCache(url, virtualTrack);
       localStorage.setItem('aideo_current_track', JSON.stringify(virtualTrack));
       set({
@@ -1463,9 +1495,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           return;
         }
       } else {
-        await invoke('play_track', { path: url, startPos: 0.0 });
+        await invoke('play_track', { path: url, startPos: 0.0, attemptId });
       }
-      if (get().playback.is_buffering) {
+      if (get().currentAttemptId !== attemptId) return;
+      if (get().chromecast_connected) {
         set(s => ({ playback: { ...s.playback, is_buffering: false } }));
       }
       if (triggerAutoplay) {
@@ -1562,13 +1595,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         return;
       }
 
-      await chainQueueOperation(async () => {
-        await invoke('add_to_queue', { path: finalPath });
-      });
-
       const newQueue = [...get().queue, occurrenceTrack];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+      await get().syncBackendQueue();
       return true;
     } catch (e) {
       console.error(e);
@@ -1625,13 +1655,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         return;
       }
 
-      await chainQueueOperation(async () => {
-        await invoke('queue_next', { path: finalPath });
-      });
-
       const newQueue = [occurrenceTrack, ...get().queue];
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+      await get().syncBackendQueue();
       return true;
     } catch (e) {
       console.error(e);
@@ -1652,10 +1679,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ queue: newQueue });
     localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
 
-    if (!get().sourceQueueManaged) await chainQueueOperation(async () => {
-        await invoke('remove_from_queue', { index }).catch(() => {});
-    });
-
+    await get().syncBackendQueue();
     await get().playTrack(trackToPlay, undefined, false);
   },
 
@@ -1668,9 +1692,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     set({ queue: newQueue });
     localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
 
-    await chainQueueOperation(async () => {
-      await invoke('remove_from_queue', { index }).catch(() => {});
-    });
+    await get().syncBackendQueue();
   },
 
   clearQueue: async () => {
@@ -1685,15 +1707,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         set({ recentlyClearedAutoplayPaths: newCleared });
       }
 
-      await chainQueueOperation(async () => {
-        await invoke('clear_queue');
-      });
-
-      // Clear only — never stop the current track or rebuild the radio here.
-      // When the current track ends naturally, playNext() may start a fresh radio
-      // (excluding the paths recorded above) if autoplay is enabled.
       set({ queue: [] });
       localStorage.setItem('aideo_queue', JSON.stringify([]));
+
+      await get().syncBackendQueue();
 
       if (currentQueue.length > 0) {
         const previousQueue = [...currentQueue];
@@ -1704,9 +1721,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
             onClick: async () => {
               set({ queue: previousQueue });
               localStorage.setItem('aideo_queue', JSON.stringify(previousQueue));
-              for (const t of previousQueue) {
-                await chainQueueOperation(() => invoke('add_to_queue', { path: t.path }));
-              }
+              await get().syncBackendQueue();
               toast.success(`Restored ${previousQueue.length} track${previousQueue.length === 1 ? '' : 's'} to queue`, { title: 'Queue' });
             },
           },
@@ -1720,16 +1735,27 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     if (from < 0 || from >= queue.length || to < 0 || to >= queue.length) return;
 
     try {
-      await chainQueueOperation(async () => {
-        await invoke('reorder_queue', { from, to });
-      });
-
       const newQueue = [...queue];
       const [moved] = newQueue.splice(from, 1);
       newQueue.splice(to, 0, moved);
       set({ queue: newQueue });
       localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
+
+      await get().syncBackendQueue();
     } catch (e) { console.error(e); }
+  },
+
+  syncBackendQueue: async () => {
+    await chainQueueOperation(async () => {
+      if (get().sourceQueueManaged) return;
+      await invoke('clear_queue');
+      if (get().sourceQueueManaged) return;
+      const localPrefix = get().repeat === 'one' && get().queue[0]?.is_autoplay
+        ? [] : getContiguousLocalPrefix(get().queue);
+      if (localPrefix.length > 0) {
+        await invoke('add_to_queue_bulk', { paths: localPrefix });
+      }
+    });
   },
 
   initializeQueue: async () => {
@@ -1835,10 +1861,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         const paths: string[] = Array.isArray(rawPaths) ? rawPaths : [];
         const { tracks, queue: currentQueue = [] } = get();
 
-        // If backend returned empty, but frontend already has streaming tracks in the queue,
-        // preserve the frontend queue (streaming tracks are managed on frontend to prevent token expiry).
-        const streamTracksInQueue = (currentQueue || []).filter(t => isStreamTrack(t.path, t.format));
-        if (paths.length === 0 && streamTracksInQueue.length > 0) {
+        // If frontend already has tracks in the queue, preserve the frontend queue as SSOT.
+        if (currentQueue.length > 0) {
           return currentQueue;
         }
 
@@ -1905,41 +1929,35 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   connectCastDevice: async (device: { name: string; ip: string; port: number }) => {
     try {
-      if (get().chromecast_connected) {
-        await get().disconnectCastDevice();
-      }
-
-      // Capture currently playing track and position before connecting and stopping local
       const activeTrack = get().currentTrack;
       const startPos = get().playback.position_secs;
-
+      const wasPaused = get().playback.status === 'Paused';
+      cancelSourcePlayback();
+      if (get().upnp_connected) {
+        await invoke('upnp_control', { action: 'stop' });
+        await invoke('upnp_disconnect');
+        set({ upnp_active_device: null, upnp_connected: false });
+      }
+      if (get().chromecast_connected) {
+        await invoke('chromecast_control', { action: 'stop' });
+        await invoke('chromecast_disconnect');
+        set({ chromecast_active_device: null, chromecast_connected: false });
+      }
+      await invoke('stop_track');
       await invoke('chromecast_connect', { ip: device.ip, port: device.port });
-
-      await invoke('stop_track').catch(() => {});
-
-      set({
-        chromecast_active_device: device.ip,
-        chromecast_connected: true,
-      });
+      set(s => ({ chromecast_active_device: device.ip, chromecast_connected: true,
+        currentAttemptId: undefined,
+        playback: { ...s.playback, attempt_id: undefined, effective_audio_path: null } }));
 
       window.dispatchEvent(new CustomEvent('ui-toast', {
         detail: { message: `Connected to ${device.name}`, type: 'success' }
       }));
 
-      // Seamlessly transfer playback if a song was active
       if (activeTrack) {
         await get().playTrack(activeTrack, true, false, undefined, startPos);
+        if (wasPaused && get().playback.status === 'Playing' && get().chromecast_connected) await get().pauseTrack();
       } else {
-        set({
-          playback: {
-            ...get().playback,
-            status: 'Stopped',
-            current_track: null,
-            position_secs: 0,
-          },
-          currentTrack: null,
-          coverArt: null,
-        });
+        set({ playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 }, currentTrack: null, coverArt: null });
       }
     } catch (e) {
       console.error('Failed to connect to Chromecast:', e);
@@ -1957,6 +1975,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const wasPlaying = get().playback.status === 'Playing';
 
       if (get().chromecast_connected) {
+        await invoke('chromecast_control', { action: 'stop' });
         await invoke('chromecast_disconnect');
       }
       set({
@@ -1992,23 +2011,25 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   connectUpnpDevice: async (device: any) => {
     try {
-      if (get().upnp_connected) {
-        await get().disconnectUpnpDevice();
-      }
-      if (get().chromecast_connected) {
-        await get().disconnectCastDevice();
-      }
-
       const activeTrack = get().currentTrack;
       const startPos = get().playback.position_secs;
-
+      const wasPaused = get().playback.status === 'Paused';
+      cancelSourcePlayback();
+      if (get().chromecast_connected) {
+        await invoke('chromecast_control', { action: 'stop' });
+        await invoke('chromecast_disconnect');
+        set({ chromecast_active_device: null, chromecast_connected: false });
+      }
+      if (get().upnp_connected) {
+        await invoke('upnp_control', { action: 'stop' });
+        await invoke('upnp_disconnect');
+        set({ upnp_active_device: null, upnp_connected: false });
+      }
+      await invoke('stop_track');
       await invoke('upnp_connect', { deviceId: device.id });
-      await invoke('stop_track').catch(() => {});
-
-      set({
-        upnp_active_device: device.id,
-        upnp_connected: true,
-      });
+      set(s => ({ upnp_active_device: device.id, upnp_connected: true,
+        currentAttemptId: undefined,
+        playback: { ...s.playback, attempt_id: undefined, effective_audio_path: null } }));
 
       window.dispatchEvent(new CustomEvent('ui-toast', {
         detail: { message: `Connected to ${device.name} [Hi-Res Lossless DLNA]`, type: 'success' }
@@ -2016,6 +2037,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       if (activeTrack) {
         await get().playTrack(activeTrack, true, false, undefined, startPos);
+        if (wasPaused && get().playback.status === 'Playing' && get().upnp_connected) await get().pauseTrack();
+      } else {
+        set({ playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 }, currentTrack: null, coverArt: null });
       }
     } catch (e) {
       console.error('Failed to connect to UPnP device:', e);
@@ -2031,6 +2055,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       const currentPos = get().playback.position_secs;
       const wasPlaying = get().playback.status === 'Playing';
 
+      await invoke('upnp_control', { action: 'stop' });
       await invoke('upnp_disconnect');
       set({
         upnp_active_device: null,

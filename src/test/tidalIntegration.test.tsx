@@ -383,7 +383,24 @@ describe('TidalConnectCard', () => {
 
       await useStore.getState().playTrack(tidalTrack);
 
-      expect(invoke).toHaveBeenCalledWith('play_track', { path: cdnUrl, startPos: 0 });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: cdnUrl, startPos: 0, attemptId: useStore.getState().currentAttemptId });
+    });
+
+    it('assigns a fresh attempt to each same-path replay', async () => {
+      vi.mocked(invoke).mockResolvedValue(null);
+      const local: Track = { ...tidalTrack, path: 'C:/same.flac', format: 'FLAC' };
+      await useStore.getState().playTrack(local);
+      const first = useStore.getState().currentAttemptId;
+      await useStore.getState().playTrack(local);
+      const second = useStore.getState().currentAttemptId;
+      expect(first).toMatch(/^local_attempt_/);
+      expect(second).not.toBe(first);
+      expect(useStore.getState().playback.attempt_id).toBe(second);
+      const starts = vi.mocked(invoke).mock.calls.filter(([command]) => command === 'play_track');
+      expect(starts).toEqual([
+        ['play_track', { path: local.path, startPos: 0, attemptId: first }],
+        ['play_track', { path: local.path, startPos: 0, attemptId: second }],
+      ]);
     });
 
     it('should reject addToQueue when stream resolution fails', async () => {
@@ -443,7 +460,7 @@ describe('TidalConnectCard', () => {
 
       // Verify tidal_get_stream_url was called and play_track received freshUrl
       expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path, requestedQuality: 'best_available' });
-      expect(invoke).toHaveBeenCalledWith('play_track', { path: freshUrl, startPos: 0 });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: freshUrl, startPos: 0, attemptId: useStore.getState().currentAttemptId });
     });
 
     it('triggerAutoplayRadio should not push stream URLs to backend queue in bulk', async () => {
@@ -495,7 +512,7 @@ describe('TidalConnectCard', () => {
 
       // Should have recovered original track ID and fetched fresh URL
       expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: tidalTrack.path, requestedQuality: 'best_available' });
-      expect(invoke).toHaveBeenCalledWith('play_track', { path: freshCdnUrl, startPos: 0 });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: freshCdnUrl, startPos: 0, attemptId: useStore.getState().currentAttemptId });
     });
 
     it('fetchQueue should preserve upcoming stream tracks when backend queue is empty', async () => {
@@ -545,7 +562,7 @@ describe('TidalConnectCard', () => {
 
       // Should have resolved the stream URL for the queued track
       expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: nextTidalTrack.path, requestedQuality: 'best_available' });
-      expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedStreamUrl, startPos: 0 });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedStreamUrl, startPos: 0, attemptId: useStore.getState().currentAttemptId });
 
       // Queue should have popped the played track
       expect(useStore.getState().queue.length).toBe(0);
@@ -569,12 +586,15 @@ describe('TidalConnectCard', () => {
       useStore.setState({
         queue: [queuedTrack],
         currentTrack: tidalTrack,
+        currentAttemptId: undefined,
         playback: {
           ...useStore.getState().playback,
           status: 'Playing',
           current_track: 'https://lgf.audio.tidal.com/prev.flac',
           backend_stop_detected_at: Date.now() - 4000, // 4 seconds ago (> 3000ms threshold)
           last_skip_time: Date.now() - 5000,
+          is_buffering: false,
+          attempt_id: undefined,
         },
       });
 
@@ -598,7 +618,7 @@ describe('TidalConnectCard', () => {
 
       // Poll status should have triggered fallback playNext
       expect(invoke).toHaveBeenCalledWith('tidal_get_stream_url', { trackId: queuedTrack.path, requestedQuality: 'best_available' });
-      expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedUrl, startPos: 0 });
+      expect(invoke).toHaveBeenCalledWith('play_track', { path: resolvedUrl, startPos: 0, attemptId: useStore.getState().currentAttemptId });
     });
   });
 });

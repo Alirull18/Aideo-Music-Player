@@ -36,6 +36,12 @@ describe('Lossless UPnP / DLNA Network Streamer Store & Actions', () => {
       upnp_active_device: null,
       upnp_scanning: false,
       upnp_connected: false,
+      chromecast_connected: false,
+      chromecast_active_device: null,
+      playbackError: null,
+      recordPlaybackTransition: vi.fn().mockResolvedValue(undefined),
+      updateDiscordPresence: vi.fn(),
+      autoFetchLyricsOnline: vi.fn().mockResolvedValue(undefined),
       currentTrack: {
         id: 1,
         title: 'Comfortably Numb',
@@ -140,5 +146,152 @@ describe('Lossless UPnP / DLNA Network Streamer Store & Actions', () => {
     await useStore.getState().seek(120);
     expect(invoke).toHaveBeenCalledWith('upnp_control', { action: 'seek', value: 120 });
     expect(useStore.getState().playback.position_secs).toBe(120);
+  });
+
+  it('uses the UPnP renderer status without polling the stopped local decoder', async () => {
+    useStore.setState({ upnp_connected: true, upnp_active_device: mockDevices[0].id,
+      playback: { ...useStore.getState().playback, status: 'Playing', current_track: 'https://example.com/song', is_buffering: false } });
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => cmd === 'upnp_get_status'
+      ? { active_device_id: mockDevices[0].id, is_playing: true, position_secs: 42, duration_secs: 382, volume: 80 }
+      : null);
+
+    await useStore.getState().pollStatus();
+    expect(useStore.getState().playback).toMatchObject({ status: 'Playing', position_secs: 42 });
+    expect(invoke).not.toHaveBeenCalledWith('get_playback_status');
+  });
+
+  it('does not turn a paused UPnP renderer back into Playing on a status poll', async () => {
+    useStore.setState({ upnp_connected: true, upnp_active_device: mockDevices[0].id,
+      playback: { ...useStore.getState().playback, status: 'Paused', current_track: 'https://example.com/song' } });
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => cmd === 'upnp_get_status'
+      ? { active_device_id: mockDevices[0].id, is_playing: false, position_secs: 18, duration_secs: 382, volume: 80 }
+      : null);
+
+    await useStore.getState().pollStatus();
+    expect(useStore.getState().playback.status).toBe('Paused');
+    expect(invoke).not.toHaveBeenCalledWith('get_playback_status');
+  });
+
+  it('treats a nonplaying UPnP report as paused, not as a track end', async () => {
+    useStore.setState({ upnp_connected: true, upnp_active_device: mockDevices[0].id,
+      playback: { ...useStore.getState().playback, status: 'Playing', current_track: 'https://example.com/song', position_secs: 80 } });
+    vi.mocked(invoke).mockImplementation(async cmd => cmd === 'upnp_get_status'
+      ? { active_device_id: mockDevices[0].id, is_playing: false, position_secs: 80, duration_secs: 382, volume: 80 }
+      : null);
+    await useStore.getState().pollStatus();
+    expect(useStore.getState().playback.status).toBe('Paused');
+    expect(invoke).not.toHaveBeenCalledWith('get_playback_status');
+  });
+
+  it('ignores status from an old UPnP renderer after a route switch', async () => {
+    let finish!: (value: unknown) => void;
+    useStore.setState({ upnp_connected: true, upnp_active_device: mockDevices[0].id,
+      playback: { ...useStore.getState().playback, status: 'Playing', position_secs: 34 } });
+    vi.mocked(invoke).mockImplementation(async cmd => cmd === 'upnp_get_status' ? new Promise(resolve => { finish = resolve; }) : null);
+    const pending = useStore.getState().pollStatus();
+    useStore.setState({ upnp_connected: false, chromecast_connected: true,
+      playback: { ...useStore.getState().playback, position_secs: 90 } });
+    finish({ active_device_id: mockDevices[0].id, is_playing: false, position_secs: 2 });
+    await pending;
+    expect(useStore.getState().playback).toMatchObject({ status: 'Playing', position_secs: 90 });
+  });
+  it('clears a previous local strict path before remote playback', async () => {
+    useStore.setState({ currentTrack: null, playback: { ...useStore.getState().playback,
+      effective_audio_path: { active: true, engine: 'WASAPI', share_mode: 'exclusive',
+        source: { sample_rate: 44100, channels: 2 }, pipeline_sample_format: 'f32',
+        output: { sample_rate: 44100, channels: 2 }, requested_exclusive: true,
+        requested_bit_perfect: true, resampling: false, volume_applied: false,
+        active_transforms: [], underruns: 0, strict_bit_perfect: true } } });
+    vi.mocked(invoke).mockResolvedValue(null);
+    await useStore.getState().connectCastDevice({ name: 'Cast', ip: '192.168.1.60', port: 8009 });
+    expect(useStore.getState().playback.effective_audio_path).toBeNull();
+  });
+  it('ignores a pending local status response after connecting a remote renderer', async () => {
+    let finish!: (value: unknown) => void;
+    const promise = new Promise<unknown>(resolve => { finish = resolve; });
+    useStore.setState({ playback: { ...useStore.getState().playback,
+      status: 'Playing', current_track: 'C:/Music/comfortably_numb.flac', position_secs: 12 } });
+    vi.mocked(invoke).mockImplementation(async cmd => cmd === 'get_playback_status' ? promise : null);
+    const pending = useStore.getState().pollStatus();
+    await useStore.getState().connectCastDevice({ name: 'Cast', ip: '192.168.1.60', port: 8009 });
+    finish({ status: 'Playing', current_track: 'C:/Music/comfortably_numb.flac', position_secs: 40,
+      effective_audio_path: { strict_bit_perfect: true } });
+    await pending;
+    expect(useStore.getState().playback.effective_audio_path).toBeNull();
+    expect(useStore.getState().playback.position_secs).not.toBe(40);
+  });
+
+
+
+  it.each([
+    ['upnp', 'cast', 'upnp_disconnect', 'chromecast_connect'],
+    ['cast', 'upnp', 'chromecast_disconnect', 'upnp_connect'],
+  ] as const)('switches %s to %s without restarting local audio and preserves pause', async (from, to, stopCommand, connectCommand) => {
+    const calls: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => { calls.push(cmd); return null; });
+    useStore.setState({
+      chromecast_connected: from === 'cast', chromecast_active_device: from === 'cast' ? '192.168.1.60' : null,
+      upnp_connected: from === 'upnp', upnp_active_device: from === 'upnp' ? mockDevices[0].id : null,
+      playback: { ...useStore.getState().playback, status: 'Paused', position_secs: 53, current_track: null },
+    });
+
+    if (to === 'cast') await useStore.getState().connectCastDevice({ name: 'Cast', ip: '192.168.1.60', port: 8009 });
+    else await useStore.getState().connectUpnpDevice(mockDevices[1]);
+
+    expect(calls.indexOf(stopCommand)).toBeGreaterThanOrEqual(0);
+    expect(calls.indexOf(stopCommand)).toBeLessThan(calls.indexOf(connectCommand));
+    expect(invoke).toHaveBeenCalledWith(from === 'cast' ? 'chromecast_control' : 'upnp_control', { action: 'stop' });
+    expect(calls).not.toContain('play_track');
+    expect(useStore.getState().chromecast_connected).toBe(to === 'cast');
+    expect(useStore.getState().upnp_connected).toBe(to === 'upnp');
+    expect(useStore.getState().playback.status).toBe('Paused');
+    const playCommand = to === 'cast' ? 'chromecast_play' : 'upnp_play';
+    const controlCommand = to === 'cast' ? 'chromecast_control' : 'upnp_control';
+    expect(calls).toContain(playCommand);
+    expect(invoke).toHaveBeenCalledWith(controlCommand, { action: 'pause' });
+    if (to === 'cast') expect(invoke).toHaveBeenCalledWith('chromecast_play', expect.objectContaining({ startTime: 53 }));
+    else expect(invoke).toHaveBeenCalledWith('upnp_control', { action: 'seek', value: 53 });
+  });
+
+  it.each(['cast', 'upnp'] as const)('does not connect Cast when %s stop fails', async route => {
+    useStore.setState({
+      chromecast_connected: route === 'cast', upnp_connected: route === 'upnp',
+      upnp_active_device: route === 'upnp' ? mockDevices[0].id : null,
+    });
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === (route === 'cast' ? 'chromecast_control' : 'upnp_control')) throw new Error('Stop failed');
+      return null;
+    });
+    await useStore.getState().connectCastDevice({ name: 'Other Cast', ip: '192.168.1.70', port: 8009 });
+    expect(invoke).not.toHaveBeenCalledWith('chromecast_connect', expect.anything());
+    expect(useStore.getState().chromecast_connected).toBe(route === 'cast');
+    expect(useStore.getState().upnp_connected).toBe(route === 'upnp');
+  });
+
+  it('applies UPnP volume only after receiver command succeeds, without adjusting local gain', async () => {
+    useStore.setState({ upnp_connected: true, upnp_active_device: mockDevices[0].id });
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'upnp_control') throw new Error('Receiver rejected volume');
+      return null;
+    });
+    await useStore.getState().setVolume(0.2);
+    expect(useStore.getState().playback.volume).toBe(0.8);
+    expect(invoke).not.toHaveBeenCalledWith('set_volume', expect.anything());
+
+    vi.mocked(invoke).mockImplementation(async () => null);
+    await useStore.getState().setVolume(0.2);
+    expect(useStore.getState().playback.volume).toBe(0.2);
+    expect(invoke).toHaveBeenCalledWith('upnp_control', { action: 'volume', value: 20 });
+    expect(invoke).not.toHaveBeenCalledWith('set_volume', expect.anything());
+  });
+
+  it('does not report Cast volume or mute as changed when receiver volume is unavailable', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    useStore.setState({ chromecast_connected: true, playback: { ...useStore.getState().playback, volume: 0.8 }, isMuted: false });
+    await useStore.getState().setVolume(0.2);
+    await useStore.getState().toggleMute();
+    expect(useStore.getState().playback.volume).toBe(0.8);
+    expect(useStore.getState().isMuted).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith('set_volume', expect.anything());
   });
 });

@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { useStore } from '../store';
 import { NowPlayingView } from '../components/NowPlayingView';
 import { FullscreenView } from '../components/FullscreenView';
-import { listen } from '@tauri-apps/api/event';
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
@@ -16,19 +15,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(),
 }));
 
-const spectrumListeners: Array<(event: { payload: number[] }) => void> = [];
-const listenMock = vi.mocked(listen);
-
 beforeEach(() => {
-  spectrumListeners.length = 0;
-  listenMock.mockReset();
-  listenMock.mockImplementation((event, handler) => {
-    if (event === 'audio-spectrum') {
-      spectrumListeners.push(handler as (event: { payload: number[] }) => void);
-    }
-    return Promise.resolve(() => {});
-  });
-
   global.ResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
@@ -78,6 +65,7 @@ beforeEach(() => {
       exclusive: true,
       effective_audio_path: null,
     },
+    chromecast_connected: false,
     theaterModeDesign: 'stage',
     theaterHudStyle: 'capsule',
     view: 'nowplaying',
@@ -111,8 +99,8 @@ describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
     expect(overlay).toBeInTheDocument();
     expect(within(overlay).getByText('TRACK INSPECTOR')).toBeInTheDocument();
     expect(within(overlay).getByText('FLAC')).toBeInTheDocument();
-    expect(within(overlay).getAllByText(/96.0 kHz/).length).toBeGreaterThan(0);
-    expect(within(overlay).getByText(/Bit-perfect/i)).toBeInTheDocument();
+    expect(within(overlay).getByText('Path pending')).toBeInTheDocument();
+    expect(within(overlay).queryByText('Bit-perfect')).not.toBeInTheDocument();
     expect(within(overlay).getByText('Beethoven Symphonies')).toBeInTheDocument();
 
     // Click close button inside inspector overlay
@@ -191,22 +179,14 @@ describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
     expect(within(overlay).getAllByText(/Stereo/).length).toBeGreaterThan(0);
   });
 
-  it('updates signal telemetry from the live audio spectrum event', async () => {
+  it('does not infer dBFS from display spectrum bands', () => {
     const { container } = render(<NowPlayingView />);
-
-    await waitFor(() => expect(spectrumListeners.length).toBeGreaterThan(0));
-
-    const signalButton = container.querySelector('button[title="Inspect Audio Signal Path & Telemetry"]');
-    expect(signalButton).toBeInTheDocument();
-    fireEvent.click(signalButton!);
+    const signalControl = container.querySelector('[title="Inspect Audio Signal Path & Telemetry"]');
+    expect(signalControl).toBeInTheDocument();
+    fireEvent.click(signalControl!);
 
     expect(screen.getByRole('dialog', { name: /Audio Signal Path & Telemetry/i })).toBeInTheDocument();
-
-    act(() => {
-      spectrumListeners.forEach(listener => listener({ payload: [0.5] }));
-    });
-
-    expect(screen.getByText(/Peak:/i)).toHaveTextContent('-6.0 dBFS');
+    expect(screen.getByText('Peak: Unknown · Dynamic Headroom: Unknown')).toBeInTheDocument();
   });
 
   it('toggles signal telemetry with the I shortcut', async () => {
@@ -232,6 +212,14 @@ describe('FullscreenView Top Bar & Scope Mode Pitch Black Background', () => {
     expect(screen.getByTitle(/HUD: Floating Capsule/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Current: Stage View/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Exit Fullscreen Mode/i)).toBeInTheDocument();
+  });
+
+  it('disables unsupported Cast receiver volume controls', () => {
+    useStore.setState({ chromecast_connected: true });
+    const { container } = render(<FullscreenView />);
+    expect(screen.getByRole('button', { name: 'Cast receiver volume unavailable' })).toBeDisabled();
+    expect(container.querySelector('.fullscreen-hud-volume-slider')).toBeDisabled();
+    expect(screen.getByText('Cast volume unavailable')).toBeInTheDocument();
   });
 
   it('renders Scope mode with pure black full-screen background and disables LiquidBackground', () => {

@@ -353,7 +353,7 @@ async fn get_unison_ttml(
         );
         if let Ok(resp) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
             .send()
             .await
         {
@@ -407,7 +407,7 @@ async fn get_unison_ttml(
             if let Ok(resp) = client
                 .get(&url)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
                 .send()
                 .await
             {
@@ -524,7 +524,7 @@ async fn search_lyrics_online(
         );
         if let Ok(res) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
             .send()
             .await
         {
@@ -607,7 +607,7 @@ async fn search_lyrics_online(
         for u in urls {
             if let Ok(res) = client.get(&u)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.10")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
                 .send()
                 .await
             {
@@ -3246,54 +3246,83 @@ async fn acoustid_identify_track(state: State<'_, AppState>, path: String) -> Re
     }))
 }
 
-#[tauri::command]
-async fn get_similar_tracks(state: State<'_, AppState>, path: String) -> Result<Vec<crate::db::Track>, String> {
-    let conn = safe_lock(&state.db);
-    let all_tracks = crate::db::get_all_tracks(&conn).map_err(|e| e.to_string())?;
-    
+fn rank_similar_tracks(all_tracks: Vec<crate::db::Track>, path: &str, excluded_paths: &[String]) -> Result<Vec<crate::db::Track>, String> {
     let seed = all_tracks.iter().find(|t| t.path == path)
         .ok_or_else(|| "Seed track not found in database".to_string())?;
-        
-    let seed_bpm = seed.bpm.unwrap_or(120.0);
-    let seed_energy = seed.energy.unwrap_or(0.5);
-    let seed_bass = seed.bass_ratio.unwrap_or(0.33);
-    let seed_treble = seed.treble_ratio.unwrap_or(0.33);
-    
+
+    let seed_bpm = seed.bpm;
+    let seed_energy = seed.energy;
+    let seed_bass = seed.bass_ratio;
+    let seed_treble = seed.treble_ratio;
+    let seed_artist_lower = seed.artist.as_ref().map(|a| a.trim().to_lowercase()).unwrap_or_default();
+    let seed_genre_lower = seed.genre.as_ref().map(|g| g.trim().to_lowercase()).unwrap_or_default();
+
     let mut scored_tracks = Vec::new();
-    
+
     for track in all_tracks {
-        if track.path == path {
+        if track.path == path || excluded_paths.iter().any(|excluded| excluded == &track.path) || !crate::player::is_playable_local_path(&track.path) {
             continue;
         }
-        
-        let t_bpm = track.bpm.unwrap_or(120.0);
-        let t_energy = track.energy.unwrap_or(0.5);
-        let t_bass = track.bass_ratio.unwrap_or(0.33);
-        let t_treble = track.treble_ratio.unwrap_or(0.33);
-        
-        let bpm_diff = (seed_bpm - t_bpm) / 60.0;
-        let energy_diff = seed_energy - t_energy;
-        let bass_diff = seed_bass - t_bass;
-        let treble_diff = seed_treble - t_treble;
-        
-        let distance = (
-            1.5 * bpm_diff * bpm_diff +
-            1.0 * energy_diff * energy_diff +
-            1.2 * bass_diff * bass_diff +
-            0.8 * treble_diff * treble_diff
-        ).sqrt();
-        
-        scored_tracks.push((track, distance));
+
+        let track_artist_lower = track.artist.as_ref().map(|a| a.trim().to_lowercase()).unwrap_or_default();
+        let track_genre_lower = track.genre.as_ref().map(|g| g.trim().to_lowercase()).unwrap_or_default();
+
+        let is_same_artist = !seed_artist_lower.is_empty() && seed_artist_lower != "unknown artist" && track_artist_lower == seed_artist_lower;
+        let is_same_genre = !seed_genre_lower.is_empty() && track_genre_lower == seed_genre_lower;
+
+        let has_dsp_features = seed_bpm.is_some() && track.bpm.is_some() && seed_energy.is_some() && track.energy.is_some();
+
+        let mut distance = if has_dsp_features {
+            let s_bpm = seed_bpm.unwrap();
+            let t_bpm = track.bpm.unwrap();
+            let s_energy = seed_energy.unwrap();
+            let t_energy = track.energy.unwrap();
+            let s_bass = seed_bass.unwrap_or(0.33);
+            let t_bass = track.bass_ratio.unwrap_or(0.33);
+            let s_treble = seed_treble.unwrap_or(0.33);
+            let t_treble = track.treble_ratio.unwrap_or(0.33);
+
+            let bpm_diff = (s_bpm - t_bpm) / 60.0;
+            let energy_diff = s_energy - t_energy;
+            let bass_diff = s_bass - t_bass;
+            let treble_diff = s_treble - t_treble;
+
+            (1.5 * bpm_diff * bpm_diff +
+             1.0 * energy_diff * energy_diff +
+             1.2 * bass_diff * bass_diff +
+             0.8 * treble_diff * treble_diff).sqrt()
+        } else if is_same_artist {
+            0.2
+        } else if is_same_genre {
+            0.5
+        } else {
+            2.0
+        };
+
+        if is_same_artist {
+            distance = (distance - 1.0).max(0.05);
+        } else if is_same_genre {
+            distance = (distance - 0.5).max(0.1);
+        }
+
+        if distance < 1.8 {
+            scored_tracks.push((track, distance));
+        }
     }
-    
+
     scored_tracks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    
-    let result: Vec<crate::db::Track> = scored_tracks.into_iter()
+
+    Ok(scored_tracks.into_iter()
         .take(15)
         .map(|(t, _)| t)
-        .collect();
-        
-    Ok(result)
+        .collect())
+}
+
+#[tauri::command]
+async fn get_similar_tracks(state: State<'_, AppState>, path: String, excluded_paths: Option<Vec<String>>) -> Result<Vec<crate::db::Track>, String> {
+    let conn = safe_lock(&state.db);
+    let all_tracks = crate::db::get_all_tracks(&conn).map_err(|e| e.to_string())?;
+    rank_similar_tracks(all_tracks, &path, excluded_paths.as_deref().unwrap_or(&[]))
 }
 
 #[tauri::command]
@@ -4338,4 +4367,111 @@ mod write_text_file_tests {
         assert!(!is_trusted_oauth_host("phishing-google.com"));
         assert!(!is_trusted_oauth_host(""));
     }
+}
+
+#[cfg(test)]
+mod similar_tracks_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn track(id: i32, path: String, bpm: f64, artist: &str) -> crate::db::Track {
+        crate::db::Track {
+            id,
+            path,
+            title: Some(format!("Track {id}")),
+            artist: Some(artist.to_string()),
+            album: None,
+            duration: Some(180.0),
+            format: Some("mp3".to_string()),
+            lyric_offset: 0,
+            loved: Some(0),
+            disliked: Some(0),
+            cover_url: None,
+            path_hash: None,
+            bpm: Some(bpm),
+            energy: Some(0.5),
+            bass_ratio: Some(0.33),
+            treble_ratio: Some(0.33),
+            replaygain_gain: None,
+            track_number: None,
+            disc_number: None,
+            genre: Some("Test".to_string()),
+        }
+    }
+
+    fn temp_track_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "aideo-similar-{name}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn similar_tracks_excludes_online_rows_before_the_result_cap() {
+        let seed_path = temp_track_path("seed");
+        let lower_ranked_local_path = temp_track_path("lower-ranked-local");
+        let mut paths_to_remove = vec![seed_path.clone(), lower_ranked_local_path.clone()];
+        std::fs::write(&seed_path, b"").unwrap();
+        std::fs::write(&lower_ranked_local_path, b"").unwrap();
+
+        let mut tracks = vec![track(0, seed_path.to_string_lossy().into_owned(), 120.0, "Seed")];
+        for id in 1..=14 {
+            let path = temp_track_path(&format!("local-{id}"));
+            std::fs::write(&path, b"").unwrap();
+            paths_to_remove.push(path.clone());
+            tracks.push(track(id, path.to_string_lossy().into_owned(), 120.0, "Local"));
+        }
+        tracks.push(track(
+            15,
+            lower_ranked_local_path.to_string_lossy().into_owned(),
+            180.0,
+            "Lower-ranked local",
+        ));
+        for id in 16..=30 {
+            tracks.push(track(
+                id,
+                format!("https://example.com/online-{id}.mp3"),
+                120.0,
+                "Online",
+            ));
+        }
+        tracks.push(track(31, temp_track_path("missing-local").to_string_lossy().into_owned(), 120.0, "Missing"));
+
+        let result = rank_similar_tracks(tracks, &seed_path.to_string_lossy(), &[]).unwrap();
+
+        assert_eq!(result.len(), 15);
+        assert!(result.iter().any(|candidate| candidate.path == lower_ranked_local_path.to_string_lossy()));
+        assert!(result.iter().all(|candidate| crate::player::is_playable_local_path(&candidate.path)));
+
+        for path in paths_to_remove {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+    #[test]
+    fn similar_tracks_skips_excluded_history_before_result_cap() {
+        let seed_path = temp_track_path("excluded-seed");
+        let eligible_path = temp_track_path("eligible-sixteenth");
+        let mut paths_to_remove = vec![seed_path.clone(), eligible_path.clone()];
+        std::fs::write(&seed_path, b"").unwrap();
+        std::fs::write(&eligible_path, b"").unwrap();
+        let mut tracks = vec![track(0, seed_path.to_string_lossy().into_owned(), 120.0, "Seed")];
+        let mut excluded = Vec::new();
+        for id in 1..=15 {
+            let path = temp_track_path(&format!("heard-{id}"));
+            std::fs::write(&path, b"").unwrap();
+            excluded.push(path.to_string_lossy().into_owned());
+            paths_to_remove.push(path.clone());
+            tracks.push(track(id, path.to_string_lossy().into_owned(), 120.0, "Heard"));
+        }
+        tracks.push(track(16, eligible_path.to_string_lossy().into_owned(), 180.0, "New"));
+
+        let result = rank_similar_tracks(tracks, &seed_path.to_string_lossy(), &excluded).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, eligible_path.to_string_lossy());
+
+        for path in paths_to_remove {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
 }

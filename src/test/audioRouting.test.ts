@@ -61,6 +61,19 @@ describe('Playback Engine, Queue & Audio Routing', () => {
     expect(useStore.getState().isMuted).toBe(false);
   });
 
+  it('allows actual mute but rejects attenuation during bit-perfect playback', async () => {
+    const store = useStore.getState();
+    useStore.setState({ playback: { ...useStore.getState().playback, bit_perfect: true, volume: 1 }, isMuted: false });
+    await store.setVolume(0.4);
+    expect(useStore.getState().playback.volume).toBe(1);
+    await store.toggleMute();
+    expect(useStore.getState().isMuted).toBe(true);
+    expect(useStore.getState().playback.volume).toBe(0);
+    await store.toggleMute();
+    expect(useStore.getState().isMuted).toBe(false);
+    expect(useStore.getState().playback.volume).toBe(1);
+  });
+
   it('preserves bit-perfect mode when setDSP is called with false/disabled parameters', async () => {
     const store = useStore.getState();
     useStore.setState({

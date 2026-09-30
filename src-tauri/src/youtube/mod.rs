@@ -1175,7 +1175,7 @@ pub async fn get_artist_discography(artist: String) -> Result<Vec<YoutubeTrack>,
     if let Ok(t2) = res2 { combined_tracks.extend(t2); }
     if let Ok(t3) = res3 { combined_tracks.extend(t3); }
 
-    let mut seen_titles = std::collections::HashSet::new();
+    let mut seen_tracks = std::collections::HashSet::new();
     let mut seen_ids = std::collections::HashSet::new();
     let mut verified_tracks = Vec::new();
 
@@ -1194,8 +1194,8 @@ pub async fn get_artist_discography(artist: String) -> Result<Vec<YoutubeTrack>,
             continue;
         }
 
-        let title_key = clean_title(&track.title);
-        if seen_titles.insert(title_key) {
+        let track_key = yt_track_signature(&track);
+        if seen_tracks.insert(track_key) {
             verified_tracks.push(track);
         }
     }
@@ -1349,7 +1349,7 @@ pub async fn get_aideo_recommendations(top_artists: Vec<String>, exclude_ids: Ve
         }
     }
 
-    final_tracks.retain(|track| !is_duration_too_long(&track.duration_raw));
+    final_tracks.retain(|track| is_known_duration_within_limit(&track.duration_raw));
 
     Ok(final_tracks)
 }
@@ -1882,7 +1882,8 @@ pub async fn get_youtube_autoplay_recommendations(
                     "gl": "US"
                 }
             },
-            "videoId": resolved_video_id
+            "videoId": resolved_video_id,
+            "playlistId": format!("RDAMVM{}", resolved_video_id)
         });
 
         if let Ok(res) = client.post(&search_url)
@@ -1918,7 +1919,8 @@ pub async fn get_youtube_autoplay_recommendations(
                         .unwrap_or("Unknown Title")
                         .to_string();
 
-                    let track_artist = item.get("longBylineText")
+                    let mut track_artist = item.get("longBylineText")
+                        .or_else(|| item.get("shortBylineText"))
                         .and_then(|b| b.get("runs"))
                         .and_then(|r| r.as_array())
                         .and_then(|arr| arr.first())
@@ -1926,6 +1928,15 @@ pub async fn get_youtube_autoplay_recommendations(
                         .and_then(|t| t.as_str())
                         .unwrap_or("Unknown Artist")
                         .to_string();
+
+                    if (track_artist == "Unknown Artist" || track_artist.contains("Radio") || track_artist.contains("Official") || track_artist.contains("Records") || track_artist.contains("Channel"))
+                        && track_title.contains(" - ")
+                    {
+                        let parts: Vec<&str> = track_title.splitn(2, " - ").collect();
+                        if parts.len() == 2 && !parts[0].trim().is_empty() {
+                            track_artist = parts[0].trim().to_string();
+                        }
+                    }
 
                     let thumbnail_url = item.get("thumbnail")
                         .and_then(|t| t.get("thumbnails"))
@@ -1965,7 +1976,7 @@ pub async fn get_youtube_autoplay_recommendations(
                         cover_url,
                         duration_raw,
                         url,
-                        recommendation_source: None,
+                        recommendation_source: Some("youtube_radio".to_string()),
                         source_context: None,
                     });
                 }
@@ -1974,144 +1985,106 @@ pub async fn get_youtube_autoplay_recommendations(
     }
 
     // --- CANDIDATE GENERATION SOURCE 2: Hybrid Collaborative Loved Seeds & Current Track (Last.fm) ---
-    // Only query loved streams that share some context (same artist or matching text tokens) with the current song
-    // to prevent unrelated genres/languages from hijacking the radio.
-    let extra_seeds: Vec<(String, String)> = {
-        let mut seeds = Vec::new();
-        let conn = crate::safe_lock(&state.db);
+    // Only query Last.fm / loved seeds if Source 1 returned fewer than 10 tracks to prevent cross-genre contamination
+    if tracks.len() < 10 {
+        let extra_seeds: Vec<(String, String)> = {
+            let mut seeds = Vec::new();
+            let conn = crate::safe_lock(&state.db);
 
-        // Step 1: Look for loved streams by the exact same artist
-        if let Ok(mut stmt) = conn.prepare(
-            "SELECT title, artist FROM tracks
-             WHERE loved = 1
-               AND LOWER(artist) = LOWER(?1)
-               AND (path LIKE 'http%' OR format IN ('YouTube Direct', 'Tidal FLAC', 'SUBSONIC', 'JELLYFIN'))
-             ORDER BY RANDOM() LIMIT 2"
-        ) {
-            if let Ok(mut rows) = stmt.query(rusqlite::params![artist]) {
-                while let Some(row) = rows.next().unwrap_or(None) {
-                    if let (Ok(t_title), Ok(t_artist)) = (row.get::<_, String>(0), row.get::<_, String>(1)) {
-                        seeds.push((t_title, t_artist));
+            // Look for loved streams by the exact same artist
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT title, artist FROM tracks
+                 WHERE loved = 1
+                   AND LOWER(artist) = LOWER(?1)
+                   AND (path LIKE 'http%' OR format IN ('YouTube Direct', 'Tidal FLAC', 'SUBSONIC', 'JELLYFIN'))
+                 ORDER BY RANDOM() LIMIT 2"
+            ) {
+                if let Ok(mut rows) = stmt.query(rusqlite::params![artist]) {
+                    while let Some(row) = rows.next().unwrap_or(None) {
+                        if let (Ok(t_title), Ok(t_artist)) = (row.get::<_, String>(0), row.get::<_, String>(1)) {
+                            seeds.push((t_title, t_artist));
+                        }
+                    }
+                }
+            }
+            seeds
+        };
+
+        use futures::FutureExt;
+        let mut lastfm_candidates = Vec::new();
+        let mut collaborative_tasks = Vec::new();
+
+        // Seed 1: Current track
+        let seed_artist = artist.clone();
+        let seed_title = title.clone();
+        collaborative_tasks.push(async move {
+            crate::lastfm_api::get_similar_tracks(&seed_artist, &seed_title).await
+        }.boxed());
+
+        // Seed 2 & 3: Random loved streams by the same artist
+        for (s_title, s_artist) in extra_seeds {
+            collaborative_tasks.push(async move {
+                crate::lastfm_api::get_similar_tracks(&s_artist, &s_title).await
+            }.boxed());
+        }
+
+        let collaborative_results = futures::future::join_all(collaborative_tasks).await;
+        for res in collaborative_results {
+            if let Ok(sim_tracks) = res {
+                for t in sim_tracks {
+                    let track_title = t.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                    let track_artist = t.get("artist").and_then(|a| a.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
+                    if !track_title.is_empty() && !track_artist.is_empty() {
+                        lastfm_candidates.push((track_title, track_artist));
                     }
                 }
             }
         }
 
-        // Step 2: If we need more seeds, look for loved streams sharing name tokens
-        if seeds.len() < 2 {
-            let mut words: Vec<String> = artist.split_whitespace()
-                .chain(title.split_whitespace())
-                .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
-                .filter(|w| w.len() > 3 && w != "feat" && w != "featuring" && w != "live" && w != "remix" && w != "version" && w != "official" && w != "audio" && w != "video")
+        if lastfm_candidates.is_empty() && !artist.is_empty() && artist != "Unknown Artist" {
+            if let Ok(sim_artists) = crate::lastfm_api::get_similar_artists(&artist).await {
+                for sim_art in sim_artists.iter().take(3) {
+                    if let Ok(top_tracks) = crate::lastfm_api::get_artist_top_tracks(sim_art).await {
+                        for t in top_tracks {
+                            let track_title = t.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                            if !track_title.is_empty() {
+                                lastfm_candidates.push((track_title, sim_art.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Resolve top 3 Last.fm candidates concurrently in parallel
+        if !lastfm_candidates.is_empty() {
+            let mut lastfm_futures = Vec::new();
+            for (t_title, t_artist) in lastfm_candidates.into_iter().take(3) {
+                let client_clone = client.clone();
+                let api_key_clone = api_key.clone();
+                lastfm_futures.push(async move {
+                    let query = format!("{} {}", t_artist, t_title);
+                    if let Ok(results) = search_youtube_internal(&client_clone, &api_key_clone, &query, false).await {
+                        if let Some(first) = results.into_iter().next() {
+                            return Some(first);
+                        }
+                    }
+                    None
+                });
+            }
+
+            let resolved_lastfm: Vec<YoutubeTrack> = futures::future::join_all(lastfm_futures)
+                .await
+                .into_iter()
+                .flatten()
                 .collect();
 
-            words.sort();
-            words.dedup();
+            println!("[youtube] Successfully integrated {} collaborative candidates from Last.fm!", resolved_lastfm.len());
 
-            for word in words {
-                if seeds.len() >= 2 {
-                    break;
+            for tr in resolved_lastfm {
+                if !tracks.iter().any(|t| t.id == tr.id) {
+                    tracks.push(tr);
                 }
-                let search_pattern = format!("%{}%", word);
-                if let Ok(mut stmt) = conn.prepare(
-                    "SELECT title, artist FROM tracks
-                     WHERE loved = 1
-                       AND (LOWER(title) LIKE ?1 OR LOWER(artist) LIKE ?1)
-                       AND (path LIKE 'http%' OR format IN ('YouTube Direct', 'Tidal FLAC', 'SUBSONIC', 'JELLYFIN'))
-                     ORDER BY RANDOM() LIMIT 2"
-                ) {
-                    if let Ok(mut rows) = stmt.query(rusqlite::params![search_pattern]) {
-                        while let Some(row) = rows.next().unwrap_or(None) {
-                            if seeds.len() >= 2 {
-                                break;
-                            }
-                            if let (Ok(t_title), Ok(t_artist)) = (row.get::<_, String>(0), row.get::<_, String>(1)) {
-                                if !seeds.iter().any(|(st, sa)| st == &t_title && sa == &t_artist) {
-                                    seeds.push((t_title, t_artist));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        seeds
-    };
-
-    use futures::FutureExt;
-    let mut lastfm_candidates = Vec::new();
-    let mut collaborative_tasks = Vec::new();
-
-    // Seed 1: Current track
-    let seed_artist = artist.clone();
-    let seed_title = title.clone();
-    collaborative_tasks.push(async move {
-        crate::lastfm_api::get_similar_tracks(&seed_artist, &seed_title).await
-    }.boxed());
-
-    // Seed 2 & 3: Random loved streams
-    for (s_title, s_artist) in extra_seeds {
-        collaborative_tasks.push(async move {
-            crate::lastfm_api::get_similar_tracks(&s_artist, &s_title).await
-        }.boxed());
-    }
-
-    let collaborative_results = futures::future::join_all(collaborative_tasks).await;
-    for res in collaborative_results {
-        if let Ok(sim_tracks) = res {
-            for t in sim_tracks {
-                let track_title = t.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-                let track_artist = t.get("artist").and_then(|a| a.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
-                if !track_title.is_empty() && !track_artist.is_empty() {
-                    lastfm_candidates.push((track_title, track_artist));
-                }
-            }
-        }
-    }
-
-    if lastfm_candidates.is_empty() && !artist.is_empty() && artist != "Unknown Artist" {
-        if let Ok(sim_artists) = crate::lastfm_api::get_similar_artists(&artist).await {
-            for sim_art in sim_artists.iter().take(3) {
-                if let Ok(top_tracks) = crate::lastfm_api::get_artist_top_tracks(sim_art).await {
-                    for t in top_tracks {
-                        let track_title = t.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-                        if !track_title.is_empty() {
-                            lastfm_candidates.push((track_title, sim_art.clone()));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Resolve top 3 Last.fm candidates concurrently in parallel
-    if !lastfm_candidates.is_empty() {
-        let mut lastfm_futures = Vec::new();
-        for (t_title, t_artist) in lastfm_candidates.into_iter().take(3) {
-            let client_clone = client.clone();
-            let api_key_clone = api_key.clone();
-            lastfm_futures.push(async move {
-                let query = format!("{} {}", t_artist, t_title);
-                if let Ok(results) = search_youtube_internal(&client_clone, &api_key_clone, &query, false).await {
-                    if let Some(first) = results.into_iter().next() {
-                        return Some(first);
-                    }
-                }
-                None
-            });
-        }
-
-        let resolved_lastfm: Vec<YoutubeTrack> = futures::future::join_all(lastfm_futures)
-            .await
-            .into_iter()
-            .flatten()
-            .collect();
-
-        println!("[youtube] Successfully integrated {} collaborative candidates from Last.fm!", resolved_lastfm.len());
-
-        for tr in resolved_lastfm {
-            if !tracks.iter().any(|t| t.id == tr.id) {
-                tracks.push(tr);
             }
         }
     }
@@ -2155,7 +2128,7 @@ pub async fn get_youtube_autoplay_recommendations(
     let _artist_lower = artist.to_lowercase();
     let clean_seed_title = clean_title(&title);
     let mut filtered_tracks = Vec::new();
-    let mut seen_titles = std::collections::HashSet::new();
+    let mut seen_tracks: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
 
     for track in tracks {
         // 0. Skip exact seed video ID
@@ -2194,11 +2167,13 @@ pub async fn get_youtube_autoplay_recommendations(
             continue;
         }
 
-        // 5. De-duplicate clean titles inside the recommended list itself
-        if seen_titles.contains(&clean_cand) {
+        // 5. De-duplicate clean titles and artists inside the recommended list itself
+        let artist_key = track.artist.trim().to_lowercase();
+        let track_key = (artist_key, clean_cand);
+        if seen_tracks.contains(&track_key) {
             continue;
         }
-        seen_titles.insert(clean_cand);
+        seen_tracks.insert(track_key);
 
         filtered_tracks.push(track);
     }
@@ -2254,8 +2229,16 @@ pub async fn get_youtube_autoplay_recommendations(
 
     let mut scored_tracks: Vec<(YoutubeTrack, f64)> = Vec::new();
 
-    for track in filtered_tracks {
-        let score = score_autoplay_candidate(&taste_profile, &track.title, &track.artist);
+    for (idx, track) in filtered_tracks.into_iter().enumerate() {
+        let mut score = score_autoplay_candidate(&taste_profile, &track.title, &track.artist);
+        // Boost tracks by the same artist as the seed track so the user gets more hits by the chosen artist
+        if artist_matches(&track.artist, &artist) {
+            score += 0.40;
+        }
+        // Preserve YouTube Music Radio's natural high quality ranking for top results
+        if idx < 50 {
+            score += (50 - idx) as f64 * 0.01;
+        }
         scored_tracks.push((track, score));
     }
 
@@ -2326,6 +2309,8 @@ pub async fn get_youtube_autoplay_recommendations(
             }
         }
     }
+
+    final_queue.retain(|track| is_known_duration_within_limit(&track.duration_raw));
 
     Ok(final_queue)
 }
@@ -3105,6 +3090,10 @@ fn interleave_tracks(online: Vec<YoutubeTrack>, local: Vec<YoutubeTrack>, limit:
 /// format used by the discovery hub (normalize_artist_name + clean_title).
 fn yt_track_signature(t: &YoutubeTrack) -> String {
     format!("{}::{}", normalize_artist_name(&t.artist), clean_title(&t.title))
+}
+
+fn is_known_duration_within_limit(duration_raw: &str) -> bool {
+    parse_duration_seconds(duration_raw).is_some_and(|seconds| seconds > 0 && seconds <= 900)
 }
 
 /// Merges online duplicate sources into the matching shelf track's source_context
@@ -5216,23 +5205,22 @@ pub fn get_cached_discovery_hub(app_handle: tauri::AppHandle) -> Result<Option<D
     Ok(None)
 }
 
-pub fn is_duration_too_long(duration_raw: &str) -> bool {
-    let parts: Vec<&str> = duration_raw.split(':').collect();
-    if parts.len() >= 3 {
-        if let (Ok(hours), Ok(minutes)) = (parts[0].trim().parse::<u32>(), parts[1].trim().parse::<u32>()) {
-            hours > 0 || minutes > 15
-        } else {
-            false
+fn parse_duration_seconds(duration_raw: &str) -> Option<u64> {
+    let mut parts = duration_raw.split(':');
+    let first = parts.next()?.trim().parse::<u64>().ok()?;
+    let second = parts.next()?.trim().parse::<u64>().ok()?;
+    match parts.next() {
+        Some(seconds) if parts.next().is_none() => {
+            let seconds = seconds.trim().parse::<u64>().ok()?;
+            Some(first.saturating_mul(3600).saturating_add(second.saturating_mul(60)).saturating_add(seconds))
         }
-    } else if parts.len() == 2 {
-        if let Ok(minutes) = parts[0].trim().parse::<u32>() {
-            minutes > 15
-        } else {
-            false
-        }
-    } else {
-        false
+        None => Some(first.saturating_mul(60).saturating_add(second)),
+        _ => None,
     }
+}
+
+pub fn is_duration_too_long(duration_raw: &str) -> bool {
+    parse_duration_seconds(duration_raw).is_some_and(|seconds| seconds > 900)
 }
 
 #[cfg(test)]
@@ -5502,7 +5490,7 @@ mod tests {
         assert!(!is_duration_too_long("00:03:45"));
         assert!(!is_duration_too_long("00:14:59"));
         assert!(!is_duration_too_long("00:15:00"));
-        assert!(!is_duration_too_long("00:15:01"));
+        assert!(is_duration_too_long("00:15:01"));
 
         // 3-part over 15 mins -> too long
         assert!(is_duration_too_long("00:18:00"));
@@ -5514,7 +5502,7 @@ mod tests {
         // 2-part normal: <= 15 mins -> not too long
         assert!(!is_duration_too_long("04:15"));
         assert!(!is_duration_too_long("15:00"));
-        assert!(!is_duration_too_long("15:01"));
+        assert!(is_duration_too_long("15:01"));
 
         // 2-part long: > 15 mins -> too long
         assert!(is_duration_too_long("16:00"));
@@ -5524,6 +5512,31 @@ mod tests {
         assert!(!is_duration_too_long("invalid:time"));
         assert!(!is_duration_too_long(""));
         assert!(!is_duration_too_long("invalid:time:format"));
+    }
+
+    #[test]
+    fn discography_dedup_keeps_same_title_by_different_artists() {
+        let tracks = vec![
+            shelf_track("adele-hello", "Hello", "Adele", "Discography"),
+            shelf_track("lionel-hello", "Hello", "Lionel Richie", "Discography"),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        let kept: Vec<_> = tracks
+            .into_iter()
+            .filter(|track| seen.insert(yt_track_signature(track)))
+            .collect();
+
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn resolved_unknown_duration_is_not_allowed_into_recommendations() {
+        assert!(!is_known_duration_within_limit("0:00"));
+        assert!(!is_known_duration_within_limit(""));
+        assert!(!is_known_duration_within_limit("unknown"));
+        assert!(is_known_duration_within_limit("15:00"));
+        assert!(!is_known_duration_within_limit("15:01"));
+        assert!(!is_known_duration_within_limit("00:15:01"));
     }
 
     #[test]
@@ -6045,6 +6058,33 @@ mod tests {
         let token = matched.unwrap();
         assert!(token.starts_with("Cgt"));
         assert!(token.len() > 30);
+    }
+
+    #[test]
+    fn test_autoplay_radio_candidate_scoring_seed_affinity() {
+        let top = vec!["IVE".to_string(), "NewJeans".to_string()];
+        let library = vec!["IVE".to_string()];
+        let empty_recent: std::collections::HashSet<String> = Default::default();
+        let empty_skips: std::collections::HashMap<String, (i64, i64)> = Default::default();
+        let empty_tokens: std::collections::HashMap<String, u32> = Default::default();
+
+        let profile = autoplay_profile(&top, &library, "balanced", &empty_recent, &empty_skips, &empty_tokens);
+
+        let seed_artist = "Wali";
+        let candidate_same_artist = "Cari Jodoh";
+        let candidate_other_artist = "Pergi Pagi Pulang Pagi";
+
+        let mut score_same = score_autoplay_candidate(&profile, candidate_same_artist, "Wali");
+        if artist_matches("Wali", seed_artist) {
+            score_same += 0.40;
+        }
+
+        let mut score_other = score_autoplay_candidate(&profile, candidate_other_artist, "Armada");
+        if artist_matches("Armada", seed_artist) {
+            score_other += 0.40;
+        }
+
+        assert!(score_same > score_other, "Seed artist track must score higher than non-seed artist track");
     }
 }
 

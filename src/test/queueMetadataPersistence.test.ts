@@ -342,6 +342,7 @@ describe('pollStatus accepts a genuine backend stop after the grace window', () 
     localStorage.clear();
     useStore.setState({
       currentTrack: null,
+      currentAttemptId: undefined,
       queue: [],
       playback: {
         ...useStore.getState().playback,
@@ -350,6 +351,8 @@ describe('pollStatus accepts a genuine backend stop after the grace window', () 
         last_skip_time: Date.now() - 10000,
         last_stop_time: 0,
         backend_stop_detected_at: 0,
+        is_buffering: false,
+        attempt_id: undefined,
         last_poll_time: 0,
       },
     });

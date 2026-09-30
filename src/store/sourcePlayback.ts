@@ -6,7 +6,7 @@ import { applySourcePreference, bounded, isLocalUnifiedTrack, matchingSources, r
 
 type SetState = StoreApi<PlayerState>['setState'];
 let sequence = 0;
-let retry: { path: string; run: (error: string) => Promise<void> } | null = null;
+let retry: { path: string; attemptId: string; run: (error: string) => Promise<void> } | null = null;
 let pendingUpgrade: (() => void) | null = null;
 
 // Bounded background enrichment controller (Feature 23: max 2 concurrent jobs with request coalescing)
@@ -75,8 +75,8 @@ export function cancelSourcePlayback() {
   enrichmentQueue.length = 0;
 }
 export const playbackRequest = () => sequence;
-export function handleSourceFailure(path: string, error: string) {
-  if (!retry || retry.path !== path) return;
+export function handleSourceFailure(path: string, error: string, attemptId?: string) {
+  if (!retry || retry.path !== path || (attemptId && retry.attemptId !== attemptId)) return;
   const next = retry;
   retry = null;
   void next.run(error);
@@ -108,15 +108,13 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
   }
   const previous = get().currentTrack;
   const history = previous && !isHistory && !preservePlaybackSession ? [...get().playHistory, previous].slice(-200) : get().playHistory;
-  const queue = [...get().queue];
-  const queued = resetAutoplay
-    ? queue.findIndex(t =>
-        original.queue_occurrence_id
-          ? t.queue_occurrence_id === original.queue_occurrence_id
-          : (t === original || (t.source_context?.recording_id === context.recording_id && t.playlist_entry_id === track.playlist_entry_id))
-      )
-    : -1;
-  if (queued >= 0) queue.splice(queued, 1);
+  const queue = resetAutoplay ? [] : [...get().queue];
+  if (resetAutoplay) {
+    set({ queue });
+    localStorage.setItem('aideo_queue', JSON.stringify(queue));
+    await get().syncBackendQueue();
+    if (!current()) return;
+  }
   const preferredSource = ordered[0];
   const initialCover = preferredSource
     ? (preferredSource.metadata?.cover_url ?? (preferredSource.provider === 'local' ? (track.cover_url || null) : null))
@@ -208,7 +206,7 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
           }).catch(() => {});
         }
 
-        retry = { path: result.url, run: attempt };
+        retry = { path: result.url, attemptId, run: attempt };
         const playRemainingMs = Math.max(0, overallDeadline - Date.now());
         if (playRemainingMs <= 0) throw new Error('Playback attempt timed out across all sources');
         if (get().chromecast_connected) {
@@ -216,7 +214,10 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
         } else if (get().upnp_connected) {
           await bounded(invoke('upnp_play', { path: result.url, title: playingTrack.title, artist: playingTrack.artist, album: playingTrack.album, coverUrl: playingTrack.cover_url }), playRemainingMs);
           if (startPos > 0) await invoke('upnp_control', { action: 'seek', value: startPos });
-        } else await bounded(invoke('play_track', { path: result.url, startPos, attempt_id: attemptId }), playRemainingMs);
+        } else await bounded(invoke('play_track', { path: result.url, startPos, attemptId }), playRemainingMs);
+        if ((get().chromecast_connected || get().upnp_connected) && active()) {
+          set({ playback: { ...get().playback, is_buffering: false } });
+        }
         if (!active()) return;
         const desired = ordered[0]?.catalog_quality;
         const dropped = quality !== 'data_saver' && (result.quality.lossless !== true
@@ -238,6 +239,7 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
         }
         localStorage.setItem('aideo_current_track', JSON.stringify(playingTrack));
         get().updateDiscordPresence();
+        if (get().autoplayEnabled && !preservePlaybackSession) void get().triggerAutoplayRadio(playingTrack, resetAutoplay);
         return;
       } catch (error) { lastError = String(error); if (active()) retry = null; }
     }
@@ -264,7 +266,7 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
   };
   try {
     if (context.selection.mode === 'auto' && quality !== 'data_saver' && track.title && track.artist) void discover();
-    const nextTrack = get().queue[0] || (get().getNextTrackToPlay ? get().getNextTrackToPlay() : undefined);
+    const nextTrack = get().queue[0];
     const isLocalSequence = isLocalUnifiedTrack(track) && (!nextTrack || isLocalUnifiedTrack(nextTrack));
     if (isLocalSequence) {
       if (get().sourceQueueManaged) {

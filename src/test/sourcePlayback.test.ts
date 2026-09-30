@@ -50,6 +50,28 @@ describe('Source playback fallback', () => {
     expect(JSON.parse(localStorage.getItem('aideo_current_track')!).source_context.selection).toEqual(track.source_context?.selection);
   });
 
+  it('replaces the old queue and shows recommendations for a directly selected unified song', async () => {
+    const old = { ...track, path: 'old', title: 'Old', source_context: undefined };
+    const radio = { id: 'radio123456', title: 'Radio Song', artist: 'Radio Artist', duration_raw: '3:00', url: 'https://www.youtube.com/watch?v=radio123456' };
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
+      if (cmd === 'get_youtube_autoplay_recommendations') return [radio];
+      return null;
+    });
+    useStore.setState({ queue: [old], autoplayEnabled: true, recommendationEngine: 'youtube', appMode: 'hybrid' });
+
+    await useStore.getState().playTrack(track);
+    await vi.waitFor(() => expect(useStore.getState().queue.map(t => t.title)).toEqual(['Radio Song']));
+    expect(JSON.parse(localStorage.getItem('aideo_queue')!).map((t: Track) => t.title)).toEqual(['Radio Song']);
+  });
+
+  it('preserves remaining manual entries when starting a unified track from the queue', async () => {
+    const next = { ...track, id: 2, path: 'next', title: 'Next', source_context: undefined };
+    useStore.setState({ queue: [track, next], autoplayEnabled: true, recommendationEngine: 'youtube' });
+    await useStore.getState().playFromQueue(0);
+    expect(useStore.getState().queue.map(t => t.path)[0]).toBe(next.path);
+  });
+
   it('bounds native decoder fallback and stops after exhaustion', async () => {
     const notices = vi.spyOn(window, 'dispatchEvent');
     await useStore.getState().playTrack(track);
@@ -61,6 +83,15 @@ describe('Source playback fallback', () => {
     expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(2);
     expect(notices).toHaveBeenCalledWith(expect.objectContaining({ type: 'ui-toast', detail: expect.objectContaining({ type: 'error', message: expect.stringContaining('No source') }) }));
     notices.mockRestore();
+  });
+
+  it('ignores a late failure from an older attempt at the same URL', async () => {
+    await useStore.getState().playTrack(track);
+    const currentAttemptId = useStore.getState().currentAttemptId;
+    handleSourceFailure('https://tidal.example/audio', 'Old decoder failed', 'previous-attempt');
+    await Promise.resolve();
+    expect(useStore.getState().currentAttemptId).toBe(currentAttemptId);
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
   });
 
   it('prevents a late resolution from playing after stop', async () => {
@@ -133,6 +164,24 @@ describe('Source playback fallback', () => {
     expect(useStore.getState()).toMatchObject({ playHistory: history, playCounts: { recording: 4 }, lyrics, lyricStatus: 'found', scrobbledCurrent: true });
   });
 
+  it('keeps the upcoming queue when switching the current song source', async () => {
+    const next: Track = { ...track, id: 2, path: 'next', title: 'Next', source_context: undefined };
+    const radio = { id: 'radio123456', title: 'Radio Song', artist: 'Radio Artist', duration_raw: '3:00', url: 'https://www.youtube.com/watch?v=radio123456' };
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
+      if (cmd === 'get_youtube_autoplay_recommendations') return [radio];
+      return null;
+    });
+    useStore.setState({ currentTrack: track, queue: [next], autoplayEnabled: true, recommendationEngine: 'youtube', appMode: 'hybrid' });
+    const qobuzTrack = { ...track, source_context: { ...track.source_context!, selection: { mode: 'explicit' as const, source: { provider: 'qobuz' as const, id: '123' } } } };
+
+    await useStore.getState().playTrack(qobuzTrack, true, false, undefined, 83, true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(useStore.getState().queue.map(t => t.path)).toEqual([next.path]);
+    expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'clear_queue')).toBe(false);
+  });
+
   it('seeks UPnP after switching source because UPnP play has no start position', async () => {
     useStore.setState({ currentTrack: track, upnp_connected: true });
 
@@ -140,6 +189,13 @@ describe('Source playback fallback', () => {
 
     expect(invoke).toHaveBeenCalledWith('upnp_play', expect.objectContaining({ path: 'https://tidal.example/audio' }));
     expect(invoke).toHaveBeenCalledWith('upnp_control', { action: 'seek', value: 83 });
+  });
+
+  it.each(['cast', 'upnp'] as const)('completes %s buffering after successful remote play', async route => {
+    useStore.setState({ chromecast_connected: route === 'cast', upnp_connected: route === 'upnp' });
+    await useStore.getState().playTrack(track);
+    expect(useStore.getState().playback.status).toBe('Playing');
+    expect(useStore.getState().playback.is_buffering).toBe(false);
   });
 
   it('falls back from a missing local file and keeps that explicit preference', async () => {
@@ -254,7 +310,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     });
 
     // Start playing initial track
-    await useStore.getState().playTrack(initialTrack);
+    await useStore.getState().playTrack(initialTrack, false, false);
 
     // Initial state: playing YouTube
     expect(useStore.getState().currentTrack?.active_source?.provider).toBe('youtube');
@@ -884,7 +940,7 @@ describe('Milestone 3: Playback attempt lifecycle, cancellation, 15s deadline & 
     expect(useStore.getState().playback.attempt_id).toBe(currentAttemptId);
     expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({
       path: 'https://tidal.example/stream',
-      attempt_id: currentAttemptId,
+      attemptId: currentAttemptId,
     }));
   });
 

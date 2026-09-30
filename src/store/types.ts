@@ -465,6 +465,7 @@ export interface PlayerState {
   currentHistoryId: number | null;
   autoplayEnabled: boolean;
   autoplayDiscoveryLevel: 'familiarity' | 'balanced' | 'discovery';
+  recommendationEngine: 'our' | 'youtube' | 'tidal';
   autoplaySeedTrack: Track | null;
   autoplaySessionHistory: Track[];
   recentlyClearedAutoplayPaths: string[];
@@ -558,7 +559,9 @@ export interface PlayerState {
   reorderQueue: (from: number, to: number) => Promise<void>;
   initializeQueue: () => Promise<void>;
   fetchQueue: () => Promise<void>;
+  syncBackendQueue: () => Promise<void>;
   handleTrackTransition: (path: string) => Promise<void>;
+  handleNativeTrackTransition: (path: string, attemptId: string) => Promise<void>;
   playNext: () => Promise<void>;
   getNextTrackToPlay: () => Track | null;
   getNextTracksToPlay: (count?: number) => Track[];
@@ -568,6 +571,7 @@ export interface PlayerState {
   toggleRepeat: () => void;
   toggleAutoplay: () => Promise<void>;
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => void;
+  setRecommendationEngine: (engine: 'our' | 'youtube' | 'tidal') => void;
   triggerAutoplayRadio: (track: Track, forceReset?: boolean) => Promise<void>;
   pauseTrack: () => Promise<void>;
   resumeTrack: () => Promise<void>;

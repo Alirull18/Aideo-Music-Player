@@ -4,7 +4,7 @@ use wasapi::{
     WaveFormat,
 };
 #[cfg(target_os = "windows")]
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
 #[cfg(target_os = "windows")]
@@ -13,6 +13,72 @@ use std::thread;
 pub struct WasapiStream {
     shutdown: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
+    drain_nanos: Arc<AtomicU64>,
+}
+
+impl WasapiStream {
+    pub fn drain_duration(&self) -> std::time::Duration {
+        std::time::Duration::from_nanos(self.drain_nanos.load(Ordering::Acquire))
+    }
+}
+
+fn buffer_duration(frames: u32, sample_rate: u32) -> std::time::Duration {
+    std::time::Duration::from_nanos(u64::from(frames) * 1_000_000_000 / u64::from(sample_rate))
+}
+
+fn release_endpoint<T>(endpoint: &mut Option<T>) {
+    drop(endpoint.take());
+}
+
+fn record_start_failure(attempts: &mut u32) -> bool {
+    *attempts += 1;
+    *attempts >= MAX_START_FAILURES
+}
+
+#[cfg(target_os = "windows")]
+struct ExclusiveEndpoint {
+    render_client: wasapi::AudioRenderClient,
+    event: Option<wasapi::Handle>,
+    client: wasapi::AudioClient,
+    buffer_size: u32,
+    num_frames: usize,
+}
+
+#[cfg(target_os = "windows")]
+fn prepare_endpoint(client: wasapi::AudioClient, is_polling: bool) -> Result<ExclusiveEndpoint, String> {
+    let event = if is_polling {
+        None
+    } else {
+        Some(client.set_get_eventhandle().map_err(|e| format!("Failed to set event handle: {e}"))?)
+    };
+    let render_client = client.get_audiorenderclient()
+        .map_err(|e| format!("Failed to get render client: {e}"))?;
+    let buffer_size = client.get_buffer_size()
+        .map_err(|e| format!("Failed to get exclusive buffer size: {e}"))?;
+    if buffer_size == 0 {
+        return Err("Exclusive buffer size is 0, aborting".to_string());
+    }
+    let num_frames = if is_polling { (buffer_size / 4).max(1) } else { buffer_size } as usize;
+    Ok(ExclusiveEndpoint { render_client, event, client, buffer_size, num_frames })
+}
+
+#[cfg(target_os = "windows")]
+fn reacquire_endpoint(device: &wasapi::Device, format: &WaveFormat, mode: &StreamMode, is_polling: bool)
+    -> Result<ExclusiveEndpoint, String>
+{
+    let mut client = device.get_iaudioclient().map_err(|e| format!("WASAPI reacquire activation failed: {e}"))?;
+    client.initialize_client(format, &Direction::Render, mode)
+        .map_err(|e| format!("WASAPI reacquire initialization failed: {e}"))?;
+    prepare_endpoint(client, is_polling)
+}
+
+#[cfg(target_os = "windows")]
+fn prefill_endpoint(endpoint: &ExclusiveEndpoint, output_bytes: &[u8], is_polling: bool) -> Result<(), String> {
+    for _ in 0..if is_polling { 4 } else { 1 } {
+        endpoint.render_client.write_to_device(endpoint.num_frames, output_bytes, None)
+            .map_err(|e| format!("WASAPI exclusive prefill failed: {e}"))?;
+    }
+    Ok(())
 }
 
 impl Drop for WasapiStream {
@@ -24,26 +90,21 @@ impl Drop for WasapiStream {
     }
 }
 
-/// Hardware action derived from the player's playing/paused state and whether
-/// the exclusive device lock is currently held. Stopping the stream releases
-/// WASAPI's exclusive-mode lock so other apps can play while we are paused.
+/// Actions depend on ownership of the initialized endpoint, not whether its
+/// stream is running: Stop alone leaves an exclusive IAudioClient alive.
 #[derive(Debug, PartialEq, Eq)]
 pub enum HwAction {
-    /// Playing and lock held — run the normal render loop iteration.
     Run,
-    /// Paused while holding the lock — call stop_stream() to release it.
-    Stop,
-    /// Resumed without the lock — call start_stream() to reacquire it.
-    Start,
-    /// Paused and lock already released — idle until playback resumes.
+    Release,
+    Acquire,
     Idle,
 }
 
-pub fn decide_hw_action(is_playing: bool, hw_running: bool) -> HwAction {
-    match (is_playing, hw_running) {
+pub fn decide_hw_action(is_playing: bool, endpoint_held: bool) -> HwAction {
+    match (is_playing, endpoint_held) {
         (true, true) => HwAction::Run,
-        (false, true) => HwAction::Stop,
-        (true, false) => HwAction::Start,
+        (false, true) => HwAction::Release,
+        (true, false) => HwAction::Acquire,
         (false, false) => HwAction::Idle,
     }
 }
@@ -139,6 +200,19 @@ pub fn decide_exclusive_recovery(consecutive_failures: u32) -> ExclusiveRecovery
     }
 }
 
+fn quantize_pcm(sample: f32, valid_bits: u32, dither_lsb: f32) -> i32 {
+    let scale = (1u64 << (valid_bits - 1)) as f64;
+    (sample.clamp(-1.0, 1.0) as f64 * scale + dither_lsb as f64)
+        .round()
+        .clamp(-scale, scale - 1.0) as i32
+}
+fn encode_pcm(sample: f32, valid_bits: u32, container_bits: u32, dither_lsb: f32, output: &mut [u8]) {
+    let quantized = quantize_pcm(sample, valid_bits, dither_lsb);
+    let container_sample = if container_bits == 32 && valid_bits == 24 { quantized << 8 } else { quantized };
+    output.copy_from_slice(&container_sample.to_le_bytes()[..output.len()]);
+}
+
+
 #[cfg(target_os = "windows")]
 pub fn start_exclusive_stream<F, E>(
     device_name: &str,
@@ -157,6 +231,8 @@ where
 {
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown);
+    let drain_nanos = Arc::new(AtomicU64::new(0));
+    let drain_nanos_clone = Arc::clone(&drain_nanos);
     let flush_signal_clone = Arc::clone(&flush_signal);
     let dev_name = device_name.to_string();
     let timing_str = timing_mode.to_string();
@@ -342,7 +418,7 @@ where
                         .unwrap_or(std::cmp::max(def_period, min_period));
                     
                     // Note: Microsoft WASAPI specifies that non-event exclusive streams (polling) require period_hns == 0.
-                    let mode = if is_polling {
+                    let mut mode = if is_polling {
                         StreamMode::PollingExclusive { 
                             period_hns: 0,
                             buffer_duration_hns: 4 * aligned_period, 
@@ -393,6 +469,7 @@ where
                                     };
                                     if fresh_client.initialize_client(&format, &Direction::Render, &recovery_mode).is_ok() {
                                         test_client = fresh_client;
+                                        mode = recovery_mode;
                                         init_res = Ok(());
                                     }
                                 }
@@ -402,14 +479,14 @@ where
 
                     if init_res.is_ok() {
                         successful_client = Some(test_client);
-                        negotiated_format = Some((format, bits, valid_bits, is_float, cand_rate));
+                        negotiated_format = Some((format, mode, bits, valid_bits, is_float, cand_rate));
                         break 'rate_loop;
                     }
                 }
             }
         }
 
-        let (format, bits, valid_bits, is_float, negotiated_rate) = match negotiated_format {
+        let (format, mode, bits, valid_bits, is_float, negotiated_rate) = match negotiated_format {
             Some(f) => f,
             None => {
                 let err_msg = format!("Device does not support Exclusive Mode (attempted rates: {:?})", candidate_rates);
@@ -433,58 +510,27 @@ where
         );
 
         let is_polling = timing_str == "polling";
-        let event = if !is_polling {
-            match client.set_get_eventhandle() {
-                Ok(e) => Some(e),
-                Err(_) => {
-                    let _ = tx.send(Err("Failed to set event handle".to_string()));
-                    return;
-                }
-            }
-        } else {
-            None
-        };
-
-        let render_client = match client.get_audiorenderclient() {
-            Ok(r) => r,
-            Err(_) => {
-                let _ = tx.send(Err("Failed to get render client".to_string()));
+        let initial_endpoint = match prepare_endpoint(client, is_polling) {
+            Ok(endpoint) => endpoint,
+            Err(err) => {
+                let _ = tx.send(Err(err));
                 return;
             }
         };
-
-        let buffer_size = client.get_buffer_size().unwrap_or(0);
-        if buffer_size == 0 {
-            let _ = tx.send(Err("Exclusive buffer size is 0, aborting".to_string()));
-            return;
-        }
-
-        let num_frames = if is_polling {
-            (buffer_size / 4).max(1) as usize
-        } else {
-            buffer_size as usize
-        };
+        let mut num_frames = initial_endpoint.num_frames;
+        drain_nanos_clone.store(buffer_duration(initial_endpoint.buffer_size, negotiated_rate).as_nanos() as u64, Ordering::Release);
         let num_samples = num_frames * negotiated_channels as usize;
         let mut f32_data = vec![0.0f32; num_samples];
         
         let bytes_per_sample = bits / 8;
         let mut output_bytes = vec![0u8; num_samples * bytes_per_sample];
 
-        // PRE-FILL FIRST BUFFER WITH SILENCE BEFORE STARTING STREAM
-        if is_polling {
-            for _ in 0..4 {
-                let _ = render_client.write_to_device(
-                    num_frames,
-                    &output_bytes,
-                    None,
-                );
-            }
-        } else {
-            let _ = render_client.write_to_device(
-                num_frames,
-                &output_bytes,
-                None,
-            );
+        if let Err(err) = prefill_endpoint(&initial_endpoint, &output_bytes, is_polling)
+            .and_then(|_| initial_endpoint.client.start_stream()
+                .map_err(|e| format!("WASAPI exclusive initial start failed: {e}")))
+        {
+            let _ = tx.send(Err(err));
+            return;
         }
 
         // Notify main thread of success FIRST (including negotiated_rate)
@@ -500,6 +546,23 @@ where
             return;
         }
 
+        let mut clock = initial_endpoint.client.get_audioclock().ok();
+        let mut clock_start = clock.as_ref().and_then(|c| c.get_position().ok().map(|(position, _)| position));
+        let mut clock_frequency = clock.as_ref().and_then(|c| c.get_frequency().ok());
+        let mut rate_window = std::time::Instant::now();
+        let mut frames_written = 0u64;
+        let (rate_tx, rate_rx) = std::sync::mpsc::sync_channel::<(u64, f64, Option<u64>, Option<u64>, Option<u64>)>(4);
+        let log_device = dev_name.clone();
+        let log_timing = timing_str.clone();
+        let rate_logger = thread::spawn(move || {
+            while let Ok((frames, elapsed, start, end, frequency)) = rate_rx.recv() {
+                crate::log_info!(
+                    "WASAPI",
+                    "Exclusive rate window: device='{}' negotiated={}Hz timing={} frames_written={} elapsed={:.3}s clock_start={:?} clock_end={:?} clock_frequency={:?}",
+                    log_device, negotiated_rate, log_timing, frames, elapsed, start, end, frequency,
+                );
+            }
+        });
         let mut xor_state = rand::random::<u32>().max(1);
         macro_rules! next_dither {
             () => {{
@@ -510,44 +573,66 @@ where
             }};
         }
 
-        // The exclusive device lock is only held while the stream is running.
-        // Pause -> stop_stream() releases it so Windows apps regain audio;
-        // Resume -> start_stream() reacquires it.
-        let mut hw_running = false;
+        // Keep callback state and its ring consumer alive, but drop every COM
+        // interface derived from the initialized AudioClient while paused.
+        let mut endpoint = Some(initial_endpoint);
         let mut start_failures = 0u32;
         let mut poll_stall_count = 0u32;
 
         while !shutdown_clone.load(Ordering::Relaxed) {
-            match decide_hw_action(
-                playing_flag.load(Ordering::Relaxed) == 1,
-                hw_running,
-            ) {
-                HwAction::Stop => {
-                    let _ = client.stop_stream();
-                    hw_running = false;
+            match decide_hw_action(playing_flag.load(Ordering::Relaxed) == 1, endpoint.is_some()) {
+                HwAction::Release => {
+                    if let Some(ep) = &endpoint {
+                        let _ = ep.client.stop_stream();
+                    }
+                    clock = None;
+                    clock_start = None;
+                    release_endpoint(&mut endpoint);
                     std::thread::sleep(std::time::Duration::from_millis(HW_RESTART_DELAY_MS));
                     continue;
                 }
-                HwAction::Start => {
-                    // Brief head start so the producer can fill the ring buffer
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    if client.start_stream().is_ok() {
-                        hw_running = true;
-                        start_failures = 0;
-                        poll_stall_count = 0;
-                    } else {
-                        start_failures += 1;
-                        if start_failures >= MAX_START_FAILURES {
-                            on_error("WASAPI exclusive start_stream failed".to_string());
-                            break;
+                HwAction::Acquire => {
+                    // A new IAudioClient is mandatory: Stop does not release an
+                    // initialized exclusive session on some endpoints.
+                    let acquired = reacquire_endpoint(&device, &format, &mode, is_polling)
+                        .and_then(|ep| {
+                            if ep.num_frames != num_frames {
+                                num_frames = ep.num_frames;
+                                f32_data.resize(num_frames * negotiated_channels as usize, 0.0);
+                                output_bytes.resize(num_frames * negotiated_channels as usize * bytes_per_sample, 0);
+                            }
+                            output_bytes.fill(0);
+                            prefill_endpoint(&ep, &output_bytes, is_polling)?;
+                            ep.client.start_stream()
+                                .map_err(|e| format!("WASAPI exclusive resume start failed: {e}"))?;
+                            Ok(ep)
+                        });
+                    match acquired {
+                        Ok(ep) => {
+                            drain_nanos_clone.store(buffer_duration(ep.buffer_size, negotiated_rate).as_nanos() as u64, Ordering::Release);
+                            clock = ep.client.get_audioclock().ok();
+                            clock_start = clock.as_ref().and_then(|c| c.get_position().ok().map(|(position, _)| position));
+                            clock_frequency = clock.as_ref().and_then(|c| c.get_frequency().ok());
+                            rate_window = std::time::Instant::now();
+                            frames_written = 0;
+                            endpoint = Some(ep);
+                            start_failures = 0;
+                            poll_stall_count = 0;
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(HW_RESTART_DELAY_MS * u64::from(start_failures)));
+                        Err(err) => {
+                            if record_start_failure(&mut start_failures) {
+                                if !shutdown_clone.load(Ordering::Relaxed) {
+                                    on_error(format!("WASAPI exclusive resume failed after {start_failures} attempts: {err}"));
+                                }
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(HW_RESTART_DELAY_MS * u64::from(start_failures)));
+                        }
                     }
                     continue;
                 }
                 HwAction::Idle => {
                     if flush_signal_clone.load(Ordering::SeqCst) {
-                        let _ = client.reset_stream();
                         f32_data.fill(0.0);
                         callback(&mut f32_data);
                     }
@@ -557,29 +642,29 @@ where
                 HwAction::Run => {}
             }
 
+            let ep = endpoint.as_ref().unwrap();
             if flush_signal_clone.load(Ordering::SeqCst) {
-                if hw_running {
-                    let _ = client.stop_stream();
-                    let _ = client.reset_stream();
-                    output_bytes.fill(0);
-                    let _ = render_client.write_to_device(num_frames, &output_bytes, None);
-                    if client.start_stream().is_err() {
-                        hw_running = false;
-                    }
-                } else {
-                    let _ = client.reset_stream();
+                if let Err(err) = ep.client.stop_stream()
+                    .and_then(|_| ep.client.reset_stream())
+                    .and_then(|_| {
+                        output_bytes.fill(0);
+                        ep.render_client.write_to_device(num_frames, &output_bytes, None)
+                    })
+                    .and_then(|_| ep.client.start_stream())
+                {
+                    on_error(format!("WASAPI exclusive seek reset failed: {err}"));
+                    break;
                 }
                 f32_data.fill(0.0);
                 callback(&mut f32_data);
                 continue;
             }
-
             if is_polling {
                 // In Polling mode, sleep for half of the buffer period duration, then query available space
                 let sleep_ms = ((num_frames as f32 / negotiated_rate as f32) * 500.0) as u64;
                 std::thread::sleep(std::time::Duration::from_millis(std::cmp::max(sleep_ms, 2)));
 
-                let avail_frames = match client.get_available_space_in_frames() {
+                let avail_frames = match ep.client.get_available_space_in_frames() {
                     Ok(f) => f,
                     Err(_) => {
                         if !shutdown_clone.load(Ordering::Relaxed) {
@@ -602,17 +687,40 @@ where
                 }
                 poll_stall_count = 0;
             } else {
-                // In Event-driven mode, wait for event handle signals
-                if let Some(ref ev) = event {
-                    if ev.wait_for_event(2000).is_err() {
-                        if !shutdown_clone.load(Ordering::Relaxed) {
-                            on_error("WASAPI exclusive stream timed out".to_string());
+                // A short wait lets pause drop the COM endpoint promptly; only
+                // two seconds without an event while playing is a stream fault.
+                if let Some(ev) = &ep.event {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                    let mut signaled = false;
+                    while playing_flag.load(Ordering::Relaxed) == 1
+                        && !shutdown_clone.load(Ordering::Relaxed)
+                    {
+                        if ev.wait_for_event(50).is_ok() {
+                            signaled = true;
+                            break;
                         }
-                        break;
+                        if std::time::Instant::now() >= deadline {
+                            break;
+                        }
+                    }
+                    if !signaled {
+                        if playing_flag.load(Ordering::Relaxed) == 1
+                            && !shutdown_clone.load(Ordering::Relaxed)
+                        {
+                            on_error("WASAPI exclusive stream timed out".to_string());
+                            break;
+                        }
+                        continue;
                     }
                 }
             }
             
+            if playing_flag.load(Ordering::Relaxed) != 1
+                || shutdown_clone.load(Ordering::Relaxed)
+            {
+                continue;
+            }
+
             callback(&mut f32_data);
             
             // Quantize and format conversion
@@ -628,102 +736,38 @@ where
                 };
                 let copy_len = output_bytes.len().min(byte_slice.len());
                 output_bytes[..copy_len].copy_from_slice(&byte_slice[..copy_len]);
-            } else if bits == 32 {
-                // 32-bit container: Int32 or Int24
-                // WASAPI expects 24-bit valid data to be left-justified in the 32-bit container.
-                let mask = if valid_bits == 24 { !0xFF } else { !0 };
-                if valid_bits == 24 {
-                    let multiplier = 8388607.0; // 2^23 - 1
-                    for (i, &sample) in f32_data.iter().enumerate() {
-                        let clamped = sample.clamp(-1.0, 1.0);
-                        let val = if dither_enabled {
-                            let r1 = next_dither!();
-                            let r2 = next_dither!();
-                            clamped * multiplier + r1 + r2
-                        } else {
-                            clamped * multiplier
-                        };
-                        let quantized = ((val.clamp(-multiplier, multiplier).round() as i32) << 8) & mask;
-                        let bytes = quantized.to_ne_bytes();
-                        let offset = i * 4;
-                        output_bytes[offset] = bytes[0];
-                        output_bytes[offset + 1] = bytes[1];
-                        output_bytes[offset + 2] = bytes[2];
-                        output_bytes[offset + 3] = bytes[3];
-                    }
-                } else {
-                    let multiplier = 2147483647.0; 
-                    for (i, &sample) in f32_data.iter().enumerate() {
-                        let clamped = sample.clamp(-1.0, 1.0);
-                        let val = if dither_enabled {
-                            let r1 = next_dither!();
-                            let r2 = next_dither!();
-                            clamped * multiplier + r1 + r2
-                        } else {
-                            clamped * multiplier
-                        };
-                        let quantized = (val.clamp(-multiplier, multiplier).round() as i32) & mask;
-                        let bytes = quantized.to_ne_bytes();
-                        let offset = i * 4;
-                        output_bytes[offset] = bytes[0];
-                        output_bytes[offset + 1] = bytes[1];
-                        output_bytes[offset + 2] = bytes[2];
-                        output_bytes[offset + 3] = bytes[3];
-                    }
-                }
-            } else if bits == 24 {
-                // 24-bit container: Int24 packed (3 bytes per sample)
-                let multiplier = 8388607.0; // 2^23 - 1
-                for (i, &sample) in f32_data.iter().enumerate() {
-                    let clamped = sample.clamp(-1.0, 1.0);
-                    let val = if dither_enabled {
-                        let r1 = next_dither!();
-                        let r2 = next_dither!();
-                        clamped * multiplier + r1 + r2
-                    } else {
-                        clamped * multiplier
-                    };
-                    let quantized = val.clamp(-multiplier, multiplier).round() as i32;
-                    let bytes = quantized.to_ne_bytes();
-                    let offset = i * 3;
-                    // Write the lowest 3 bytes (little-endian)
-                    output_bytes[offset] = bytes[0];
-                    output_bytes[offset + 1] = bytes[1];
-                    output_bytes[offset + 2] = bytes[2];
-                }
-            } else if bits == 16 {
-                // 16-bit container: Int16
-                let multiplier = 32767.0; // i16::MAX
-                for (i, &sample) in f32_data.iter().enumerate() {
-                    let clamped = sample.clamp(-1.0, 1.0);
-                    let val = if dither_enabled {
-                        let r1 = next_dither!();
-                        let r2 = next_dither!();
-                        clamped * multiplier + r1 + r2
-                    } else {
-                        clamped * multiplier
-                    };
-                    let quantized = val.clamp(-multiplier, multiplier).round() as i16;
-                    let bytes = quantized.to_ne_bytes();
-                    let offset = i * 2;
-                    output_bytes[offset] = bytes[0];
-                    output_bytes[offset + 1] = bytes[1];
+            } else {
+                let bytes_per_sample = bits / 8;
+                for (sample, output) in f32_data.iter().zip(output_bytes.chunks_exact_mut(bytes_per_sample)) {
+                    let dither_lsb = if dither_enabled { next_dither!() + next_dither!() } else { 0.0 };
+                    encode_pcm(*sample, valid_bits as u32, bits as u32, dither_lsb, output);
                 }
             }
             
-            if let Err(e) = render_client.write_to_device(
-                num_frames,
-                &output_bytes,
-                None,
-            ) {
+            if let Err(e) = ep.render_client.write_to_device(num_frames, &output_bytes, None) {
                 if !shutdown_clone.load(Ordering::Relaxed) {
                     on_error(format!("WASAPI exclusive write failed: {}", e));
                 }
                 break;
             }
+            frames_written += num_frames as u64;
+            if rate_window.elapsed() >= std::time::Duration::from_secs(5) {
+                let elapsed = rate_window.elapsed().as_secs_f64();
+                let clock_end = clock.as_ref().and_then(|c| c.get_position().ok().map(|(position, _)| position));
+                let _ = rate_tx.try_send((frames_written, elapsed, clock_start, clock_end, clock_frequency));
+                rate_window = std::time::Instant::now();
+                frames_written = 0;
+                clock_start = clock_end;
+            }
         }
 
-        let _ = client.stop_stream();
+        if let Some(ep) = &endpoint {
+            let _ = ep.client.stop_stream();
+        }
+        drop(clock);
+        release_endpoint(&mut endpoint);
+        drop(rate_tx);
+        let _ = rate_logger.join();
         if let Ok(h) = mmcss_handle {
             unsafe {
                 let _ = windows::Win32::System::Threading::AvRevertMmThreadCharacteristics(h);
@@ -742,6 +786,7 @@ where
             WasapiStream {
                 shutdown,
                 handle: Some(handle),
+                drain_nanos,
             },
             format,
         )),
@@ -789,6 +834,26 @@ mod tests {
         assert_eq!(candidates[1], 44100);
         assert_eq!(candidates[2], 48000);
     }
+    #[test]
+    fn integer_pcm_preserves_signed_boundaries_and_alignment() {
+        let cases: &[(u32, u32, f32, &[u8])] = &[
+            (16, 16, -1.0, &[0x00, 0x80]),
+            (16, 16, 1.0, &[0xff, 0x7f]),
+            (24, 24, -1.0, &[0x00, 0x00, 0x80]),
+            (24, 24, 1.0, &[0xff, 0xff, 0x7f]),
+            (24, 32, -1.0, &[0x00, 0x00, 0x00, 0x80]),
+            (24, 32, 1.0, &[0x00, 0xff, 0xff, 0x7f]),
+            (32, 32, -1.0, &[0x00, 0x00, 0x00, 0x80]),
+            (32, 32, 1.0, &[0xff, 0xff, 0xff, 0x7f]),
+        ];
+        for &(valid_bits, container_bits, sample, expected) in cases {
+            let mut bytes = [0; 4];
+            let output = &mut bytes[..(container_bits / 8) as usize];
+            encode_pcm(sample, valid_bits, container_bits, 0.0, output);
+            assert_eq!(output, expected, "{valid_bits} valid bits in {container_bits} container");
+        }
+    }
+
 
     #[test]
     fn keeps_hardware_running_while_playing() {
@@ -796,20 +861,40 @@ mod tests {
     }
 
     #[test]
-    fn stops_hardware_when_paused_to_release_device_lock() {
-        // Pausing must stop the exclusive stream so Windows regains the endpoint
-        // and other apps' audio resumes while Aideo is paused.
-        assert!(matches!(decide_hw_action(false, true), HwAction::Stop));
+    fn pause_drops_endpoint_and_resume_requests_fresh_one() {
+        use std::sync::atomic::AtomicUsize;
+
+        struct Lease(Arc<AtomicUsize>);
+        impl Drop for Lease {
+            fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
+        }
+
+        let releases = Arc::new(AtomicUsize::new(0));
+        let mut endpoint = Some(Lease(Arc::clone(&releases)));
+        assert_eq!(decide_hw_action(false, endpoint.is_some()), HwAction::Release);
+        release_endpoint(&mut endpoint);
+        assert_eq!(releases.load(Ordering::SeqCst), 1);
+        assert_eq!(decide_hw_action(false, endpoint.is_some()), HwAction::Idle);
+        assert_eq!(decide_hw_action(true, endpoint.is_some()), HwAction::Acquire);
+        endpoint = Some(Lease(Arc::clone(&releases)));
+        assert_eq!(decide_hw_action(true, endpoint.is_some()), HwAction::Run);
+        drop(endpoint);
+        assert_eq!(releases.load(Ordering::SeqCst), 2);
     }
 
     #[test]
-    fn restarts_hardware_on_resume() {
-        assert!(matches!(decide_hw_action(true, false), HwAction::Start));
+    fn reacquire_failures_are_bounded() {
+        let mut attempts = 0;
+        for _ in 1..MAX_START_FAILURES {
+            assert!(!record_start_failure(&mut attempts));
+        }
+        assert!(record_start_failure(&mut attempts));
+        assert_eq!(attempts, MAX_START_FAILURES);
     }
 
     #[test]
-    fn stays_idle_when_paused_and_already_stopped() {
-        assert!(matches!(decide_hw_action(false, false), HwAction::Idle));
+    fn drain_duration_uses_negotiated_frames() {
+        assert_eq!(buffer_duration(480, 48000), std::time::Duration::from_millis(10));
     }
 
     #[test]
@@ -830,6 +915,7 @@ mod tests {
         let stream = WasapiStream {
             shutdown: Arc::clone(&shutdown),
             handle: None,
+            drain_nanos: Arc::new(AtomicU64::new(0)),
         };
         assert!(!shutdown.load(Ordering::SeqCst));
         drop(stream);

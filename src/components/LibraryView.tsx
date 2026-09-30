@@ -1276,25 +1276,7 @@ export function LibraryView() {
   };
 
   const playCloudTrack = async (ct: CloudTrack) => {
-    const currentList = activeSector === 'subsonic' ? subsonicTracks : jellyfinTracks;
-    const clickedIndex = currentList.findIndex(x => x.id === ct.id);
-    const remainingCloudTracks = clickedIndex !== -1 ? currentList.slice(clickedIndex + 1) : [];
-    const tracksToQueue = remainingCloudTracks.map(cloudTrackToVirtualTrack);
-
     const vt = cloudTrackToVirtualTrack(ct);
-    persistQueueState(tracksToQueue);
-    
-    // Sync the queue to the backend immediately to prevent duplicates/desyncs
-    try {
-      await invoke('clear_queue');
-      if (tracksToQueue.length > 0) {
-        const paths = tracksToQueue.map(t => t.path);
-        await invoke('add_to_queue_bulk', { paths });
-      }
-    } catch (e) {
-      console.error('Failed to sync cloud queue to backend:', e);
-    }
-
     await playTrack(vt);
     
     if (ct.cover_url) {
@@ -1338,7 +1320,7 @@ export function LibraryView() {
       console.error('Failed to sync cloud queue to backend:', e);
     }
 
-    await playTrack(firstTrack);
+    await playTrack(firstTrack, false, false);
     setView('nowplaying');
   };
 
@@ -1483,7 +1465,7 @@ export function LibraryView() {
         await invoke('add_to_queue_bulk', { paths });
       }
     } catch (e) { console.error(e); }
-    await playTrack(first);
+    await playTrack(first, false, false);
     setView('nowplaying');
   };
 
@@ -1870,7 +1852,7 @@ export function LibraryView() {
                     }
                   });
 
-                  playTrack(firstTrack);
+                  playTrack(firstTrack, false, false);
                   setView('nowplaying');
                 } else if (isCloudTab) {
                   handlePlayAllCloud(true);
@@ -1901,7 +1883,7 @@ export function LibraryView() {
                     }
                   });
 
-                  playTrack(firstTrack);
+                  playTrack(firstTrack, false, false);
                   setView('nowplaying');
                 } else if (isCloudTab) {
                   handlePlayAllCloud(false);

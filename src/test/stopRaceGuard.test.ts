@@ -46,6 +46,8 @@ describe('Stop-button race guard (pollStatus recovery branch)', () => {
     const s = useStore.getState();
     expect(s.currentTrack).toBeNull();
     expect(s.queue.length).toBe(queueBefore);
+    expect(s.playback.status).toBe('Stopped');
+    expect(s.playback.current_track).toBeNull();
   });
 
   it('still performs legitimate backend-driven recovery when no stop happened', async () => {

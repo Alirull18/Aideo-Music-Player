@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player — Modern Windows Music Player (v0.9.10)
+# 💎 Aideo Music Player — Modern Windows Music Player (v0.9.11)
 
 **A fast, lightweight, open-source desktop music player for Windows 10 and Windows 11. Built with Rust and Tauri for bit-perfect WASAPI Exclusive sound, real-time synchronized karaoke lyrics, and a gorgeous glassmorphism interface.**
 
@@ -16,7 +16,7 @@
   <p>
     <a href="https://alirull18.github.io/Aideo-Music-Player/"><strong>🌐 Official Website</strong></a> &nbsp;•&nbsp;
     <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest"><strong>📥 Download for Windows (.exe / .msi)</strong></a> &nbsp;•&nbsp;
-    <a href="docs/RELEASE_NOTES_v0.9.10.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
+    <a href="docs/RELEASE_NOTES_v0.9.11.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
     <a href="https://www.producthunt.com/products/aideo-music-player"><strong>🚀 Product Hunt</strong></a>
   </p>
   <br/>
@@ -78,9 +78,37 @@
 
 ---
 
-## ✨ What's New in v0.9.10
+## ✨ What's New in v0.9.11
 
-Version **0.9.10** delivers major architectural updates across album and library browsing, track interactions, audio transition hardening, and visual appearance consistency:
+Version **0.9.11** delivers critical reliability upgrades across the audio playback core, an intelligent overhaul of our Infinite Autoplay Radio recommendation engine, seamless background Tidal session auto-restoration, hardware-measured WASAPI Exclusive diagnostics, UPnP/DLNA casting protocol support, and automated WinGet distribution workflows:
+
+* 🔊 **WASAPI Exclusive Hardware Clock Diagnostics & Strict Bit-Perfect Telemetry (`wasapi_engine.rs`)**:
+  * Real-time 5-second sampling rate diagnostic windows logged directly to `%APPDATA%/com.alirul.music-player/logs/aideo.log`, measuring frames written versus device clock deltas (`IAudioClock`) to verify output speed and sample rate match without audio drift.
+  * Overhauled `ExclusiveEndpoint` lease lifecycle: dropping audio device locks on pause so external applications instantly regain audio access, and dynamic reacquisition on resume.
+* 🧭 **Infinite Autoplay Radio & Queue Progression Overhaul (`playbackSlice.ts`, `youtube/mod.rs`)**:
+  * Multi-tier recommendation fallback cascade (Last.fm similarities -> related artists -> seed catalog) with strict seed affinity scoring and semantic noise filtering (banning reactions, covers, live bootlegs, non-music audio).
+  * Repeat-One preservation without exhausting recommendations, and automatic queue refill when upcoming items run low.
+  * Explicit recommendation engine selector in Settings: **Aideo Hybrid**, **YouTube Music Radio**, and **Tidal Radio**.
+* 🌊 **Tidal Stream Lifecycle & Automatic Session Bootstrap (`tidal.rs`)**:
+  * Authenticated Tidal sessions automatically restore on application boot without opening Settings.
+  * Token auto-refresh cooldown gates and stream URL expiry mitigation eliminate stream EOF hangs during multi-hour listening sessions.
+* 🛡️ **Atomic Stop Race Guard & IPC Attempt Tracking (`attempt_id`)**:
+  * Eliminates race conditions between async frontend stop events and background decoder buffer drains, completely preventing accidental track resurrection.
+  * Strict track correlation IDs across all Tauri IPC playback events (`track-ended`, `playback-error`, `track-transitioned`, `stream-buffering`) discard stale events from superseded tracks.
+* 📡 **Native UPnP / DLNA Network Streaming Bridge**:
+  * Integrated AVTransport and RenderingControl protocol bridges for high-fidelity audio casting to DLNA/UPnP network receivers.
+* 📦 **Automated WinGet Package Distribution**:
+  * Automated WinGet updates via GitHub Actions on new releases (`winget install Alirul.Aideo`).
+
+> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.11 Release Notes**](docs/RELEASE_NOTES_v0.9.11.md).*
+
+---
+
+## 📜 Previous Release Highlights
+
+<details>
+<summary><strong>✨ What Was New in v0.9.10 (Click to expand)</strong></summary>
+<br />
 
 * 💿 **3 Distinct Album Layout Architectures (`AlbumsView`)**:
   * Replaced superficial card gimmicks with 3 complete full-page layout experiences: **Classic Wall** (`classic`: fast, virtualized 2D grid for rapid browsing), **Compact Table** (`compact`: dense sortable table with clickable headers and in-place expandable multi-disc accordion tracklists), and **Editorial Magazine** (`editorial`: visual storytelling with hero spotlight and curated shelves).
@@ -99,11 +127,9 @@ Version **0.9.10** delivers major architectural updates across album and library
 * 💀 **High-Performance View Skeletons (`ViewSkeleton`)**:
   * Shimmering placeholder skeletons across Library, Albums, and Insights for zero perceived layout shift during initial load.
 
-> 📖 *Looking for deep technical patch notes? Read the full [**v0.9.10 Release Notes**](docs/RELEASE_NOTES_v0.9.10.md).*
+> 📖 *Full details: [**v0.9.10 Release Notes**](docs/RELEASE_NOTES_v0.9.10.md)*
 
----
-
-## 📜 Previous Release Highlights
+</details>
 
 <details>
 <summary><strong>✨ What Was New in v0.9.9 (Click to expand)</strong></summary>
@@ -223,14 +249,15 @@ Version **0.9.10** delivers major architectural updates across album and library
 * **Instant Translations & Pronunciation**: Translate foreign lyrics on the fly, with automatic pronunciation (Romaji) for Japanese and Korean songs.
 
 ### 🔊 Studio-Grade Sound Quality
-* **Bit-Perfect Playback**: Delivers uncompressed, exact master sound directly to your headphones or DAC via WASAPI Exclusive mode.
-* **Audio Telemetry & Signal Path Inspector**: Live interactive HUD displaying container format, DSP processing, and hardware output with a verified Bit-Perfect badge.
+* **WASAPI Exclusive Playback**: Requests a direct endpoint stream that bypasses the Windows shared mixer when the device supports it; otherwise playback can fall back to shared mode. Exclusive access alone does not prove bit-identical DAC output.
+* **Audio Telemetry & Signal Path Inspector**: Shows the active route, source/output formats, transformations, and reasons strict bit-perfect status is unavailable. The status is software-derived, not a physical DAC measurement.
+* **Exclusive speed diagnostics**: For an affected local track, compare the `Output route` entries in `%APPDATA%/com.alirul.music-player/logs/aideo.log` before, during, and after toggling Exclusive mode. They include source/output rates, playback rate, selected resampling ratio, and actual share mode. A steady exclusive stream also logs five-second `Exclusive rate window` entries with frames written, elapsed time, and WASAPI device-clock positions/frequency. Compare frames written per elapsed second with the negotiated Hz, and clock-position delta divided by clock frequency with elapsed seconds. These counters alone do not measure audible pitch; capture a known test tone at the output to establish whether the physical sound is fast.
 * **Headphone Tuner (AutoEQ)**: Choose from over 4,000 pre-calibrated headphone profiles to make your specific headphones sound their absolute best.
 * **Volume Leveling & DSP Suite**: EBU R128 loudness leveling, 10-band equalizer, Haas spatializer, and PureScope ballistic spectrum visualizer.
 
 ### 🧭 Smart Music Discovery & Scrobbling
 * **7 Smart Mixes**: Automatically created playlists like *High Energy*, *Deep Focus*, *Late Night Chill*, and *Forgotten Gems*.
-* **Infinite Radio**: Keep the music going with an endless queue of songs that match your current listening vibe.
+* **Infinite Radio**: Clicking one song replaces the upcoming queue and fills it with recommendations for that song. Queue playback and explicit mixes keep their remaining songs; manually queued songs play before radio suggestions. When the queue runs out, autoplay checks for more recommendations before advancing and stops if none remain. Local-only mode selects playable local files; repeat-one holds radio tracks until repeat changes. Cleared or already-heard tracks are not replayed by radio. Tidal Radio uses Last.fm related tracks (or related artists when no track matches are available), then keeps only Tidal catalog songs with matching artist and title; it may return fewer songs or none, and does not switch an explicit Tidal selection to YouTube.
 * **Universal Scrobbler**: Automatically scrobbles playback history to **Last.fm** and **ListenBrainz** across Local, Tidal, Qobuz, and Webstream.
 * **100% Offline Friendly**: Generates smart mixes and browses embedded album art even with no internet connection.
 
@@ -297,7 +324,7 @@ Aideo Music Player is designed natively for 64-bit **Windows 10** and **Windows 
 ### ⚡ Quick Start
 1. **Download & Run**: Grab the `.exe` or `.msi` installer above and run it on your Windows 10/11 PC.
 2. **Add Your Music**: Select your local music folders (FLAC, MP3, WAV, AAC, ALAC, Ogg Vorbis) or search Webstream directly.
-3. **Enjoy Studio Sound**: Toggle **WASAPI Exclusive mode** under Settings for bit-perfect direct DAC audio.
+3. **Check the Active Path**: Toggle **WASAPI Exclusive mode** under Settings, then inspect the active route and strict bit-perfect status during playback. Matching formats and bypassed DSP are required; hardware output is not independently measured.
 
 > 💻 **System Requirements**: Windows 10 (64-bit) or Windows 11 (64-bit), 4 GB RAM, Windows audio device.
 

@@ -21,6 +21,7 @@ import QobuzConnectCard from './QobuzConnectCard';
 import { DebugLogsModal } from './DebugLogsModal';
 import { LocalQRCode } from './LocalQRCode';
 import { logger } from '../utils/logger';
+import { getAudioPathPresentation } from '../utils/audioPath';
 
 interface PresetTheme {
   name: string;
@@ -123,7 +124,7 @@ const STREAMING_PRESET_TIERS: StreamingPresetTier[] = [
     id: 'standard_lossless',
     title: 'Standard Lossless',
     badge: '16-bit / 44.1 kHz FLAC',
-    desc: 'Bit-perfect CD quality audio. Pure lossless fidelity with moderate bandwidth. Local files take priority when matching.',
+    desc: 'Requests 16-bit / 44.1 kHz FLAC. Playback route and processing depend on the active audio path. Local files take priority when matching.',
     icon: <Disc size={18} />,
     defaultSource: 'auto',
   },
@@ -490,7 +491,7 @@ export function SettingsView() {
     keepAwake, toggleKeepAwake,
     discordEnabled, toggleDiscord,
     lowSpecMode, toggleLowSpecMode,
-    dsp, setDSP, playbackExclusive, playbackBitPerfect, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
+    dsp, setDSP, playback, playbackExclusive, playbackBitPerfect, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
     listenbrainzToken, listenbrainzUsername, listenbrainzEnabled,
     validateAndSetListenbrainzToken, setListenbrainzToken, toggleListenbrainzScrobble,
     sidebarLastfmVisible, sidebarListenbrainzVisible,
@@ -507,6 +508,7 @@ export function SettingsView() {
     jellyfinUrl, jellyfinConnected, jellyfinLoading,
     connectSubsonic, disconnectSubsonic, connectJellyfin, disconnectJellyfin,
     autoplayDiscoveryLevel, setAutoplayDiscoveryLevel,
+    recommendationEngine, setRecommendationEngine,
     setShowOnboarding, setOnboardingCompleted,
     cacheSizeLimit, setCacheSizeLimit,
     discoverCastDevices,
@@ -550,6 +552,7 @@ export function SettingsView() {
     setDSP: s.setDSP,
     playbackExclusive: s.playback.exclusive,
     playbackBitPerfect: s.playback.bit_perfect,
+    playback: s.playback,
     toggleExclusive: s.toggleExclusive,
     devices: s.devices,
     currentDevice: s.currentDevice,
@@ -597,6 +600,8 @@ export function SettingsView() {
     disconnectJellyfin: s.disconnectJellyfin,
     autoplayDiscoveryLevel: s.autoplayDiscoveryLevel,
     setAutoplayDiscoveryLevel: s.setAutoplayDiscoveryLevel,
+    recommendationEngine: s.recommendationEngine,
+    setRecommendationEngine: s.setRecommendationEngine,
     setShowOnboarding: s.setShowOnboarding,
     setOnboardingCompleted: s.setOnboardingCompleted,
     cacheSizeLimit: s.cacheSizeLimit,
@@ -890,7 +895,7 @@ export function SettingsView() {
     }
     
     window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: 'Audio hardware engine restored to bit-perfect flat!', type: 'success' } 
+      detail: { message: 'Audio processing settings restored to defaults.', type: 'success' }
     }));
   };
 
@@ -3897,10 +3902,11 @@ export function SettingsView() {
                   <button
                     onClick={() => {
                       const diag = {
-                        currentDevice: currentDevice || 'Default',
-                        exclusive: playbackExclusive,
+                        requestedDevice: currentDevice || 'System default',
+                        requestedExclusive: playbackExclusive,
                         exclusiveTiming: dsp.exclusive_mode_timing,
-                        bitPerfect: playbackBitPerfect,
+                        requestedBitPerfect: playbackBitPerfect,
+                        effectiveAudioPath: playback.effective_audio_path,
                         audioProfile: dsp.audio_profile,
                         upsampleRate: dsp.upsample_rate,
                         dither: dsp.dither,
@@ -3983,18 +3989,21 @@ export function SettingsView() {
             {/* Exclusive Mode settings */}
             <div style={{ flex: 1, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <div className="settings-ctrl-title">Bit-Perfect Signal Pass</div>
+                <div className="settings-ctrl-title">Bit-Perfect Request</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+                  Effective output: {getAudioPathPresentation(playback).hudLabel}
+                </div>
                 <div className={`exclusive-toggle ${playbackBitPerfect ? 'active' : ''}`}
                   onClick={() => useStore.getState().toggleBitPerfect()}
                   style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playbackBitPerfect ? 'rgba(6, 182, 212, 0.08)' : 'rgba(0,0,0,0.2)', borderColor: playbackBitPerfect ? '#06b6d4' : '', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Bit-Perfect Bypass</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Request Bit-Perfect Bypass</span>
                     <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackBitPerfect ? '#06b6d4' : 'var(--glass-h)', color: playbackBitPerfect ? '#fff' : 'var(--text-dim)' }}>
-                      {playbackBitPerfect ? 'ACTIVE' : 'OFF'}
+                      {playbackBitPerfect ? 'REQUESTED' : 'OFF'}
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                    Passes bitstream directly. Skips mixer resampler, volume gain, and all active DSP.
+                    Requests bypass of mixer resampling, volume gain, and DSP. Check the active signal path for the effective result.
                   </div>
                 </div>
               </div>
@@ -4011,7 +4020,7 @@ export function SettingsView() {
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                    Bypass standard Windows WASAPI sound layers for low latency and zero resampling distortion.
+                    Requests exclusive access; the active route determines whether the driver is exclusive.
                   </div>
                 </div>
               </div>
@@ -4035,7 +4044,7 @@ export function SettingsView() {
                     }}>
                       {[
                         { id: 'polling', label: 'Timer-Driven (Stability)', tag: 'Safe for USB DAC' },
-                        { id: 'event', label: 'Event-Driven (Low Latency)', tag: 'Pure Kernel Stream' }
+                        { id: 'event', label: 'Event-Driven (Low Latency)', tag: 'Event callback' }
                       ].map(opt => {
                         const active = dsp.exclusive_mode_timing === opt.id;
                         return (
@@ -4128,12 +4137,7 @@ export function SettingsView() {
                     transition: 'all 0.2s',
                     flex: '1 0 10%'
                   }}
-                  onClick={() => {
-                    setDSP({ upsample_rate: rate });
-                    if (rate > 0 && playbackBitPerfect) {
-                      useStore.getState().toggleBitPerfect();
-                    }
-                  }}
+                  onClick={() => setDSP({ upsample_rate: rate })}
                 >
                   {rate === 0 ? 'OFF' : `${rate / 1000}kHz`}
                 </button>
@@ -4490,6 +4494,91 @@ export function SettingsView() {
                 }));
               }} 
             />
+          </div>
+        </div>
+      )
+    },
+    {
+      id: 'recommendation-engine',
+      title: 'Recommendation & Radio Source',
+      description: 'Choose which recommendation engine generates autoplay queues, artist radio, and music suggestions.',
+      keywords: 'recommendation engine radio source youtube tidal our aideo hybrid algorithm autoplay',
+      tab: 'system',
+      element: (
+        <div className="settings-ctrl-card">
+          <div style={{ display: 'flex', gap: 10, background: 'rgba(0,0,0,0.12)', padding: 6, borderRadius: 12, border: '1px solid var(--glass-border)' }}>
+            {[
+              { 
+                id: 'our', 
+                label: 'Aideo Hybrid', 
+                desc: 'Smart blend of local audio similarity, YouTube radio, and taste profile',
+                badge: 'Default',
+              },
+              { 
+                id: 'youtube', 
+                label: 'YouTube Music Radio', 
+                desc: 'Direct recommendations from YouTube Music curated track and artist radio',
+              },
+              { 
+                id: 'tidal', 
+                label: 'Tidal Radio', 
+                desc: 'Related songs from Last.fm matched to Tidal recordings; may return fewer tracks',
+              }
+            ].map(engine => {
+              const active = (recommendationEngine || 'our') === engine.id;
+              return (
+                <motion.div
+                  key={engine.id}
+                  onClick={() => {
+                    setRecommendationEngine(engine.id as any);
+                    window.dispatchEvent(new CustomEvent('ui-toast', { 
+                      detail: { message: `Recommendation engine set to: ${engine.label}`, type: 'success' } 
+                    }));
+                  }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  style={{
+                    flex: 1,
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    background: active ? 'rgba(var(--accent-rgb), 0.1)' : 'transparent',
+                    border: active ? '1.5px solid var(--accent)' : '1px solid transparent',
+                    transition: 'all 0.25s ease',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: active ? '0 4px 20px rgba(var(--accent-rgb), 0.15)' : 'none',
+                    position: 'relative'
+                  }}
+                >
+                  {engine.badge && (
+                    <span style={{
+                      position: 'absolute',
+                      top: 4,
+                      right: 6,
+                      fontSize: 8,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      padding: '1px 5px',
+                      borderRadius: 4,
+                      background: 'rgba(var(--accent-rgb), 0.25)',
+                      color: 'var(--accent)'
+                    }}>
+                      {engine.badge}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 12, fontWeight: 700, color: active ? 'white' : 'var(--text-dim)', transition: 'color 0.2s' }}>
+                    {engine.label}
+                  </span>
+                  <span style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.3, display: 'block', opacity: active ? 0.9 : 0.6 }}>
+                    {engine.desc}
+                  </span>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
       )

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { listen } from '@tauri-apps/api/event';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
+import { getAudioPathPresentation } from '../../utils/audioPath';
 import {
   X,
   Activity,
@@ -18,22 +18,19 @@ import {
 export interface TheaterSignalPathModalProps {
   isOpen: boolean;
   onClose: () => void;
-  spectrumBands?: number[];
 }
 
-export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: TheaterSignalPathModalProps) {
+export function TheaterSignalPathModal({ isOpen, onClose }: TheaterSignalPathModalProps) {
   const {
     currentTrack,
     currentDevice,
     playback,
-    dsp,
     accentColor
   } = useStore(
     useShallow((s) => ({
       currentTrack: s.currentTrack,
       currentDevice: s.currentDevice,
       playback: s.playback,
-      dsp: s.dsp,
       accentColor: s.accentColor
     }))
   );
@@ -52,89 +49,17 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, onClose]);
 
-  const effectivePath = playback.effective_audio_path;
-  const isBitPerfect = Boolean(effectivePath?.active && effectivePath.strict_bit_perfect);
-  const isExclusive = Boolean(
-    effectivePath?.active &&
-      (effectivePath.share_mode === 'exclusive' || effectivePath.share_mode === 'direct')
-  );
+  const effectivePath = playback.effective_audio_path?.active ? playback.effective_audio_path : null;
+  const { isBitPerfect, hudLabel } = getAudioPathPresentation(playback);
+  const sourceFormat = currentTrack?.format || 'Unknown';
+  const sourceRate = effectivePath?.source.sample_rate || playback.file_rate || 0;
+  const sourceChannels = effectivePath?.source.channels || playback.file_ch || 0;
+  const outputRate = effectivePath?.output.sample_rate || 0;
+  const outputBits = effectivePath?.output.bits_per_sample || 0;
+  const outputChannels = effectivePath?.output.channels || 0;
+  const underruns = effectivePath?.underruns;
 
-  const engineLabel = effectivePath
-    ? effectivePath.engine === 'asio'
-      ? 'ASIO'
-      : effectivePath.engine === 'wasapi'
-      ? 'WASAPI'
-      : 'CPAL'
-    : playback.driver_type || 'WASAPI';
-
-  const sourceFormat = currentTrack?.format || (effectivePath ? `${effectivePath.source.sample_rate / 1000}kHz` : 'PCM Audio');
-  const sourceRate = effectivePath?.source.sample_rate || playback.file_rate || 44100;
-  const sourceChannels = effectivePath?.source.channels || playback.file_ch || 2;
-
-  const outputRate = effectivePath?.output.sample_rate || playback.dev_rate || sourceRate;
-  const outputBits = effectivePath?.output.bits_per_sample || 24;
-  const outputChannels = effectivePath?.output.channels || sourceChannels;
-  const underruns = effectivePath?.underruns || 0;
-
-  // Active transforms list
-  const activeTransforms = useMemo(() => {
-    if (effectivePath?.active_transforms && effectivePath.active_transforms.length > 0) {
-      return effectivePath.active_transforms;
-    }
-    const list: string[] = [];
-    if (dsp.auto_headroom) list.push('Auto Headroom Protection (-3dB)');
-    if (dsp.eq_enabled) list.push('10-Band Graphic EQ');
-    if (dsp.r128_enabled) list.push('EBU R128 Volume Normalization');
-    if (dsp.upsample_rate > 0) list.push(`Upsampler (${dsp.upsample_rate / 1000}kHz sinc)`);
-    if (dsp.saturation_enabled) list.push(`Analog Saturation (${dsp.saturation_drive}x)`);
-    if (playback.volume < 1) list.push(`Software Volume Attenuation (${Math.round(playback.volume * 100)}%)`);
-    return list;
-  }, [effectivePath, dsp, playback.volume]);
-
-  const [internalBands, setInternalBands] = useState<number[]>([]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    let active = true;
-    let lastUpdate = 0;
-    const unlistenPromise = listen<number[]>('audio-spectrum', event => {
-      const now = performance.now();
-      if (active && now - lastUpdate >= 65) {
-        lastUpdate = now;
-        setInternalBands(event.payload);
-      }
-    });
-
-    return () => {
-      active = false;
-      unlistenPromise.then(fn => fn()).catch(() => {});
-    };
-  }, [isOpen]);
-
-  const activeSpectrum = spectrumBands && spectrumBands.length > 0 ? spectrumBands : internalBands;
-
-  // Real-time peak & headroom telemetry calculation
-  const { peakDbStr, headroomDbStr, isClipping, isNearLimit, peakRatio } = useMemo(() => {
-    if (!activeSpectrum || activeSpectrum.length === 0) {
-      return {
-        peakDbStr: '-12.0',
-        headroomDbStr: '+12.0',
-        isClipping: false,
-        isNearLimit: false,
-        peakRatio: 0.25
-      };
-    }
-    const maxAmp = Math.max(0.001, Math.min(1.0, Math.max(...activeSpectrum)));
-    const db = 20 * Math.log10(maxAmp);
-    const headroom = Math.max(0, -db);
-    return {
-      peakDbStr: db >= -0.05 ? '0.0' : db.toFixed(1),
-      headroomDbStr: `+${headroom.toFixed(1)}`,
-      isClipping: maxAmp >= 0.98,
-      isNearLimit: maxAmp >= 0.89 && maxAmp < 0.98,
-      peakRatio: maxAmp
-    };
-  }, [activeSpectrum]);
+  const activeTransforms = effectivePath?.active_transforms;
 
   return (
     <AnimatePresence>
@@ -241,7 +166,7 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                         color: 'rgba(255, 255, 255, 0.5)'
                       }}
                     >
-                      Real-time DSP pipeline and hardware driver telemetry
+                      Backend-reported route and transforms; peak and headroom require measured levels.
                     </p>
                   </div>
                 </div>
@@ -286,86 +211,9 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                   gap: 16
                 }}
               >
-                {/* Real-time Headroom & Clipping Telemetry Card */}
-                <div
-                  style={{
-                    padding: '14px 18px',
-                    borderRadius: 10,
-                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      color: 'rgba(255, 255, 255, 0.5)'
-                    }}
-                  >
-                    <span>SIGNAL HEADROOM & PEAK DYNAMICS</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          backgroundColor: isClipping ? '#ef4444' : isNearLimit ? '#f59e0b' : '#10b981',
-                          boxShadow: isClipping ? '0 0 8px #ef4444' : isNearLimit ? '0 0 8px #f59e0b' : '0 0 8px #10b981'
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: isClipping ? '#ef4444' : isNearLimit ? '#f59e0b' : '#10b981'
-                        }}
-                      >
-                        {isClipping ? 'CLIPPING' : isNearLimit ? 'PEAK WARN' : 'SAFE / CLEAN'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Level Meter Bar */}
-                  <div
-                    style={{
-                      height: 10,
-                      backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                      borderRadius: 4,
-                      overflow: 'hidden',
-                      position: 'relative'
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: '100%',
-                        width: `${Math.round(peakRatio * 100)}%`,
-                        backgroundColor: isClipping ? '#ef4444' : isNearLimit ? '#f59e0b' : accentColor,
-                        borderRadius: 4,
-                        transition: 'width 0.1s ease-out'
-                      }}
-                    />
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: 'rgba(255, 255, 255, 0.7)'
-                    }}
-                  >
-                    <span>Peak: <strong style={{ color: '#f8fafc' }}>{peakDbStr} dBFS</strong></span>
-                    <span>Dynamic Headroom: <strong style={{ color: '#10b981' }}>{headroomDbStr} dB</strong></span>
-                  </div>
+                <div style={{ padding: '14px 18px', borderRadius: 10, backgroundColor: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <span>SIGNAL HEADROOM &amp; PEAK DYNAMICS</span>
+                  <div style={{ marginTop: 8 }}>Peak: Unknown · Dynamic Headroom: Unknown</div>
                 </div>
 
                 {/* Node 1: Source */}
@@ -424,7 +272,7 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                         marginTop: 2
                       }}
                     >
-                      {sourceRate.toLocaleString()} Hz · {sourceChannels === 2 ? 'Stereo (2.0)' : `${sourceChannels} Channels`}
+                      {sourceRate > 0 ? `${sourceRate.toLocaleString()} Hz` : 'Unknown rate'} · {sourceChannels > 0 ? sourceChannels === 2 ? 'Stereo (2.0)' : `${sourceChannels} Channels` : 'Unknown channels'}
                     </div>
                   </div>
                 </div>
@@ -501,11 +349,11 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                           lineHeight: 1.4
                         }}
                       >
-                        Exact bitstream delivered to the audio driver with 0 bit alterations or software volume re-quantization.
+                        Backend reports a strict bit-perfect path with no active transforms.
                       </div>
                     ) : (
                       <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {activeTransforms.map((t: string, i: number) => (
+                        {activeTransforms == null ? <span>Transforms unknown</span> : activeTransforms.length === 0 ? <span>No active transforms</span> : activeTransforms.map((t: string, i: number) => (
                           <div
                             key={i}
                             style={{
@@ -572,7 +420,7 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                         marginTop: 2
                       }}
                     >
-                      {engineLabel} {isExclusive ? 'Exclusive' : 'Shared'}
+                      {effectivePath ? hudLabel : 'Audio path pending'}
                     </div>
                     <div
                       style={{
@@ -584,7 +432,7 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                         textOverflow: 'ellipsis'
                       }}
                     >
-                      Endpoint: {currentDevice || 'Default System Audio Device'}
+                      Requested endpoint: {currentDevice || 'System default'}
                     </div>
                     <div
                       style={{
@@ -596,17 +444,17 @@ export function TheaterSignalPathModal({ isOpen, onClose, spectrumBands = [] }: 
                         color: 'rgba(255, 255, 255, 0.45)'
                       }}
                     >
-                      <span>{outputRate.toLocaleString()} Hz · {outputBits}-bit · {outputChannels === 2 ? 'Stereo' : `${outputChannels}ch`}</span>
+                      <span>{outputRate > 0 ? `${outputRate.toLocaleString()} Hz` : 'Unknown rate'} · {outputBits > 0 ? `${outputBits}-bit` : 'Unknown depth'} · {outputChannels > 0 ? outputChannels === 2 ? 'Stereo' : `${outputChannels}ch` : 'Unknown channels'}</span>
                       <span
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           gap: 4,
-                          color: underruns > 0 ? '#f59e0b' : '#10b981'
+                          color: underruns == null ? '#94a3b8' : underruns > 0 ? '#f59e0b' : '#10b981'
                         }}
                       >
-                        <CheckCircle2 size={12} />
-                        <span>{underruns} Underruns</span>
+                        {underruns == null ? <Info size={12} /> : <CheckCircle2 size={12} />}
+                        <span>{underruns == null ? 'Underruns unknown' : `${underruns} Underruns`}</span>
                       </span>
                     </div>
                   </div>

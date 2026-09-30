@@ -1016,7 +1016,8 @@ export function AideoView() {
       // Fired in parallel with everything below; first manual refresh reuses the session
       // pool, repeated refreshes escalate to a fresh search.
       const latestStore = useStore.getState();
-      const tidalEligible = latestStore.appMode !== 'local' && !!latestStore.tidalConnected;
+      const recEngine = latestStore.recommendationEngine || 'our';
+      const tidalEligible = latestStore.appMode !== 'local' && !!latestStore.tidalConnected && recEngine !== 'youtube';
       const wantFreshTidalSearch = forceRefresh
         ? tidalRefreshCountRef.current > 0 || tidalHubPoolRef.current.length === 0
         : tidalHubPoolRef.current.length === 0;
@@ -1085,7 +1086,7 @@ export function AideoView() {
           tidalPool = []; // silent omit
         }
       }
-      if (tidalPool.length > 0 && useStore.getState().appMode !== 'local') {
+      if (tidalPool.length > 0 && useStore.getState().appMode !== 'local' && (useStore.getState().recommendationEngine || 'our') !== 'youtube') {
         const currentHub = useStore.getState().discoveryData;
         if (currentHub) setDiscoveryData(mergeTidalIntoHub(currentHub, tidalPool));
       }
@@ -1373,7 +1374,7 @@ export function AideoView() {
             duration: first.duration || undefined,
           }, false);
         } else {
-          await playTrack(first);
+          await playTrack(first, false, false);
         }
       }
 

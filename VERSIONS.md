@@ -11,6 +11,7 @@
   - [📑 Table of Contents](#-table-of-contents)
   - [📊 Quick Release Index \& Evolution Matrix](#-quick-release-index--evolution-matrix)
   - [🚀 Version-by-Version Detailed Breakdown](#-version-by-version-detailed-breakdown)
+    - [💎 v0.9.11 — WASAPI Clock Diagnostics, Infinite Radio Overhaul, Streaming Token Lifecycle & WinGet Automation](#-v0911--wasapi-clock-diagnostics-infinite-radio-overhaul-streaming-token-lifecycle--winget-automation)
     - [💎 v0.9.10 — Album Archetypes, Advanced Library Architecture & Audiophile Control](#-v0910--album-archetypes-advanced-library-architecture--audiophile-control)
     - [💎 v0.9.9 — Reliable Unified Music Sources, Direct Webstream Audio & Motion Canvas](#-v099--reliable-unified-music-sources-direct-webstream-audio--motion-canvas)
     - [💎 v0.9.8 — Aideo Connect Mobile Remote, Official Tauri v2 Updater \& Next-Gen Discovery Hubs](#-v098--aideo-connect-mobile-remote-official-tauri-v2-updater--next-gen-discovery-hubs)
@@ -53,6 +54,7 @@
 
 | Version | Release Date | Codename / Focus | Primary Capabilities Added |
 |:---|:---:|:---|:---|
+| **v0.9.11** | 2026-09-30 | WASAPI Clocks & Infinite Radio | Hardware WASAPI Exclusive clock diagnostics (`IAudioClock`), multi-tier Infinite Autoplay Radio overhaul, automatic Tidal session bootstrap, atomic playback stop race guard, native UPnP/DLNA casting bridge, and automated WinGet distribution. |
 | **v0.9.10** | 2026-09-20 | Album Architectures & Library Designs | 3 distinct album layout architectures (Classic Wall, Compact Table with Inline Accordion, Editorial Magazine), 6 signature Library designs, universal right-click TrackContextMenu, AddToPlaylistModal, zero audio bleed transitions, and Listening Insights V2. |
 | **v0.9.9** | 2026-09-18 | Reliable Unified Sources & Motion Canvas | Reliable Unified Music Sources architecture with conservative recording identity, direct Webstream Opus audio pipeline, Motion Canvas video artwork loops, 6 signature home screen layouts, interactive Source Switcher, Settings overhaul, GPL-3.0 licensing, 1,107 frontend + 315 backend tests. |
 | **v0.9.8** | 2026-09-07 | Aideo Connect & Tauri v2 Updater | Mobile web LAN remote control, Minisign cryptographically verified in-app updater, Next-gen Discovery Hubs (Editorial, Stage), 5-mode visualizer physics. |
@@ -645,6 +647,37 @@
 3. **Multi-Engine Lyric Scraper:** Integrated NetEase and QQ Music scraping with automatic Romaji transliteration.
 4. **Online Cover Art Resolver:** Automated search and assignment of missing album artwork.
 5. **10-Band Studio Equalizer:** Graphic equalizer with soft-limiting DSP.
+
+### 💎 v0.9.11 — WASAPI Clock Diagnostics, Infinite Radio Overhaul, Streaming Token Lifecycle & WinGet Automation
+- **Tag:** `v0.9.11`
+- **Release Date:** 2026-09-30
+- **Full Title:** *Aideo Music Player v0.9.11 — WASAPI Clock Diagnostics, Infinite Radio Overhaul, Streaming Token Lifecycle & WinGet Automation*
+- **Primary Goals:** Overhaul WASAPI Exclusive device session management with real-time hardware clock diagnostics (`IAudioClock`), multi-tier Infinite Autoplay Radio recommendation engine, seamless background Tidal session auto-restoration, atomic stop race guard, native UPnP/DLNA casting bridge, and automated WinGet distribution.
+
+#### 🌟 Key Additions & Features
+1. **WASAPI Exclusive Device Clock Diagnostics & Session Lifecycle (`wasapi_engine.rs`):**
+   - **Hardware Rate Window Tracking (`IAudioClock`)**: Logs 5-second sampling windows (`frames_written`, `elapsed`, `clock_start`, `clock_end`, `clock_frequency`) directly to `%APPDATA%/com.alirul.music-player/logs/aideo.log` to definitively measure clock drift and sample rate mismatch.
+   - **Exclusive Endpoint Lease Architecture**: Overhauled `ExclusiveEndpoint` so pausing drops COM interfaces, completely releasing exclusive soundcard ownership to Windows, and dynamically reacquires them with silence prefill upon resume.
+   - **Integer PCM Quantization & Bit-Packing**: Exact signed boundary preservation and MSB container packing for 24-bit audio in 32-bit containers (`quantized << 8`).
+2. **Infinite Autoplay Radio & Queue Progression Overhaul (`playbackSlice.ts`, `youtube/mod.rs`):**
+   - **Multi-Tier Recommendation Fallback**: Traverses Last.fm track similarities $\rightarrow$ related artist discographies $\rightarrow$ seed artist top catalog.
+   - **Seed Affinity Scoring & Slop Filtering**: Penalizes spoken word, low-fidelity bootlegs, and live clutter; dynamic skip and recently-played penalties prevent queue loops.
+   - **Repeat-One & Queue Priority**: Repeat-One holds the track without draining radio suggestions; manual queues and curated mixes always execute first; automatic background top-up occurs as the upcoming queue thins.
+   - **Explicit Recommendation Engine Selector**: User-selectable in Settings $\rightarrow$ System (**Aideo Hybrid**, **YouTube Music Radio**, **Tidal Radio**).
+3. **Tidal Stream Lifecycle & Automatic Session Bootstrap (`tidal.rs`, `App.tsx`):**
+   - **App Boot Session Auto-Restoration**: Verifies and restores authenticated Tidal sessions immediately on application launch without visiting Settings.
+   - **Token Refresh Cooldown & URL Expiry Mitigation**: Prevents HTTP 401/403 stream token expiry and eliminates stream EOF hangs during multi-hour listening sessions.
+4. **Playback Lifecycle State Machine & Atomic Stop Race Guard (`player/mod.rs`):**
+   - **Atomic Stop Race Guard**: Eliminates race conditions between async frontend stop dispatches and background buffer drains, preventing accidental track resurrection.
+   - **Correlation ID Tracking (`attempt_id`)**: Emits and correlates track attempt IDs across all Tauri IPC playback events (`track-ended`, `playback-error`, `track-transitioned`, `stream-buffering`) to discard stale events from superseded tracks.
+   - **Resampler Timeline EOF Draining**: Replaced arbitrary EOF padding with Rubato `output_delay()` impulse draining, preventing micro-clicks and audio duplication.
+5. **Native UPnP / DLNA Network Streaming Bridge (`lib.rs`):**
+   - Integrated AVTransport and RenderingControl protocol bridges for high-fidelity audio casting to DLNA/UPnP network receivers, with device discovery and HTTP byte-range streaming.
+6. **Official WinGet Package Automation & CI Hardening (`.github/workflows/winget.yml`, `publish.yml`):**
+   - Automated GitHub Actions workflow pushing package manifests to the Microsoft Windows Package Manager Community Repository on release (`winget install Alirul.Aideo`).
+   - Propagates Supabase authentication credentials (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) in release packaging workflows.
+
+---
 
 ### 💎 v0.9.10 — Album Layout Architectures, Library Designs & Audio Engine Hardening
 - **Tag:** `v0.9.10`

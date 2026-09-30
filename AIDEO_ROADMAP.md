@@ -56,6 +56,14 @@ Abstract hardcoded monolithic integrations into standardized provider interfaces
 * **Audio Stream & Source Resolvers**: Resolve tracks from remote or local storage vaults (e.g., Subsonic, Jellyfin, WebDAV, Bandcamp).
 * **DSP Audio Effects**: Custom EQ curves, spatializers, and audio filters (WASM-based).
 
+### Pillar 4: Pluggable Song Sources & Unified Discovery Cards (BitChord Standard)
+Standardize song cards and source representation across the Discovery Hub, search, and feeds:
+* **Extensible Provider Registry (`sourceProviders.ts`)**: Decouple the rigid 4-provider union (`local | tidal | qobuz | youtube`) into a dynamic registry where built-in sources and third-party plugin sources register their metadata (identifier, display name, brand color, icon, and catalog quality resolution).
+* **Unified Song Card Anatomy**:
+  * **Artwork with Source Pill**: Clean source pill displaying provider icon + quality tag (e.g., `[Tidal · FLAC]`, `[Local · FLAC]`, `[Subsonic · 320k]`).
+  * **Alternative Sources Counter**: When the track is available across multiple connected sources, render an alternative counter (e.g., `· 3 sources`) allowing 1-click switching via `SourceMenu`.
+  * **Fallback Handling**: Unmatched single-source tracks from charts or recommendations always display their primary source rather than disappearing or rendering a blank `"Auto"` button.
+
 ---
 
 ## 3. Plugin Specification (`plugin.json`)
@@ -131,10 +139,12 @@ gantt
 
 ### Phase 1: Internal Decoupling & Provider Interfaces
 - [ ] Refactor built-in services (Last.fm, ListenBrainz, Lyrics, Tidal, Qobuz) to implement internal `IProvider`, `IScrobbler`, and `ISourceResolver` interfaces.
+- [ ] Create `sourceProviders.ts` extensible registry to decouple hardcoded provider unions (`'local' | 'tidal' | 'qobuz' | 'youtube' | string`).
 - [ ] Centralize audio and playback state change dispatches through a unified internal Event Bus.
 - [ ] Ensure all existing unit and integration tests pass without regression.
 
 ### Phase 2: UI Slot Engine & Theming System
+- [ ] Standardize Discovery Hub and search song cards with unified `SourceBadge` (provider icon + audio quality + multi-source counter).
 - [ ] Implement `<SlotContainer slot="..." />` React components for Sidebar, PlayerBar, and NowPlaying panels.
 - [ ] Convert hardcoded sidebar routes into a dynamic registry that supports user reordering and visibility toggling.
 - [ ] Implement dynamic theme loader supporting JSON theme packs with live CSS variable updates.
