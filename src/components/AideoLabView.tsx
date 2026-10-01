@@ -59,17 +59,17 @@ const EQ_QUICK_PRESETS = [
   { name: 'Bass Boost', gains: [4.5, 3.5, 2.0, 1.0, 0, 0, 0, 0.5, 1.0, 1.5], preamp: -2.0 },
   { name: 'Vocal Clarity', gains: [-1.0, -0.5, 0, 1.0, 2.5, 3.0, 2.0, 1.0, 0.5, 0], preamp: -1.0 },
   { name: 'Treble Air', gains: [0, 0, 0, 0, 0, 0.5, 1.5, 3.0, 4.0, 4.5], preamp: -1.5 },
-  { name: 'Audiophile Master', gains: [1.0, 0.5, 0, -0.5, 0, 0.5, 1.0, 1.5, 2.0, 1.5], preamp: -0.5 },
+  { name: 'Mild Boost', gains: [1.0, 0.5, 0, -0.5, 0, 0.5, 1.0, 1.5, 2.0, 1.5], preamp: -0.5 },
 ];
 
 const getSourceStyle = (source: string) => {
   const s = source.toLowerCase();
-  if (s.includes('oratory')) return { bg: 'rgba(59, 130, 246, 0.12)', border: 'rgba(59, 130, 246, 0.35)', color: '#60a5fa', label: 'oratory1990' };
-  if (s.includes('crinacle')) return { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', color: '#34d399', label: 'crinacle' };
-  if (s.includes('rtings')) return { bg: 'rgba(249, 115, 22, 0.12)', border: 'rgba(249, 115, 22, 0.35)', color: '#fb923c', label: 'Rtings' };
-  if (s.includes('innerfidelity')) return { bg: 'rgba(234, 179, 8, 0.12)', border: 'rgba(234, 179, 8, 0.35)', color: '#facc15', label: 'Innerfidelity' };
-  if (s.includes('raa')) return { bg: 'rgba(236, 72, 153, 0.12)', border: 'rgba(236, 72, 153, 0.35)', color: '#f472b6', label: 'RAA' };
-  return { bg: 'rgba(139, 92, 246, 0.12)', border: 'rgba(139, 92, 246, 0.3)', color: '#a78bfa', label: source };
+  if (s.includes('oratory')) return { bg: 'rgba(59, 130, 246, 0.12)', border: 'rgba(59, 130, 246, 0.35)', color: '#60a5fa' };
+  if (s.includes('crinacle')) return { bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.35)', color: '#34d399' };
+  if (s.includes('rtings')) return { bg: 'rgba(249, 115, 22, 0.12)', border: 'rgba(249, 115, 22, 0.35)', color: '#fb923c' };
+  if (s.includes('innerfidelity')) return { bg: 'rgba(234, 179, 8, 0.12)', border: 'rgba(234, 179, 8, 0.35)', color: '#facc15' };
+  if (s.includes('raa')) return { bg: 'rgba(236, 72, 153, 0.12)', border: 'rgba(236, 72, 153, 0.35)', color: '#f472b6' };
+  return { bg: 'rgba(139, 92, 246, 0.12)', border: 'rgba(139, 92, 246, 0.3)', color: '#a78bfa' };
 };
 
 export function AideoLabView() {
@@ -102,13 +102,14 @@ export function AideoLabView() {
   const [autoEqDb, setAutoEqDb] = useState<{ name: string; url: string; source: string; fullSource: string }[] | null>(null);
   const [isFetchingDb, setIsFetchingDb] = useState(false);
   const [autoEqError, setAutoEqError] = useState('');
-  const [activeCalibratedHeadphone, setActiveCalibratedHeadphone] = useState<string>(() => {
+  const [activeAutoEqUrl, setActiveAutoEqUrl] = useState<string>(() => {
     try {
       return localStorage.getItem('aideo_active_autoeq_model') || '';
     } catch {
       return '';
     }
   });
+  const activeAutoEqProfile = autoEqDb?.find(profile => profile.url === activeAutoEqUrl);
 
   // Selected Node & Dragging state for Parametric EQ
   const [selectedBand, setSelectedBand] = useState<number>(0);
@@ -311,7 +312,7 @@ export function AideoLabView() {
   }, [autoEqDb, selectedBrand, dbSearchQuery]);
 
   // Load and apply selected headphone profile
-  const handleApplyHeadphoneProfile = async (headphone: { name: string; url: string; source: string }) => {
+  const handleApplyHeadphoneProfile = async (headphone: { name: string; url: string; fullSource: string }) => {
     setAutoEqError('');
     try {
       const response = await fetch(headphone.url);
@@ -346,12 +347,12 @@ export function AideoLabView() {
         preamp_gain: preamp,
       });
 
-      setActiveCalibratedHeadphone(headphone.name);
-      localStorage.setItem('aideo_active_autoeq_model', headphone.name);
+      setActiveAutoEqUrl(headphone.url);
+      localStorage.setItem('aideo_active_autoeq_model', headphone.url);
       window.dispatchEvent(
         new CustomEvent('ui-toast', {
           detail: {
-            message: `Applied AutoEQ calibration for ${headphone.name} (${headphone.source})`,
+            message: `Applied AutoEQ for ${headphone.name} (${headphone.fullSource})`,
             type: 'success',
           },
         })
@@ -594,7 +595,7 @@ export function AideoLabView() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: -0.3 }}>
-                Aideo Acoustic Laboratory
+                Audio Settings
               </h1>
               <span
                 style={{
@@ -609,18 +610,18 @@ export function AideoLabView() {
                   border: '1px solid rgba(255, 255, 255, 0.08)',
                 }}
               >
-                Studio DSP Suite
+                DSP
               </span>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 2 }}>
-              Precision Headphone AutoEQ, 10-Band Parametric Biquad Equalizer & Psychoacoustic Stage
+              Headphone AutoEQ, 10-band equalizer, and spatial audio
             </div>
           </div>
         </div>
 
         {/* Header Actions: Instant A/B + Reset */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {activeCalibratedHeadphone && (
+          {activeAutoEqProfile && (
             <div
               style={{
                 display: 'flex',
@@ -636,7 +637,7 @@ export function AideoLabView() {
               }}
             >
               <Headphones size={13} />
-              <span>Calibrated: {activeCalibratedHeadphone}</span>
+              <span>AutoEQ: {activeAutoEqProfile.name} ({activeAutoEqProfile.fullSource})</span>
             </div>
           )}
 
@@ -644,7 +645,7 @@ export function AideoLabView() {
           <button
             className="btn"
             onClick={toggleDspAB}
-            title="Instant A/B DSP Compare (Press 'B' globally)"
+            title="Compare DSP on/off (Press 'B')"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -663,7 +664,7 @@ export function AideoLabView() {
             }}
           >
             <Zap size={14} color={dsp.enabled ? '#34d399' : '#38bdf8'} />
-            <span>{dsp.enabled ? 'Mode B: DSP Active' : 'Mode A: Raw Direct'}</span>
+            <span>{dsp.enabled ? 'Mode B: DSP On' : 'Mode A: DSP Off'}</span>
             <span
               style={{
                 fontSize: 9,
@@ -682,7 +683,7 @@ export function AideoLabView() {
           <button
             className="btn btn-secondary"
             onClick={resetProMode}
-            title="Reset DSP laboratory back to flat defaults"
+            title="Reset DSP settings"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -711,8 +712,8 @@ export function AideoLabView() {
         }}
       >
         {[
-          { id: 'studio_eq' as MainLabTab, label: 'Studio EQ & AutoEQ Calibration', icon: Sliders, badge: 'Unified Stage' },
-          { id: 'spatial_acoustics' as MainLabTab, label: 'Spatial Acoustics & DSP Rack', icon: Waves, badge: 'IR & Staging' },
+          { id: 'studio_eq' as MainLabTab, label: 'EQ & AutoEQ', icon: Sliders, badge: '10 Bands' },
+          { id: 'spatial_acoustics' as MainLabTab, label: 'Spatial Audio & Effects', icon: Waves, badge: 'IR & Crossfeed' },
         ].map(tab => {
           const Icon = tab.icon;
           const isSelected = activeTab === tab.id;
@@ -804,7 +805,7 @@ export function AideoLabView() {
                   />
                 </button>
                 <span style={{ fontSize: 13, fontWeight: 700, color: dsp.eq_enabled ? 'var(--text)' : 'var(--text-dim)' }}>
-                  Master EQ
+                  Equalizer
                 </span>
               </div>
 
@@ -828,7 +829,7 @@ export function AideoLabView() {
                   }}
                 >
                   <Activity size={13} />
-                  <span>Spline Graph</span>
+                  <span>Graph</span>
                 </button>
                 <button
                   onClick={() => setEqViewMode('faders')}
@@ -848,7 +849,7 @@ export function AideoLabView() {
                   }}
                 >
                   <SlidersHorizontal size={13} />
-                  <span>Tactile Faders</span>
+                  <span>Faders</span>
                 </button>
               </div>
 
@@ -1489,7 +1490,7 @@ export function AideoLabView() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-                    10-Band Precision Mixer Strips
+                    EQ faders
                   </span>
                   <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
                     Double-click any fader to snap to 0 dB
@@ -1648,11 +1649,11 @@ export function AideoLabView() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Headphones size={16} color="var(--accent)" />
-                <span style={{ fontSize: 13, fontWeight: 700 }}>AutoEQ Headphone Calibration</span>
+                <span style={{ fontSize: 13, fontWeight: 700 }}>AutoEQ headphone profiles</span>
                 <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-                  ({isFetchingDb ? 'Fetching index...' : `${filteredHeadphones.length} models ready`})
+                  ({isFetchingDb ? 'Loading index...' : `${filteredHeadphones.length} profiles shown`})
                 </span>
-                {activeCalibratedHeadphone && (
+                {activeAutoEqProfile && (
                   <span
                     style={{
                       fontSize: 10,
@@ -1667,7 +1668,7 @@ export function AideoLabView() {
                       gap: 4,
                     }}
                   >
-                    <Check size={10} /> Active: {activeCalibratedHeadphone}
+                    <Check size={10} /> Active: {activeAutoEqProfile.name} ({activeAutoEqProfile.fullSource})
                   </span>
                 )}
               </div>
@@ -1727,7 +1728,7 @@ export function AideoLabView() {
                     toggleAutoEqCollapsed();
                   }}
                   className="autoeq-collapse-btn"
-                  title={autoEqCollapsed ? 'Expand AutoEQ Calibration' : 'Collapse AutoEQ Calibration'}
+                  title={autoEqCollapsed ? 'Expand AutoEQ profiles' : 'Collapse AutoEQ profiles'}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1808,11 +1809,11 @@ export function AideoLabView() {
             >
               {filteredHeadphones.map(hp => {
                 const srcStyle = getSourceStyle(hp.source);
-                const isActive = activeCalibratedHeadphone === hp.name;
+                const isActive = activeAutoEqUrl === hp.url;
 
                 return (
                   <div
-                    key={`${hp.name}-${hp.source}`}
+                    key={hp.url}
                     style={{
                       background: isActive ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(255, 255, 255, 0.02)',
                       border: isActive
@@ -1843,12 +1844,14 @@ export function AideoLabView() {
                             color: srcStyle.color,
                           }}
                         >
-                          {srcStyle.label}
+                          {hp.fullSource}
                         </span>
                       </div>
                     </div>
 
                     <button
+                      aria-label={`Apply ${hp.name} (${hp.fullSource})`}
+                      aria-pressed={isActive}
                       onClick={() => handleApplyHeadphoneProfile(hp)}
                       style={{
                         display: 'flex',
@@ -1867,7 +1870,7 @@ export function AideoLabView() {
                       }}
                     >
                       {isActive ? <Check size={12} /> : <Zap size={12} />}
-                      <span>{isActive ? 'Calibrated' : 'Calibrate'}</span>
+                      <span>{isActive ? 'Applied' : 'Apply'}</span>
                     </button>
                   </div>
                 );
@@ -1924,7 +1927,7 @@ export function AideoLabView() {
                 </button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                Real room acoustics, studio cabinet impulses, and HRTF binaural spatial profiles.
+                Load an impulse response for room, cabinet, or HRTF filtering.
               </div>
             </div>
 
@@ -2002,7 +2005,7 @@ export function AideoLabView() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Headphones size={16} color="var(--accent)" /> Binaural Crossfeed & Soundstage
+                  <Headphones size={16} color="var(--accent)" /> Crossfeed & Stereo Width
                 </span>
                 <button
                   onClick={() => setDSP({ crossfeed_enabled: !dsp.crossfeed_enabled })}
@@ -2021,7 +2024,7 @@ export function AideoLabView() {
                 </button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                Simulates natural speaker angle listening on headphones and Haas precedence widening.
+                Adjust headphone crossfeed, stereo width, and Haas delay.
               </div>
             </div>
 
@@ -2064,7 +2067,7 @@ export function AideoLabView() {
             {/* Soundstage Width Slider */}
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
-                <span>Master Soundstage Width</span>
+                <span>Stereo Width</span>
                 <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>{Math.round(dsp.width * 100)}%</span>
               </div>
               <input
@@ -2096,7 +2099,7 @@ export function AideoLabView() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Sparkles size={16} color="#f59e0b" /> Analog Triode Tube Saturation
+                  <Sparkles size={16} color="#f59e0b" /> Saturation
                 </span>
                 <button
                   onClick={() => setDSP({ saturation_enabled: !dsp.saturation_enabled })}
@@ -2111,11 +2114,11 @@ export function AideoLabView() {
                     cursor: 'pointer',
                   }}
                 >
-                  {dsp.saturation_enabled ? 'WARMTH ACTIVE' : 'OFF'}
+                  {dsp.saturation_enabled ? 'ON' : 'OFF'}
                 </button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                Adds subtle 2nd and 3rd order even-harmonic tube warmth and smooth soft-clipping saturation.
+                Adds harmonic distortion and soft clipping.
               </div>
             </div>
 
@@ -2143,7 +2146,7 @@ export function AideoLabView() {
             </div>
 
             <div style={{ fontSize: 11, color: 'var(--text-dim)', background: 'rgba(0,0,0,0.2)', padding: '8px 12px', borderRadius: 6 }}>
-              Modeled after class-A 12AX7 vacuum tube circuitry with polynomial transfer function.
+              Drive controls the amount of saturation.
             </div>
           </div>
 
@@ -2163,11 +2166,11 @@ export function AideoLabView() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Shield size={16} color="#34d399" /> Safety Gain Staging & Limiter
+                  <Shield size={16} color="#34d399" /> Gain & Limiter
                 </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                Inter-sample peak guard, 18Hz Butterworth subsonic DC-block, and digital headroom protection.
+                Adjust preamp gain, limiter ceiling, automatic headroom, and the 18 Hz subsonic filter.
               </div>
             </div>
 
@@ -2289,7 +2292,7 @@ export function AideoLabView() {
 
             <input
               type="text"
-              placeholder="Preset Name (e.g. My Studio HD600 Curve)..."
+              placeholder="Preset name..."
               value={newPresetName}
               onChange={e => setNewPresetName(e.target.value)}
               style={{

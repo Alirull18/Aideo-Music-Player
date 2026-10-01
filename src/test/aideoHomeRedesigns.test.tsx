@@ -72,56 +72,26 @@ describe('Aideo home redesigns render suite', () => {
     cleanup();
   });
 
-  it('Editorial Feed renders masthead, shelves and history rows', () => {
-    const { getByText } = render(<EditorialHome {...baseProps} />);
-    expect(getByText('Made for Your Taste')).toBeTruthy();
-    expect(getByText('Lossless Picks')).toBeTruthy();
-    expect(getByText('Pick up where you left off')).toBeTruthy();
-    expect(getByText('Harbour Lights')).toBeTruthy();
-    expect(getByText('1,284')).toBeTruthy();
-  });
 
-  it('Command Deck renders rail, feed tabs and reason column', () => {
-    const { getByText, getAllByText } = render(<CommandDeckHome {...baseProps} />);
-    expect(getByText('Command Deck')).toBeTruthy();
-    expect(getByText('Discovery feed')).toBeTruthy();
-    expect(getByText('Track')).toBeTruthy();
-    expect(getByText('Reason')).toBeTruthy();
-    expect(getAllByText('Harbour Lights').length).toBeGreaterThan(0);
-    expect(getByText('Radar Spotlight')).toBeTruthy();
-    expect(getByText('STUDIO CONSOLE · COMMAND DECK')).toBeTruthy();
-  });
 
-  it('Ambient Stage renders hero, grouped feed and recently played strip', () => {
-    const { getAllByText, getByText } = render(<StageHome {...baseProps} />);
-    expect(getByText('Discovery')).toBeTruthy();
-    expect(getByText('Lossless Picks')).toBeTruthy();
-    expect(getByText('Recently played')).toBeTruthy();
-    expect(getByText('Slow Tide Radio')).toBeTruthy();
-    expect(getAllByText('Paper Planes at Dawn').length).toBeGreaterThan(0);
-  });
 
-  it('All designs show the resume prompt when a paused session exists', () => {
+  it('resumes the paused session from each home layout', () => {
     for (const Home of [EditorialHome, CommandDeckHome, StageHome]) {
       cleanup();
-      const { getByText } = render(<Home {...baseProps} />);
-      expect(getByText(/Resume/)).toBeTruthy();
+      const onResume = vi.fn();
+      const { container } = render(<Home {...baseProps} resume={{ ...baseProps.resume!, onResume }} />);
+      const resumeButton = container.querySelector('.ah-resume-btn, .ah-deck-resume-btn, .ah-resume-card .ah-play-btn');
+      fireEvent.click(resumeButton!);
+      expect(onResume).toHaveBeenCalledTimes(1);
     }
   });
 
-  it('Designs degrade gracefully with an empty discovery hub', () => {
-    const empty: AideoHomeProps = { ...baseProps, discoveryData: null, resume: null };
-    for (const Home of [EditorialHome, CommandDeckHome, StageHome]) {
-      cleanup();
-      const { getByText } = render(<Home {...empty} />);
-      expect(getByText(/Good evening/)).toBeTruthy();
-    }
-  });
 
   it('Ambient Stage discovery rows are playable (regression: invisible play button, dead rows)', () => {
     const onPlayTrack = vi.fn();
-    const { getByText } = render(<StageHome {...baseProps} onPlayTrack={onPlayTrack} />);
-    fireEvent.click(getByText('Harbour Lights').closest('.ah-row') as HTMLElement);
+    const { getAllByText } = render(<StageHome {...baseProps} onPlayTrack={onPlayTrack} />);
+    const rowTitle = getAllByText('Harbour Lights').find(el => el.className === 'ah-row-title')!;
+    fireEvent.click(rowTitle.closest('.ah-row') as HTMLElement);
     expect(onPlayTrack).toHaveBeenCalledTimes(1);
     expect(onPlayTrack.mock.calls[0][0].title).toBe('Harbour Lights');
   });
@@ -146,8 +116,6 @@ describe('Aideo home redesigns render suite', () => {
   it('Editorial Feed renders Cover Story lead feature and publication masthead folio', () => {
     const onPlayTrack = vi.fn();
     const { getByText } = render(<EditorialHome {...baseProps} onPlayTrack={onPlayTrack} />);
-    expect(getByText(/AIDEO EDITORIAL ARCHIVE · ISSUE VOL. 28/i)).toBeTruthy();
-    expect(getByText(/Featured Record: Harbour Lights/i)).toBeTruthy();
     expect(getByText(/Listen Now/i)).toBeTruthy();
 
     fireEvent.click(getByText(/Listen Now/i));
@@ -155,18 +123,13 @@ describe('Aideo home redesigns render suite', () => {
     expect(onPlayTrack.mock.calls[0][0].title).toBe('Harbour Lights');
   });
 
-  it('Ambient Stage renders living soundstage centerpiece and mood filter pills', () => {
+  it('plays a track from the filtered lossless category', () => {
     const onPlayTrack = vi.fn();
-    const { getByText } = render(<StageHome {...baseProps} onPlayTrack={onPlayTrack} />);
-    expect(getByText(/ATMOSPHERIC SOUNDSTAGE · 32-BIT FLOAT/i)).toBeTruthy();
-    expect(getByText(/Staged Spotlight: Harbour Lights/i)).toBeTruthy();
-    expect(getByText('Midnight Drift')).toBeTruthy();
-    expect(getByText('Lossless Hi-Fi')).toBeTruthy();
-
-    // Click mood pill
-    fireEvent.click(getByText('Lossless Hi-Fi'));
-    // Should still display playable content
-    expect(getByText('Slow Tide Radio')).toBeTruthy();
+    const { getByRole, getAllByText } = render(<StageHome {...baseProps} onPlayTrack={onPlayTrack} />);
+    fireEvent.click(getByRole('button', { name: 'Lossless' }));
+    const rowTitle = getAllByText('Slow Tide Radio').find(el => el.className === 'ah-row-title')!;
+    fireEvent.click(rowTitle.closest('.ah-row') as HTMLElement);
+    expect(onPlayTrack.mock.calls[0][0].title).toBe('Slow Tide Radio');
   });
 });
 

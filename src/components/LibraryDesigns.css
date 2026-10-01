@@ -560,7 +560,7 @@
 .hero-content {
   display: flex;
   flex-direction: column;
-  justifyContent: space-between;
+  justify-content: space-between;
   flex: 1;
   min-width: 0;
   gap: 16px;

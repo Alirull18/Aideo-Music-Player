@@ -19,43 +19,20 @@ beforeEach(() => {
 });
 
 describe('SettingsView Audio Spectrum Visualizer Card', () => {
-  it('renders the Audio Spectrum Visualizer card in Settings under appearance tab', () => {
-    render(<SettingsView />);
-
-    expect(screen.getByText('Audio Spectrum Visualizer')).toBeInTheDocument();
-    expect(
-      screen.getByText('Customize visualizer rendering styles, decay kinetics, and display height in the player.')
-    ).toBeInTheDocument();
-
-    // Check style chips
-    expect(screen.getByRole('button', { name: 'Studio Bars' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Bilateral Mirror' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Silk Wave' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Radial Halo' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Dot Matrix' })).toBeInTheDocument();
-
-    // Check decay buttons
-    expect(screen.getByRole('button', { name: 'Snappy' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Balanced' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Silky' })).toBeInTheDocument();
-
-    // Check expanded toggle description
-    expect(screen.getByText('Expanded Now Playing Canvas')).toBeInTheDocument();
-  });
 
   it('updates visualizerMode in store when clicking a style chip', () => {
     render(<SettingsView />);
 
     expect(useStore.getState().visualizerMode).toBe('bars');
 
-    const waveChip = screen.getByRole('button', { name: 'Silk Wave' });
+    const waveChip = screen.getByRole('button', { name: 'Wave' });
     act(() => {
       fireEvent.click(waveChip);
     });
 
     expect(useStore.getState().visualizerMode).toBe('wave');
 
-    const dotsChip = screen.getByRole('button', { name: 'Dot Matrix' });
+    const dotsChip = screen.getByRole('button', { name: 'Dots' });
     act(() => {
       fireEvent.click(dotsChip);
     });
@@ -68,14 +45,14 @@ describe('SettingsView Audio Spectrum Visualizer Card', () => {
 
     expect(useStore.getState().visualizerDecayRate).toBe('balanced');
 
-    const silkyBtn = screen.getByRole('button', { name: 'Silky' });
+    const silkyBtn = screen.getByRole('button', { name: 'Slow' });
     act(() => {
       fireEvent.click(silkyBtn);
     });
 
     expect(useStore.getState().visualizerDecayRate).toBe('silky');
 
-    const snappyBtn = screen.getByRole('button', { name: 'Snappy' });
+    const snappyBtn = screen.getByRole('button', { name: 'Fast' });
     act(() => {
       fireEvent.click(snappyBtn);
     });

@@ -1189,7 +1189,7 @@ function AideoApp() {
           </motion.div>
         )}
 
-        <AnimatePresence>
+        <AnimatePresence key="custom-prompt">
           {customPrompt.open && (
             <AideoPrompt
               title={customPrompt.title}
@@ -1202,15 +1202,15 @@ function AideoApp() {
           )}
         </AnimatePresence>
 
-        <AnimatePresence>
+        <AnimatePresence key="cover-art">
           {coverArtModalTrack && <CoverArtModal />}
         </AnimatePresence>
 
-        <AnimatePresence>
+        <AnimatePresence key="add-to-playlist">
           {playlistModalTrack && <AddToPlaylistModal />}
         </AnimatePresence>
 
-        <AnimatePresence>
+        <AnimatePresence key="tag-editor">
           {(tagEditorTrack || (tagEditorBatchTracks && tagEditorBatchTracks.length > 0)) && <TagEditorModal />}
         </AnimatePresence>
       </AnimatePresence>

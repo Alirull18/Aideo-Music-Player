@@ -1107,7 +1107,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
     window.dispatchEvent(new CustomEvent('ui-toast', {
       detail: {
-        message: nextEnabled ? '⚡ A/B Mode B: Tuned DSP & AutoEQ Active' : '🎧 A/B Mode A: Direct Raw Bypass (DSP Off)',
+        message: nextEnabled ? 'DSP enabled' : 'DSP bypassed',
         type: nextEnabled ? 'success' : 'info'
       }
     }));

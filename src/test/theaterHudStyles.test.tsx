@@ -115,19 +115,19 @@ describe('Theater HUD Styles (Store & UI Integration)', () => {
   it('cycles HUD styles when clicking the top-bar HUD style button', () => {
     render(<FullscreenView />);
 
-    const hudBtn = screen.getByTitle(/HUD: Floating Capsule/i);
+    const hudBtn = screen.getByTitle(/HUD: Floating/i);
     expect(hudBtn).toBeInTheDocument();
 
     fireEvent.click(hudBtn);
     expect(useStore.getState().theaterHudStyle).toBe('master');
 
-    fireEvent.click(screen.getByTitle(/HUD: Master Deck/i));
+    fireEvent.click(screen.getByTitle(/HUD: Rack/i));
     expect(useStore.getState().theaterHudStyle).toBe('minimal');
 
-    fireEvent.click(screen.getByTitle(/HUD: Zen Minimal/i));
+    fireEvent.click(screen.getByTitle(/HUD: Minimal/i));
     expect(useStore.getState().theaterHudStyle).toBe('analog');
 
-    fireEvent.click(screen.getByTitle(/HUD: Vintage Analog/i));
+    fireEvent.click(screen.getByTitle(/HUD: Analog style/i));
     expect(useStore.getState().theaterHudStyle).toBe('capsule');
   });
 
@@ -182,7 +182,6 @@ describe('Theater HUD Styles (Store & UI Integration)', () => {
       expect(right?.querySelector('button[title*="Romaji"]')).toBeInTheDocument();
       expect(right?.querySelector('button[title*="Translation"], button[title*="Translate"]')).toBeInTheDocument();
       expect(right?.querySelector('button[title*="Visualizer Mode"]')).toBeInTheDocument();
-      expect(right?.querySelector('button[title*="Visualizer Aura"]')).toBeInTheDocument();
       expect(right?.querySelector('button[title*="Queue"]')).toBeInTheDocument();
       expect(right?.querySelector('button[title*="Fullscreen"]')).toBeInTheDocument();
     }

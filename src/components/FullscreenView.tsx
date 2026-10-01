@@ -46,18 +46,18 @@ import { getAudioPathPresentation } from '../utils/audioPath';
 
 const THEATER_NAMES: Record<TheaterModeDesign, string> = {
   stage: 'Stage View',
-  zen: 'Zen View',
+  zen: 'Zen Mode',
   studio: 'Studio Deck',
-  vinyl: 'Turntable',
-  poster: 'Poster View',
-  scope: 'Pure Scope',
+  vinyl: 'Vinyl Turntable',
+  poster: 'Poster',
+  scope: 'Scope',
 };
 
 export const THEATER_HUD_NAMES: Record<TheaterHudStyle, string> = {
-  capsule: 'Floating Capsule',
-  master: 'Master Deck',
-  minimal: 'Zen Minimal',
-  analog: 'Vintage Analog',
+  capsule: 'Floating',
+  master: 'Rack',
+  minimal: 'Minimal',
+  analog: 'Analog style',
 };
 
 export function FullscreenView() {
@@ -321,7 +321,7 @@ export function FullscreenView() {
         const next = order[(order.indexOf(cur) + 1) % order.length];
         useStore.getState().setTheaterModeDesign(next);
         window.dispatchEvent(new CustomEvent('ui-toast', {
-          detail: { message: `Theater Persona: ${THEATER_NAMES[next]}`, type: 'info' }
+          detail: { message: `Fullscreen layout: ${THEATER_NAMES[next]}`, type: 'info' }
         }));
       } else if (key === 'h') {
         e.preventDefault();
@@ -576,7 +576,7 @@ export function FullscreenView() {
             const next = order[(order.indexOf(theaterModeDesign) + 1) % order.length];
             setTheaterModeDesign(next);
           }}
-          title={`Current: ${THEATER_NAMES[theaterModeDesign]} (Click or press L to cycle persona)`}
+          title={`Current: ${THEATER_NAMES[theaterModeDesign]} (Click or press L to change layout)`}
         >
           <LayoutGrid size={16} />
           <span>{THEATER_NAMES[theaterModeDesign]}</span>
@@ -719,7 +719,7 @@ export function FullscreenView() {
             </button>
 
             {theaterHudStyle === 'master' && (
-              <div className="hud-master-led-meter" title="Precision Output Level">
+              <div className="hud-master-led-meter" title="Playback status">
                 <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
                 <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
                 <span className={`hud-meter-dot green ${playbackStatus === 'Playing' ? 'lit' : ''}`} />
@@ -730,9 +730,9 @@ export function FullscreenView() {
             )}
 
             {theaterHudStyle === 'analog' && (
-              <div className="hud-analog-tube-badge" title="Analog Vacuum Stage Active">
+              <div className="hud-analog-tube-badge" title="Analog-style controls">
                 <span className="hud-analog-tube-glow" />
-                <span className="hud-analog-badge-text">TUBE STAGE</span>
+                <span className="hud-analog-badge-text">PLAYBACK</span>
               </div>
             )}
 
@@ -856,7 +856,7 @@ export function FullscreenView() {
             <button
               className={`fullscreen-hud-btn ${liquidBackgroundEnabled ? 'active' : ''}`}
               onClick={toggleLiquidBackground}
-              title={liquidBackgroundEnabled ? 'Disable Dynamic Visualizer Aura' : 'Enable Dynamic Visualizer Aura'}
+              title={liquidBackgroundEnabled ? 'Disable animated background' : 'Enable animated background'}
             >
               <Sparkles size={18} />
             </button>

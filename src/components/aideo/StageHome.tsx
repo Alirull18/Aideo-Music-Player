@@ -13,11 +13,11 @@ interface MoodConfig {
 }
 
 const AMBIENT_MOODS: MoodConfig[] = [
-  { id: 'all', label: 'All Frequencies', icon: Sparkles, color: 'var(--ah-primary)' },
-  { id: 'midnight', label: 'Midnight Drift', icon: Moon, shelfFilter: ['recs', 'gems'], color: '#a78bfa' },
-  { id: 'focus', label: 'Deep Focus', icon: Waves, shelfFilter: ['recs', 'charts'], color: '#38bdf8' },
-  { id: 'warmth', label: 'Acoustic Warmth', icon: Coffee, shelfFilter: ['rotation', 'gems'], color: '#fbbf24' },
-  { id: 'lossless', label: 'Lossless Hi-Fi', icon: Flame, shelfFilter: ['tidal'], color: '#22d3ee' },
+  { id: 'all', label: 'All tracks', icon: Sparkles, color: 'var(--ah-primary)' },
+  { id: 'midnight', label: 'Recommendations & favorites', icon: Moon, shelfFilter: ['recs', 'gems'], color: '#a78bfa' },
+  { id: 'focus', label: 'Recommendations & charts', icon: Waves, shelfFilter: ['recs', 'charts'], color: '#38bdf8' },
+  { id: 'warmth', label: 'Most played & favorites', icon: Coffee, shelfFilter: ['rotation', 'gems'], color: '#fbbf24' },
+  { id: 'lossless', label: 'Lossless', icon: Flame, shelfFilter: ['tidal'], color: '#22d3ee' },
 ];
 
 export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isLoadingRecs, isRefreshingRecs, onRefreshRecs, onPlayTrack, resume, search, layoutFilter, onContextMenu }: AideoHomeProps) {
@@ -68,9 +68,9 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
             <div>
               <div className="ah-stage-kicker">
                 <Radio size={12} className="ah-stage-pulse-dot" />
-                <span>ATMOSPHERIC SOUNDSTAGE · 32-BIT FLOAT</span>
+                <span>Aideo home</span>
               </div>
-              <h1 className="ah-stage-title">{greeting},<br />Listener</h1>
+              <h1 className="ah-stage-title">{greeting}</h1>
               <div className="ah-stats-line">
                 <b>{trackCount.toLocaleString()}</b> tracks<span className="ah-dot">·</span><b>{totalPlays.toLocaleString()}</b> plays
               </div>
@@ -100,7 +100,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
           </div>
 
           {/* ── AMBIENT MOOD SELECTOR BAR ── */}
-          <nav className="ah-stage-mood-bar" aria-label="Ambient Moods">
+          <nav className="ah-stage-mood-bar" aria-label="Track categories">
             {AMBIENT_MOODS.map(mood => {
               const Icon = mood.icon;
               const isActive = activeMood === mood.id;
@@ -162,13 +162,13 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
               <div className="ah-soundstage-meta">
                 <div className="ah-soundstage-badge">
                   <Sparkles size={12} />
-                  <span>NOW STAGED SPOTLIGHT</span>
+                  <span>Featured track</span>
                 </div>
                 <h2 className="ah-soundstage-title">
-                  Staged Spotlight: {spotlightTrack.title}
+                  {spotlightTrack.title}
                 </h2>
                 <div className="ah-soundstage-artist">{spotlightTrack.artist}</div>
-                <div className="ah-soundstage-aura-line">Immersive acoustic presence · Resonating on current stage</div>
+                <div className="ah-soundstage-aura-line">A track from your recommendations</div>
               </div>
               <div className="ah-soundstage-action">
                 <button
@@ -201,7 +201,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
           </div>
 
           {isLoadingRecs ? (
-            <div className="ah-loading"><RefreshCw size={14} className="spin" /> Curating recommendations…</div>
+            <div className="ah-loading"><RefreshCw size={14} className="spin" /> Loading recommendations…</div>
           ) : (
             grouped.map(g => (
               <div key={g.id} className="ah-stage-group-section">
@@ -260,7 +260,7 @@ export function StageHome({ greeting, trackCount, totalPlays, discoveryData, isL
             ))
           )}
           {!isLoadingRecs && feed.length === 0 && (
-            <div className="ah-empty">Nothing curated yet. Search above or refresh the feed.</div>
+            <div className="ah-empty">No recommendations yet. Search above or refresh the feed.</div>
           )}
         </section>
 

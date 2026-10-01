@@ -114,7 +114,7 @@ export function VinylTurntableLayout({
             </p>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255, 255, 255, 0.05)', padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 600, color: accentColor }}>
               <Disc size={13} />
-              <span>{telemetryText || '33⅓ RPM VINYL CUT'}</span>
+              <span>{telemetryText || 'Now playing'}</span>
             </div>
           </div>
         </div>

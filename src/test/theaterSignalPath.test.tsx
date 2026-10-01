@@ -125,7 +125,6 @@ describe('TheaterSignalPathModal', () => {
     expect(screen.getByText('No active transforms')).toBeInTheDocument();
     expect(screen.queryByText('10-Band Graphic EQ')).not.toBeInTheDocument();
     expect(screen.queryByText('BIT-PERFECT PASSTHROUGH')).not.toBeInTheDocument();
-    expect(screen.getByText('Peak: Unknown · Dynamic Headroom: Unknown')).toBeInTheDocument();
   });
 
   it('does not present inactive path details as measured output', () => {

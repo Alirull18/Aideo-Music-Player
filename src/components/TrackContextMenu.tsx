@@ -237,7 +237,7 @@ export const TrackContextMenu = memo(function TrackContextMenu({
                     window.dispatchEvent(
                       new CustomEvent('ui-toast', {
                         detail: {
-                          message: `MagicMatch: Found match "${match.title || match.name}" by "${match.artist}"`,
+                          message: `Found metadata match "${match.title || match.name}" by "${match.artist}"`,
                           type: 'success',
                         },
                       })
@@ -251,7 +251,7 @@ export const TrackContextMenu = memo(function TrackContextMenu({
                   }
                 } catch (err) {
                   window.dispatchEvent(
-                    new CustomEvent('ui-toast', { detail: { message: `MagicMatch failed: ${err}`, type: 'error' } })
+                    new CustomEvent('ui-toast', { detail: { message: `Metadata lookup failed: ${err}`, type: 'error' } })
                   );
                 } finally {
                   setIsMatching(false);
@@ -261,7 +261,7 @@ export const TrackContextMenu = memo(function TrackContextMenu({
               <span className="menu-item-icon">
                 {isMatching ? <RefreshCw size={15} className="spin" /> : <Activity size={15} />}
               </span>
-              <span>{isMatching ? 'Searching...' : 'Magic Match'}</span>
+              <span>{isMatching ? 'Searching...' : 'Match metadata'}</span>
             </button>
 
             {/* Sonic Mix */}
@@ -281,19 +281,19 @@ export const TrackContextMenu = memo(function TrackContextMenu({
                     store.playTrack(similar[0]);
                     window.dispatchEvent(
                       new CustomEvent('ui-toast', {
-                        detail: { message: `Sonic Mix: Queued ${similar.length} similar tracks!`, type: 'success' },
+                        detail: { message: `Queued ${similar.length} similar tracks`, type: 'success' },
                       })
                     );
                   } else {
                     window.dispatchEvent(
                       new CustomEvent('ui-toast', {
-                        detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' },
+                        detail: { message: 'No similar tracks found in library.', type: 'warning' },
                       })
                     );
                   }
                 } catch (err) {
                   window.dispatchEvent(
-                    new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } })
+                    new CustomEvent('ui-toast', { detail: { message: `Could not queue similar tracks: ${err}`, type: 'error' } })
                   );
                 }
               }}
@@ -301,7 +301,7 @@ export const TrackContextMenu = memo(function TrackContextMenu({
               <span className="menu-item-icon">
                 <Sparkles size={15} />
               </span>
-              <span>Sonic Mix</span>
+              <span>Play similar tracks</span>
             </button>
 
             <div className="track-action-menu-divider" />

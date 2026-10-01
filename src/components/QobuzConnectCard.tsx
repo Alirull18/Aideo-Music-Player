@@ -111,7 +111,7 @@ export default function QobuzConnectCard() {
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5, padding: '10px 12px', background: 'var(--glass)', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
-            Sign in with your Qobuz account. A secure official login window will open and automatically connect when you finish logging in.
+            Sign in with your Qobuz account. A Qobuz login window will open and connect when you finish logging in.
           </div>
 
           <button

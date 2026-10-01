@@ -217,12 +217,12 @@ export function HorizonHome({
 
   // Extract shelf tracks
   const shelvesConfig: Array<{ id: ShelfId; title: string; desc: string }> = [
-    { id: 'recs', title: 'Made For You', desc: 'Curated directly from your taste profile and favorites' },
-    { id: 'recent', title: 'Jump Back In', desc: 'Pick up right where you left off' },
-    { id: 'rotation', title: 'Heavy Rotation', desc: 'Your most played tracks this month' },
-    { id: 'gems', title: 'Forgotten Gems', desc: 'Beloved tracks waiting to be revisited' },
-    { id: 'tidal', title: 'Lossless Hi-Fi', desc: 'Pure studio master and CD quality lossless streams' },
-    { id: 'charts', title: 'Trending Global', desc: 'Top charting tracks right now' },
+    { id: 'recs', title: 'Recommendations', desc: 'Based on your favorites and listening history' },
+    { id: 'recent', title: 'Recently played', desc: 'Your listening history' },
+    { id: 'rotation', title: 'Most played', desc: 'Your most repeated tracks' },
+    { id: 'gems', title: 'Older favorites', desc: 'Favorites you have not played lately' },
+    { id: 'tidal', title: 'Tidal tracks', desc: 'FLAC matches from Tidal' },
+    { id: 'charts', title: 'Trending tracks', desc: 'Tracks from the charts' },
   ];
 
   // Filter shelves according to filter pill
@@ -231,7 +231,7 @@ export function HorizonHome({
       return shelvesConfig.filter((s) => s.id === 'recent' || s.id === 'rotation');
     }
     if (filter === 'lossless') {
-      return [{ id: 'tidal' as ShelfId, title: 'Hi-Res Lossless', desc: 'Bit-perfect studio master streams and local lossless FLAC/ALAC library tracks' }];
+      return [{ id: 'tidal' as ShelfId, title: 'Lossless tracks', desc: 'Streaming matches and local lossless files' }];
     }
     if (filter === 'music') {
       return shelvesConfig.filter((s) => s.id !== 'charts');
@@ -256,7 +256,7 @@ export function HorizonHome({
             className="sp-refresh-btn"
             onClick={onRefreshRecs}
             disabled={isRefreshingRecs || isLoadingRecs}
-            aria-label="Refresh curated recommendations"
+            aria-label="Refresh recommendations"
             title="Refresh recommendations"
           >
             <RefreshCw size={14} className={isRefreshingRecs || isLoadingRecs ? 'spin' : ''} />
@@ -321,7 +321,7 @@ export function HorizonHome({
           [
             { id: 'all', label: 'All' },
             { id: 'music', label: 'Music' },
-            { id: 'lossless', label: 'Hi-Res Lossless' },
+            { id: 'lossless', label: 'Lossless' },
             { id: 'recent', label: 'Recently Played' },
           ] as const
         ).map((pill) => (
@@ -362,9 +362,9 @@ export function HorizonHome({
               <Disc3 size={28} />
             </div>
             <div className="ah-empty-lossless-content">
-              <h3 className="ah-empty-lossless-title">No Hi-Res Lossless Audio Found</h3>
+              <h3 className="ah-empty-lossless-title">No lossless tracks found</h3>
               <p className="ah-empty-lossless-desc">
-                No lossless tracks were found in your active rotation or local library. Connect your Tidal account in Settings &gt; Library or import local FLAC, WAV, or ALAC files to enable bit-perfect studio streaming.
+                Connect Tidal in Settings &gt; Library or add local FLAC, WAV, or ALAC files.
               </p>
             </div>
           </div>
@@ -373,7 +373,7 @@ export function HorizonHome({
         {isLoadingRecs ? (
           <div className="sp-loading-box">
             <RefreshCw size={18} className="spin" />
-            <span>Curating your personalized shelves…</span>
+            <span>Loading recommendations…</span>
           </div>
         ) : (
           activeShelves.map((shelf) => {

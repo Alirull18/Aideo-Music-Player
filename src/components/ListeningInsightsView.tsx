@@ -117,22 +117,22 @@ export function ListeningInsightsView() {
   // Music Personality Engine
   const getPersonality = () => {
     if (!insights || insights.total_plays === 0) {
-      return { title: 'The Silent Observer', desc: 'You have not played enough music yet to discover your musical personality.' };
+      return { title: 'No listening history', desc: 'Play some music to see your listening summary.' };
     }
     
     // 1. Audiophile check (over 70% bit-perfect or hi-res)
     if (insights.audiophile && (insights.audiophile.bit_perfect_rate > 70 || insights.audiophile.hires_count > insights.total_plays * 0.5)) {
       return {
-        title: 'The Master Tape Purist',
-        desc: 'You care deeply about bit-perfect fidelity and uncompromised dynamic range. Only the purest bitstreams grace your signal path.'
+        title: 'Audio format summary',
+        desc: 'Many of your logged plays use a bit-perfect path or high-resolution source files.'
       };
     }
 
     // 2. Check skip rate
     if (insights.skip_rate > 35) {
       return { 
-        title: 'The Impatient Explorer', 
-        desc: 'You love discovering new music but move quickly when an intro fails to connect. On to the next sonic adventure.' 
+        title: 'Frequent skips',
+        desc: 'You skipped more than 35% of the tracks in this period.'
       };
     }
 
@@ -148,13 +148,13 @@ export function ListeningInsightsView() {
 
     if (maxHour >= 22 || maxHour <= 4) {
       return { 
-        title: 'The Midnight Wanderer', 
-        desc: 'Your music tastes peak when the world goes quiet. Late-night synths, lo-fi beats, or cozy acoustic tracks are your comfort zone.' 
+        title: 'Late-night listening',
+        desc: 'Your busiest listening hour falls between 10 PM and 4 AM.'
       };
     } else if (maxHour >= 5 && maxHour <= 9) {
       return { 
-        title: 'The Sunriser', 
-        desc: 'You wake up with the sun and lock into high-energy beats immediately. Music is your fuel to conquer the morning.' 
+        title: 'Morning listening',
+        desc: 'Your busiest listening hour falls between 5 AM and 9 AM.'
       };
     }
 
@@ -164,16 +164,16 @@ export function ListeningInsightsView() {
       const ratio = topArtist.play_count / insights.total_plays;
       if (ratio > 0.4) {
         return { 
-          title: `The ${topArtist.artist} Devotee`, 
-          desc: `You find an artist you love and you stay locked in. You accounted for ${Math.round(ratio * 100)}% of your plays listening to ${topArtist.artist}.` 
+          title: `Most played: ${topArtist.artist}`,
+          desc: `${topArtist.artist} accounts for ${Math.round(ratio * 100)}% of your logged plays.`
         };
       }
     }
 
     // 5. Default
     return { 
-      title: 'The Deep Listener', 
-      desc: 'A balanced scrobbler. You explore multiple genres, split your listening times evenly, and give every track a fair chance.' 
+      title: 'Listening summary',
+      desc: 'See your most played tracks, artists, and listening times below.'
     };
   };
 
@@ -437,7 +437,7 @@ export function ListeningInsightsView() {
               <div className="insights-widget-card">
                 <h3 className="insights-widget-title">
                   <Zap size={16} className="text-accent" />
-                  <span>Audiophile Fidelity</span>
+                  <span>Audio formats</span>
                 </h3>
                 <div className="insights-audio-metrics">
                   <div className="insights-audio-stat-block">
@@ -697,10 +697,10 @@ export function ListeningInsightsView() {
                     >
                       <Sparkles size={48} style={{ color: 'var(--accent)', margin: '0 auto 20px' }} />
                       <h2 style={{ fontSize: 28, fontWeight: 900, letterSpacing: -0.5, lineHeight: 1.2 }}>
-                        Your Sound Profile<br />on Aideo
+                        Listening summary<br />on Aideo
                       </h2>
                       <p style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 14 }}>
-                        A private look at your listening habits, high-fidelity statistics, and sonic footprint.
+                        A summary of your listening history and audio formats.
                       </p>
                       <div style={{ fontSize: 10, color: 'var(--accent)', textTransform: 'uppercase', fontWeight: 800, marginTop: 40, letterSpacing: 1.5 }}>
                         Click right side of card to advance
@@ -717,12 +717,12 @@ export function ListeningInsightsView() {
                       transition={{ duration: 0.3 }}
                     >
                       <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>The Stats</span>
-                      <h2 style={{ fontSize: 26, fontWeight: 900, marginTop: 10, letterSpacing: -0.5 }}>You lived inside the music.</h2>
+                      <h2 style={{ fontSize: 26, fontWeight: 900, marginTop: 10, letterSpacing: -0.5 }}>Playback totals.</h2>
                       <div className="wrapped-big-number">
                         {Math.round(insights!.total_listening_time_secs / 60)}
                       </div>
                       <p style={{ fontSize: 14, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                        total minutes of playback recorded locally. That represents {insights!.total_plays} individual plays with an intentional skip rate of {insights!.skip_rate.toFixed(0)}%.
+                        minutes of playback recorded locally across {insights!.total_plays} plays, with a skip rate of {insights!.skip_rate.toFixed(0)}%.
                       </p>
                     </motion.div>
                   )}
@@ -736,7 +736,7 @@ export function ListeningInsightsView() {
                       transition={{ duration: 0.3 }}
                     >
                       <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>Top Artist</span>
-                      <h2 style={{ fontSize: 26, fontWeight: 900, marginTop: 10, letterSpacing: -0.5 }}>Your ultimate companion.</h2>
+                      <h2 style={{ fontSize: 26, fontWeight: 900, marginTop: 10, letterSpacing: -0.5 }}>Your most played artist.</h2>
                       {insights!.top_artists.length > 0 ? (
                         <div style={{ marginTop: 24 }}>
                           <div style={{ fontSize: 36, fontWeight: 900, color: '#fff', letterSpacing: -1 }}>
@@ -761,7 +761,7 @@ export function ListeningInsightsView() {
                       transition={{ duration: 0.3 }}
                     >
                       <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>Top Album</span>
-                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5, marginBottom: 16 }}>The full experience.</h2>
+                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5, marginBottom: 16 }}>Your most played album.</h2>
                       {insights!.top_albums && insights!.top_albums.length > 0 ? (
                         <div className="wrapped-album-card">
                           {insights!.top_albums[0].cover_url ? (
@@ -802,7 +802,7 @@ export function ListeningInsightsView() {
                       transition={{ duration: 0.3 }}
                     >
                       <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>Top Songs</span>
-                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5, marginBottom: 16 }}>Your heavy rotations.</h2>
+                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5, marginBottom: 16 }}>Your most played songs.</h2>
                       <div className="wrapped-meta-list">
                         {insights!.top_songs.slice(0, 4).map((song, sidx) => (
                           <div key={sidx} className="wrapped-meta-item">
@@ -825,19 +825,19 @@ export function ListeningInsightsView() {
                       exit={{ opacity: 0, y: -30 }}
                       transition={{ duration: 0.3 }}
                     >
-                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>Audiophile Signature</span>
-                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5, marginBottom: 16 }}>Sound without compromises.</h2>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>Audio formats</span>
+                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5, marginBottom: 16 }}>Formats in your listening history.</h2>
                       <div className="wrapped-audiophile-card">
                         <div className="wrapped-audio-row">
-                          <span>Bit-Perfect Accuracy</span>
+                          <span>Bit-perfect share</span>
                           <strong>{insights!.audiophile?.bit_perfect_rate.toFixed(1) || 0}%</strong>
                         </div>
                         <div className="wrapped-audio-row">
-                          <span>Hi-Res Streams</span>
+                          <span>Hi-Res plays</span>
                           <strong>{insights!.audiophile?.hires_count || 0} tracks</strong>
                         </div>
                         <div className="wrapped-audio-row">
-                          <span>Lossless Master Plays</span>
+                          <span>Lossless plays</span>
                           <strong>{insights!.audiophile?.lossless_count || 0} tracks</strong>
                         </div>
                         <div className="wrapped-audio-row">
@@ -857,8 +857,8 @@ export function ListeningInsightsView() {
                       style={{ textAlign: 'center' }}
                     >
                       <Award size={40} style={{ color: 'var(--accent)', margin: '0 auto 16px' }} />
-                      <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>Your Persona</span>
-                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5 }}>The verdict is in.</h2>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>Listening summary</span>
+                      <h2 style={{ fontSize: 24, fontWeight: 900, marginTop: 8, letterSpacing: -0.5 }}>Your listening habits.</h2>
                       <div className="wrapped-personality-card">
                         <div className="wrapped-personality-title">{personality.title}</div>
                         <p className="wrapped-personality-desc">{personality.desc}</p>

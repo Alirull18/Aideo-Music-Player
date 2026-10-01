@@ -179,7 +179,7 @@ export function ListenbrainzView() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <h2 style={{ fontSize: 22, margin: 0, fontWeight: 700, color: 'white' }}>{listenbrainzUsername}</h2>
             <span style={{ fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 12, background: 'rgba(235, 116, 59, 0.12)', color: '#ff9e59', border: '1px solid rgba(235, 116, 59, 0.2)' }}>
-              UUID SECURE SESSION
+              CONNECTED
             </span>
           </div>
           <div className="lfm-stats-grid" style={{ marginTop: 12, display: 'flex', gap: 24 }}>

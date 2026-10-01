@@ -341,12 +341,12 @@ export function StudioDeckLayout({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Sliders size={18} style={{ color: accentColor }} />
             <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '1.5px', color: 'var(--text-dim)' }}>
-              AIDEO MASTERING CONSOLE · MODEL-100
+              Audio meters
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-              BALLISTIC CALIBRATED
+              AUDIO VISUALIZER
             </span>
             <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-dim)' }}>
               CH 1 · LEFT

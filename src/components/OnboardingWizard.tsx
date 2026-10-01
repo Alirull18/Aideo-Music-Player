@@ -223,7 +223,7 @@ export function OnboardingWizard() {
     setView('aideo');
 
     window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: `Welcome to Aideo Console! Calibrated in ${selectedMode.toUpperCase()} mode.`, type: 'success' } 
+      detail: { message: `Setup complete. ${selectedMode === 'local' ? 'Local' : 'Hybrid'} mode selected.`, type: 'success' }
     }));
   };
 
@@ -307,10 +307,10 @@ export function OnboardingWizard() {
             </div>
 
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.5, marginBottom: 8 }}>
-              Calibrate Your <span style={{ color: `rgb(${rgbAccent})` }}>Aideo Experience</span>
+              Set up <span style={{ color: `rgb(${rgbAccent})` }}>Aideo</span>
             </h1>
             <p style={{ fontSize: 13, color: 'var(--text-dim)', lineHeight: 1.5, maxWidth: 520, marginBottom: 36 }}>
-              Welcome to the reference desktop audio workspace. Choose how you would like to interact with your music environment.
+              Choose whether to play local files only or include online music sources.
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, width: '100%', marginBottom: 40 }}>
@@ -346,12 +346,12 @@ export function OnboardingWizard() {
                   </div>
                   <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: '#ffffff' }}>Local File Only Mode</h3>
                   <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                    Offline local music catalog with personalized Aideo Discovery Hub, local algorithmic smart mixes, time capsule, and bit-perfect audio playback.
+                    Play local music offline, with recommendations and mixes based on your library.
                   </p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: selectedMode === 'local' ? `rgb(${rgbAccent})` : 'var(--text-dim)' }}>
                   {selectedMode === 'local' ? <Check size={14} /> : null}
-                  {selectedMode === 'local' ? 'Selected Path' : 'Select Local Path'}
+                  {selectedMode === 'local' ? 'Selected' : 'Select local mode'}
                 </div>
               </motion.div>
 
@@ -385,14 +385,14 @@ export function OnboardingWizard() {
                   }}>
                     <Headphones size={18} />
                   </div>
-                  <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: '#ffffff' }}>Hybrid Music Explorer Mode</h3>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: '#ffffff' }}>Hybrid Mode</h3>
                   <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                    Pristine offline engine coupled with high-fidelity Lossless Cloud streams, Web Stream search discovery, scrobblers, and remote Subsonic/Jellyfin cloud indexing.
+                    Play local files and online streams, search music services, and connect Subsonic or Jellyfin.
                   </p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: selectedMode === 'hybrid' ? `rgb(${rgbAccent})` : 'var(--text-dim)' }}>
                   {selectedMode === 'hybrid' ? <Check size={14} /> : null}
-                  {selectedMode === 'hybrid' ? 'Selected Path' : 'Select Hybrid Path'}
+                  {selectedMode === 'hybrid' ? 'Selected' : 'Select hybrid mode'}
                 </div>
               </motion.div>
             </div>
@@ -413,7 +413,7 @@ export function OnboardingWizard() {
                 boxShadow: `0 8px 24px rgba(${rgbAccent}, 0.25)`
               }}
             >
-              Continue to Calibration <ArrowRight size={16} />
+              Continue <ArrowRight size={16} />
             </button>
           </motion.div>
         )}
@@ -456,10 +456,10 @@ export function OnboardingWizard() {
             </div>
 
             <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, textAlign: 'center' }}>
-              Required Engines Calibration
+              Install streaming tools
             </h2>
             <p style={{ fontSize: 12, color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.5, maxWidth: 540, marginBottom: 28, alignSelf: 'center' }}>
-              Hybrid Mode blends local files with scrobblers and web searches. To stream high-fidelity audio from the cloud, Aideo uses local decoders. Let's download and set them up now.
+              Aideo uses yt-dlp and FFmpeg for web streaming. Download them to continue with Hybrid Mode.
             </p>
 
             {/* Dependency Cards */}
@@ -487,7 +487,7 @@ export function OnboardingWizard() {
                   <div>
                     <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>Web Stream Resolver</h3>
                     <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                      Handles direct lossless stream extraction. Size: {depStatus?.ytdlp_size ? `${(depStatus.ytdlp_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
+                      Resolves web audio streams. Size: {depStatus?.ytdlp_size ? `${(depStatus.ytdlp_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
                     </p>
                   </div>
                 </div>
@@ -541,7 +541,7 @@ export function OnboardingWizard() {
                   <div>
                     <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>FFmpeg Transcoder</h3>
                     <p style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                      Decodes and converts audio streams to premium lossless M4A format. Size: {depStatus?.ffmpeg_size ? `${(depStatus.ffmpeg_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
+                      Decodes and converts audio streams. Size: {depStatus?.ffmpeg_size ? `${(depStatus.ffmpeg_size / 1024 / 1024).toFixed(1)} MB` : 'Pending Download'}
                     </p>
                   </div>
                 </div>
@@ -598,8 +598,8 @@ export function OnboardingWizard() {
               >
                 <DownloadCloud size={16} /> 
                 {depDownloads['ytdlp']?.active || depDownloads['ffmpeg']?.active
-                  ? 'Downloading Core Engines...'
-                  : 'Install All Required Engines (Recommended)'}
+                  ? 'Downloading tools...'
+                  : 'Install required tools'}
               </button>
             )}
 
@@ -676,7 +676,7 @@ export function OnboardingWizard() {
             }}
           >
             <h2 style={{ fontSize: 20, fontWeight: 800, textAlign: 'center', marginBottom: 4 }}>
-              Setup & Connection Parameters
+              Playback & Connections
             </h2>
             <p style={{ fontSize: 12, color: 'var(--text-dim)', textAlign: 'center', marginBottom: 28 }}>
               Configure your optional connected stream and stats API integrations.
@@ -713,8 +713,8 @@ export function OnboardingWizard() {
                         {options.youtubeMusic ? <CheckSquare size={16} /> : <Square size={16} />}
                       </div>
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Web Streams & Lossless Cloud Search</div>
-                        <div style={{ fontSize: 9.5, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 2 }}>Enables direct web stream extraction and lossless cloud FLAC downloads. Spawns yt-dlp.</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>Web streaming and downloads</div>
+                        <div style={{ fontSize: 9.5, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 2 }}>Search, play, and download online audio using yt-dlp.</div>
                       </div>
                     </div>
                   )}
@@ -855,10 +855,10 @@ export function OnboardingWizard() {
             </div>
 
             <h2 style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>
-              Define Offline Audio Directories
+              Add music folders
             </h2>
             <p style={{ fontSize: 12, color: 'var(--text-dim)', textAlign: 'center', lineHeight: 1.5, maxWidth: 500, marginBottom: 28 }}>
-              Select folders on your local disk containing MP3, FLAC, M4A, or WAV files. Aideo indices metadata recursively.
+              Select folders containing MP3, FLAC, M4A, or WAV files. Aideo scans their subfolders too.
             </p>
 
             {/* Folder list box */}
@@ -892,7 +892,7 @@ export function OnboardingWizard() {
                   fontSize: 12, color: 'var(--text-dim)', padding: '24px', textAlign: 'center',
                   background: 'var(--glass)', borderRadius: 12, border: '1px dashed var(--glass-border)'
                 }}>
-                  No local paths linked yet. Link folders to index your music!
+                  No music folders added yet. Add a folder to scan your music.
                 </div>
               )}
             </div>
@@ -954,7 +954,7 @@ export function OnboardingWizard() {
                   background: `linear-gradient(135deg, rgb(${rgbAccent}), rgba(${rgbAccent}, 0.75))`
                 }}
               >
-                <ShieldCheck size={16} /> Launch Aideo Console
+                <ShieldCheck size={16} /> Open Aideo
               </button>
             </div>
           </motion.div>

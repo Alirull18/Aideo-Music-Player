@@ -31,15 +31,15 @@ interface PresetTheme {
 }
 
 const PRESET_THEMES: PresetTheme[] = [
-  { name: 'Purple', color: '#8b5cf6', rgb: '139, 92, 246', description: 'Royal Violet default' },
-  { name: 'Forest', color: '#10b981', rgb: '16, 185, 129', description: 'Emerald Deep Green' },
-  { name: 'Ocean', color: '#0ea5e9', rgb: '14, 165, 233', description: 'Bright Maritime Blue' },
-  { name: 'Mocha', color: '#d97706', rgb: '217, 119, 6', description: 'Amber Warm Cocoa' },
-  { name: 'Black', color: '#ffffff', rgb: '255, 255, 255', description: 'Pure Monochromatic White' },
-  { name: 'Dark', color: '#64748b', rgb: '100, 116, 139', description: 'Slate Metal Gray' },
-  { name: 'White', color: '#0f172a', rgb: '15, 23, 42', description: 'Deep Onyx contrast' },
-  { name: 'Frappé', color: '#f2cdcd', rgb: '242, 205, 205', description: 'Soft Pastel Rose' },
-  { name: 'Latte', color: '#dc8a78', rgb: '220, 138, 120', description: 'Warm Sunbaked Peach' }
+  { name: 'Purple', color: '#8b5cf6', rgb: '139, 92, 246', description: 'Violet (default)' },
+  { name: 'Forest', color: '#10b981', rgb: '16, 185, 129', description: 'Green' },
+  { name: 'Ocean', color: '#0ea5e9', rgb: '14, 165, 233', description: 'Blue' },
+  { name: 'Mocha', color: '#d97706', rgb: '217, 119, 6', description: 'Amber' },
+  { name: 'Black', color: '#ffffff', rgb: '255, 255, 255', description: 'White accent' },
+  { name: 'Dark', color: '#64748b', rgb: '100, 116, 139', description: 'Slate gray' },
+  { name: 'White', color: '#0f172a', rgb: '15, 23, 42', description: 'Dark accent' },
+  { name: 'Frappé', color: '#f2cdcd', rgb: '242, 205, 205', description: 'Pink' },
+  { name: 'Latte', color: '#dc8a78', rgb: '220, 138, 120', description: 'Peach' }
 ];
 
 const GOOGLE_FONTS = [
@@ -116,7 +116,7 @@ const STREAMING_PRESET_TIERS: StreamingPresetTier[] = [
     id: 'best_available',
     title: 'Best Available',
     badge: 'Up to 24-bit / 192 kHz',
-    desc: 'Prefers studio FLAC and master quality. Available streams request remote service master tier. Falls back automatically with notice.',
+    desc: 'Requests the highest available source resolution. Falls back to another available copy with a notice.',
     icon: <Zap size={18} />,
     defaultSource: 'auto',
   },
@@ -132,7 +132,7 @@ const STREAMING_PRESET_TIERS: StreamingPresetTier[] = [
     id: 'data_saver',
     title: 'Data Saver',
     badge: 'Compressed Stream',
-    desc: 'Reduces streaming data usage and eliminates buffering on metered networks. Prioritizes efficient compressed streams.',
+    desc: 'Prioritizes compressed streams to reduce data usage.',
     icon: <Radio size={18} />,
     defaultSource: 'youtube',
   },
@@ -908,7 +908,7 @@ export function SettingsView() {
     setAutoplayDiscoveryLevel('balanced');
     setCacheSizeLimit(5.0);
     window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: 'System extensions, cloud credentials & calibrations reset.', type: 'success' } 
+      detail: { message: 'Service connections and audio settings reset.', type: 'success' }
     }));
   };
 
@@ -1333,7 +1333,7 @@ export function SettingsView() {
                 let subtitle = '';
                 if (item.id === 'aideo') {
                   icon = <Sparkles size={16} />;
-                  subtitle = 'AI Music Companion & Discovery';
+                  subtitle = 'Music recommendations';
                 } else if (item.id === 'charts') {
                   icon = <TrendingUp size={16} />;
                   subtitle = 'Global Top Streaming Charts (Hybrid mode)';
@@ -1351,10 +1351,10 @@ export function SettingsView() {
                   subtitle = 'Offline Cached & Downloaded Songs';
                 } else if (item.id === 'aideo_lab') {
                   icon = <Activity size={16} />;
-                  subtitle = 'Studio DSP, Equalizer & Audio Lab';
+                  subtitle = 'Equalizer and audio effects';
                 } else if (item.id === 'insights') {
                   icon = <BarChart3 size={16} />;
-                  subtitle = 'Personal Listening Analytics & Insights';
+                  subtitle = 'Listening history and statistics';
                 } else if (item.id === 'lastfm') {
                   icon = <Radio size={16} />;
                   subtitle = 'Last.fm Scrobble Stats & Profile';
@@ -1458,7 +1458,7 @@ export function SettingsView() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 4px', borderTop: '1px solid var(--glass-border)', marginTop: 6 }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Smart Mix Builder Card</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Display smart mix generator card on home portal</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Show the mix builder on the home page</div>
               </div>
               <SlidingSwitch 
                 checked={showSmartMixWidget} 
@@ -1668,7 +1668,7 @@ export function SettingsView() {
     {
       id: 'theater-mode-design',
       title: 'Theater & Fullscreen Style',
-      description: 'Choose your default visual archetype for Theater Fullscreen mode.',
+      description: 'Choose the fullscreen layout.',
       keywords: 'theater fullscreen layout style design stage zen studio vinyl turntable poster scope visualizer appearance UI',
       tab: 'appearance',
       element: (
@@ -1681,7 +1681,7 @@ export function SettingsView() {
                 badge: 'MODERN',
                 badgeColor: '#8b5cf6',
                 icon: <Tv2 size={18} color="#a78bfa" />,
-                desc: 'Balanced 2-column layout with high-contrast album artwork and smooth karaoke word-by-word synced lyrics.',
+                desc: 'Album artwork beside synchronized lyrics.',
               },
               {
                 id: 'zen' as TheaterModeDesign,
@@ -1689,39 +1689,39 @@ export function SettingsView() {
                 badge: 'MINIMAL',
                 badgeColor: '#10b981',
                 icon: <Type size={18} color="#34d399" />,
-                desc: 'Typographic focus with generous whitespace, centered lyric typography, and minimal ambient art pill.',
+                desc: 'Centered lyrics with compact album artwork.',
               },
               {
                 id: 'studio' as TheaterModeDesign,
-                name: 'Hi-Fi Studio Deck',
-                badge: 'AUDIOPHILE',
+                name: 'Studio Deck',
+                badge: 'METERS',
                 badgeColor: '#f59e0b',
                 icon: <Sliders size={18} color="#fbbf24" />,
-                desc: 'Vintage analog studio console with dual ballistic needle VU meters, signal path telemetry, and realtime oscilloscope.',
+                desc: 'Needle-style level meters, audio path details, and an oscilloscope.',
               },
               {
                 id: 'vinyl' as TheaterModeDesign,
                 name: 'Vinyl Turntable',
-                badge: 'ANALOG WARMTH',
+                badge: 'ROTATING ARTWORK',
                 badgeColor: '#ec4899',
                 icon: <Disc size={18} color="#f472b6" />,
-                desc: 'Realistic 33⅓ RPM rotating vinyl with micro-groove sheen, physical tonearm tracking progress, and propped jacket.',
+                desc: 'Rotating album artwork with a turntable-style progress indicator.',
               },
               {
                 id: 'poster' as TheaterModeDesign,
-                name: 'Editorial Poster',
-                badge: 'SWISS GRID',
+                name: 'Poster',
+                badge: 'LARGE TEXT',
                 badgeColor: '#06b6d4',
                 icon: <FileText size={18} color="#22d3ee" />,
-                desc: 'Swiss broadsheet layout with bold solid-ink typography, asymmetric grid, and album liner notes archive.',
+                desc: 'Poster layout with large text, album artwork, and lyrics.',
               },
               {
                 id: 'scope' as TheaterModeDesign,
-                name: 'Pure Scope',
-                badge: 'IMMERSIVE',
+                name: 'Scope',
+                badge: 'VISUALIZER',
                 badgeColor: '#a855f7',
                 icon: <Activity size={18} color="#c084fc" />,
-                desc: 'Full-bleed 60fps audio reactive vector scope modulated by 64 FFT bands with an ethereal auto-dimming lyric overlay.',
+                desc: 'Full-screen audio visualizer with lyrics overlaid.',
               },
             ].map((d) => {
               const isSelected = theaterModeDesign === d.id;
@@ -1778,7 +1778,7 @@ export function SettingsView() {
                         textTransform: 'uppercase',
                       }}
                     >
-                      ✓ Active Persona
+                      ✓ Active layout
                     </div>
                   )}
                 </div>
@@ -1791,7 +1791,7 @@ export function SettingsView() {
     {
       id: 'theater-hud-style',
       title: 'Theater Playback HUD Style',
-      description: 'Choose your preferred tailored floating playback bar in Theater / Fullscreen mode.',
+      description: 'Choose the playback controls shown in fullscreen mode.',
       keywords: 'theater fullscreen hud playback bar floating capsule master minimal analog controls appearance UI',
       tab: 'appearance',
       element: (
@@ -1800,11 +1800,11 @@ export function SettingsView() {
             {[
               {
                 id: 'capsule' as TheaterHudStyle,
-                name: 'Floating Studio Capsule',
-                badge: 'DEFAULT / ISLAND',
+                name: 'Floating',
+                badge: 'DEFAULT',
                 badgeColor: '#8b5cf6',
                 icon: <Radio size={18} color="#a78bfa" />,
-                desc: 'Balanced floating island pill with rounded glassmorphism, wave scrubber, centered transport, and quick tool popovers.',
+                desc: 'Rounded playback bar with a seek control and quick settings.',
                 visual: (
                   <div className="thud-prev-box prev-capsule">
                     <div className="thud-prev-pill">
@@ -1822,11 +1822,11 @@ export function SettingsView() {
               },
               {
                 id: 'master' as TheaterHudStyle,
-                name: 'Audiophile Master Deck',
-                badge: 'PRO AUDIO / RACK',
+                name: 'Rack',
+                badge: 'SQUARE CONTROLS',
                 badgeColor: '#06b6d4',
                 icon: <Sliders size={18} color="#22d3ee" />,
-                desc: 'Precision studio rack chassis with brushed chamfered trim, segmented LED peak level indicators, and monospace telemetry.',
+                desc: 'Rack-style controls with playback status lights and audio path details.',
                 visual: (
                   <div className="thud-prev-box prev-master">
                     <div className="thud-prev-rack">
@@ -1850,11 +1850,11 @@ export function SettingsView() {
               },
               {
                 id: 'minimal' as TheaterHudStyle,
-                name: 'Zen Minimalist Hairline',
-                badge: 'ZERO DISTRACTION',
+                name: 'Minimal',
+                badge: 'COMPACT',
                 badgeColor: '#10b981',
                 icon: <Type size={18} color="#34d399" />,
-                desc: 'Ultra low-profile hairline strip that sits quietly at the edge, dedicating maximum screen canvas to album art and lyrics.',
+                desc: 'Thin playback bar at the bottom edge.',
                 visual: (
                   <div className="thud-prev-box prev-minimal">
                     <div className="thud-prev-hairline">
@@ -1870,11 +1870,11 @@ export function SettingsView() {
               },
               {
                 id: 'analog' as TheaterHudStyle,
-                name: 'Retro Turntable Strip',
-                badge: 'VINTAGE HI-FI',
+                name: 'Analog style',
+                badge: 'ROUND CONTROLS',
                 badgeColor: '#f59e0b',
                 icon: <Disc size={18} color="#fbbf24" />,
-                desc: 'Warm analog console with golden amber glow, vintage mechanical switches, retro VU levels, and tube-stage warmth.',
+                desc: 'Round controls, amber accents, and decorative meter markings.',
                 visual: (
                   <div className="thud-prev-box prev-analog">
                     <div className="thud-prev-analog-console">
@@ -2020,8 +2020,8 @@ export function SettingsView() {
                     },
                     {
                       id: 'backdrop' as CanvasMode,
-                      name: 'Cinema Backdrop',
-                      desc: 'Full-bleed edge-to-edge video backdrop with high-contrast vignette and subtle blur.',
+                      name: 'Video background',
+                      desc: 'Full-screen video background with darkened edges and blur.',
                       icon: <Sparkles size={16} color="#38bdf8" />
                     },
                     {
@@ -2093,11 +2093,11 @@ export function SettingsView() {
             {[
               {
                 id: 'classic' as AideoPageDesign,
-                name: 'Classic Studio',
-                badge: 'Balanced Hub',
+                name: 'Classic',
+                badge: 'SHELVES',
                 badgeColor: '#3b82f6',
                 icon: <Layers size={18} color="#60a5fa" />,
-                desc: 'Comprehensive multi-shelf discovery layout with live library stats, quick recap grid, and dynamic smart mix builder.',
+                desc: 'Recommendation shelves, library counts, recent tracks, and a mix builder.',
                 visual: (
                   <div className="aideo-prev-box prev-classic">
                     <div className="aideo-prev-greeting">
@@ -2122,11 +2122,11 @@ export function SettingsView() {
               },
               {
                 id: 'spotify' as AideoPageDesign,
-                name: 'Horizon Grid',
-                badge: 'Emerald Grid',
+                name: 'Grid',
+                badge: 'TRACK CARDS',
                 badgeColor: 'var(--accent, #1db954)',
                 icon: <Headphones size={18} color="var(--accent, #1db954)" />,
-                desc: 'Deep dark layout with adaptive accents, 6-card quick launch favorites grid, and horizontal carousel shelves.',
+                desc: 'Track cards with horizontally scrolling recommendation shelves.',
                 visual: (
                   <div className="aideo-prev-box prev-spotify" style={{ background: '#121212', padding: 8, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -2154,11 +2154,11 @@ export function SettingsView() {
               },
               {
                 id: 'apple' as AideoPageDesign,
-                name: 'Spatial Glass',
-                badge: 'Crimson Glass',
+                name: 'Carousel',
+                badge: 'FEATURED TRACKS',
                 badgeColor: 'var(--accent, #fa243c)',
                 icon: <Disc size={18} color="var(--accent, #fa243c)" />,
-                desc: 'Frosted acrylic glassmorphism, adaptive accents, paged Spatial Hero Marquee carousel, and multi-row quick listen grid.',
+                desc: 'Featured track carousel with quick-play cards and recommendation shelves.',
                 visual: (
                   <div className="aideo-prev-box prev-apple" style={{ background: 'linear-gradient(180deg, #1f1f23 0%, #121214 100%)', padding: 8, borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ height: 24, background: 'rgba(var(--accent-rgb, 250, 36, 60), 0.15)', border: '1px solid rgba(var(--accent-rgb, 250, 36, 60), 0.3)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 6px' }}>
@@ -2180,11 +2180,11 @@ export function SettingsView() {
               },
               {
                 id: 'editorial' as AideoPageDesign,
-                name: 'Editorial Feed',
-                badge: 'Magazine / Broadsheet',
+                name: 'Featured',
+                badge: 'SHELVES',
                 badgeColor: '#a855f7',
                 icon: <LayoutGrid size={18} color="#c084fc" />,
-                desc: 'Curated magazine broadsheet: publication masthead, asymmetric Cover Story spread, curatorial liner notes, and volume shelves.',
+                desc: 'Featured track, grouped recommendation shelves, and listening history.',
                 visual: (
                   <div className="aideo-prev-box prev-bento">
                     <div className="aideo-prev-line title" style={{ width: '55%' }} />
@@ -2201,11 +2201,11 @@ export function SettingsView() {
               },
               {
                 id: 'command' as AideoPageDesign,
-                name: 'Command Deck',
-                badge: 'Hi-Res / Precision',
+                name: 'Table',
+                badge: 'TABLE',
                 badgeColor: '#06b6d4',
                 icon: <Activity size={18} color="#22d3ee" />,
-                desc: 'Audiophile two-zone console: persistent rail for search, sources and feeds on the left; a disciplined track table with reason and quality columns on the right.',
+                desc: 'Search and source filters beside a track table with recommendation reasons and format labels.',
                 visual: (
                   <div className="aideo-prev-box prev-audiophile">
                     <div className="aideo-prev-audio-header">
@@ -2229,11 +2229,11 @@ export function SettingsView() {
               },
               {
                 id: 'stage' as AideoPageDesign,
-                name: 'Ambient Stage',
-                badge: 'Living Soundstage',
+                name: 'Stage',
+                badge: 'CATEGORY FILTERS',
                 badgeColor: '#f59e0b',
                 icon: <Sparkles size={18} color="#fbbf24" />,
-                desc: 'Atmospheric soundstage: living aurora aura, floating glass pedestal, dynamic mood filters (Midnight, Focus, Acoustic, Lossless), and frosted sensory rows.',
+                desc: 'Featured track, animated background, and filters for recommendation categories.',
                 visual: (
                   <div className="aideo-prev-box prev-cinematic">
                     <div className="aideo-prev-cine-hero">
@@ -2334,7 +2334,7 @@ export function SettingsView() {
     {
       id: 'library-design',
       title: 'Library Page Style',
-      description: 'Choose your music library layout archetype: Classic, Studio Pro, Editorial Archive, Crate Digger, Ambient Flow, or Industrial Brutalist.',
+      description: 'Choose a track table, large rows, split view, rounded rows, or grid layout.',
       keywords: 'library design style layout archetype studio pro editorial archive crate digger ambient flow industrial brutalist appearance UI',
       tab: 'appearance',
       element: (
@@ -2347,47 +2347,47 @@ export function SettingsView() {
                 badge: 'Desktop Default',
                 badgeColor: '#3b82f6',
                 icon: <LayoutGrid size={18} color="#60a5fa" />,
-                desc: 'Balanced table and album grid layout with verified contrast, virtualized 52px rows, and quick filter chips.',
+                desc: 'Track table and album grid with quick filters.',
               },
               {
                 id: 'studio' as LibraryDesign,
-                name: 'Studio Pro (Audiophile Rack)',
+                name: 'Compact',
                 badge: 'High Density / 38px',
                 badgeColor: '#06b6d4',
                 icon: <Sliders size={18} color="#22d3ee" />,
-                desc: 'Compact technical rack layout with audio codec chips (FLAC, DSD), monospace tabular numbers, and studio telemetry.',
+                desc: 'Compact rows with audio format labels and aligned numbers.',
               },
               {
                 id: 'editorial' as LibraryDesign,
-                name: 'Editorial Archive',
-                badge: 'Vinyl & Liner Notes',
+                name: 'Large rows',
+                badge: 'LARGER ARTWORK',
                 badgeColor: '#f59e0b',
                 icon: <Disc size={18} color="#fbbf24" />,
-                desc: 'Spacious 68px editorial rows with serif typography, embossed vinyl sleeve album art, and release year tags.',
+                desc: 'Larger artwork, serif text, and release year labels.',
               },
               {
                 id: 'crate' as LibraryDesign,
-                name: 'Compact Crate Digger',
-                badge: 'Split-Pane Explorer',
+                name: 'Split view',
+                badge: 'ARTIST SIDEBAR',
                 badgeColor: '#8b5cf6',
                 icon: <Layers size={18} color="#a78bfa" />,
-                desc: 'Two-column workstation with instant artist/album tree on the left and rapid 42px virtualized tracklist on the right.',
+                desc: 'Artist sidebar beside a compact track list.',
               },
               {
                 id: 'ambient' as LibraryDesign,
-                name: 'Modern Ambient Flow',
-                badge: 'Sleek Minimalist',
+                name: 'Rounded',
+                badge: 'TRANSLUCENT ROWS',
                 badgeColor: '#ec4899',
                 icon: <Radio size={18} color="#f472b6" />,
-                desc: 'Tidal & Apple Music inspired silky dark glass, dynamic album-tinted backdrop blur, and floating capsule action pills.',
+                desc: 'Rounded rows with artwork-colored backgrounds and action buttons.',
               },
               {
                 id: 'brutalist' as LibraryDesign,
-                name: 'Industrial Brutalist',
-                badge: 'Cassette Terminal',
+                name: 'Grid',
+                badge: 'SQUARE ROWS',
                 badgeColor: '#eab308',
                 icon: <Terminal size={18} color="#fde047" />,
-                desc: 'Raw mechanical Swiss grid interface with high-visibility safety amber/cyan indicators and cassette transport glyphs.',
+                desc: 'Square rows, visible grid lines, and colored status labels.',
               },
             ].map((d) => {
               const isSelected = libraryDesign === d.id;
@@ -2480,11 +2480,11 @@ export function SettingsView() {
             {[
               {
                 id: 'classic' as PlayerBarDesign,
-                name: 'Classic Studio',
+                name: 'Classic',
                 badge: 'Desktop Default',
                 badgeColor: '#3b82f6',
                 icon: <Layers size={18} color="#60a5fa" />,
-                desc: 'Balanced 3-column docked layout with interactive waveform seekbar, synchronized lyric peek, and full audio utility drawer.',
+                desc: 'Docked bar with a seek control, lyric preview, and audio controls.',
                 visual: (
                   <div className="pbar-preview-box preview-classic">
                     <div className="pbar-prev-thumb" />
@@ -2502,11 +2502,11 @@ export function SettingsView() {
               },
               {
                 id: 'floating' as PlayerBarDesign,
-                name: 'Floating Dynamic Island',
-                badge: 'Spatial Glass / macOS',
+                name: 'Floating',
+                badge: 'ROUNDED BAR',
                 badgeColor: '#a855f7',
                 icon: <Radio size={18} color="#c084fc" />,
-                desc: 'Elevated glassmorphic pill capsule suspended cleanly above the canvas with centered fluid controls and ambient glow.',
+                desc: 'Rounded playback bar above the bottom edge.',
                 visual: (
                   <div className="pbar-preview-box preview-floating">
                     <div className="pbar-prev-floating-pill">
@@ -2522,11 +2522,11 @@ export function SettingsView() {
               },
               {
                 id: 'waveform' as PlayerBarDesign,
-                name: 'Audiophile Waveform Deck',
-                badge: 'Pro Audio & DAW',
+                name: 'Waveform',
+                badge: 'SEEK BAR',
                 badgeColor: '#06b6d4',
                 icon: <Activity size={18} color="#22d3ee" />,
-                desc: 'Prominent full-width high-definition audio waveform scrubbing deck paired with real-time audio telemetry engine HUD.',
+                desc: 'Full-width waveform seek bar with audio path details.',
                 visual: (
                   <div className="pbar-preview-box preview-waveform">
                     <div className="pbar-prev-full-wave">
@@ -2548,7 +2548,7 @@ export function SettingsView() {
                 badge: 'Zen / Low-Profile',
                 badgeColor: '#10b981',
                 icon: <Minus size={18} color="#34d399" />,
-                desc: 'Ultra-slim 48px distraction-free bar with top hairline scrubbing line, maximizing screen real estate for your library.',
+                desc: 'Compact playback bar with a thin seek line.',
                 visual: (
                   <div className="pbar-preview-box preview-minimal">
                     <div className="pbar-prev-hairline" />
@@ -2563,11 +2563,11 @@ export function SettingsView() {
               },
               {
                 id: 'vinyl' as PlayerBarDesign,
-                name: 'Retro Vinyl Deck',
-                badge: 'Analog Turntable',
+                name: 'Vinyl',
+                badge: 'ROTATING ARTWORK',
                 badgeColor: '#f59e0b',
                 icon: <Disc size={18} color="#fbbf24" />,
-                desc: 'Nostalgic turntable aesthetic featuring spinning vinyl disc album art, vintage warm amber accents, and glowing status LEDs.',
+                desc: 'Rotating album artwork with amber accents and status lights.',
                 visual: (
                   <div className="pbar-preview-box preview-vinyl">
                     <div className="pbar-prev-vinyl-disc">
@@ -2729,7 +2729,7 @@ export function SettingsView() {
     {
       id: 'audio-visualizer-config',
       title: 'Audio Spectrum Visualizer',
-      description: 'Customize visualizer rendering styles, decay kinetics, and display height in the player.',
+      description: 'Choose the visualizer style, animation decay, and height.',
       keywords: 'visualizer spectrum audio style bars wave circle mirror dots decay height now playing',
       tab: 'appearance',
       element: (
@@ -2741,11 +2741,11 @@ export function SettingsView() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
               {[
-                { id: 'bars', name: 'Studio Bars', desc: 'Floating peak caps' },
-                { id: 'mirror', name: 'Bilateral Mirror', desc: 'Center-out stereo' },
-                { id: 'wave', name: 'Silk Wave', desc: 'Analog oscilloscope' },
-                { id: 'circle', name: 'Radial Halo', desc: 'Orbital burst' },
-                { id: 'dots', name: 'Dot Matrix', desc: 'Phosphor LED grid' },
+                { id: 'bars', name: 'Bars', desc: 'Vertical bars with peak markers' },
+                { id: 'mirror', name: 'Mirror', desc: 'Bars from the center outward' },
+                { id: 'wave', name: 'Wave', desc: 'Waveform line' },
+                { id: 'circle', name: 'Circle', desc: 'Radial bars' },
+                { id: 'dots', name: 'Dots', desc: 'Dot grid' },
               ].map(style => (
                 <button
                   key={style.id}
@@ -2777,13 +2777,13 @@ export function SettingsView() {
           {/* Decay Profile Pills */}
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-dim)', letterSpacing: 0.5, marginBottom: 8 }}>
-              Decay Kinetics
+              Animation decay
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {[
-                { id: 'snappy', label: 'Snappy', desc: 'Fast & punchy' },
-                { id: 'balanced', label: 'Balanced', desc: 'Natural studio response' },
-                { id: 'silky', label: 'Silky', desc: 'Liquid smooth transitions' },
+                { id: 'snappy', label: 'Fast', desc: 'Fast decay' },
+                { id: 'balanced', label: 'Balanced', desc: 'Medium decay' },
+                { id: 'silky', label: 'Slow', desc: 'Slow decay' },
               ].map(decay => (
                 <button
                   key={decay.id}
@@ -2817,8 +2817,8 @@ export function SettingsView() {
     },
     {
       id: 'app-experience-mode',
-      title: 'Player Experience Mode',
-      description: 'Switch between pure offline Local File Only Mode and multi-source Hybrid Mode.',
+      title: 'Playback Mode',
+      description: 'Choose local files only or include online music sources.',
       keywords: 'mode local hybrid offline streaming cloud network catalog online experience playback',
       tab: 'library',
       element: (
@@ -2861,7 +2861,7 @@ export function SettingsView() {
                   )}
                 </div>
                 <p style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.45, margin: 0 }}>
-                  Pure local audio playback. Suppresses network streaming, Webstream, and cloud resolution. Guarantees bit-perfect local playback and native gapless sequences.
+                  Plays local files only. Online search, streaming, and cloud source resolution are disabled.
                 </p>
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, color: appMode === 'local' ? 'var(--accent)' : 'var(--text-dim)' }}>
@@ -2874,7 +2874,7 @@ export function SettingsView() {
               onClick={() => {
                 if (appMode !== 'hybrid') {
                   setAppMode('hybrid');
-                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Switched to Hybrid Explorer Mode.', type: 'success' } }));
+                  window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Switched to Hybrid Mode.', type: 'success' } }));
                 }
               }}
               style={{
@@ -2897,7 +2897,7 @@ export function SettingsView() {
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: appMode === 'hybrid' ? 'var(--accent)' : 'var(--glass-border)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Globe size={15} />
                     </div>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Hybrid Explorer</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Hybrid Mode</span>
                   </div>
                   {appMode === 'hybrid' && (
                     <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2910,7 +2910,7 @@ export function SettingsView() {
                 </p>
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, color: appMode === 'hybrid' ? 'var(--accent)' : 'var(--text-dim)' }}>
-                {appMode === 'hybrid' ? 'Currently Active' : 'Click to Enable Hybrid Explorer'}
+                {appMode === 'hybrid' ? 'Currently Active' : 'Enable Hybrid Mode'}
               </div>
             </div>
           </div>
@@ -3258,7 +3258,7 @@ export function SettingsView() {
         <div className="settings-ctrl-card">
           {appMode === 'local' && (
             <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', color: '#f59e0b', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={14} /> Inactive in Local File Only Mode. Switch to Hybrid Explorer Mode in Settings &gt; Library to stream.
+              <Info size={14} /> Inactive in Local Mode. Switch to Hybrid Mode in Settings &gt; Library to stream.
             </div>
           )}
           <TidalConnectCard />
@@ -3275,7 +3275,7 @@ export function SettingsView() {
         <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {appMode === 'local' && (
             <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', color: '#f59e0b', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={14} /> Inactive in Local File Only Mode. Switch to Hybrid Explorer Mode in Settings &gt; Library to stream.
+              <Info size={14} /> Inactive in Local Mode. Switch to Hybrid Mode in Settings &gt; Library to stream.
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3565,7 +3565,7 @@ export function SettingsView() {
                 icon: <Laptop size={20} />,
                 bullets: [
                   { label: 'Rubato Resampler', value: 'Linear (Fast)', active: false, premium: false },
-                  { label: 'Oversampling Factor', value: '128x precision', active: false, premium: false },
+                  { label: 'Oversampling Factor', value: '128x', active: false, premium: false },
                   { label: 'Sinc Kernel Length', value: '64 Taps', active: false, premium: false },
                   { label: 'FFmpeg Transcode', value: '16-bit / 44.1kHz', active: false, premium: false }
                 ]
@@ -3577,20 +3577,20 @@ export function SettingsView() {
                 icon: <Volume2 size={20} />,
                 bullets: [
                   { label: 'Rubato Resampler', value: 'Cubic (Balanced)', active: true, premium: false },
-                  { label: 'Oversampling Factor', value: '256x precision', active: true, premium: false },
+                  { label: 'Oversampling Factor', value: '256x', active: true, premium: false },
                   { label: 'Sinc Kernel Length', value: '128 Taps', active: true, premium: false },
                   { label: 'FFmpeg Transcode', value: '24-bit / 48.0kHz', active: true, premium: false }
                 ]
               },
               {
                 id: 'high',
-                name: 'Studio Reference',
-                desc: 'Bit-perfect fidelity with high-resolution 256-tap sinc kernel.',
+                name: 'High',
+                desc: 'Uses a 256-tap sinc filter and higher oversampling settings.',
                 icon: <Zap size={20} />,
                 bullets: [
-                  { label: 'Rubato Resampler', value: 'Cubic (High-Res)', active: true, premium: true },
-                  { label: 'Oversampling Factor', value: '512x precision', active: true, premium: true },
-                  { label: 'Sinc Kernel Length', value: '256 Taps (Ref)', active: true, premium: true },
+                  { label: 'Rubato Resampler', value: 'Cubic', active: true, premium: true },
+                  { label: 'Oversampling Factor', value: '512x', active: true, premium: true },
+                  { label: 'Sinc Kernel Length', value: '256 Taps', active: true, premium: true },
                   { label: 'FFmpeg Transcode', value: '24-bit / 96.0kHz', active: true, premium: true }
                 ]
               },
@@ -3600,8 +3600,8 @@ export function SettingsView() {
                 desc: 'Customized DSP parameters configured in the advanced panel below.',
                 icon: <Settings size={20} />,
                 bullets: [
-                  { label: 'Rubato Resampler', value: dsp.resampler_interpolation === 'linear' ? 'Linear (Fast)' : 'Cubic (High-Res)', active: dsp.resampler_interpolation === 'cubic', premium: false },
-                  { label: 'Oversampling Factor', value: `${dsp.resampler_oversampling}x precision`, active: true, premium: dsp.resampler_oversampling === 512 },
+                  { label: 'Rubato Resampler', value: dsp.resampler_interpolation === 'linear' ? 'Linear' : 'Cubic', active: dsp.resampler_interpolation === 'cubic', premium: false },
+                  { label: 'Oversampling Factor', value: `${dsp.resampler_oversampling}x`, active: true, premium: dsp.resampler_oversampling === 512 },
                   { label: 'Sinc Kernel Length', value: `${dsp.resampler_sinc_len} Taps`, active: true, premium: dsp.resampler_sinc_len === 256 },
                   { label: 'FFmpeg Transcode', value: dsp.ffmpeg_transcode_quality === 'standard' ? '16-bit / 44.1k' : dsp.ffmpeg_transcode_quality === 'studio' ? '24-bit / 48.0k' : dsp.ffmpeg_transcode_quality === 'native' ? '24-bit / Source Rate' : '24-bit / 96.0k', active: true, premium: dsp.ffmpeg_transcode_quality === 'hires' }
                 ]
@@ -3717,7 +3717,7 @@ export function SettingsView() {
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>Resampler Interpolation</div>
                         <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 4, marginBottom: 12 }}>
-                          Linear interpolation is light on the CPU; Cubic interpolation delivers reference-grade mathematical precision and superior anti-aliasing.
+                          Choose linear or cubic interpolation for the resampler's filter table.
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -3751,7 +3751,7 @@ export function SettingsView() {
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>Sinc Kernel tap length</div>
                         <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 4, marginBottom: 12 }}>
-                          Determines the filter tap length. Larger kernels provide a razor-sharp brick-wall cutoff at the cost of slight latency.
+                          Sets the sinc filter length. Longer filters require more processing.
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -3786,7 +3786,7 @@ export function SettingsView() {
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>Oversampling Lookup Factor</div>
                         <div style={{ fontSize: 9, color: 'var(--text-dim)', lineHeight: 1.3, marginTop: 4, marginBottom: 12 }}>
-                          Controls the size and precision of the sinc filter coefficient table lookup. Higher values ensure lower distortion.
+                          Sets the resolution of the sinc filter coefficient lookup table.
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -3878,7 +3878,7 @@ export function SettingsView() {
             >
               <Info size={14} style={{ flexShrink: 0 }} />
               <span>
-                <strong>High-Precision Audio Mode is active:</strong> High-precision interpolation and intensive sinc kernels will consume slightly more CPU. Recommended for systems with external audiophile DACs.
+                <strong>High processing settings are active:</strong> Larger filter tables and longer sinc filters use more CPU.
               </span>
             </motion.div>
           )}
@@ -3979,7 +3979,7 @@ export function SettingsView() {
                     onChange={e => setDSP({ width: +e.target.value })} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', marginTop: 8 }}>
                     <span>Headphone Crossfeed</span>
-                    <span style={{ color: 'var(--accent)', fontWeight: 800 }}>{Math.round(dsp.width * 100)}% ({dsp.width === 1.0 ? 'Bypass' : dsp.width < 1.0 ? 'Narrow Mono Blend' : 'Hyper-Spacialized Stereo'})</span>
+                    <span style={{ color: 'var(--accent)', fontWeight: 800 }}>{Math.round(dsp.width * 100)}% ({dsp.width === 1.0 ? 'Bypass' : dsp.width < 1.0 ? 'Narrower stereo' : 'Wider stereo'})</span>
                     <span>Wide Speaker</span>
                   </div>
                 </div>
@@ -4090,7 +4090,7 @@ export function SettingsView() {
                     </span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                    Combats quantization artifacts on high-end DACs by introducing a linear 24-bit TPDF noise spectrum.
+                    Adds TPDF dither when reducing audio bit depth.
                   </div>
                 </div>
               </div>
@@ -4115,9 +4115,9 @@ export function SettingsView() {
           </div>
 
           <div style={{ borderTop: '1px solid var(--glass-border)', marginTop: 24, paddingTop: 20 }}>
-            <div className="settings-ctrl-title">Hi-Res Sinc Interpolation Upsampling</div>
+            <div className="settings-ctrl-title">Output sample rate</div>
             <div className="settings-ctrl-desc" style={{ marginBottom: 12 }}>
-              Upsample sound waves using high-accuracy mathematical interpolation chips prior to hardware digital conversion.
+              Select the target sample rate for resampling before audio output.
             </div>
             
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -4179,7 +4179,7 @@ export function SettingsView() {
                 Transition Duration: <span style={{ color: 'var(--accent)', fontWeight: 800 }}>{dsp.crossfade_transition_duration.toFixed(1)} seconds</span>
               </span>
               <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                {dsp.crossfade_transition_duration === 0 ? 'Pure Gapless Cut' : dsp.crossfade_transition_duration <= 3 ? 'Radio Blend' : dsp.crossfade_transition_duration <= 6 ? 'DJ Crossfade' : 'Club Ambient Morph'}
+                {dsp.crossfade_transition_duration === 0 ? 'No overlap' : `${dsp.crossfade_transition_duration}s overlap`}
               </span>
             </div>
 
@@ -4202,10 +4202,10 @@ export function SettingsView() {
 
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               {[
-                { label: 'Off', val: 0, enable: false, desc: 'Gapless Cut' },
-                { label: '2.5s', val: 2.5, enable: true, desc: 'Quick Fade' },
-                { label: '5.0s', val: 5.0, enable: true, desc: 'Standard DJ' },
-                { label: '8.0s', val: 8.0, enable: true, desc: 'Ambient Blend' },
+                { label: 'Off', val: 0, enable: false, desc: 'No crossfade' },
+                { label: '2.5s', val: 2.5, enable: true, desc: '2.5-second overlap' },
+                { label: '5.0s', val: 5.0, enable: true, desc: '5-second overlap' },
+                { label: '8.0s', val: 8.0, enable: true, desc: '8-second overlap' },
               ].map(p => (
                 <button
                   key={p.label}
@@ -4295,7 +4295,7 @@ export function SettingsView() {
               </div>
               <div style={{ display: 'flex', background: 'var(--glass)', padding: 3, borderRadius: 8, border: '1px solid var(--glass-border)', gap: 4 }}>
                 {[
-                  { id: 'yt-dlp', label: 'yt-dlp', desc: 'Fast, unthrottled downloads' },
+                  { id: 'yt-dlp', label: 'yt-dlp', desc: 'Downloads audio with yt-dlp' },
                   { id: 'reqwest', label: 'Direct HTTP', desc: 'Lightweight direct audio streaming' }
                 ].map(opt => (
                   <button
@@ -4327,7 +4327,7 @@ export function SettingsView() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Gapless Pre-Buffering</div>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                    Pre-download upcoming queue tracks for seamless playback
+                    Download upcoming queue tracks in advance
                   </div>
                 </div>
                 <SlidingSwitch 
@@ -4664,7 +4664,7 @@ export function SettingsView() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ flex: 1, paddingRight: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Hardware Throttling Optimization</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Reduce resource usage</span>
                 {lowSpecMode && (
                   <span style={{ fontSize: 9, background: 'var(--accent)', color: 'white', padding: '2px 6px', borderRadius: 10, fontWeight: 700 }}>
                     ACTIVE
@@ -4848,15 +4848,15 @@ export function SettingsView() {
 
     {
       id: 'system-diagnostics-logs',
-      title: 'Diagnostics, Terminal Logs & Crash Reporting',
-      description: 'Inspect live backend & frontend terminal logs, export debug bundles, or open the persistent log storage directory.',
+      title: 'Logs and diagnostics',
+      description: 'View application logs, export a diagnostic report, or open the logs folder.',
       keywords: 'logs terminal debug diagnostics crash report bug troubleshoot errors developer trace stdout stderr',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
             <div style={{ flex: '1 1 400px', minWidth: 280 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Application Observability & Crash Tracing</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Application logs and crash reports</div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.5 }}>
                 Aideo records timestamped logs, audio hardware state, and Rust panic / JavaScript crash dumps in your AppData directory. Use the live terminal viewer or export full diagnostics when troubleshooting.
               </div>
@@ -5269,14 +5269,14 @@ function DependencyManagerPanel() {
     {
       id: 'ytdlp',
       name: 'Web Stream Decoder',
-      desc: 'Enables playing, parsing, and downloading high-fidelity web audio streams.',
+      desc: 'Enables playing and downloading web audio streams.',
       installed: status?.ytdlp_installed,
       size: status?.ytdlp_size
     },
     {
       id: 'ffmpeg',
       name: 'FFmpeg Transcoder & Muxer',
-      desc: 'Enables precise dynamic audio splitting, crossovers, and stem transcoding.',
+      desc: 'Decodes and converts audio for streams and fallback playback.',
       installed: status?.ffmpeg_installed,
       size: status?.ffmpeg_size
     }

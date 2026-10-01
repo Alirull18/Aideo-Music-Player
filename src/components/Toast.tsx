@@ -67,7 +67,7 @@ function formatToastMessage(
     cleanMsg =
       'Audio playback system encountered an error. Aideo is attempting to automatically recover.';
   } else if (msgLower.includes('magicmatch') || msgLower.includes('match')) {
-    context = 'MagicMatch Metadata (scanner.rs / db.rs)';
+    context = 'Metadata Lookup (scanner.rs / db.rs)';
     cleanMsg = 'Metadata lookup failed. The track details could not be resolved.';
   } else if (msgLower.includes('lyrics') || msgLower.includes('lyric')) {
     context = 'Lyric Search & Sync (lyrics.rs / lib.rs)';

@@ -37,8 +37,8 @@ const EQ_PRESETS: { name: string; gains: number[]; preamp?: number }[] = [
   { name: 'Flat', gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], preamp: 0 },
   { name: 'Bass Boost', gains: [5.0, 4.0, 3.0, 1.5, 0.5, 0, 0, 0, 0, 0], preamp: -2.0 },
   { name: 'Vocal Clarity', gains: [-1.0, -0.5, 0, 1.5, 3.0, 3.5, 2.5, 1.0, 0, 0], preamp: -1.0 },
-  { name: 'Treble Air', gains: [0, 0, 0, 0, 0, 0.5, 1.5, 3.0, 4.5, 5.0], preamp: -1.5 },
-  { name: 'Audiophile Master', gains: [2.5, 1.8, 1.0, 0.0, -0.5, 0.5, 1.0, 1.5, 2.5, 3.0], preamp: -1.5 },
+  { name: 'Treble Boost', gains: [0, 0, 0, 0, 0, 0.5, 1.5, 3.0, 4.5, 5.0], preamp: -1.5 },
+  { name: 'Bass & Treble Boost', gains: [2.5, 1.8, 1.0, 0.0, -0.5, 0.5, 1.0, 1.5, 2.5, 3.0], preamp: -1.5 },
 ];
 
 export function AudioControlCenter() {
@@ -287,7 +287,7 @@ export function AudioControlCenter() {
                     border: '1px solid rgba(255, 255, 255, 0.08)',
                   }}
                 >
-                  Pro Studio Deck
+                  Audio settings
                 </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
@@ -502,7 +502,7 @@ export function AudioControlCenter() {
                         />
                       </button>
                       <span style={{ fontSize: 13, fontWeight: 700, color: dsp.eq_enabled ? 'var(--text)' : 'var(--text-dim)' }}>
-                        Dynamic Frequency Transfer Curve
+                        EQ response curve
                       </span>
                     </div>
                     <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
@@ -686,7 +686,7 @@ export function AudioControlCenter() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600 }}>
                     <SlidersHorizontal size={15} color="var(--accent)" />
-                    <span>Tactile Graphic Channel Strips</span>
+                    <span>EQ faders</span>
                   </div>
                   <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
                     Double-click any fader to snap to 0 dB
@@ -962,7 +962,7 @@ export function AudioControlCenter() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Sparkles size={14} color="#f59e0b" /> Tube Warmth
+                      <Sparkles size={14} color="#f59e0b" /> Saturation
                     </span>
                     <button
                       onClick={() => setDSP({ saturation_enabled: !dsp.saturation_enabled })}
@@ -1288,7 +1288,7 @@ export function AudioControlCenter() {
                 }}
               >
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 16 }}>
-                  Live Signal Chain Architecture
+                  Audio signal path
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14, flex: 1, position: 'relative' }}>
@@ -1402,7 +1402,7 @@ export function AudioControlCenter() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Sparkles size={15} color="var(--accent)" /> DJ Gapless Crossfade
+                      <Sparkles size={15} color="var(--accent)" /> Crossfade
                     </span>
                     <button
                       onClick={() => setDSP({ crossfade_transition_enabled: !dsp.crossfade_transition_enabled })}
@@ -1688,7 +1688,7 @@ export function AudioControlCenter() {
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>Offline Local Audio Mode</div>
                       <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                        Playing from local storage with 0ms network transport latency.
+                        Playing from local storage.
                       </div>
                     </div>
                   </div>

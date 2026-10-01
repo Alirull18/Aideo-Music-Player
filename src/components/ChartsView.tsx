@@ -356,7 +356,7 @@ export function ChartsView() {
         <header className="charts-header">
           <div className="charts-heading">
             <h1 id="charts-title">Top charts</h1>
-            <p>Published rank first. Reliable playback where Aideo can find it.</p>
+            <p>Chart rankings with playback when a matching track is available.</p>
           </div>
           <ProviderTabs value={source} onChange={changeSource} />
         </header>
@@ -404,7 +404,7 @@ export function ChartsView() {
         {error && page && <div className="charts-notice is-warning" role="status"><AlertTriangle aria-hidden="true" /><span><strong>Showing saved ranks.</strong>The latest refresh failed: {error}</span></div>}
 
         {error && !page && (
-          <section className="charts-state" role="alert"><AlertTriangle aria-hidden="true" /><h2>Chart signal unavailable</h2><p>We couldn't reach {selectedSource.label}. Check your connection, then try again.</p><button type="button" onClick={() => void requestPage(true)}>Try again</button><small>{error}</small></section>
+          <section className="charts-state" role="alert"><AlertTriangle aria-hidden="true" /><h2>Charts unavailable</h2><p>We couldn't reach {selectedSource.label}. Check your connection, then try again.</p><button type="button" onClick={() => void requestPage(true)}>Try again</button><small>{error}</small></section>
         )}
         {loading && !page && <ChartsSkeleton />}
         {!loading && !error && page && entries.length === 0 && <section className="charts-state"><ListMusic aria-hidden="true" /><h2>No ranks in this view</h2><p>Choose a different scope or refresh the current source.</p></section>}
@@ -439,7 +439,7 @@ export function ChartsView() {
               </article>
 
               <div className="charts-ledger">
-                <div className="charts-ledger-head" aria-hidden="true"><span>RANK</span><span>TRACK</span><span>SIGNAL</span><span>TIME</span><span>ACTION</span></div>
+                <div className="charts-ledger-head" aria-hidden="true"><span>RANK</span><span>TRACK</span><span>PLAYBACK</span><span>TIME</span><span>ACTION</span></div>
                 {rankedEntries.length > 0 ? (
                   <ol start={rankedEntries[0].rank}>
                     {rankedEntries.map((entry) => <ChartRow key={entry.chart_id} entry={entry} isPlaying={entry.playback_track?.url === currentTrackPath} onPlay={(item) => void handlePlay(item)} onQueue={(item) => void handleQueue(item)} />)}

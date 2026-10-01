@@ -21,7 +21,7 @@ const ShelfRow = memo(({ track, idx, onPlay, onContextMenu }: { track: any; idx:
       <div className="ah-row-artist" title={track.artist}>{track.artist}</div>
       <SongSources track={track} />
     </div>
-    <div className="ah-editorial-tag">VOL. {(idx + 1).toString().padStart(2, '0')}</div>
+    <div className="ah-editorial-tag">TRACK {(idx + 1).toString().padStart(2, '0')}</div>
     <span className="ah-row-dur">{track.duration_raw}</span>
     {onContextMenu && (
       <button
@@ -101,16 +101,16 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
         <div className="ah-masthead-folio">
           <div className="ah-masthead-stamp">
             <BookOpen size={13} />
-            <span>AIDEO EDITORIAL ARCHIVE · ISSUE VOL. 28</span>
+            <span>Aideo home</span>
           </div>
-          <div className="ah-masthead-edition">CURATED LISTENING DIGEST</div>
+          <div className="ah-masthead-edition">Recommendations</div>
           {layoutFilter}
         </div>
 
         <div className="ah-masthead-main">
           <div className="ah-masthead-lead">
-            <h1 className="ah-greeting">{greeting}, <span>Listener</span></h1>
-            <p className="ah-masthead-desc">Daily curations, high-fidelity pressings, and acoustic liner notes tailored to your library.</p>
+            <h1 className="ah-greeting">{greeting}</h1>
+            <p className="ah-masthead-desc">Recommendations and recently played tracks from your library.</p>
           </div>
           <div className="ah-stats-line">
             <b>{trackCount.toLocaleString()}</b> tracks<span className="ah-dot">·</span><b>{totalPlays.toLocaleString()}</b> plays
@@ -123,7 +123,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
         <div className="ah-resume-bar ah-editorial-resume">
           <TrackCover src={resume.coverUrl} path={resume.coverPath} size={48} radius={8} />
           <div className="ah-resume-meta">
-            <div className="ah-resume-kicker">EDITORIAL BOOKMARK · {resume.positionLabel}</div>
+            <div className="ah-resume-kicker">Resume · {resume.positionLabel}</div>
             <div className="ah-resume-title">{resume.title}</div>
             <div className="ah-resume-sub">{resume.artist}</div>
           </div>
@@ -183,15 +183,15 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
             <div className="ah-cover-story-content">
               <div className="ah-cover-story-kicker">
                 <Sparkles size={13} />
-                <span>COVER STORY · CURATOR'S SELECTION</span>
+                <span>Recommended track</span>
                 <span className="ah-cover-story-badge">FEATURED</span>
               </div>
               <h2 className="ah-cover-story-title" title={leadTrack.title}>
-                Featured Record: {leadTrack.title}
+                {leadTrack.title}
               </h2>
               <div className="ah-cover-story-artist">{leadTrack.artist}</div>
               <p className="ah-cover-story-quote">
-                "An essential pressing pulled from your acoustic resonance profile. Balanced dynamics with striking presence across the soundstage."
+                A track from your recommendations.
               </p>
               <div className="ah-cover-story-footer">
                 <button
@@ -215,7 +215,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
 
       {/* ── CURATED SHELVES ── */}
       {isLoadingRecs ? (
-        <div className="ah-loading"><RefreshCw size={15} className="spin" /> Curating recommendations…</div>
+        <div className="ah-loading"><RefreshCw size={15} className="spin" /> Loading recommendations…</div>
       ) : (
         shelfIds.map((id, shelfIdx) => {
           const tracks = tracksForShelf(discoveryData, id).slice(0, 10);
@@ -225,7 +225,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
             <section key={id} className="ah-section ah-editorial-section">
               <div className="ah-section-head">
                 <div>
-                  <div className="ah-section-num">VOL. {(shelfIdx + 1).toString().padStart(2, '0')}</div>
+                  <div className="ah-section-num">{(shelfIdx + 1).toString().padStart(2, '0')}</div>
                   <h2>{meta.label}</h2>
                   <p className="ah-section-reason">{meta.reason}</p>
                 </div>
@@ -236,13 +236,12 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
                 )}
               </div>
               <div className="ah-shelf">
-                {tracks.map((t, idx) => (
+                {tracks.map((t) => (
                   <ArtCard
                     key={t.id}
                     track={t}
                     onPlay={onPlayTrack}
                     onContextMenu={onContextMenu}
-                    badge={idx === 0 ? 'ESSENTIAL' : idx === 1 ? 'DEEP CUT' : undefined}
                   />
                 ))}
               </div>
@@ -256,9 +255,9 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
         <section className="ah-section ah-editorial-history">
           <div className="ah-section-head">
             <div>
-              <div className="ah-section-num">ARCHIVE</div>
-              <h2>Pick up where you left off</h2>
-              <p className="ah-section-reason">Recently traversed tracks from your personal archive</p>
+              <div className="ah-section-num">HISTORY</div>
+              <h2>Recently played</h2>
+              <p className="ah-section-reason">Tracks from your listening history</p>
             </div>
           </div>
           <div className="ah-rows">
@@ -268,7 +267,7 @@ export function EditorialHome({ greeting, trackCount, totalPlays, discoveryData,
       )}
 
       {buildTaggedFeed(discoveryData).length === 0 && !isLoadingRecs && (
-        <div className="ah-empty">Nothing curated yet. Refresh the feed or search the web above.</div>
+        <div className="ah-empty">No recommendations yet. Refresh the feed or search above.</div>
       )}
     </div>
   );

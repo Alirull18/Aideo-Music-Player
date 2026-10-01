@@ -26,12 +26,12 @@ export interface ShelfMeta {
 }
 
 export const SHELVES: Record<ShelfId, ShelfMeta> = {
-  recent: { label: 'Jump Back In', reason: 'Recently played', color: '#34d399' },
-  rotation: { label: 'Heavy Rotation', reason: 'Your most repeated tracks', color: '#f59e0b' },
-  gems: { label: 'Forgotten Gems', reason: 'Old favorites you have not played lately', color: '#a855f7' },
-  recs: { label: 'Made for Your Taste', reason: 'Seeded from your favorites and listening history', color: '#c084fc' },
-  tidal: { label: 'Lossless Picks', reason: 'Hi-res FLAC matches from Tidal', color: '#22d3ee' },
-  charts: { label: 'Global Trends', reason: 'Trending on Last.fm right now', color: '#f87171' },
+  recent: { label: 'Recently played', reason: 'Your listening history', color: '#34d399' },
+  rotation: { label: 'Most played', reason: 'Your most repeated tracks', color: '#f59e0b' },
+  gems: { label: 'Older favorites', reason: 'Favorites you have not played lately', color: '#a855f7' },
+  recs: { label: 'Recommendations', reason: 'Based on your favorites and listening history', color: '#c084fc' },
+  tidal: { label: 'Tidal tracks', reason: 'FLAC matches from Tidal', color: '#22d3ee' },
+  charts: { label: 'Trending tracks', reason: 'Trending on Last.fm', color: '#f87171' },
 };
 
 const SHELF_ORDER: ShelfId[] = ['recent', 'rotation', 'gems', 'recs', 'tidal', 'charts'];

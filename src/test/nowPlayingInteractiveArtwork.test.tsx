@@ -186,7 +186,7 @@ describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
     fireEvent.click(signalControl!);
 
     expect(screen.getByRole('dialog', { name: /Audio Signal Path & Telemetry/i })).toBeInTheDocument();
-    expect(screen.getByText('Peak: Unknown · Dynamic Headroom: Unknown')).toBeInTheDocument();
+    expect(screen.queryByText(/\d+(?:\.\d+)?\s*dBFS/i)).not.toBeInTheDocument();
   });
 
   it('toggles signal telemetry with the I shortcut', async () => {
@@ -209,7 +209,6 @@ describe('FullscreenView Top Bar & Scope Mode Pitch Black Background', () => {
     const topBar = container.querySelector('.fullscreen-top-bar');
     expect(topBar).toBeInTheDocument();
 
-    expect(screen.getByTitle(/HUD: Floating Capsule/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Current: Stage View/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Exit Fullscreen Mode/i)).toBeInTheDocument();
   });

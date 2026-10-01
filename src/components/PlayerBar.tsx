@@ -200,7 +200,7 @@ function WaveformDeckTopScrubber({
       onClick={handleSeek}
       onMouseMove={handleMouseMove}
       onMouseLeave={() => setHoverSeekPct(null)}
-      title="Interactive High-Definition Waveform Scrubber"
+      title="Seek in waveform"
     >
       {waveformPeaks.length > 0 ? (
         <div className="waveform-full-bars">
@@ -542,7 +542,7 @@ export function PlayerBar() {
           <ListMusic size={17} />
         </button>
         {!compact && (
-          <button className={`pb-btn ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView(view === 'aideo_lab' ? 'nowplaying' : 'aideo_lab')} title="Aideo Lab DSP Laboratory">
+          <button className={`pb-btn ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView(view === 'aideo_lab' ? 'nowplaying' : 'aideo_lab')} title="Equalizer and DSP">
             <Activity size={17} />
           </button>
         )}
@@ -808,7 +808,7 @@ export function PlayerBar() {
 
           {/* Right Audiophile HUD & Master Volume */}
           <div className="waveform-deck-right">
-            <div className="audiophile-hud-chip" title="Audio Stream Hardware Readout">
+            <div className="audiophile-hud-chip" title="Audio path details">
               <Activity size={12} color="var(--accent)" />
               <span>{audioPathPresentation.hudLabel}</span>
               {audioPathPresentation.outputRate > 0 && <span>· {audioPathPresentation.outputRate / 1000}kHz</span>}

@@ -48,7 +48,7 @@ export function EditorialPosterLayout({
         {/* Editorial Eyebrow */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 700, letterSpacing: '2px', color: 'var(--text-dim)' }}>
           <FileText size={13} style={{ color: accentColor }} />
-          <span>EDITORIAL ARCHIVE · VOL. 26</span>
+          <span>Now playing</span>
         </div>
 
         {/* Hero Title & Artist */}
@@ -93,7 +93,7 @@ export function EditorialPosterLayout({
         >
           <img
             src={effectiveCover}
-            alt="Editorial Plate"
+            alt="Album artwork"
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
           {!lowSpecMode && canvas && (canvasMode === 'artwork' || canvasMode === 'both') && (
@@ -129,7 +129,7 @@ export function EditorialPosterLayout({
           <div>
             <div style={{ color: 'var(--text-dim)', fontSize: 10, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}>Signal Path</div>
             <div style={{ fontWeight: 600, color: accentColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {telemetryText || 'BIT-PERFECT DIRECT'}
+              {telemetryText || 'Audio path unavailable'}
             </div>
           </div>
         </div>

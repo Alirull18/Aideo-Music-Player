@@ -303,7 +303,7 @@ function getSourceType(track: any): { color: string; label: string } {
     return { color: '#7fb8e6', label: 'Qobuz Studio · Lossless' };
   }
   if (!localMatch && (p.startsWith('http://') || p.startsWith('https://'))) return { color: '#f87171', label: 'Webstream' };
-  if (fmt === 'flac' || fmt === 'wav' || /\.(flac|wav|alac|aiff|dsd)$/.test(p)) return { color: '#c084fc', label: 'Local Hi-Res · Lossless' };
+  if (fmt === 'flac' || fmt === 'wav' || /\.(flac|wav|alac|aiff|dsd)$/.test(p)) return { color: '#c084fc', label: 'Local lossless' };
   return { color: '#34d399', label: 'Local File' };
 }
 
@@ -1119,7 +1119,7 @@ export function AideoView() {
       return next;
     });
     window.dispatchEvent(new CustomEvent('ui-toast', {
-      detail: { message: `Downloading high-fidelity stream: ${track.title}...`, type: 'info' }
+      detail: { message: `Downloading stream: ${track.title}...`, type: 'info' }
     }));
     try {
       await invoke('download_track', {
@@ -1457,7 +1457,7 @@ export function AideoView() {
           return rTitle.includes(cleanTarget) || cleanTarget.includes(rTitle);
         }) || results[0];
         window.dispatchEvent(new CustomEvent('ui-toast', {
-          detail: { message: `Downloading high-fidelity stream: ${match.title}...`, type: 'info' }
+          detail: { message: `Downloading stream: ${match.title}...`, type: 'info' }
         }));
         await invoke('download_track', {
           url: match.url,
@@ -1917,7 +1917,7 @@ export function AideoView() {
                     <button
                       onClick={() => handleDownloadTrack(track)}
                       className="discovery-download-btn"
-                      title="Download high-fidelity stream offline"
+                      title="Download for offline playback"
                     >
                       <Download size={12} />
                     </button>
@@ -2080,7 +2080,7 @@ export function AideoView() {
           <div className="aideo-discovery-title-wrap">
             <h2 className="aideo-sec-title" style={{ margin: 0 }}>Discovery Hub</h2>
             <p style={{ margin: '3px 0 0 0', fontSize: 12, color: 'var(--text-dim)' }}>
-              Personalized curation derived from your offline library & streaming trends
+              Recommendations from your library and listening history
             </p>
           </div>
 
@@ -2148,7 +2148,7 @@ export function AideoView() {
               title="Re-run discovery algorithm"
             >
               <RefreshCw size={13} className={isRefreshingRecs || isLoadingRecs ? "spin" : ""} />
-              <span>{isRefreshingRecs ? "Curating..." : "Refresh Recommendations"}</span>
+              <span>{isRefreshingRecs ? "Refreshing..." : "Refresh Recommendations"}</span>
             </button>
           </div>
         </div>
@@ -2157,7 +2157,7 @@ export function AideoView() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-dim)', fontSize: 12, fontWeight: 500 }}>
               <Loader2 className="spin" size={14} style={{ color: 'var(--accent)' }} />
-              <span>Curating personalized recommendations from your listening habits...</span>
+              <span>Loading recommendations...</span>
             </div>
             <div
               className="discovery-skeleton-grid"
@@ -2182,7 +2182,7 @@ export function AideoView() {
                     <div className="discovery-shelf-header">
                       <div className="discovery-shelf-title-wrap">
                         <RotateCcw size={17} color="var(--accent)" />
-                        <h3 className="discovery-shelf-title">Jump Back In</h3>
+                        <h3 className="discovery-shelf-title">Recently played</h3>
                       </div>
                       <span className="discovery-shelf-badge">{discoveryData.recently_played.length} tracks</span>
                     </div>
@@ -2196,9 +2196,9 @@ export function AideoView() {
                     <div className="discovery-shelf-header">
                       <div className="discovery-shelf-title-wrap">
                         <Sparkles size={17} color="#06b6d4" />
-                        <h3 className="discovery-shelf-title">Made For You</h3>
+                        <h3 className="discovery-shelf-title">Your mixes</h3>
                       </div>
-                      <span className="discovery-shelf-badge">Personalized Station Mixes</span>
+                      <span className="discovery-shelf-badge">Mixes from your listening history</span>
                     </div>
                     {renderMixCards(discoveryData.mixed_for_you)}
                   </div>
@@ -2224,9 +2224,9 @@ export function AideoView() {
                     <div className="discovery-shelf-header">
                       <div className="discovery-shelf-title-wrap">
                         <Waves size={17} color="#22d3ee" />
-                        <h3 className="discovery-shelf-title">Tidal HiFi</h3>
+                        <h3 className="discovery-shelf-title">Tidal tracks</h3>
                       </div>
-                      <span className="discovery-shelf-badge">Lossless Picks Â· Stream & Download</span>
+                      <span className="discovery-shelf-badge">Stream and download</span>
                     </div>
                     {renderTrackCarousel(discoveryData.tidal_hifi.slice(0, 12))}
                   </div>
@@ -2238,7 +2238,7 @@ export function AideoView() {
                     <div className="discovery-shelf-header">
                       <div className="discovery-shelf-title-wrap">
                         <Clock size={17} color="#a855f7" />
-                        <h3 className="discovery-shelf-title">Forgotten Gems</h3>
+                        <h3 className="discovery-shelf-title">Older favorites</h3>
                       </div>
                       <span className="discovery-shelf-badge">Old Favorites You Haven't Played Recently</span>
                     </div>
@@ -2252,7 +2252,7 @@ export function AideoView() {
                     <div className="discovery-shelf-header">
                       <div className="discovery-shelf-title-wrap">
                         <ListMusic size={17} color="#ec4899" />
-                        <h3 className="discovery-shelf-title">Curated Playlist Mixes</h3>
+                        <h3 className="discovery-shelf-title">Playlist mixes</h3>
                       </div>
                       <span className="discovery-shelf-badge">Ready to Play</span>
                     </div>
@@ -2266,9 +2266,9 @@ export function AideoView() {
                     <div className="discovery-shelf-header">
                       <div className="discovery-shelf-title-wrap">
                         <Flame size={17} color="#f59e0b" />
-                        <h3 className="discovery-shelf-title">Heavy Rotation</h3>
+                        <h3 className="discovery-shelf-title">Most played</h3>
                       </div>
-                      <span className="discovery-shelf-badge">Your Most Repeated Listening Trends</span>
+                      <span className="discovery-shelf-badge">Frequently played tracks</span>
                     </div>
                     {renderTrackCarousel(discoveryData.heavy_rotation.slice(0, 12))}
                   </div>
@@ -2282,7 +2282,7 @@ export function AideoView() {
                         <Compass size={17} color="#3b82f6" />
                         <h3 className="discovery-shelf-title">{appMode === 'local' ? 'Local Top Hits' : 'Global Trends & Charts'}</h3>
                       </div>
-                      <span className="discovery-shelf-badge">{appMode === 'local' ? 'Local Library Momentum' : 'Last.fm Real-Time Discovery'}</span>
+                      <span className="discovery-shelf-badge">{appMode === 'local' ? 'Local tracks' : 'Last.fm charts'}</span>
                     </div>
                     {renderTrackCarousel(discoveryData.global_charts.slice(0, 12))}
                   </div>
@@ -2321,7 +2321,7 @@ export function AideoView() {
                   <div className="discovery-unified-section">
                     <div className="discovery-unified-section-title">
                       <ListMusic size={14} color="#ec4899" />
-                      <span>Curated Playlist Mixes</span>
+                      <span>Playlist mixes</span>
                     </div>
                     {renderMixCards(discoveryData.playlist_mixes)}
                   </div>
@@ -2337,7 +2337,7 @@ export function AideoView() {
                     return (
                       <div className="aideo-empty-box" style={{ margin: '20px 0' }}>
                         <Compass size={28} />
-                        <p>No tracks currently curated in this feed category.</p>
+                        <p>No tracks in this category.</p>
                       </div>
                     );
                   }
@@ -2369,7 +2369,7 @@ export function AideoView() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 180, color: 'var(--text-dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', borderRadius: 16, padding: 24, textAlign: 'center' }}>
             <Sparkles size={24} color="var(--accent)" style={{ marginBottom: 8 }} />
-            <p style={{ margin: '0 0 12px 0', fontSize: 13 }}>Personalized discovery mixes are ready to be curated.</p>
+            <p style={{ margin: '0 0 12px 0', fontSize: 13 }}>Load recommendations based on your listening history.</p>
             <button className="btn btn-primary" onClick={() => fetchRecommendations(true)} style={{ padding: '8px 18px', fontSize: 12 }}>
               Load Recommendations
             </button>
@@ -2508,7 +2508,7 @@ export function AideoView() {
     return (
       <section className="aideo-section" style={{ marginBottom: 32 }}>
         <h2 className="aideo-sec-title">Smart Mix Builder</h2>
-        <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Compile dynamic offline playlists custom-tailored to your listening trends, habits, and mood.</p>
+        <p className="aideo-subtitle" style={{ marginBottom: 16 }}>Create a mix from your library based on a mood and listening history.</p>
 
         <div style={{
           background: 'var(--glass)',
@@ -2555,7 +2555,7 @@ export function AideoView() {
 
           {/* Seed Trend Source Selector */}
           <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Seed Trend Source</label>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Listening history source</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {['Library History', 'Last.fm Trends', 'ListenBrainz Scrobbles'].map(s => {
                 const active = activeSource === s;
@@ -2610,7 +2610,7 @@ export function AideoView() {
             >
               {generatingMix ? (
                 <>
-                  <Loader2 className="spin" size={15} /> Analyzing Patterns...
+                  <Loader2 className="spin" size={15} /> Creating mix...
                 </>
               ) : (
                 <>
@@ -2678,10 +2678,10 @@ export function AideoView() {
   const renderLayoutFilter = () => {
     const layoutItems = [
       { id: 'classic' as const, label: 'Classic', icon: Layers, accent: '#3b82f6' },
-      { id: 'spotify' as const, label: 'Horizon', icon: Headphones, accent: 'var(--accent, #1db954)' },
-      { id: 'apple' as const, label: 'Spatial Glass', icon: Disc, accent: 'var(--accent, #fa243c)' },
-      { id: 'editorial' as const, label: 'Editorial', icon: BookOpen, accent: '#a855f7' },
-      { id: 'command' as const, label: 'Command', icon: Activity, accent: '#06b6d4' },
+      { id: 'spotify' as const, label: 'Grid', icon: Headphones, accent: 'var(--accent, #1db954)' },
+      { id: 'apple' as const, label: 'Carousel', icon: Disc, accent: 'var(--accent, #fa243c)' },
+      { id: 'editorial' as const, label: 'Featured', icon: BookOpen, accent: '#a855f7' },
+      { id: 'command' as const, label: 'Table', icon: Activity, accent: '#06b6d4' },
       { id: 'stage' as const, label: 'Stage', icon: Sparkles, accent: '#f59e0b' },
     ];
 
@@ -3707,9 +3707,9 @@ export function AideoView() {
                     transition={{ duration: 0.5 }}
                     className="aideo-title"
                   >
-                    {greeting}, Listener
+                    {greeting}
                   </motion.h1>
-                  <p className="aideo-subtitle">Your personalized music portal is fully customized and ready.</p>
+                  <p className="aideo-subtitle">Your library, listening history, and recommendations.</p>
                 </div>
                 <div className="aideo-header-stats">
                   <div className="aideo-stat-box">

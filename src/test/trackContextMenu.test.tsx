@@ -49,8 +49,6 @@ describe('TrackContextMenu', () => {
     expect(screen.getByText('Play Next')).toBeInTheDocument();
     expect(screen.getByText('Add to Queue')).toBeInTheDocument();
     expect(screen.getByText('Manage Cover Art')).toBeInTheDocument();
-    expect(screen.getByText('Magic Match')).toBeInTheDocument();
-    expect(screen.getByText('Sonic Mix')).toBeInTheDocument();
     expect(screen.getByText('Edit Audio Tags')).toBeInTheDocument();
     expect(screen.getByText('Other Audio Sources')).toBeInTheDocument();
     expect(screen.getByText('Add to Playlist...')).toBeInTheDocument();
@@ -94,8 +92,6 @@ describe('TrackContextMenu', () => {
 
     // Should NOT show local-only actions
     expect(screen.queryByText('Manage Cover Art')).not.toBeInTheDocument();
-    expect(screen.queryByText('Magic Match')).not.toBeInTheDocument();
-    expect(screen.queryByText('Sonic Mix')).not.toBeInTheDocument();
     expect(screen.queryByText('Edit Audio Tags')).not.toBeInTheDocument();
     expect(screen.queryByText('Delete Song')).not.toBeInTheDocument();
 

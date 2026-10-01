@@ -235,12 +235,12 @@ export function SpatialGlassHome({
 
   // Compile discovery shelves
   const shelfCategories: Array<{ id: ShelfId; label: string; sub: string }> = [
-    { id: 'recs', label: 'Made for You', sub: 'Personalized selections based on your favorites' },
-    { id: 'recent', label: 'Recently Played', sub: 'Jump back into your recent sessions' },
-    { id: 'rotation', label: 'Heavy Rotation', sub: 'Albums and tracks on repeat' },
-    { id: 'tidal', label: 'Spatial & Lossless', sub: 'High-resolution FLAC audio streams' },
-    { id: 'gems', label: 'Curator Vault', sub: 'Deep catalog picks and forgotten gems' },
-    { id: 'charts', label: 'Top Worldwide', sub: 'Trending across global charts' },
+    { id: 'recs', label: 'Recommendations', sub: 'Based on your favorites' },
+    { id: 'recent', label: 'Recently played', sub: 'Your listening history' },
+    { id: 'rotation', label: 'Most played', sub: 'Your most repeated tracks' },
+    { id: 'tidal', label: 'Tidal tracks', sub: 'FLAC matches from Tidal' },
+    { id: 'gems', label: 'Older favorites', sub: 'Favorites you have not played lately' },
+    { id: 'charts', label: 'Trending tracks', sub: 'Tracks from the charts' },
   ];
 
   const filteredShelves = useMemo(() => {
@@ -324,7 +324,7 @@ export function SpatialGlassHome({
       {/* ── HEADER ── */}
       <div className="am-header-section">
         <div className="am-header-titles">
-          <span className="am-header-kicker">SPATIAL AUDIO ARCHIVE</span>
+          <span className="am-header-kicker">Aideo home</span>
           <h1 className="am-header-main">{greeting}</h1>
           <div className="am-header-meta">
             <span>{trackCount.toLocaleString()} tracks in library</span>
@@ -368,7 +368,7 @@ export function SpatialGlassHome({
                 </h2>
                 <div className="am-hero-artist">{currentHeroTrack.artist || 'Unknown Artist'}</div>
                 <p className="am-hero-desc">
-                  Curated spotlight from your acoustic taste profile. Experience high-fidelity audio resolution and pristine dynamic range.
+                  A track from your recommendations and listening history.
                 </p>
 
                 <div className="am-hero-cta-row">
@@ -493,7 +493,7 @@ export function SpatialGlassHome({
               { id: 'browse', label: 'Browse' },
               { id: 'top', label: 'Top Picks' },
               { id: 'new', label: 'New Discoveries' },
-              { id: 'lossless', label: 'Lossless Hi-Fi' },
+              { id: 'lossless', label: 'Lossless' },
             ] as const
           ).map((tab) => (
             <button
@@ -518,9 +518,9 @@ export function SpatialGlassHome({
               <Disc3 size={28} />
             </div>
             <div className="ah-empty-lossless-content">
-              <h3 className="ah-empty-lossless-title">No Hi-Res Lossless Audio Found</h3>
+              <h3 className="ah-empty-lossless-title">No lossless tracks found</h3>
               <p className="ah-empty-lossless-desc">
-                No lossless tracks were found in your active rotation or local library. Connect your Tidal account in Settings &gt; Library or import local FLAC, WAV, or ALAC files to enable bit-perfect studio streaming.
+                Connect Tidal in Settings &gt; Library or add local FLAC, WAV, or ALAC files.
               </p>
             </div>
           </div>
@@ -529,7 +529,7 @@ export function SpatialGlassHome({
         {isLoadingRecs ? (
           <div className="am-loading-state">
             <RefreshCw size={20} className="spin" />
-            <span>Curating music catalogue…</span>
+            <span>Loading recommendations…</span>
           </div>
         ) : (
           filteredShelves.map((shelf) => {

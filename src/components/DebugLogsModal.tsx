@@ -208,7 +208,7 @@ export const DebugLogsModal: React.FC<DebugLogsModalProps> = ({ isOpen, onClose 
                     </span>
                   </h2>
                   <p style={{ margin: 0, fontSize: 11, color: '#8b949e' }}>
-                    Full real-time system observability, IPC traces, audio engine status, and crash logs
+                    System logs, IPC calls, audio engine status, and crash reports
                   </p>
                 </div>
               </div>

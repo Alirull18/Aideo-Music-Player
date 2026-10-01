@@ -157,7 +157,7 @@ export function TheaterSignalPathModal({ isOpen, onClose }: TheaterSignalPathMod
                         color: '#f8fafc'
                       }}
                     >
-                      Signal Path & Audio Telemetry
+                      Audio signal path
                     </h2>
                     <p
                       style={{
@@ -166,7 +166,7 @@ export function TheaterSignalPathModal({ isOpen, onClose }: TheaterSignalPathMod
                         color: 'rgba(255, 255, 255, 0.5)'
                       }}
                     >
-                      Backend-reported route and transforms; peak and headroom require measured levels.
+                      Source format, active processing, and output device.
                     </p>
                   </div>
                 </div>
@@ -212,8 +212,10 @@ export function TheaterSignalPathModal({ isOpen, onClose }: TheaterSignalPathMod
                 }}
               >
                 <div style={{ padding: '14px 18px', borderRadius: 10, backgroundColor: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                  <span>SIGNAL HEADROOM &amp; PEAK DYNAMICS</span>
-                  <div style={{ marginTop: 8 }}>Peak: Unknown · Dynamic Headroom: Unknown</div>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Peak and headroom</span>
+                  <p style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.5, color: '#cbd5e1' }}>
+                    Live level measurements are not available. Peak and headroom cannot be calculated from the audio route or EQ settings.
+                  </p>
                 </div>
 
                 {/* Node 1: Source */}
@@ -253,7 +255,7 @@ export function TheaterSignalPathModal({ isOpen, onClose }: TheaterSignalPathMod
                         color: 'rgba(255, 255, 255, 0.45)'
                       }}
                     >
-                      Stage 1 · Source Stream
+                      Stage 1 · Source
                     </div>
                     <div
                       style={{
@@ -410,7 +412,7 @@ export function TheaterSignalPathModal({ isOpen, onClose }: TheaterSignalPathMod
                         color: 'rgba(255, 255, 255, 0.45)'
                       }}
                     >
-                      Stage 3 · Hardware Output Stage
+                      Stage 3 · Output device
                     </div>
                     <div
                       style={{

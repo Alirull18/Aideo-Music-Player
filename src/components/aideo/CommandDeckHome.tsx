@@ -41,7 +41,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
   const visible = useMemo(() => feed === 'all' ? feedItems : feedItems.filter(t => t.shelf === feed), [feed, feedItems]);
 
   const tabs: Array<{ id: FeedTab; label: string; count: number }> = useMemo(() => [
-    { id: 'all', label: 'All Signals', count: feedItems.length },
+    { id: 'all', label: 'All tracks', count: feedItems.length },
     ...(['recs', 'tidal', 'recent' as ShelfId, 'rotation', 'gems', 'charts'] as ShelfId[])
       .map(id => ({ id, label: SHELVES[id].label, count: feedItems.filter(t => t.shelf === id).length }))
       .filter(t => t.count > 0 || t.id === 'recs'),
@@ -58,10 +58,10 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
           <div className="ah-deck-title-block">
             <div className="ah-deck-kicker">
               <Activity size={12} className="ah-deck-pulse" />
-              <span>STUDIO CONSOLE · COMMAND DECK</span>
+              <span>Aideo home</span>
             </div>
-            <h1 className="ah-deck-heading">Command Deck</h1>
-            <p className="ah-deck-sub">{greeting}, Listener · Precision audio curation & active signal stream</p>
+            <h1 className="ah-deck-heading">Home</h1>
+            <p className="ah-deck-sub">{greeting} · Recommendations and listening history</p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
@@ -79,17 +79,17 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
               <div className="ah-deck-stat-sep" />
               <div className="ah-deck-stat">
                 <span className="ah-deck-stat-num">{visible.length}</span>
-                <span className="ah-deck-stat-lbl">SIGNALS</span>
+                <span className="ah-deck-stat-lbl">RESULTS</span>
               </div>
 
               <button
                 className="ah-deck-refresh-btn"
                 onClick={onRefreshRecs}
                 disabled={isRefreshingRecs || isLoadingRecs}
-                title="Curate recommendations"
+                title="Refresh recommendations"
               >
                 <RefreshCw size={13} className={isRefreshingRecs || isLoadingRecs ? 'spin' : ''} />
-                <span>{isRefreshingRecs || isLoadingRecs ? 'Curating…' : 'Refresh'}</span>
+                <span>{isRefreshingRecs || isLoadingRecs ? 'Refreshing…' : 'Refresh'}</span>
               </button>
             </div>
           </div>
@@ -109,7 +109,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
             <div className="ah-deck-resume-meta">
               <div className="ah-deck-resume-kicker">
                 <Radio size={11} className="pulse" />
-                <span>SIGNAL RESTORATION · {resume.positionLabel}</span>
+                <span>Resume · {resume.positionLabel}</span>
               </div>
               <div className="ah-deck-resume-title">{resume.title}</div>
               <div className="ah-deck-resume-sub">{resume.artist}</div>
@@ -126,7 +126,7 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
       )}
 
       {/* ── HORIZONTAL FEED CONTROLLER RIBBON ── */}
-      <nav className="ah-deck-ribbon" aria-label="Signal Feeds">
+      <nav className="ah-deck-ribbon" aria-label="Track categories">
         <div className="ah-deck-ribbon-pills">
           {tabs.map(t => {
             const color = t.id === 'all' ? 'var(--ah-primary)' : SHELVES[t.id as ShelfId].color;
@@ -153,9 +153,9 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
           <div className="ah-deck-section-title">
             <div className="ah-deck-section-title-left">
               <Radio size={14} className="ah-accent-icon" />
-              <span>Radar Spotlight</span>
+              <span>Featured tracks</span>
             </div>
-            <span className="ah-deck-section-sub">Highest affinity audio signals in active feed</span>
+            <span className="ah-deck-section-sub">Tracks from your recommendations</span>
           </div>
 
           <div className="ah-deck-spotlight-grid">
@@ -214,14 +214,14 @@ export function CommandDeckHome({ greeting, trackCount, totalPlays, discoveryDat
         <div className="ah-deck-head">
           <div className="ah-deck-head-left">
             <h2>Discovery feed</h2>
-            <span className="ah-deck-signal-count">{visible.length} signals active</span>
+            <span className="ah-deck-signal-count">{visible.length} tracks</span>
           </div>
         </div>
 
         {isLoadingRecs ? (
           <div className="ah-loading">
             <RefreshCw size={15} className="spin" />
-            <span>Curating recommendations…</span>
+            <span>Loading recommendations…</span>
           </div>
         ) : (
           <>

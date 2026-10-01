@@ -25,12 +25,12 @@ import { shuffleArray } from '../utils/shuffle';
 import './LibraryDesigns.css';
 
 export const LIBRARY_DESIGNS: { id: LibraryDesign; label: string; icon: React.ReactNode; desc: string }[] = [
-  { id: 'classic', label: 'Classic', icon: <LayoutGrid size={14} />, desc: 'Original balanced table & album grid' },
-  { id: 'studio', label: 'Studio Pro', icon: <Sliders size={14} />, desc: 'Audiophile rack, 38px rows, audio tech chips' },
-  { id: 'editorial', label: 'Editorial Archive', icon: <BookOpen size={14} />, desc: 'Vinyl & liner notes, rich serif display' },
-  { id: 'crate', label: 'Crate Digger', icon: <Layers size={14} />, desc: 'Split-pane artist/album explorer, 42px rows' },
-  { id: 'ambient', label: 'Ambient Flow', icon: <Waves size={14} />, desc: 'Tidal/Apple fluid glass, floating capsules' },
-  { id: 'brutalist', label: 'Industrial Brutalist', icon: <Terminal size={14} />, desc: 'Swiss grid terminal, safety amber/cyan' },
+  { id: 'classic', label: 'Classic', icon: <LayoutGrid size={14} />, desc: 'Track table and album grid' },
+  { id: 'studio', label: 'Compact', icon: <Sliders size={14} />, desc: 'Compact rows with audio format labels' },
+  { id: 'editorial', label: 'Large rows', icon: <BookOpen size={14} />, desc: 'Larger artwork and serif text' },
+  { id: 'crate', label: 'Split view', icon: <Layers size={14} />, desc: 'Artist sidebar beside the track list' },
+  { id: 'ambient', label: 'Rounded', icon: <Waves size={14} />, desc: 'Rounded rows with translucent backgrounds' },
+  { id: 'brutalist', label: 'Grid', icon: <Terminal size={14} />, desc: 'Square rows with visible grid lines' },
 ];
 
 const entryKey = (track: Track) => track.playlist_entry_id !== undefined ? `entry:${track.playlist_entry_id}` : track.source_context ? `recording:${track.source_context.recording_id}` : track.path;
@@ -460,7 +460,7 @@ function TrackActionMenu({
                 window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'No match found for this track.', type: 'warning' } }));
               }
             } catch (err) {
-              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `MagicMatch failed: ${err}`, type: 'error' } }));
+              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Metadata lookup failed: ${err}`, type: 'error' } }));
             } finally {
               setIsMatching(null);
             }
@@ -469,7 +469,7 @@ function TrackActionMenu({
           <span className="menu-item-icon">
             {isMatching === track.id ? <RefreshCw size={15} className="spin" /> : <Activity size={15} />}
           </span>
-          <span>{isMatching === track.id ? 'Searching...' : 'Magic Match'}</span>
+          <span>{isMatching === track.id ? 'Searching...' : 'Match metadata'}</span>
         </button>
 
         <button
@@ -486,17 +486,17 @@ function TrackActionMenu({
                   await store.addToQueue(t);
                 }
                 playTrack(similar[0]);
-                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix: Queued ${similar.length} similar tracks!`, type: 'success' } }));
+                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Queued ${similar.length} similar tracks`, type: 'success' } }));
               } else {
-                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' } }));
+                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'No similar tracks found in library.', type: 'warning' } }));
               }
             } catch (err) {
-              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } }));
+              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Could not queue similar tracks: ${err}`, type: 'error' } }));
             }
           }}
         >
           <span className="menu-item-icon"><Sparkles size={15} /></span>
-          <span>Sonic Mix</span>
+          <span>Play similar tracks</span>
         </button>
 
         <div className="track-action-menu-divider" />
@@ -2376,8 +2376,8 @@ export function LibraryView() {
                 <div className="pulse-container" style={{ width: 64, height: 64, background: 'rgba(var(--accent-rgb), 0.1)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
                   <Activity size={32} color="var(--accent)" />
                 </div>
-                <h2 style={{ margin: 0 }}>Magic Match Found</h2>
-                <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>We found the official metadata for this track.</p>
+                <h2 style={{ margin: 0 }}>Metadata match</h2>
+                <p style={{ color: 'var(--text-dim)', fontSize: 14 }}>Review the matching track details before applying them.</p>
               </div>
 
               <div className="match-comparison" style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 12, padding: 20, marginBottom: 24 }}>

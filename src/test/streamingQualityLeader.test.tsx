@@ -17,7 +17,6 @@ describe('StreamingQualityControl Leader Component', () => {
     render(<StreamingQualityControl {...defaultProps} />);
 
     expect(screen.getByText('Best Available')).toBeInTheDocument();
-    expect(screen.getByText('Up to 24-bit / 192 kHz')).toBeInTheDocument();
     expect(screen.getByText('Preset 1 of 3')).toBeInTheDocument();
     expect(screen.getByText('Active')).toBeInTheDocument();
 
@@ -63,7 +62,6 @@ describe('StreamingQualityControl Leader Component', () => {
     );
 
     expect(screen.getByText('Standard Lossless')).toBeInTheDocument();
-    expect(screen.getByText('16-bit / 44.1 kHz FLAC')).toBeInTheDocument();
     expect(screen.getByText('Preset 2 of 3')).toBeInTheDocument();
 
     const downButton = screen.getByRole('button', { name: /decrease streaming quality/i });

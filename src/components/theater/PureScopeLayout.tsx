@@ -336,7 +336,7 @@ export function PureScopeLayout({
           }}
         >
           <Activity size={13} style={{ color: accentColor || '#8b5cf6' }} />
-          <span>{telemetryText || 'PURE VECTOR SCOPE · LAB RETICLE'}</span>
+          <span>{telemetryText || 'Visualizer'}</span>
         </div>
 
         <h1

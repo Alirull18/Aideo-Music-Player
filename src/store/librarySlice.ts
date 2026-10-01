@@ -2117,14 +2117,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     await get().playTrack(selectedTracks[0]);
 
     let mixName = 'Chill Mix';
-    if (mixType === 'supermix') mixName = 'My Supermix';
+    if (mixType === 'supermix') mixName = 'Library Mix';
     else if (mixType === 'recap') mixName = 'Aideo Recap Mix';
     else if (mixType === 'discovery') mixName = 'Discovery Mix';
     else if (mixType === 'chill') {
       const hrs = new Date().getHours();
-      if (hrs >= 5 && hrs < 12) mixName = 'Sunrise Energy Mix';
-      else if (hrs >= 12 && hrs < 17) mixName = 'Productive Focus Mix';
-      else mixName = 'Chill & Unwind Mix';
+      if (hrs >= 5 && hrs < 12) mixName = 'Morning Mix';
+      else if (hrs >= 12 && hrs < 17) mixName = 'Afternoon Mix';
+      else mixName = 'Evening Mix';
     }
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Playing ${mixName}!`, type: 'success' } }));
   },

@@ -4,6 +4,14 @@
 > Documents every milestone, audio DSP pipeline evolution, user interface iteration, cloud/streaming integration, bug fix, and architectural hardening from `v0.1.0` through `v0.9.8` and current development `HEAD`.
 
 ---
+## Unreleased
+
+- AutoEQ selection and persistence now identify the exact profile URL, so same-name headphones from different authors or measurement sources select independently.
+- Signal inspection explains that live peak and headroom measurements are unavailable instead of showing a permanent unknown-value panel.
+- Replaced decorative frontend copy with functional labels across library, albums, home layouts, settings, onboarding, DSP, theater, insights, menus, and toasts.
+- Album quality labels use known resolution metadata; lossless formats no longer imply high resolution, CD bit depth, or stereo channels.
+- Fixed duplicate modal animation keys and an ignored album layout CSS property.
+
 
 ## 📑 Table of Contents
 

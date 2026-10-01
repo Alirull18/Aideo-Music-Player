@@ -448,7 +448,7 @@ export function TheaterQueueDrawer({ isOpen, onClose }: TheaterQueueDrawerProps)
                       maxWidth: 240
                     }}
                   >
-                    Add tracks from your library or let Autoplay keep the music flowing seamlessly.
+                    Add tracks from your library or enable Autoplay.
                   </p>
                 </div>
               ) : (

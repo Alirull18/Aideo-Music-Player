@@ -18,9 +18,9 @@ import { parseSearchQuery, foldSearchText, simplifyPunctuation } from '../utils/
 import { AlbumViewMode } from '../store/types';
 
 export const ALBUM_VIEW_MODES: { id: AlbumViewMode; label: string; icon: React.ReactNode; desc: string }[] = [
-  { id: 'classic', label: 'Classic Wall', icon: <LayoutGrid size={14} />, desc: 'High-density virtualized 2D grid' },
-  { id: 'compact', label: 'Compact Table', icon: <AlignJustify size={14} />, desc: 'Dense sortable table with inline expandable tracklists' },
-  { id: 'editorial', label: 'Editorial Magazine', icon: <Sparkles size={14} />, desc: 'Visual storytelling with featured spotlight and shelves' },
+  { id: 'classic', label: 'Grid', icon: <LayoutGrid size={14} />, desc: 'Album artwork grid' },
+  { id: 'compact', label: 'Table', icon: <AlignJustify size={14} />, desc: 'Sortable table with expandable tracklists' },
+  { id: 'editorial', label: 'Featured', icon: <Sparkles size={14} />, desc: 'Featured album and grouped shelves' },
 ];
 
 // Backward compatibility alias for any external consumers
@@ -58,9 +58,6 @@ export function formatAudioResolution(sampleTrack: any): string | null {
   if (f.includes('dsd') || f.includes('dsf') || f.includes('dff')) {
     return '1-bit / DSD';
   }
-  if (isLosslessTrack(sampleTrack)) {
-    return '16-bit / 44.1kHz';
-  }
   return null;
 }
 
@@ -69,7 +66,7 @@ export function formatChannels(sampleTrack: any): string {
   if (ch === 1) return '1.0 Mono';
   if (ch === 2) return '2.0 Stereo';
   if (ch && ch > 2) return `${ch}.0 Surround`;
-  return '2.0 Stereo';
+  return 'Unknown';
 }
 
 export function extractAlbumYear(album: { tracks: any[]; title: string; sampleTrack: any }): number | null {
@@ -364,7 +361,7 @@ function AlbumContextMenu({
               onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
             >
               <Activity size={14} style={{ color: '#10b981' }} />
-              Sonic Mix
+              Play similar tracks
             </div>
 
             <div
@@ -456,7 +453,7 @@ const ClassicAlbumCard = memo(function ClassicAlbumCard({
   setSelectedArtist,
 }: CardCommonProps) {
   const isLossless = isLosslessTrack(album.sampleTrack);
-  const formatText = isLossless ? 'HI-RES' : (album.sampleTrack?.format || 'STEREO');
+  const formatText = isHiResTrack(album.sampleTrack) && isLossless ? 'HI-RES' : isLossless ? 'LOSSLESS' : (album.sampleTrack?.format || 'Unknown');
 
   return (
     <div
@@ -931,7 +928,7 @@ const CompactTableView = memo(function CompactTableView({
                                 marginTop: 2,
                               }}
                             >
-                              View Gatefold
+                              View album
                             </button>
                           </div>
                         </div>
@@ -1178,8 +1175,8 @@ function HeroSpotlight({
       <div className="hero-content">
         <div>
           <div className="hero-eyebrow">
-            <span className="hero-badge-spotlight">Editorial Spotlight</span>
-            {isLossless && <span className="hero-badge-telemetry hero-badge-lossless">HI-RES LOSSLESS</span>}
+            <span className="hero-badge-spotlight">Featured album</span>
+            {isLossless && <span className="hero-badge-telemetry hero-badge-lossless">LOSSLESS</span>}
             <span className="hero-badge-telemetry">{album.sampleTrack?.format || 'STEREO'}</span>
             <span className="hero-badge-telemetry">
               <Clock size={10} style={{ marginRight: 2 }} />
@@ -1285,9 +1282,9 @@ function HeroSpotlight({
               fontSize: 13,
               fontWeight: 600,
             }}
-            title="Inspect Album in Gatefold Drawer"
+            title="View album details"
           >
-            View Gatefold
+            View album
           </button>
         </div>
       </div>
@@ -1711,12 +1708,12 @@ export function AlbumsView({
           await store.addToQueue(track);
         }
         await playTrack(similar[0]);
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix: Queued ${similar.length} tracks based on ${album.title}!`, type: 'success' } }));
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Queued ${similar.length} tracks based on ${album.title}`, type: 'success' } }));
       } else {
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' } }));
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'No similar tracks found in library.', type: 'warning' } }));
       }
     } catch (err) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } }));
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Could not queue similar tracks: ${err}`, type: 'error' } }));
     } finally {
       setIsProcessing(null);
     }
@@ -1864,7 +1861,7 @@ export function AlbumsView({
               <div className="studio-shelf-header">
                 <div className="studio-shelf-title-group">
                   <Heart size={16} fill="#ef4444" color="#ef4444" />
-                  <h3 className="studio-shelf-title">Loved & Heavy Rotation</h3>
+                  <h3 className="studio-shelf-title">Loved albums</h3>
                 </div>
                 <span className="studio-shelf-subtitle">{curatedLovedAlbums.length} {curatedLovedAlbums.length === 1 ? 'album' : 'albums'}</span>
               </div>
@@ -1919,9 +1916,9 @@ export function AlbumsView({
               <div className="studio-shelf-header">
                 <div className="studio-shelf-title-group">
                   <Sparkles size={16} color="#38bdf8" />
-                  <h3 className="studio-shelf-title">Audiophile & Hi-Res Masters</h3>
+                  <h3 className="studio-shelf-title">Lossless albums</h3>
                 </div>
-                <span className="studio-shelf-subtitle">Lossless studio recordings ({curatedHiResAlbums.length})</span>
+                <span className="studio-shelf-subtitle">Albums with lossless files ({curatedHiResAlbums.length})</span>
               </div>
               <div className="studio-shelf-scroll-row">
                 {curatedHiResAlbums.map(album => (
@@ -1971,7 +1968,7 @@ export function AlbumsView({
           {/* 3. Spacious Editorial Catalog Grid */}
           <div className="editorial-catalog-section">
             <div className="editorial-catalog-header">
-              <h3 className="editorial-catalog-title">Editorial Catalog</h3>
+              <h3 className="editorial-catalog-title">All albums</h3>
               <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{filteredAlbums.length} {filteredAlbums.length === 1 ? 'album' : 'albums'}</span>
             </div>
             <div className="editorial-catalog-grid">
@@ -2141,7 +2138,7 @@ export function AlbumsView({
                       color: 'var(--accent)',
                       fontFamily: 'ui-monospace, monospace'
                     }}>
-                      GATEFOLD AUDIOPHILE ARCHIVE
+                      Album details
                     </span>
                     <button
                       type="button"
@@ -2177,11 +2174,7 @@ export function AlbumsView({
                     <div className="gatefold-telemetry-item">
                       <span className="gatefold-telemetry-label">Quality</span>
                       <span className="gatefold-telemetry-value">
-                        {isHiResTrack(selectedAlbum.sampleTrack)
-                          ? '24-bit Hi-Res Lossless'
-                          : isLosslessTrack(selectedAlbum.sampleTrack)
-                          ? '16-bit CD Lossless'
-                          : 'Standard Quality'}
+                        {formatAudioResolution(selectedAlbum.sampleTrack) || (isLosslessTrack(selectedAlbum.sampleTrack) ? 'Lossless · resolution unknown' : 'Resolution unknown')}
                       </span>
                     </div>
                     <div className="gatefold-telemetry-item">

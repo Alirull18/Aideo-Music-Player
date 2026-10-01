@@ -320,7 +320,7 @@ export function LyricsPanel() {
               const raw = lyrics.map(l => `[${fmt(l.time_secs).padStart(5, '0')}.00]${l.text}`).join('\n');
               setEditContent(raw);
               setShowEditor(true);
-            }}>✍️ Studio</button>
+            }}>Edit lyrics</button>
 
             {/* Status Indicator */}
             <div style={{
@@ -451,7 +451,7 @@ export function LyricsPanel() {
                           setEditContent('');
                           setShowEditor(true);
                         }}>
-                          ✍️ Studio
+                          Edit lyrics
                         </button>
                       </div>
                     </div>
@@ -473,7 +473,7 @@ export function LyricsPanel() {
                         onSubmit: (val) => doSearch(val)
                       });
                     }}>🔍 Manual</button>
-                    <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => { setEditContent(''); setShowEditor(true); }}>✍️ Studio</button>
+                    <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={() => { setEditContent(''); setShowEditor(true); }}>Edit lyrics</button>
                   </div>
                 </div>
               ) : (
@@ -580,7 +580,7 @@ export function LyricsPanel() {
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
               <div className="modal-header">
                 <div>
-                  <h3 style={{ margin: 0 }}>Lyric Studio</h3>
+                  <h3 style={{ margin: 0 }}>Edit lyrics</h3>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>Paste your LRC text or synchronized lyrics below.</div>
                 </div>
                 <button className="modal-close" onClick={() => setShowEditor(false)}>✕</button>
