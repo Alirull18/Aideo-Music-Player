@@ -140,6 +140,8 @@ yt-dlp.exe
 ytdlp.exe
 *.exe
 *.msi
+!docs/downloads/*.exe
+!docs/downloads/*.msi
 *.sig
 *.dll
 *.dylib
