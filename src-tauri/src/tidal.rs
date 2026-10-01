@@ -874,31 +874,30 @@ pub async fn tidal_download(
     // Spawn downloader in background to keep UI fully responsive
     tokio::spawn(async move {
         let client = get_client();
-        if let Ok(dl_res) = client.get(&direct_url_clone).send().await {
-            let status = dl_res.status();
-            if status.is_success() {
+        let result: Result<(), String> = async {
+            let dl_res = client.get(&direct_url_clone).send().await
+                .map_err(|e| format!("Download request failed: {e}"))?
+                .error_for_status().map_err(|e| format!("Download HTTP error: {e}"))?;
                 let total_size = dl_res.content_length().unwrap_or(0);
                 let mut downloaded: u64 = 0;
 
-                if let Ok(mut file) = std::fs::File::create(&file_path) {
+                let mut file = std::fs::File::create(&file_path)
+                    .map_err(|e| format!("Cannot create download file: {e}"))?;
                      use std::io::Write;
                      let mut stream = dl_res.bytes_stream();
                      let mut last_emit_time = std::time::Instant::now();
-                     let mut failed = false;
 
                      while let Some(chunk_res) = stream.next().await {
                         match chunk_res {
                             Ok(chunk) => {
-                                if file.write_all(&chunk).is_err() {
-                                    failed = true;
-                                    break;
-                                }
+                                file.write_all(&chunk).map_err(|e| format!("Cannot write download file: {e}"))?;
                                 downloaded += chunk.len() as u64;
 
                                 // Throttle progress events to prevent flooding (max once every 150ms)
                                 if last_emit_time.elapsed() >= std::time::Duration::from_millis(150) {
                                     let percent = if total_size > 0 {
-                                        (downloaded as f64 / total_size as f64) * 100.0
+                                        // 100% means the file was flushed and imported, not just received.
+                                        ((downloaded as f64 / total_size as f64) * 100.0).min(99.9)
                                     } else {
                                         0.0
                                     };
@@ -915,15 +914,11 @@ pub async fn tidal_download(
                                     last_emit_time = std::time::Instant::now();
                                 }
                             }
-                            Err(_) => {
-                                failed = true;
-                                break;
-                            }
+                            Err(e) => return Err(format!("Download stream failed: {e}")),
                         }
                      }
 
-                     if !failed {
-                        let _ = file.flush();
+                        file.flush().map_err(|e| format!("Cannot flush download file: {e}"))?;
                         println!("{BOLD}{GREEN}✔ [TIDAL MONITOR] Direct download completed!{RESET}");
 
                         // Auto-import completed file into library
@@ -952,7 +947,8 @@ pub async fn tidal_download(
                             };
                             let mut tracks = vec![new_track];
                             let mut conn = crate::safe_lock(&db_clone);
-                            let _ = crate::db::save_tracks(&mut conn, &mut tracks);
+                            crate::db::save_tracks(&mut conn, &mut tracks)
+                                .map_err(|e| format!("Cannot import downloaded track: {e}"))?;
                         }
 
                         // Emit final 100% progress
@@ -969,15 +965,15 @@ pub async fn tidal_download(
                             "filename": filename_clone.clone(),
                             "track_id": track_id_clone.clone()
                         }));
-                        return;
-                     }
-                }
-            }
+                        Ok(())
+        }.await;
+        if let Err(error) = result {
+            let _ = app_handle_clone.emit("tidal-download-error", serde_json::json!({
+                "filename": filename_clone,
+                "track_id": track_id_clone,
+                "error": error
+            }));
         }
-        let _ = app_handle_clone.emit("tidal-download-error", serde_json::json!({
-            "filename": filename_clone.clone(),
-            "track_id": track_id_clone.clone()
-        }));
     });
 
     Ok(true)

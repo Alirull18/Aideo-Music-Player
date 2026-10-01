@@ -5,7 +5,6 @@ import type { VisualizerMode as StoreVisualizerMode, VisualizerDecayRate } from 
 
 // Backward-compatible VisualizerMode for legacy consumers (e.g. FullscreenView)
 export type VisualizerMode = 'baseline' | 'circle' | 'wave';
-export type ExtendedVisualizerMode = StoreVisualizerMode;
 export type { VisualizerDecayRate, StoreVisualizerMode };
 
 export interface VisualizerProps {
@@ -13,7 +12,6 @@ export interface VisualizerProps {
   decayRate?: VisualizerDecayRate;
 }
 
-export const VISUALIZER_MODES: StoreVisualizerMode[] = ['bars', 'mirror', 'wave', 'circle', 'dots'];
 
 export interface DecayConfig {
   smoothFactor: number;

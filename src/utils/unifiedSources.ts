@@ -32,7 +32,7 @@ export const normalizeArtist = (s?: string | null): string =>
 export function extractPrimaryArtist(artistStr?: string | null): string {
   const norm = normalizeArtist(artistStr);
   if (!norm) return '';
-  const parts = norm.split(/\s*(?:\bfeat(?:\.|\b)|\bft(?:\.|\b)|\bfeaturing\b|,|\/|&|\+|\bwith\b|\bvs(?:\.|\b)|\bx(?=\s+\S))\s*/i);
+  const parts = norm.split(/\s*(?:\bfeat(?:\.|\b)|\bft(?:\.|\b)|\bfeaturing\b|,|;|\/|&|\+|\bwith\b|\bvs(?:\.|\b)|\bx(?=\s+\S))\s*/i);
   return parts[0]?.trim() || norm;
 }
 
@@ -46,8 +46,8 @@ export function getArtistAliases(artistStr?: string | null): string[] {
   const withoutParens = norm.replace(/\s*[\(\[][^\)\]]+[\)\]]/g, ' ').replace(/\s+/g, ' ').trim();
   if (withoutParens) {
     set.add(withoutParens);
-    const parts = withoutParens.split(/\s*(?:\bfeat(?:\.|\b)|\bft(?:\.|\b)|\bfeaturing\b|,|\/|&|\+|\bwith\b|\bvs(?:\.|\b)|\bx(?=\s+\S))\s*/i);
-    if (parts[0]?.trim()) set.add(parts[0].trim());
+    const primary = extractPrimaryArtist(withoutParens);
+    if (primary) set.add(primary);
   }
 
   // Inside parentheses: e.g. "aespa (에스파)" -> "에스파"
@@ -57,8 +57,8 @@ export function getArtistAliases(artistStr?: string | null): string[] {
       const inner = m.replace(/[\[\]\(\)]/g, '').trim();
       if (inner && !/^(?:feat|ft|featuring|version|remix|edit|deluxe|live|mono|stereo)/i.test(inner)) {
         set.add(inner);
-        const parts = inner.split(/\s*(?:\bfeat(?:\.|\b)|\bft(?:\.|\b)|\bfeaturing\b|,|\/|&|\+|\bwith\b|\bvs(?:\.|\b)|\bx(?=\s+\S))\s*/i);
-        if (parts[0]?.trim()) set.add(parts[0].trim());
+        const primary = extractPrimaryArtist(inner);
+        if (primary) set.add(primary);
       }
     }
   }

@@ -13,6 +13,15 @@
 - Fixed duplicate modal animation keys and an ignored album layout CSS property.
 
 
+## Unreleased — 2026-10-01 technical-debt corrections
+
+- Audio: exhaustive Symphonia sample conversion; consistent FFmpeg stereo; safe unknown-duration RAM bypass; decoder-owned decrypted-file cleanup bound to the installed child; genuine stereo folding before DSP; live crossfade policy with latched duration, queue-generation invalidation and seek-safe handoff cancellation.
+- State and contracts: preserve backend ReplayGain/playback rate across client DSP updates; truthful pitch-changing speed controls, unity reset/rejection in bit-perfect mode; finite sonic analysis and NULL unanalysed rows; metadata preference at equal sonic distance.
+- UI: correlated playback/buffering feedback with immediate dismissal on user stop, readable provider/scanner failures, terminal download success only after finalization, provider Library-settings navigation, pruning/utilization against fresh persisted quota, functional visualizer overlay/focus CSS and UTF-8 text corrections.
+- Cleanup: remove unused direct dependencies and private helpers, share track/menu/artist/thumbnail utilities, inject cloud-sync state access, migrate saved loved-album identities, replace obsolete/vacuous tests with live-path coverage. Frontend lookahead pre-resolution and public IPC/event contracts remain intact.
+- Limits: `aideo://` application dispatch awaits an action specification; strict sample identity remains unverified, with no physical WASAPI/ASIO or acoustic-continuity certification. HE-AAC local-fixture test is explicitly ignored.
+
+
 ## 📑 Table of Contents
 
 - [💎 Aideo Music Player — Complete Version History \& Release Dossier](#-aideo-music-player--complete-version-history--release-dossier)

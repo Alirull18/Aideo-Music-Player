@@ -672,22 +672,17 @@ pub async fn get_subsonic_password(app_handle: tauri::AppHandle) -> Result<Strin
     }
 }
 
-pub fn prune_cache_to_limit_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn cache_limit_gb(app_handle: &tauri::AppHandle) -> f64 {
     use tauri::Manager;
-    let limit_gb = if let Ok(app_data) = app_handle.path().app_data_dir() {
-        let limit_file = app_data.join("cache_limit_gb.txt");
-        if limit_file.exists() {
-            if let Ok(content) = std::fs::read_to_string(limit_file) {
-                content.trim().parse::<f64>().unwrap_or(5.0)
-            } else {
-                5.0
-            }
-        } else {
-            5.0
-        }
-    } else {
-        5.0
-    };
+    app_handle.path().app_data_dir().ok()
+        .and_then(|dir| std::fs::read_to_string(dir.join("cache_limit_gb.txt")).ok())
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(5.0)
+}
+
+pub fn prune_cache_to_limit_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let limit_gb = cache_limit_gb(app_handle);
 
     let Some(data_dir) = dirs::data_dir() else {
         return Err("Failed to resolve data directory".to_string());
@@ -787,11 +782,12 @@ pub fn prune_cache_to_limit_internal(app_handle: &tauri::AppHandle) -> Result<()
 #[tauri::command]
 pub async fn prune_cache_to_limit(app_handle: tauri::AppHandle, limit_gb: f64) -> Result<(), String> {
     use tauri::Manager;
-    if let Ok(app_data) = app_handle.path().app_data_dir() {
-        let _ = std::fs::create_dir_all(&app_data);
-        let limit_file = app_data.join("cache_limit_gb.txt");
-        let _ = std::fs::write(limit_file, limit_gb.to_string());
+    if !limit_gb.is_finite() || limit_gb <= 0.0 {
+        return Err("Cache limit must be a finite positive number of GB".to_string());
     }
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&app_data).map_err(|e| e.to_string())?;
+    std::fs::write(app_data.join("cache_limit_gb.txt"), limit_gb.to_string()).map_err(|e| e.to_string())?;
     prune_cache_to_limit_internal(&app_handle)
 }
 

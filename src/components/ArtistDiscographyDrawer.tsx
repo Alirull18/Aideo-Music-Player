@@ -1,81 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { X, Play, Shuffle, User, Disc, Music, Download } from 'lucide-react';
-import defaultCover from '../assets/default_cover.png';
-import { sortAlbumTracks, extractPrimaryArtist } from '../utils/albumUtils';
-import { SimpleLRU } from '../utils/lruCache';
+import { sortAlbumTracks } from '../utils/albumUtils';
+import { extractPrimaryArtist } from '../utils/unifiedSources';
+import { AlbumThumbnail } from './AlbumThumbnail';
 import { foldSearchText, simplifyPunctuation } from '../utils/searchParser';
 import { fmt } from '../utils';
 import { shuffleArray } from '../utils/shuffle';
 
-const coverArtCache = new SimpleLRU<string, string | null>(300);
-const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
-
-function AlbumThumbnail({ sampleTrack, title }: { sampleTrack: any; title: string }) {
-  const targetPath = sampleTrack?.cover_url || sampleTrack?.path || sampleTrack?.stream_url;
-  const [art, setArt] = useState<string | null>(coverArtCache.get(targetPath) || null);
-
-  useEffect(() => {
-    let active = true;
-    const cached = coverArtCache.get(targetPath) || null;
-    setArt(cached);
-
-    if (!targetPath) return;
-
-    if (targetPath.startsWith('data:') || targetPath.startsWith('http://') || targetPath.startsWith('https://')) {
-      setArt(targetPath);
-      return;
-    }
-
-    if (!cached && !coverArtCache.has(targetPath)) {
-      if (!pendingArtRequests.has(targetPath)) {
-        const req = invoke('get_cover_art', { path: targetPath })
-          .then((res: any) => {
-            const artUrl = res && typeof res === 'string' ? res : null;
-            coverArtCache.set(targetPath, artUrl);
-            return artUrl;
-          })
-          .catch(() => {
-            coverArtCache.set(targetPath, null);
-            return null;
-          })
-          .finally(() => {
-            pendingArtRequests.delete(targetPath);
-          });
-        pendingArtRequests.set(targetPath, req);
-      }
-
-      pendingArtRequests.get(targetPath)?.then(resolvedArt => {
-        if (active) {
-          setArt(resolvedArt || null);
-        }
-      });
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [targetPath]);
-
-  return (
-    <img
-      src={art || defaultCover}
-      alt={title}
-      style={{
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        display: 'block',
-        transition: 'transform 0.4s ease',
-      }}
-      onError={(e) => {
-        (e.target as HTMLImageElement).src = defaultCover;
-      }}
-    />
-  );
-}
 
 interface ArtistDiscographyDrawerProps {
   artistName: string | null;
@@ -106,7 +40,7 @@ export function ArtistDiscographyDrawer({
       const foldedAlbumArtist = foldSearchText(rawAlbumArtist);
       const simpleArtist = simplifyPunctuation(foldedArtist);
       const simpleAlbumArtist = simplifyPunctuation(foldedAlbumArtist);
-      const primaryArtist = foldSearchText(extractPrimaryArtist(rawArtist));
+      const primaryArtist = foldSearchText(extractPrimaryArtist(rawArtist) || 'Unknown Artist');
 
       if (foldedArtist === foldedTarget || foldedAlbumArtist === foldedTarget) return true;
       if (simpleTarget && (simpleArtist === simpleTarget || simpleAlbumArtist === simpleTarget)) return true;
@@ -342,7 +276,7 @@ export function ArtistDiscographyDrawer({
                     >
                       <div style={{ width: '100%', paddingTop: '100%', position: 'relative', borderRadius: 8, overflow: 'hidden', marginBottom: 6, background: '#0e0e14' }}>
                         <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-                          <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+                          <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} style={{ transition: 'transform 0.4s ease' }} />
                         </div>
                       </div>
                       <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 1 }} title={album.title}>

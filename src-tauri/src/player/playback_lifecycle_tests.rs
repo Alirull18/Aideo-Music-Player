@@ -442,6 +442,7 @@ mod playback_lifecycle_tests {
     }
 
     #[test]
+    #[ignore = "requires the local HE-AAC/SBR fixture in TEMP"]
     fn test_he_aac_sbr_symphonia_half_rate_proves_ffmpeg_delegation() {
         use symphonia::core::io::MediaSourceStream;
         use symphonia::core::probe::Hint;
@@ -450,9 +451,6 @@ mod playback_lifecycle_tests {
         use symphonia::core::codecs::DecoderOptions;
 
         let path = std::env::temp_dir().join("aideo_cache_c3f44a8c7c2ef42d9916514018471758.m4a");
-        if !path.exists() {
-            return;
-        }
 
         let file = std::fs::File::open(&path).unwrap();
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -500,6 +498,286 @@ mod playback_lifecycle_tests {
         // Missing or incomplete extra_data should fallback safely to container rate
         assert_eq!(detect_aac_actual_sample_rate(None, 48000), 48000);
         assert_eq!(detect_aac_actual_sample_rate(Some(&[43]), 48000), 48000);
+    }
+
+    #[test]
+    fn decoded_multichannel_wav_preserves_centre_audio_through_stereo_dsp() {
+        use crate::player::{append_f32_channel_data, decoded_frames, fold_for_stereo_output, AudioNode, DSPState, EqNode};
+        use symphonia::core::{io::MediaSourceStream, probe::Hint, formats::FormatOptions, meta::MetadataOptions, codecs::DecoderOptions};
+        let frames = 1024u32;
+        let bytes = frames * 6 * 2;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + bytes).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&6u16.to_le_bytes());
+        wav.extend_from_slice(&48000u32.to_le_bytes());
+        wav.extend_from_slice(&(48000u32 * 12).to_le_bytes());
+        wav.extend_from_slice(&12u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&bytes.to_le_bytes());
+        for frame in 0..frames {
+            for channel in 0..6 {
+                let sample = if channel == 2 {
+                    (16384.0 * (frame as f32 * std::f32::consts::TAU * 1000.0 / 48000.0).sin()) as i16
+                } else { 0 };
+                wav.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
+        let source = MediaSourceStream::new(Box::new(std::io::Cursor::new(wav)), Default::default());
+        let mut hint = Hint::new();
+        hint.with_extension("wav");
+        let probed = crate::player::get_probe().format(&hint, source, &FormatOptions::default(), &MetadataOptions::default()).unwrap();
+        let mut format = probed.format;
+        let track = format.default_track().unwrap().clone();
+        let mut decoder = crate::player::get_codecs().make(&track.codec_params, &DecoderOptions::default()).unwrap();
+        let mut planar = vec![Vec::new(); 6];
+        while let Ok(packet) = format.next_packet() {
+            let decoded = decoder.decode(&packet).unwrap();
+            assert!(decoded_frames(&decoded) > 0);
+            for (channel, samples) in planar.iter_mut().enumerate() { append_f32_channel_data(&decoded, channel, 0, samples); }
+        }
+        assert_eq!(planar[2].len(), frames as usize);
+        assert!(planar[0].iter().all(|sample| *sample == 0.0));
+        fold_for_stereo_output(&mut planar, 2);
+        let dry_energy: f32 = planar[0][512..].iter().map(|sample| sample * sample).sum();
+        assert!(dry_energy > 1.0);
+        let mut dsp = DSPState::default();
+        dsp.enabled = true;
+        dsp.eq_enabled = true;
+        dsp.eq_graphic_gains.fill(-12.0);
+        let mut eq = EqNode::new();
+        eq.update_params(&dsp, 48000.0);
+        eq.process(&mut planar, 48000.0);
+        let wet_energy: f32 = planar[0][512..].iter().map(|sample| sample * sample).sum();
+        assert!(wet_energy < dry_energy * 0.8);
+        assert_eq!(planar[0], planar[1]);
+    }
+
+    #[test]
+    fn all_sample_formats_append_with_delay_skip() {
+        use std::borrow::Cow;
+        use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Channels, Signal, SignalSpec};
+        use symphonia::core::sample::{i24, u24};
+        use crate::player::{append_f32_channel_data, decoded_frames};
+        macro_rules! check {
+            ($variant:ident, $zero:expr, $half:expr) => {{
+                let mut buffer = AudioBuffer::new(3, SignalSpec::new(48000, Channels::FRONT_LEFT));
+                buffer.render_reserved(Some(3));
+                buffer.chan_mut(0).copy_from_slice(&[$zero, $half, $zero]);
+                let decoded = AudioBufferRef::$variant(Cow::Borrowed(&buffer));
+                assert_eq!(decoded_frames(&decoded), 3);
+                let mut out = vec![9.0];
+                append_f32_channel_data(&decoded, 0, 1, &mut out);
+                assert_eq!(out, vec![9.0, 0.5, 0.0]);
+                append_f32_channel_data(&decoded, 0, 3, &mut out);
+                assert_eq!(out, vec![9.0, 0.5, 0.0]);
+            }};
+        }
+        check!(U8, 128u8, 192u8);
+        check!(U16, 32768u16, 49152u16);
+        check!(U24, u24::from(8_388_608u32), u24::from(12_582_912u32));
+        check!(U32, 2_147_483_648u32, 3_221_225_472u32);
+        check!(S8, 0i8, 64i8);
+        check!(S16, 0i16, 16384i16);
+        check!(S24, i24::from(0), i24::from(4_194_304));
+        check!(S32, 0i32, 1_073_741_824i32);
+        check!(F32, 0.0f32, 0.5f32);
+        check!(F64, 0.0f64, 0.5f64);
+    }
+
+    #[test]
+    fn unknown_duration_decodes_on_demand_without_ram_truncation() {
+        use crate::player::should_bypass_ram_cache;
+        for duration in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(should_bypass_ram_cache(1024, duration, 48000, 2));
+        }
+        assert!(!should_bypass_ram_cache(1024, 60.0, 48000, 2));
+        assert!(should_bypass_ram_cache(1024, 60.0, 48000, 6));
+    }
+
+    #[test]
+    fn decrypted_file_lives_until_last_decoder_owner_and_never_removes_neighbour() {
+        use crate::player::DecryptedPlaybackFile;
+        let owner = DecryptedPlaybackFile::create(b"decoded audio", "wav").unwrap();
+        let path = owner.0.clone();
+        let neighbour = DecryptedPlaybackFile::create(b"other audio", "wav").unwrap();
+        let decoder_owner = owner.clone();
+        drop(owner);
+        assert_eq!(fs::read(&path).unwrap(), b"decoded audio");
+        drop(decoder_owner);
+        assert!(!path.exists());
+        assert_eq!(fs::read(&neighbour.0).unwrap(), b"other audio");
+    }
+
+    #[test]
+    fn centre_signal_reaches_stereo_eq_once_with_filter_state_preserved() {
+        use crate::player::{fold_for_stereo_output, AudioNode, DSPState, EqNode};
+        let mut dsp = DSPState::default();
+        dsp.enabled = true;
+        dsp.eq_enabled = true;
+        dsp.eq_graphic_gains = vec![-12.0; 10];
+        let mut eq = EqNode::new();
+        eq.update_params(&dsp, 48000.0);
+        let mut centre = vec![vec![0.0; 1024]; 6];
+        for (frame, sample) in centre[2].iter_mut().enumerate() {
+            *sample = 0.5 * (frame as f32 * std::f32::consts::TAU * 1000.0 / 48000.0).sin();
+        }
+        fold_for_stereo_output(&mut centre, 2);
+        assert_eq!(centre.len(), 2);
+        let dry_energy: f32 = centre[0][512..].iter().map(|sample| sample * sample).sum();
+        let folded = centre.clone();
+        fold_for_stereo_output(&mut centre, 2);
+        assert_eq!(centre, folded);
+        eq.process(&mut centre, 48000.0);
+        let wet_energy: f32 = centre[0][512..].iter().map(|sample| sample * sample).sum();
+        assert!(wet_energy < dry_energy * 0.8);
+        assert_eq!(centre[0], centre[1]);
+        let mut silence = vec![vec![0.0; 8]; 2];
+        eq.process(&mut silence, 48000.0);
+        assert!(silence[0].iter().any(|sample| sample.abs() > 1e-8));
+    }
+
+    #[test]
+    fn encoder_padding_keeps_ingested_cursor_stable_and_handles_short_tail() {
+        use crate::player::trim_encoder_padding;
+        let mut samples = vec![(100..1000).map(|sample| sample as f32).collect::<Vec<_>>()];
+        trim_encoder_padding(&mut samples, 50);
+        assert_eq!(samples[0][200], 300.0);
+        assert_eq!(samples[0].last(), Some(&949.0));
+        trim_encoder_padding(&mut samples, 1000);
+        assert!(samples[0].is_empty());
+        trim_encoder_padding(&mut samples, 1);
+        assert!(samples[0].is_empty());
+    }
+
+    #[test]
+    fn fade_live_policy_and_cancelled_reservation_restore_exact_queue_entry() {
+        use crate::player::{crossfade_trigger_position, CrossfadeReservation, DSPState};
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+        use crate::safe_lock;
+        let mut dsp = DSPState::default();
+        assert_eq!(crossfade_trigger_position(&dsp, 100.0, false, false), None);
+        dsp.crossfade_transition_enabled = true;
+        dsp.crossfade_transition_duration = 3.0;
+        assert_eq!(crossfade_trigger_position(&dsp, 100.0, false, false), Some(97.0));
+        dsp.crossfade_transition_duration = 5.0;
+        assert_eq!(crossfade_trigger_position(&dsp, 100.0, false, false), Some(95.0));
+        assert_eq!(crossfade_trigger_position(&dsp, 100.0, true, false), None);
+        assert_eq!(crossfade_trigger_position(&dsp, 100.0, false, true), None);
+        dsp.crossfade_transition_enabled = false;
+        assert_eq!(crossfade_trigger_position(&dsp, 100.0, false, false), None);
+        let queue = Arc::new(Mutex::new(VecDeque::from(["next".to_string(), "later".to_string()])));
+        let path = safe_lock(&queue).pop_front();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let worker = std::thread::spawn(move || {
+            while !worker_cancel.load(Ordering::SeqCst) { std::thread::yield_now(); }
+        });
+        drop(CrossfadeReservation { path, queue: queue.clone(), queue_generation: crate::player::LOCAL_QUEUE_GENERATION.load(Ordering::SeqCst), cancel: cancel.clone(), process: Arc::new(Mutex::new(None)), worker: Some(worker) });
+        assert!(cancel.load(Ordering::SeqCst));
+        assert_eq!(*safe_lock(&queue), VecDeque::from(["next".to_string(), "later".to_string()]));
+        let path = safe_lock(&queue).pop_front();
+        let mut handed_off = CrossfadeReservation { path, queue: queue.clone(), queue_generation: crate::player::LOCAL_QUEUE_GENERATION.load(Ordering::SeqCst), cancel, process: Arc::new(Mutex::new(None)), worker: None };
+        assert_eq!(handed_off.path.take().as_deref(), Some("next"));
+        drop(handed_off);
+        assert_eq!(*safe_lock(&queue), VecDeque::from(["later".to_string()]));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn cancelled_fade_reaps_owned_decoder_process_before_returning_queue_entry() {
+        use crate::player::CrossfadeReservation;
+        use crate::safe_lock;
+        use std::io::Read;
+        use std::sync::{Arc, Mutex, atomic::AtomicBool};
+        use std::collections::VecDeque;
+        let powershell = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let mut child = std::process::Command::new(powershell)
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"])
+            .stdout(std::process::Stdio::piped()).spawn().unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let process = Arc::new(Mutex::new(Some(child)));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let start = std::time::Instant::now();
+        drop(CrossfadeReservation {
+            path: Some("reserved.flac".into()), queue: queue.clone(),
+            queue_generation: crate::player::LOCAL_QUEUE_GENERATION.load(std::sync::atomic::Ordering::SeqCst),
+            cancel: Arc::new(AtomicBool::new(false)), process: process.clone(), worker: None,
+        });
+        assert!(safe_lock(&process).is_none());
+        assert_eq!(stdout.read(&mut [0u8; 1]).unwrap(), 0);
+        assert!(start.elapsed() < std::time::Duration::from_secs(10));
+        assert_eq!(safe_lock(&queue).pop_front().as_deref(), Some("reserved.flac"));
+    }
+
+    #[test]
+    fn source_queue_invalidation_does_not_resurrect_reserved_local_track() {
+        use crate::player::{CrossfadeReservation, LOCAL_QUEUE_GENERATION, should_restore_fade_reservation};
+        use crate::safe_lock;
+        use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+        use std::collections::VecDeque;
+        assert!(!should_restore_fade_reservation(7, 7, true));
+        assert!(!should_restore_fade_reservation(7, 8, false));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let generation = LOCAL_QUEUE_GENERATION.load(Ordering::SeqCst).wrapping_sub(1);
+        drop(CrossfadeReservation { path: Some("discarded.flac".into()), queue: queue.clone(),
+            queue_generation: generation, cancel: Arc::new(AtomicBool::new(false)),
+            process: Arc::new(Mutex::new(None)), worker: None });
+        assert!(safe_lock(&queue).is_empty());
+    }
+
+    #[test]
+    fn seek_cancels_final_fade_handoff_without_duplicate_next_playback() {
+        use crate::player::{cancel_crossfade_handoff, CrossfadeReservation, LOCAL_QUEUE_GENERATION};
+        use crate::safe_lock;
+        use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+        use std::collections::VecDeque;
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let mut reservation = Some(CrossfadeReservation { path: Some("next.flac".into()), queue: queue.clone(),
+            queue_generation: LOCAL_QUEUE_GENERATION.load(Ordering::SeqCst), cancel: Arc::new(AtomicBool::new(false)),
+            process: Arc::new(Mutex::new(None)), worker: None });
+        let mut handoff = true;
+        let mut next_track = Some(("next.flac".into(), 3.0, Some("handoff".into())));
+        cancel_crossfade_handoff(&mut reservation, &mut handoff, &mut next_track);
+        assert!(!handoff);
+        assert!(next_track.is_none());
+        assert!(reservation.is_none());
+        assert_eq!(*safe_lock(&queue), VecDeque::from(["next.flac".to_string()]));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn stale_decrypted_decoder_drop_cannot_kill_newer_process() {
+        use crate::player::DecryptedProcessGuard;
+        use crate::safe_lock;
+        use std::sync::{Arc, Mutex};
+        let powershell = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let spawn = || std::process::Command::new(&powershell)
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]).spawn().unwrap();
+        let old = spawn();
+        let old_id = old.id();
+        let slot = Arc::new(Mutex::new(Some(old)));
+        let stale_guard = DecryptedProcessGuard(Some((slot.clone(), old_id)));
+        let newer = spawn();
+        let newer_id = newer.id();
+        let mut old = safe_lock(&slot).replace(newer).unwrap();
+        old.kill().unwrap();
+        old.wait().unwrap();
+        drop(stale_guard);
+        {
+            let mut lock = safe_lock(&slot);
+            assert_eq!(lock.as_ref().unwrap().id(), newer_id);
+            assert!(lock.as_mut().unwrap().try_wait().unwrap().is_none());
+        }
+        drop(DecryptedProcessGuard(Some((slot.clone(), newer_id))));
+        assert!(safe_lock(&slot).is_none());
     }
 }
 

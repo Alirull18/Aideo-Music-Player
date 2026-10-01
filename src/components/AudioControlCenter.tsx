@@ -1492,12 +1492,17 @@ export function AudioControlCenter() {
                       {playbackRate.toFixed(2)}x
                     </span>
                   </div>
+                  <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: '0 0 10px' }}>
+                    {playbackPath.bit_perfect ? 'Disable Bit-Perfect mode to change speed.' : 'Changing speed also changes pitch.'}
+                  </p>
 
                   <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
                     {[0.75, 1.0, 1.25, 1.5].map(rate => (
                       <button
                         key={rate}
                         onClick={() => setPlaybackRate(rate)}
+                        type="button"
+                        disabled={playbackPath.bit_perfect}
                         style={{
                           flex: 1,
                           padding: '4px 0',
@@ -1517,6 +1522,8 @@ export function AudioControlCenter() {
 
                   <input
                     type="range"
+                    aria-label="Playback speed"
+                    disabled={playbackPath.bit_perfect}
                     min={0.5}
                     max={2.0}
                     step={0.05}

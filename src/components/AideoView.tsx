@@ -14,11 +14,10 @@ import { StageHome } from './aideo/StageHome';
 import { HorizonHome } from './aideo/HorizonHome';
 import { SpatialGlassHome } from './aideo/SpatialGlassHome';
 import { AideoHomeProps, SearchBarProps, HomeResumeInfo } from './aideo/HomeParts';
-import { classifyDiscoveryPlayback, pathsEqual } from '../utils';
+import { classifyDiscoveryPlayback, pathsEqual, baseName, parseDuration } from '../utils';
 import { foldSearchText, simplifyPunctuation } from '../utils/searchParser';
-import { extractPrimaryArtist } from '../utils/albumUtils';
 import { UnifiedSearchResults } from './UnifiedSearchResults';
-import { catalogTrack, groupRecordings, searchSources, type SourceSearch } from '../utils/unifiedSources';
+import { catalogTrack, groupRecordings, searchSources, extractPrimaryArtist, type SourceSearch } from '../utils/unifiedSources';
 import { SongSources } from './aideo/HomeParts';
 import { discoveryTrack, unifyDiscoveryHub } from '../utils/discoveryFeed';
 import { TrackContextMenu } from './TrackContextMenu';
@@ -29,26 +28,6 @@ function fmt(s: number | null) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
-// Extract track base name
-function baseName(p: string | null) {
-  return p ? (p.split(/[\\/]/).pop() ?? p) : 'â€”';
-}
-
-// Parse raw duration strings into seconds (defaulting to 180s if 0 or invalid)
-function parseDuration(raw: string | null | undefined): number {
-  if (!raw) return 180;
-  const parts = raw.split(':').map(Number);
-  if (parts.some(isNaN)) return 180;
-  let secs = 0;
-  if (parts.length === 3) {
-    secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
-  } else if (parts.length === 2) {
-    secs = parts[0] * 60 + parts[1];
-  } else {
-    secs = parts[0] || 0;
-  }
-  return secs > 0 ? secs : 180;
-}
 
 // Format large stats numbers
 function formatNumber(numStr: string | number | null | undefined) {
@@ -854,9 +833,19 @@ export function AideoView() {
         timers.push(timer);
       }
     });
+    const errorSub = listen<{ track_id?: string }>('tidal-download-error', event => {
+      const tid = event.payload.track_id;
+      if (!tid) return;
+      setTidalDownloads(previous => {
+        const next = { ...previous };
+        delete next[tid];
+        return next;
+      });
+    });
 
     return () => {
       sub.then(f => f());
+      errorSub.then(unlisten => unlisten());
       timers.forEach(t => clearTimeout(t));
     };
   }, []);
@@ -883,9 +872,19 @@ export function AideoView() {
         timers.push(timer);
       }
     });
+    const errorSub = listen<{ track_id?: string }>('qobuz-download-error', event => {
+      const tid = event.payload.track_id;
+      if (!tid) return;
+      setQobuzDownloads(previous => {
+        const next = { ...previous };
+        delete next[tid];
+        return next;
+      });
+    });
 
     return () => {
       sub.then(f => f());
+      errorSub.then(unlisten => unlisten());
       timers.forEach(t => clearTimeout(t));
     };
   }, []);
@@ -1059,7 +1058,7 @@ export function AideoView() {
         });
       }
 
-      // ðŸš€ Invoke new high-performance parallel backend command!
+      // Fetch the personalized discovery hub in parallel on the backend.
       const resolved = await invoke<any>('get_personalized_discovery_hub', {
         seedArtists: offlineSeedArtists,
         topArtists,
@@ -1250,7 +1249,7 @@ export function AideoView() {
         title: track.title || 'Unknown Title',
         artist: track.artist || 'Unknown Artist',
         album: (track as any).album || 'Local Library',
-        duration: parseDuration(track.duration_raw),
+        duration: parseDuration(track.duration_raw) || 180,
         format: ext || 'Local File',
         cover_url: track.cover_url || null,
         loved: (track as any).loved || 0,
@@ -1286,7 +1285,7 @@ export function AideoView() {
         detail: { message: `Streaming preview: ${track.title}...`, type: 'info' }
       }));
       try {
-        const parsedSeconds = parseDuration(track.duration_raw);
+        const parsedSeconds = parseDuration(track.duration_raw) || 180;
         await playStream(track.url, {
           title: track.title,
           artist: track.artist,
@@ -1320,7 +1319,7 @@ export function AideoView() {
     }));
 
     try {
-      const parsedSeconds = (track: any): number => parseDuration(track.duration_raw);
+      const parsedSeconds = (track: { duration_raw?: string | null }): number => parseDuration(track.duration_raw) || 180;
 
       const tracksToQueue: Track[] = mix.tracks.map((t: any) => {
         if (t.source_context) return discoveryTrack(t);
@@ -1403,7 +1402,7 @@ export function AideoView() {
           const rTitle = (r.title || '').toLowerCase().replace(/[\(\[][^\)\]]+[\)\]]/g, '').trim();
           return rTitle.includes(cleanTarget) || cleanTarget.includes(rTitle);
         }) || results[0];
-        const parsedSeconds = parseDuration(match.duration_raw);
+        const parsedSeconds = parseDuration(match.duration_raw) || 180;
         await playStream(match.url, {
           title: match.title,
           artist: match.artist,
@@ -1521,7 +1520,7 @@ export function AideoView() {
       const results = await invoke<any[]>('search_youtube', { query });
       if (results && results.length > 0) {
         const match = results[0];
-        const parsedSeconds = parseDuration(match.duration_raw);
+        const parsedSeconds = parseDuration(match.duration_raw) || 180;
 
         // Clear queue on frontend and backend manually to prevent stopping the track that is about to start
         useStore.setState({ queue: [] });
@@ -1543,7 +1542,7 @@ export function AideoView() {
               const res = await invoke<any[]>('search_youtube', { query: `${artistProfile.name} - ${t.name}` });
               if (res && res.length > 0) {
                 const subMatch = res[0];
-                const subDuration = parseDuration(subMatch.duration_raw);
+                const subDuration = parseDuration(subMatch.duration_raw) || 180;
                 const virtualTrack: Track = {
                   id: -20000 - Math.floor(Math.random() * 100000),
                   path: subMatch.url,
@@ -1588,7 +1587,7 @@ export function AideoView() {
       const results = await invoke<any[]>('search_youtube', { query: `${artistProfile.name} - ${firstTrack.name}` });
       if (results && results.length > 0) {
         const match = results[0];
-        const parsedSeconds = parseDuration(match.duration_raw);
+        const parsedSeconds = parseDuration(match.duration_raw) || 180;
         const virtualTrack: Track = {
           id: -9999,
           path: match.url,
@@ -1658,7 +1657,7 @@ export function AideoView() {
       const foldedAlbumArtist = foldSearchText(rawAlbumArtist);
       const simpleArtist = simplifyPunctuation(foldedArtist);
       const simpleAlbumArtist = simplifyPunctuation(foldedAlbumArtist);
-      const primaryArtist = foldSearchText(extractPrimaryArtist(rawArtist));
+      const primaryArtist = foldSearchText(extractPrimaryArtist(rawArtist) || 'Unknown Artist');
 
       if (foldedArtist === foldedTarget || foldedAlbumArtist === foldedTarget) return true;
       if (simpleTarget && (simpleArtist === simpleTarget || simpleAlbumArtist === simpleTarget)) return true;
@@ -2050,7 +2049,7 @@ export function AideoView() {
             {currentTrack.title || baseName(currentTrack.path)}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            {currentTrack.artist || 'Unknown Artist'} Â· paused at {fmt(resumePosition)}
+            {currentTrack.artist || 'Unknown Artist'} · paused at {fmt(resumePosition)}
             {currentTrack.duration ? ` of ${fmt(currentTrack.duration)}` : ''}
           </div>
         </div>
@@ -3250,10 +3249,10 @@ export function AideoView() {
                     </h2>
                     <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--text-dim)', fontWeight: 500 }}>
                       {artistProfile.listeners && (
-                        <span>ðŸ‘¥ {formatNumber(artistProfile.listeners)} monthly listeners</span>
+                        <span>👥 {formatNumber(artistProfile.listeners)} monthly listeners</span>
                       )}
                       {artistProfile.playcount && (
-                        <span>ðŸ’¿ {formatNumber(artistProfile.playcount)} total plays</span>
+                        <span>💿 {formatNumber(artistProfile.playcount)} total plays</span>
                       )}
                     </div>
                   </div>

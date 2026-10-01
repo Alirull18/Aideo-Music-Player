@@ -5,7 +5,7 @@ import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
 import { DiscoveryHubData, YoutubeTrack, LEGACY_AIDEO_PAGE_DESIGNS } from '../../store/types';
 import { SimpleLRU } from '../../utils/lruCache';
-import { discoveryTrack } from '../../utils/discoveryFeed';
+import { discoveryTrack, trackSignature } from '../../utils/discoveryFeed';
 import { SourceMenu } from '../SourceMenu';
 
 export function SongSources({ track }: { track: YoutubeTrack }) {
@@ -41,8 +41,6 @@ export interface TaggedTrack {
   shelf: ShelfId;
 }
 
-const trackKey = (t: YoutubeTrack) =>
-  `${(t.artist || '').trim().toLowerCase()}::${(t.title || '').trim().toLowerCase()}`;
 
 const SHELF_DATA_FIELD: Record<ShelfId, string> = {
   recent: 'recently_played',
@@ -62,7 +60,7 @@ export function buildTaggedFeed(data: DiscoveryHubData | null): TaggedTrack[] {
   for (const shelf of SHELF_ORDER) {
     const tracks = (data as any)[SHELF_DATA_FIELD[shelf]] as YoutubeTrack[] | undefined;
     for (const track of tracks || []) {
-      const key = trackKey(track);
+      const key = trackSignature(track);
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ track, shelf });

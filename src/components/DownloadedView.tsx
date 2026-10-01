@@ -85,13 +85,18 @@ export function DownloadedView() {
     }
   };
 
-  const handlePruneCache = async (maxMb: number) => {
+  const handlePruneCache = async () => {
     try {
       setPruning(true);
-      await invoke('prune_cache_to_limit', { maxMb });
+      const info = await invoke<CacheSizeInfo>('get_cache_size_info');
+      const limitGb = info.limit_gb;
+      if (typeof limitGb !== 'number' || !Number.isFinite(limitGb) || limitGb <= 0) {
+        throw new Error('Configured cache limit is unavailable');
+      }
+      await invoke('prune_cache_to_limit', { limitGb });
       await loadCacheInfo();
       window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: `Cache pruned to ${maxMb >= 1024 ? `${(maxMb / 1024).toFixed(1)} GB` : `${maxMb} MB`}`, type: 'success' }
+        detail: { message: `Cache pruned to configured ${limitGb.toFixed(1)} GB limit`, type: 'success' }
       }));
     } catch (err: any) {
       window.dispatchEvent(new CustomEvent('ui-toast', {
@@ -160,12 +165,12 @@ export function DownloadedView() {
     );
   });
 
-  const maxQuotaMb = 5120; // 5 GB default visual reference
+  const maxQuotaMb = (cacheInfo?.limit_gb ?? 0) * 1024;
   const usedMb = cacheInfo 
     ? (cacheInfo.total_mb ?? cacheInfo.mb ?? (cacheInfo.bytes ? cacheInfo.bytes / (1024 * 1024) : (cacheInfo.total_bytes ? cacheInfo.total_bytes / (1024 * 1024) : 0))) 
     : 0;
   const fileCount = cacheInfo ? (cacheInfo.file_count ?? cacheInfo.count ?? 0) : 0;
-  const percentUsed = Math.min(100, Math.max(0, (usedMb / maxQuotaMb) * 100));
+  const percentUsed = maxQuotaMb > 0 ? Math.min(100, Math.max(0, (usedMb / maxQuotaMb) * 100)) : 0;
 
   return (
     <motion.div 
@@ -227,7 +232,7 @@ export function DownloadedView() {
             disabled={loading}
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '8px 14px' }}
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={loading ? 'downloaded-spinner' : ''} />
             Refresh
           </button>
           <button 
@@ -240,12 +245,12 @@ export function DownloadedView() {
           </button>
           <button 
             className="btn btn-secondary" 
-            onClick={() => handlePruneCache(5000)}
+            onClick={handlePruneCache}
             disabled={pruning}
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '8px 14px' }}
           >
             <HardDrive size={14} />
-            Prune to 5GB
+            Prune to {cacheInfo?.limit_gb?.toFixed(1) ?? 'configured'} GB
           </button>
           <button 
             className="btn" 
@@ -287,7 +292,7 @@ export function DownloadedView() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <RefreshCw size={18} className="animate-spin" style={{ color: '#10b981' }} />
+                <RefreshCw size={18} className="downloaded-spinner" style={{ color: '#10b981' }} />
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>
                     Downloading Album / Playlist ({batchDownloadProgress.completed + 1}/{batchDownloadProgress.total})
@@ -359,7 +364,7 @@ export function DownloadedView() {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)' }}>
           <span>Used: {usedMb > 1024 ? `${(usedMb / 1024).toFixed(2)} GB` : `${(usedMb || 0).toFixed(1)} MB`}</span>
-          <span>Target Quota: 5.0 GB</span>
+          <span>Target Quota: {cacheInfo?.limit_gb?.toFixed(1) ?? 'unavailable'} GB</span>
         </div>
       </div>
 
@@ -436,11 +441,10 @@ export function DownloadedView() {
                     justifyContent: 'space-between',
                     padding: '10px 16px',
                     borderRadius: 10,
-                    background: 'rgba(255, 255, 255, 0.02)',
                     border: '1px solid rgba(255, 255, 255, 0.04)',
                     gap: 14
                   }}
-                  className="downloaded-row hover:bg-white/5 transition-colors"
+                  className="downloaded-row"
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                     <div style={{

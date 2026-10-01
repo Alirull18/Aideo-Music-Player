@@ -7,13 +7,13 @@ import {
   Disc, Play, Shuffle, MoreVertical, Plus, Trash2, Activity, ListPlus, Edit3, Image, X, Heart, Tag,
   LayoutGrid, ChevronDown, Sparkles, Clock, Music, AlignJustify, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
-import defaultCover from '../assets/default_cover.png';
 import { extractDominantColor } from '../utils/colorExtractor';
-import { fmt } from '../utils';
+import { fmt, isLosslessTrack, startSonicMix } from '../utils';
 import { shuffleArray } from '../utils/shuffle';
 import { ArtistDiscographyDrawer } from './ArtistDiscographyDrawer';
-import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey, extractPrimaryArtist } from '../utils/albumUtils';
-import { SimpleLRU } from '../utils/lruCache';
+import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey } from '../utils/albumUtils';
+import { extractPrimaryArtist } from '../utils/unifiedSources';
+import { AlbumThumbnail } from './AlbumThumbnail';
 import { parseSearchQuery, foldSearchText, simplifyPunctuation } from '../utils/searchParser';
 import { AlbumViewMode } from '../store/types';
 
@@ -26,10 +26,6 @@ export const ALBUM_VIEW_MODES: { id: AlbumViewMode; label: string; icon: React.R
 // Backward compatibility alias for any external consumers
 export const ALBUM_DESIGNS = ALBUM_VIEW_MODES;
 
-export const isLosslessTrack = (t: any) => {
-  const f = (t?.format || '').toLowerCase();
-  return f.includes('flac') || f.includes('wav') || f.includes('alac') || f.includes('dsf') || f.includes('dff') || f.includes('dsd');
-};
 
 export const isHiResTrack = (t: any) => {
   const sampleRate = t?.catalog_quality?.sample_rate || t?.active_quality?.sample_rate || t?.sample_rate || 0;
@@ -109,18 +105,6 @@ export function extractAlbumYear(album: { tracks: any[]; title: string; sampleTr
   return null;
 }
 
-export const ERA_ORDER = ['2020s', '2010s', '2000s', '1990s', '1980s', '1970s', 'Earlier Releases', 'Unknown Era'];
-
-export function getAlbumEra(year: number | null): string {
-  if (!year) return 'Unknown Era';
-  if (year >= 2020) return '2020s';
-  if (year >= 2010) return '2010s';
-  if (year >= 2000) return '2000s';
-  if (year >= 1990) return '1990s';
-  if (year >= 1980) return '1980s';
-  if (year >= 1970) return '1970s';
-  return 'Earlier Releases';
-}
 
 interface AlbumGroup {
   id: string;
@@ -132,73 +116,6 @@ interface AlbumGroup {
   totalDuration: number;
 }
 
-const coverArtCache = new SimpleLRU<string, string | null>(300);
-const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
-
-function AlbumThumbnail({ sampleTrack, title }: { sampleTrack: any; title: string }) {
-  const targetPath = sampleTrack?.cover_url || sampleTrack?.path || sampleTrack?.stream_url;
-  const [art, setArt] = useState<string | null>(coverArtCache.get(targetPath) || null);
-
-  useEffect(() => {
-    let active = true;
-    const cached = coverArtCache.get(targetPath) || null;
-    setArt(cached);
-
-    if (!targetPath) return;
-
-    if (targetPath.startsWith('data:') || targetPath.startsWith('http://') || targetPath.startsWith('https://')) {
-      setArt(targetPath);
-      return;
-    }
-
-    if (!cached && !coverArtCache.has(targetPath)) {
-      if (!pendingArtRequests.has(targetPath)) {
-        const req = invoke('get_cover_art', { path: targetPath })
-          .then((res: any) => {
-            const artUrl = res && typeof res === 'string' ? res : null;
-            coverArtCache.set(targetPath, artUrl);
-            return artUrl;
-          })
-          .catch(() => {
-            coverArtCache.set(targetPath, null);
-            return null;
-          })
-          .finally(() => {
-            pendingArtRequests.delete(targetPath);
-          });
-        pendingArtRequests.set(targetPath, req);
-      }
-
-      pendingArtRequests.get(targetPath)?.then(resolvedArt => {
-        if (active) {
-          setArt(resolvedArt || null);
-        }
-      });
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [targetPath]);
-
-  return (
-    <img
-      src={art || defaultCover}
-      alt={title}
-      loading="lazy"
-      decoding="async"
-      style={{
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        display: 'block',
-      }}
-      onError={(e) => {
-        (e.target as HTMLImageElement).src = defaultCover;
-      }}
-    />
-  );
-}
 
 const getSavedLovedAlbums = (): string[] => {
   try {
@@ -462,7 +379,7 @@ const ClassicAlbumCard = memo(function ClassicAlbumCard({
       style={{ zIndex: menuOpenFor === album.id ? 1000 : 1 }}
     >
       <div className="classic-card-art-wrap">
-        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} loading="lazy" decoding="async" />
 
         {/* Loved Heart Toggle Button on Top-Left */}
         <button
@@ -737,7 +654,7 @@ const CompactTableView = memo(function CompactTableView({
                 >
                   <td style={{ textAlign: 'center' }}>
                     <div className="compact-cover-wrap">
-                      <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+                      <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} loading="lazy" decoding="async" />
                       <div
                         className="compact-play-overlay"
                         onClick={(e) => {
@@ -854,7 +771,7 @@ const CompactTableView = memo(function CompactTableView({
                         {/* Left column: Cover + format info + Play/Shuffle */}
                         <div className="compact-accordion-left">
                           <div className="compact-accordion-cover" onClick={() => setSelectedAlbum(album)} style={{ cursor: 'pointer' }}>
-                            <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+                            <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} loading="lazy" decoding="async" />
                           </div>
 
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1046,7 +963,7 @@ const EditorialAlbumCard = memo(function EditorialAlbumCard({
       style={{ zIndex: menuOpenFor === album.id ? 1000 : 1 }}
     >
       <div className="classic-card-art-wrap">
-        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} loading="lazy" decoding="async" />
 
         <button
           type="button"
@@ -1169,7 +1086,7 @@ function HeroSpotlight({
   return (
     <div className="studio-hero-spotlight">
       <div className="hero-cover-wrap" onClick={() => setSelectedAlbum(album)} style={{ cursor: 'pointer' }}>
-        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} loading="lazy" decoding="async" />
       </div>
 
       <div className="hero-content">
@@ -1420,8 +1337,8 @@ export function AlbumsView({
         }
 
         if (!albumArtist && group.artist !== 'Various Artists' && group.artist !== trackArtist) {
-          const firstArtistMain = extractPrimaryArtist(group.artist).toLowerCase();
-          const currArtistMain = extractPrimaryArtist(trackArtist).toLowerCase();
+          const firstArtistMain = extractPrimaryArtist(group.artist) || 'unknown artist';
+          const currArtistMain = extractPrimaryArtist(trackArtist) || 'unknown artist';
           if (firstArtistMain !== currArtistMain) {
             group.artist = 'Various Artists';
           } else if (trackArtist.trim().toLowerCase() === currArtistMain && group.artist.trim().toLowerCase() !== currArtistMain) {
@@ -1438,6 +1355,34 @@ export function AlbumsView({
 
     return result;
   }, [tracks]);
+
+  useEffect(() => {
+    const replacements = new Map<string, Set<string>>();
+    for (const track of tracks) {
+      if (track.album_artist?.trim() || track.albumArtist?.trim() || track.compilation === 1 || track.is_compilation === true || track.compilation === '1') continue;
+      const artist = track.artist?.trim() || 'Unknown Artist';
+      // Only persisted inferred-artist keys need the pre-cutover parsing rule.
+      const legacyArtist = artist.split(/\s+(?:feat\.|ft\.|featuring|with|x|vs\.?)\s+|[,/;&]|\s+&\s+/i)[0]?.trim() || artist;
+      const legacyKey = `${legacyArtist.toLowerCase()}:::${(track.album?.trim() || 'Unknown Album').toLowerCase()}`;
+      const key = buildAlbumKey(track);
+      if (key === legacyKey) continue;
+      const keys = replacements.get(legacyKey) || new Set<string>();
+      keys.add(key);
+      replacements.set(legacyKey, keys);
+    }
+    if (!replacements.size) return;
+    const currentKeys = new Set(albumGroups.map(album => album.id));
+    setLovedAlbumKeys(previous => {
+      const next = [...new Set(previous.flatMap(key => {
+        const replacementsForKey = replacements.get(key);
+        if (!replacementsForKey) return [key];
+        return [...(currentKeys.has(key) ? [key] : []), ...replacementsForKey];
+      }))];
+      if (next.length === previous.length && next.every((key, index) => key === previous[index])) return previous;
+      localStorage.setItem('aideo-loved-albums', JSON.stringify(next));
+      return next;
+    });
+  }, [tracks, albumGroups]);
 
   // Filter & Sort
   const filteredAlbums = useMemo(() => {
@@ -1700,20 +1645,7 @@ export function AlbumsView({
     try {
       const sample = album.tracks[0];
       const targetPath = sample.path || sample.stream_url;
-      const similar: any[] = await invoke('get_similar_tracks', { path: targetPath });
-      if (similar && similar.length > 0) {
-        const store = useStore.getState();
-        await store.clearQueue();
-        for (const track of similar) {
-          await store.addToQueue(track);
-        }
-        await playTrack(similar[0]);
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Queued ${similar.length} tracks based on ${album.title}`, type: 'success' } }));
-      } else {
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'No similar tracks found in library.', type: 'warning' } }));
-      }
-    } catch (err) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Could not queue similar tracks: ${err}`, type: 'error' } }));
+      await startSonicMix(targetPath, useStore.getState(), album.title);
     } finally {
       setIsProcessing(null);
     }
@@ -1870,7 +1802,7 @@ export function AlbumsView({
                   <div key={`loved-shelf-${album.id}`} className="studio-shelf-card" onClick={() => setSelectedAlbum(album)}>
                     <div className="shelf-card-art-wrap">
                       <div className="shelf-card-art-inner">
-                        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+                        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} loading="lazy" decoding="async" />
                       </div>
                       <button
                         type="button"
@@ -1925,7 +1857,7 @@ export function AlbumsView({
                   <div key={`hires-shelf-${album.id}`} className="studio-shelf-card" onClick={() => setSelectedAlbum(album)}>
                     <div className="shelf-card-art-wrap">
                       <div className="shelf-card-art-inner">
-                        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} />
+                        <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} loading="lazy" decoding="async" />
                       </div>
                       <button
                         type="button"
@@ -2125,7 +2057,7 @@ export function AlbumsView({
                 </button>
 
                 <div style={{ width: 130, height: 130, borderRadius: 10, overflow: 'hidden', flexShrink: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                  <AlbumThumbnail sampleTrack={selectedAlbum.sampleTrack} title={selectedAlbum.title} />
+                  <AlbumThumbnail sampleTrack={selectedAlbum.sampleTrack} title={selectedAlbum.title} loading="lazy" decoding="async" />
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6, flex: 1, paddingRight: 40 }}>

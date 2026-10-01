@@ -193,10 +193,10 @@ export const createAuthSlice: StateCreator<PlayerState, [], [], any> = (set, get
   },
 
   syncToCloud: async () => {
-    await syncToCloud();
+    await syncToCloud(get, set);
   },
 
-  syncFromCloud: async (options?: any) => {
-    await syncFromCloud(options);
+  syncFromCloud: async (options?: Parameters<PlayerState['syncFromCloud']>[0]) => {
+    await syncFromCloud(get, set, options);
   }
 });

@@ -583,7 +583,6 @@ export interface PlayerState {
   toggleMute: () => Promise<void>;
   seek: (secs: number) => Promise<void>;
   pollStatus: () => Promise<void>;
-  handlePlaybackStateChanged: (payload: any) => void;
   toggleProMode: () => void;
   toggleControlCenter: () => void;
   resetProMode: () => void;

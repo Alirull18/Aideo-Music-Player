@@ -1,16 +1,16 @@
 import { getSupabaseClient } from './supabaseClient';
 import { invoke } from '@tauri-apps/api/core';
-import { useStore } from '../store';
+import type { PlayerState } from '../store/types';
 
-export async function syncToCloud(): Promise<void> {
+export async function syncToCloud(get: () => PlayerState, set: (state: Partial<PlayerState>) => void): Promise<void> {
   const supabase = getSupabaseClient() as any;
   if (!supabase) return;
 
-  const state = useStore.getState();
+  const state = get();
   const userId = state.user?.id;
   if (!userId) return;
 
-  useStore.setState({ syncing: true });
+  set({ syncing: true });
 
   try {
     // 1. Sync unsynced playback history logs
@@ -187,11 +187,11 @@ export async function syncToCloud(): Promise<void> {
     console.error('[Sync] Sync to cloud failed:', err);
     state.setPlaybackError(`Sync to cloud failed: ${err.message || err}`);
   } finally {
-    useStore.setState({ syncing: false });
+    set({ syncing: false });
   }
 }
 
-export async function syncFromCloud(options?: {
+export async function syncFromCloud(get: () => PlayerState, set: (state: Partial<PlayerState>) => void, options?: {
   likedTracks?: boolean;
   playlists?: boolean;
   settings?: boolean;
@@ -200,11 +200,11 @@ export async function syncFromCloud(options?: {
   const supabase = getSupabaseClient() as any;
   if (!supabase) return;
 
-  const state = useStore.getState();
+  const state = get();
   const userId = state.user?.id;
   if (!userId) return;
 
-  useStore.setState({ syncing: true });
+  set({ syncing: true });
 
   const syncLikes = options ? !!options.likedTracks : true;
   const syncPlaylists = options ? !!options.playlists : true;
@@ -222,7 +222,7 @@ export async function syncFromCloud(options?: {
       console.log('[Sync] Retrieved liked tracks from Supabase:', cloudLikes?.length, cloudLikes, likesError);
 
       if (!likesError && cloudLikes) {
-        const currentTracks = useStore.getState().tracks;
+        const currentTracks = get().tracks;
 
         // 1. If liked in cloud but not locally, make it liked locally
         for (const t of cloudLikes) {
@@ -327,7 +327,7 @@ export async function syncFromCloud(options?: {
           }
         }
         const finalPlaylists = await invoke<any[]>('get_playlists');
-        useStore.setState({ playlists: finalPlaylists });
+        set({ playlists: finalPlaylists });
       }
     }
 
@@ -350,7 +350,7 @@ export async function syncFromCloud(options?: {
         }
         if (changed) {
           localStorage.setItem('aideo_play_counts', JSON.stringify(mergedCounts));
-          useStore.setState({ playCounts: mergedCounts });
+          set({ playCounts: mergedCounts });
         }
       }
     }
@@ -361,6 +361,6 @@ export async function syncFromCloud(options?: {
     console.error('[Sync] Sync from cloud failed:', err);
     state.setPlaybackError(`Sync from cloud failed: ${err.message || err}`);
   } finally {
-    useStore.setState({ syncing: false });
+    set({ syncing: false });
   }
 }

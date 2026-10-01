@@ -45,7 +45,7 @@ describe('syncEngine non-destructive sync', () => {
       ]
     });
 
-    await syncToCloud();
+    await syncToCloud(useStore.getState, useStore.setState);
 
     expect(upsertMock).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -99,7 +99,7 @@ describe('syncEngine non-destructive sync', () => {
       ]
     });
 
-    await syncFromCloud({ likedTracks: true, playlists: false, settings: false, playCounts: false });
+    await syncFromCloud(useStore.getState, useStore.setState, { likedTracks: true, playlists: false, settings: false, playCounts: false });
 
     // Should invoke toggle_love_track with loved: true for CloudLiked.mp3
     expect(invoke).toHaveBeenCalledWith(

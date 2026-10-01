@@ -237,16 +237,16 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         conn.execute("ALTER TABLE tracks ADD COLUMN path_hash TEXT", [])?;
     }
     if !column_exists(&conn, "tracks", "bpm") {
-        conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL DEFAULT 0.0", [])?;
+        conn.execute("ALTER TABLE tracks ADD COLUMN bpm REAL", [])?;
     }
     if !column_exists(&conn, "tracks", "energy") {
-        conn.execute("ALTER TABLE tracks ADD COLUMN energy REAL DEFAULT 0.5", [])?;
+        conn.execute("ALTER TABLE tracks ADD COLUMN energy REAL", [])?;
     }
     if !column_exists(&conn, "tracks", "bass_ratio") {
-        conn.execute("ALTER TABLE tracks ADD COLUMN bass_ratio REAL DEFAULT 0.33", [])?;
+        conn.execute("ALTER TABLE tracks ADD COLUMN bass_ratio REAL", [])?;
     }
     if !column_exists(&conn, "tracks", "treble_ratio") {
-        conn.execute("ALTER TABLE tracks ADD COLUMN treble_ratio REAL DEFAULT 0.33", [])?;
+        conn.execute("ALTER TABLE tracks ADD COLUMN treble_ratio REAL", [])?;
     }
     if !column_exists(&conn, "tracks", "replaygain_gain") {
         conn.execute("ALTER TABLE tracks ADD COLUMN replaygain_gain REAL DEFAULT 0.0", [])?;
@@ -468,8 +468,8 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
                 }
 
                 let _ = conn.execute(
-                    "INSERT INTO tracks (path, title, artist, album, duration, format, loved, cover_url) 
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    "INSERT INTO tracks (path, title, artist, album, duration, format, loved, cover_url, bpm, energy, bass_ratio, treble_ratio)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, NULL, NULL)",
                     rusqlite::params![path, title, artist, album, duration, format, loved_val, cover_url],
                 );
             }
@@ -559,8 +559,8 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
         let hash = track.path_hash.clone().unwrap_or_else(|| format!("{:x}", md5::compute(track.path.as_bytes())));
         track.path_hash = Some(hash.clone());
         tx.execute(
-            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash, replaygain_gain, genre)
-             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash, :replaygain_gain, :genre)
+            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, loved, cover_url, track_number, disc_number, path_hash, replaygain_gain, genre, bpm, energy, bass_ratio, treble_ratio)
+             VALUES (:path, :title, :artist, :album, :duration, :format, :lyric_offset, COALESCE(:loved, 0), :cover_url, :track_number, :disc_number, :path_hash, :replaygain_gain, :genre, NULL, NULL, NULL, NULL)
              ON CONFLICT(path) DO UPDATE SET
                  title = excluded.title,
                  artist = excluded.artist,
@@ -972,8 +972,8 @@ pub fn toggle_love_track(
     let loved_int = if loved { 1 } else { 0 };
 
     tx.execute(
-        "INSERT INTO tracks (path, title, artist, album, duration, format, loved, disliked, cover_url)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
+        "INSERT INTO tracks (path, title, artist, album, duration, format, loved, disliked, cover_url, bpm, energy, bass_ratio, treble_ratio)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, NULL, NULL, NULL, NULL)
          ON CONFLICT(path) DO UPDATE SET
              loved = ?7,
              disliked = CASE WHEN ?7 = 1 THEN 0 ELSE tracks.disliked END,
@@ -1040,8 +1040,8 @@ pub fn toggle_dislike_track(
     let disliked_int = if disliked { 1 } else { 0 };
 
     tx.execute(
-        "INSERT INTO tracks (path, title, artist, album, duration, format, disliked, loved, cover_url)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
+        "INSERT INTO tracks (path, title, artist, album, duration, format, disliked, loved, cover_url, bpm, energy, bass_ratio, treble_ratio)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, NULL, NULL, NULL, NULL)
          ON CONFLICT(path) DO UPDATE SET
              disliked = ?7,
              loved = CASE WHEN ?7 = 1 THEN 0 ELSE tracks.loved END,

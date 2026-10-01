@@ -176,6 +176,34 @@ describe('Album View Modes & Full-Page Layout Experiences (Anti-UI-Slop Edition)
     expect(container.querySelector('.track-table')).toBeInTheDocument();
   });
 
+  it('retains saved loved albums after canonical artist migration and asynchronous track loading', () => {
+    localStorage.setItem('aideo-loved-albums', JSON.stringify([
+      'björk + guest - topic:::debut',
+      'owner + guests - topic:::owned album',
+      'various:::collection',
+      'not loaded yet:::missing album',
+    ]));
+    const tracks = [
+      { ...sampleTracks[1], id: 3, artist: 'Björk + Guest - Topic', album: 'Debut' },
+      { ...sampleTracks[1], id: 4, artist: 'Singer', album_artist: 'Owner + Guests - Topic', album: 'Owned Album' },
+      { ...sampleTracks[1], id: 5, artist: 'Singer', compilation: 1, album: 'Collection' },
+      { ...sampleTracks[1], id: 6, artist: 'Unloved Artist', album: 'Other Album' },
+    ];
+    const { container, rerender, getByRole } = render(<AlbumsView tracks={[]} albumViewMode="classic" />);
+    rerender(<AlbumsView tracks={tracks} albumViewMode="classic" />);
+
+    expect(JSON.parse(localStorage.getItem('aideo-loved-albums') || '[]')).toEqual([
+      'björk:::debut',
+      'owner + guests - topic:::owned album',
+      'various:::collection',
+      'not loaded yet:::missing album',
+    ]);
+    fireEvent.click(getByRole('button', { name: 'Loved Albums (4)' }));
+    expect(container.querySelectorAll('.album-card-classic')).toHaveLength(3);
+    expect(container.querySelectorAll('[title="Remove from Loved Albums"]')).toHaveLength(3);
+    expect(container.querySelector('[title="Love Album"]')).not.toBeInTheDocument();
+  });
+
   it('extractAlbumYear accurately finds the consensus mode year for compilation tracks', () => {
     const compilationAlbum = {
       title: 'Decade Hits Compilation',

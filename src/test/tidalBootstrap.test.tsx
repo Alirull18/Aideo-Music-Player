@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, waitFor, cleanup, screen, act } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import App from '../App';
 import { useStore } from '../store';
 import type { Track } from '../store/types';
+import { clearRecentToasts } from '../components/Toast';
+
+const realStopTrack = useStore.getState().stopTrack;
 
 // jsdom does not implement matchMedia; App reads prefers-color-scheme on mount
 if (!window.matchMedia) {
@@ -38,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  clearRecentToasts();
   cleanup();
 });
 
@@ -77,23 +81,24 @@ describe('Tidal session restoration on app boot', () => {
 
 describe('Playback lifecycle attempt correlation', () => {
   const track: Track = { id: 1, path: 'C:/same.flac', title: 'Same', artist: 'Artist', album: '', duration: 180, format: 'FLAC', lyric_offset: 0 };
-  const handlers = new Map<string, (event: { payload: unknown }) => void>();
+  const handlers = new Map<string, Array<(event: { payload: unknown }) => void>>();
 
   beforeEach(async () => {
     handlers.clear();
     vi.mocked(invoke).mockImplementation(async cmd => /playlists|devices|queue|tracks|history|recap|library/i.test(cmd) ? [] : null);
     vi.mocked(listen).mockImplementation(async (event, handler) => {
-      handlers.set(event, handler as (event: { payload: unknown }) => void);
-      return () => { handlers.delete(event); };
+      const callback = handler as (event: { payload: unknown }) => void;
+      handlers.set(event, [...(handlers.get(event) || []), callback]);
+      return () => { handlers.set(event, (handlers.get(event) || []).filter(item => item !== callback)); };
     });
     render(<App />);
     await waitFor(() => expect(handlers.has('stream-buffering-end')).toBe(true));
   });
 
   function emit(name: string, payload: unknown) {
-    const handler = handlers.get(name);
-    if (!handler) throw new Error(`Missing ${name} listener`);
-    handler({ payload });
+    const listeners = handlers.get(name);
+    if (!listeners?.length) throw new Error(`Missing ${name} listener`);
+    listeners.forEach(handler => handler({ payload }));
   }
 
   it('ignores stale same-path ready, end, error and buffering events after replay', async () => {
@@ -199,5 +204,66 @@ describe('Playback lifecycle attempt correlation', () => {
     emit('playback-error', { path: url, attempt_id: 'current', error: 'No audio output device' });
     expect(stopTrack).toHaveBeenCalledTimes(1);
     expect(useStore.getState().playbackError).toBe('No audio output device');
+  });
+
+  it('shows one current-attempt error toast and none for a stale attempt', () => {
+    const originalStopTrack = useStore.getState().stopTrack;
+    const stopTrack = vi.fn();
+    useStore.setState({ stopTrack, notificationsEnabled: true, developerNotifications: false, currentTrack: track, currentAttemptId: 'live', playbackError: null,
+      playback: { ...useStore.getState().playback, current_track: track.path, attempt_id: 'live', status: 'Playing' } });
+    try {
+      act(() => emit('playback-error', { path: track.path, attempt_id: 'stale', error: 'Expired media URL' }));
+      expect(screen.queryByText('Expired media URL')).toBeNull();
+      act(() => emit('playback-error', { path: track.path, attempt_id: 'live', error: 'Media URL expired' }));
+      expect(screen.getAllByText('Media URL expired')).toHaveLength(1);
+      expect(stopTrack).toHaveBeenCalledTimes(1);
+      expect(useStore.getState().playbackError).toBe('Media URL expired');
+    } finally {
+      useStore.setState({ stopTrack: originalStopTrack });
+    }
+  });
+
+  it('shows asynchronous provider and scanner failures without JSON payloads', () => {
+    useStore.setState({ notificationsEnabled: true, developerNotifications: false });
+    act(() => {
+      emit('tidal-download-error', { filename: 'Tidal song', track_id: '1', error: 'Session expired' });
+      emit('qobuz-download-error', { filename: 'Qobuz song', track_id: '2', error: 'Download denied' });
+      emit('scanner-error', 'Cannot open selected folder');
+    });
+    expect(screen.getByText('Tidal download failed (Tidal song): Session expired')).toBeInTheDocument();
+    expect(screen.getByText('Qobuz download failed (Qobuz song): Download denied')).toBeInTheDocument();
+    expect(screen.getByText('Cannot open selected folder')).toBeInTheDocument();
+  });
+  it('ignores stale buffering feedback and clears the live buffering card on completion', async () => {
+    useStore.setState({ currentTrack: track, currentAttemptId: 'live', playback: {
+      ...useStore.getState().playback, current_track: track.path, attempt_id: 'live', status: 'Playing', position_secs: 0, is_buffering: false,
+    } });
+    act(() => emit('stream-buffering-start', { path: track.path, attempt_id: 'stale' }));
+    expect(screen.queryByText('Buffering audio stream...')).toBeNull();
+    act(() => emit('stream-buffering-start', { path: track.path, attempt_id: 'live' }));
+    await screen.findByText('Buffering audio stream...');
+    act(() => emit('stream-buffering-end', { path: track.path, attempt_id: 'stale' }));
+    expect(screen.getByText('Buffering audio stream...')).toBeInTheDocument();
+    act(() => emit('stream-buffering-end', { path: track.path, attempt_id: 'live' }));
+    await waitFor(() => expect(screen.queryByText('Buffering audio stream...')).toBeNull());
+    expect(useStore.getState().playback.is_buffering).toBe(false);
+  });
+  it('user stop clears live buffering immediately even when the old native end is discarded', async () => {
+    const previousStopTrack = useStore.getState().stopTrack;
+    useStore.setState({ stopTrack: realStopTrack, chromecast_connected: false, upnp_connected: false, currentTrack: track, currentAttemptId: 'stopping', playback: {
+      ...useStore.getState().playback, current_track: track.path, attempt_id: 'stopping', status: 'Playing', position_secs: 0, is_buffering: false,
+    } });
+    try {
+      act(() => emit('stream-buffering-start', { path: track.path, attempt_id: 'stopping' }));
+      await screen.findByText('Buffering audio stream...');
+      await act(async () => { await useStore.getState().stopTrack(); });
+      act(() => emit('stream-buffering-end', { path: track.path, attempt_id: 'stopping' }));
+      await waitFor(() => expect(screen.queryByText('Buffering audio stream...')).toBeNull());
+      expect(useStore.getState().currentAttemptId).toBeUndefined();
+      expect(useStore.getState().playback.status).toBe('Stopped');
+      expect(useStore.getState().playback.is_buffering).toBe(false);
+    } finally {
+      useStore.setState({ stopTrack: previousStopTrack });
+    }
   });
 });

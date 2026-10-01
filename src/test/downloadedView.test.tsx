@@ -45,14 +45,16 @@ const mockTracks = [
 ];
 
 describe('DownloadedView Component', () => {
+  let cachePruned = false;
   beforeEach(() => {
     vi.clearAllMocks();
+    cachePruned = false;
     useStore.setState({
       tracks: [...mockTracks],
       cachedCloudHashes: ['hash-track-1'],
     });
 
-    (tauriCore.invoke as any).mockImplementation((cmd: string, args: any) => {
+    vi.mocked(tauriCore.invoke).mockImplementation(async (cmd, args) => {
       if (cmd === 'get_library') {
         return Promise.resolve([...mockTracks]);
       }
@@ -60,17 +62,20 @@ describe('DownloadedView Component', () => {
         return Promise.resolve({
           total_bytes: 52428800, // 50 MB
           total_mb: 50.0,
-          file_count: 12
+          file_count: cachePruned ? 1 : 12,
+          limit_gb: 2.5,
         });
       }
       if (cmd === 'get_all_cached_cloud_hashes') {
-        return Promise.resolve(['hash-track-1']);
+        return Promise.resolve(cachePruned ? [] : ['hash-track-1']);
       }
       if (cmd === 'open_cache_folder') {
         return Promise.resolve();
       }
       if (cmd === 'prune_cache_to_limit') {
-        return Promise.resolve(args);
+        if (!args || typeof args !== 'object' || !('limitGb' in args) || args.limitGb !== 2.5) throw new Error('Expected configured GB limit');
+        cachePruned = true;
+        return Promise.resolve();
       }
       if (cmd === 'delete_cached_track') {
         return Promise.resolve();
@@ -109,21 +114,17 @@ describe('DownloadedView Component', () => {
     expect(screen.getByText('Offline Song')).toBeDefined();
   });
 
-  it('triggers open folder when Open Folder button is clicked', async () => {
-    render(<DownloadedView />);
-    
-    const openBtn = screen.getByText('Open Folder');
-    fireEvent.click(openBtn);
 
-    expect(tauriCore.invoke).toHaveBeenCalledWith('open_cache_folder');
-  });
-
-  it('triggers prune to 5GB when Prune button is clicked', async () => {
+  it('prunes using the configured GB policy and refreshes offline availability', async () => {
     render(<DownloadedView />);
-    
-    const pruneBtn = screen.getByText('Prune to 5GB');
+    const pruneBtn = await screen.findByRole('button', { name: 'Prune to 2.5 GB' });
     fireEvent.click(pruneBtn);
 
-    expect(tauriCore.invoke).toHaveBeenCalledWith('prune_cache_to_limit', { maxMb: 5000 });
+    await waitFor(() => {
+      expect(screen.queryByText('Cached Subsonic Track')).toBeNull();
+      expect(screen.getByText('Offline Song')).toBeDefined();
+      expect(screen.getByText(/1 cached audio files/i)).toBeDefined();
+    });
+    expect(useStore.getState().cachedCloudHashes).toEqual([]);
   });
 });

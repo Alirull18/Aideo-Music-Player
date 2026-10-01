@@ -5,131 +5,59 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::default::{get_probe, get_codecs};
 use rustfft::{FftPlanner, num_complex::Complex};
+use symphonia::core::conv::FromSample;
 
-// Convert AudioBufferRef to interleaved i16 for Chromaprint
+// Use Symphonia's conversions so every decoded sample format is analyzed.
 pub fn audio_buffer_to_interleaved_s16(buf: &AudioBufferRef<'_>) -> Vec<i16> {
-    let frames = buf.frames();
     let channels = buf.spec().channels.count();
-    let mut out = vec![0i16; frames * channels];
-    
+    let mut out = vec![0i16; buf.frames() * channels];
+    macro_rules! convert {
+        ($b:expr) => {
+            for ch in 0..channels {
+                for (i, &sample) in $b.chan(ch).iter().enumerate() {
+                    out[i * channels + ch] = i16::from_sample(sample);
+                }
+            }
+        };
+    }
     match buf {
-        AudioBufferRef::F32(b) => {
-            for ch in 0..channels {
-                let chan_data = b.chan(ch);
-                for (i, &s) in chan_data.iter().enumerate() {
-                    let clamped = s.clamp(-1.0, 1.0);
-                    out[i * channels + ch] = (clamped * 32767.0) as i16;
-                }
-            }
-        }
-        AudioBufferRef::S16(b) => {
-            for ch in 0..channels {
-                let chan_data = b.chan(ch);
-                for (i, &s) in chan_data.iter().enumerate() {
-                    out[i * channels + ch] = s;
-                }
-            }
-        }
-        AudioBufferRef::S32(b) => {
-            for ch in 0..channels {
-                let chan_data = b.chan(ch);
-                for (i, &s) in chan_data.iter().enumerate() {
-                    out[i * channels + ch] = (s >> 16) as i16;
-                }
-            }
-        }
-        AudioBufferRef::U8(b) => {
-            for ch in 0..channels {
-                let chan_data = b.chan(ch);
-                for (i, &s) in chan_data.iter().enumerate() {
-                    out[i * channels + ch] = ((s as i32 - 128) * 256) as i16;
-                }
-            }
-        }
-        AudioBufferRef::S24(b) => {
-            for ch in 0..channels {
-                let chan_data = b.chan(ch);
-                for (i, &s) in chan_data.iter().enumerate() {
-                    out[i * channels + ch] = (s.inner() >> 8) as i16;
-                }
-            }
-        }
-        AudioBufferRef::F64(b) => {
-            for ch in 0..channels {
-                let chan_data = b.chan(ch);
-                for (i, &s) in chan_data.iter().enumerate() {
-                    let clamped = s.clamp(-1.0, 1.0);
-                    out[i * channels + ch] = (clamped * 32767.0) as i16;
-                }
-            }
-        }
-        _ => {}
+        AudioBufferRef::U8(b) => convert!(b),
+        AudioBufferRef::U16(b) => convert!(b),
+        AudioBufferRef::U24(b) => convert!(b),
+        AudioBufferRef::U32(b) => convert!(b),
+        AudioBufferRef::S8(b) => convert!(b),
+        AudioBufferRef::S16(b) => convert!(b),
+        AudioBufferRef::S24(b) => convert!(b),
+        AudioBufferRef::S32(b) => convert!(b),
+        AudioBufferRef::F32(b) => convert!(b),
+        AudioBufferRef::F64(b) => convert!(b),
     }
     out
 }
 
-// Convert AudioBufferRef to mono f32 for analysis
 pub fn audio_buffer_to_mono_f32(buf: &AudioBufferRef<'_>) -> Vec<f32> {
-    let frames = buf.frames();
     let channels = buf.spec().channels.count();
-    let mut out = vec![0.0f32; frames];
-    
+    let mut out = vec![0.0f32; buf.frames()];
+    macro_rules! convert {
+        ($b:expr) => {
+            for ch in 0..channels {
+                for (value, &sample) in out.iter_mut().zip($b.chan(ch)) {
+                    *value += f32::from_sample(sample) / channels as f32;
+                }
+            }
+        };
+    }
     match buf {
-        AudioBufferRef::F32(b) => {
-            for i in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    sum += b.chan(ch)[i];
-                }
-                out[i] = sum / channels as f32;
-            }
-        }
-        AudioBufferRef::S16(b) => {
-            for i in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    sum += b.chan(ch)[i] as f32 / 32768.0;
-                }
-                out[i] = sum / channels as f32;
-            }
-        }
-        AudioBufferRef::S32(b) => {
-            for i in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    sum += b.chan(ch)[i] as f32 / i32::MAX as f32;
-                }
-                out[i] = sum / channels as f32;
-            }
-        }
-        AudioBufferRef::U8(b) => {
-            for i in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    sum += (b.chan(ch)[i] as f32 - 128.0) / 128.0;
-                }
-                out[i] = sum / channels as f32;
-            }
-        }
-        AudioBufferRef::S24(b) => {
-            for i in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    sum += b.chan(ch)[i].inner() as f32 / 8_388_607.0;
-                }
-                out[i] = sum / channels as f32;
-            }
-        }
-        AudioBufferRef::F64(b) => {
-            for i in 0..frames {
-                let mut sum = 0.0;
-                for ch in 0..channels {
-                    sum += b.chan(ch)[i] as f32;
-                }
-                out[i] = sum / channels as f32;
-            }
-        }
-        _ => {}
+        AudioBufferRef::U8(b) => convert!(b),
+        AudioBufferRef::U16(b) => convert!(b),
+        AudioBufferRef::U24(b) => convert!(b),
+        AudioBufferRef::U32(b) => convert!(b),
+        AudioBufferRef::S8(b) => convert!(b),
+        AudioBufferRef::S16(b) => convert!(b),
+        AudioBufferRef::S24(b) => convert!(b),
+        AudioBufferRef::S32(b) => convert!(b),
+        AudioBufferRef::F32(b) => convert!(b),
+        AudioBufferRef::F64(b) => convert!(b),
     }
     out
 }
@@ -217,14 +145,14 @@ pub fn analyze_audio_file(path: &str) -> Result<(String, f64, SonicProfile), Str
     let fingerprint = fp.encode();
 
     // ── Sonic Analysis (BPM, Energy, Spectral Ratios) ───────────────────────
-    let profile = calculate_sonic_profile(&all_mono_samples, sample_rate as usize);
+    let profile = calculate_sonic_profile(&all_mono_samples, sample_rate as usize)?;
 
     Ok((fingerprint, duration, profile))
 }
 
-fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile {
-    if samples.is_empty() {
-        return SonicProfile { bpm: 120.0, energy: 0.5, bass_ratio: 0.33, treble_ratio: 0.33, integrated_lufs: -14.0, lufs_gain_db: 0.0, waveform: vec![0.5; 100] };
+fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> Result<SonicProfile, String> {
+    if samples.is_empty() || sample_rate == 0 || samples.iter().any(|s| !s.is_finite()) {
+        return Err("Cannot analyze audio without finite decoded samples and a sample rate".to_string());
     }
 
     // 1. RMS Energy
@@ -349,7 +277,7 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile 
     let lufs_gain_db = (-14.0 - integrated_lufs).clamp(-12.0, 12.0);
     let waveform = calculate_waveform_peaks(samples, 100);
 
-    SonicProfile {
+    Ok(SonicProfile {
         bpm,
         energy,
         bass_ratio,
@@ -357,7 +285,7 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> SonicProfile 
         integrated_lufs,
         lufs_gain_db,
         waveform,
-    }
+    })
 }
 
 fn calculate_waveform_peaks(samples: &[f32], buckets: usize) -> Vec<f32> {
@@ -536,6 +464,46 @@ pub fn calculate_ebu_r128_lufs(samples: &[f32], sample_rate: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analyzer_converts_integer_formats_instead_of_silence() {
+        use symphonia::core::audio::{AsAudioBufferRef, AudioBuffer, Channels, SignalSpec};
+        use symphonia::core::sample::{u24, i24};
+        let spec = SignalSpec::new(44100, Channels::FRONT_LEFT | Channels::FRONT_RIGHT);
+        macro_rules! check {
+            ($ty:ty, $negative:expr, $positive:expr) => {{
+                let mut audio = AudioBuffer::<$ty>::new(2, spec);
+                audio.render_reserved(Some(2));
+                audio.chan_mut(0).copy_from_slice(&[$negative, $positive]);
+                audio.chan_mut(1).copy_from_slice(&[$negative, $positive]);
+                let buffer = audio.as_audio_buffer_ref();
+                let mono = audio_buffer_to_mono_f32(&buffer);
+                assert_eq!(mono, vec![-0.5, 0.5]);
+                let fingerprint_samples = audio_buffer_to_interleaved_s16(&buffer);
+                assert_eq!(fingerprint_samples, vec![-16384, -16384, 16384, 16384]);
+            }};
+        }
+        check!(u8, 64, 192);
+        check!(u16, 16384, 49152);
+        check!(u24, u24(4194304), u24(12582912));
+        check!(u32, 1073741824, 3221225472);
+        check!(i8, -64, 64);
+        check!(i16, -16384, 16384);
+        check!(i24, i24(-4194304), i24(4194304));
+        check!(i32, -1073741824, 1073741824);
+        check!(f32, -0.5, 0.5);
+        check!(f64, -0.5, 0.5);
+    }
+
+    #[test]
+    fn sonic_profile_requires_decoded_finite_audio() {
+        assert!(calculate_sonic_profile(&[], 44100).is_err());
+        assert!(calculate_sonic_profile(&[f32::NAN], 44100).is_err());
+        assert!(calculate_sonic_profile(&[0.0], 0).is_err());
+        let silence = calculate_sonic_profile(&[0.0; 100], 44100).unwrap();
+        assert_eq!(silence.energy, 0.0);
+        assert_eq!(silence.integrated_lufs, -70.0);
+    }
 
     #[test]
     fn test_ebu_r128_empty_returns_minus_70() {

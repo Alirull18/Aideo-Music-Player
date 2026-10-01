@@ -83,12 +83,6 @@ pub fn get_lyrics_file_path(audio_path: &str, ext: &str) -> std::path::PathBuf {
     }
 }
 
-/// Backward compatibility helper for .lrc path
-#[allow(dead_code)]
-pub fn get_lrc_path(audio_path: &str) -> std::path::PathBuf {
-    get_lyrics_file_path(audio_path, "lrc")
-}
-
 /// Returns the save path for lyrics based on content type (TTML vs LRC)
 pub fn get_lyrics_save_path(audio_path: &str, content: &str) -> std::path::PathBuf {
     let trimmed = content.trim_start();
@@ -947,12 +941,6 @@ pub fn parse_lyrics_auto(content: &str) -> Vec<LyricLine> {
     parse_lrc(content)
 }
 
-/// Convenience alias for format identification and parsing
-#[allow(dead_code)]
-pub fn detect_and_parse_lyrics(content: &str) -> Vec<LyricLine> {
-    parse_lyrics_auto(content)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1186,7 +1174,6 @@ mod tests {
         let local_path = "C:\\Music\\song.mp3";
         assert_eq!(get_lyrics_file_path(local_path, "ttml"), std::path::PathBuf::from("C:\\Music\\song.ttml"));
         assert_eq!(get_lyrics_file_path(local_path, "lrc"), std::path::PathBuf::from("C:\\Music\\song.lrc"));
-        assert_eq!(get_lrc_path(local_path), std::path::PathBuf::from("C:\\Music\\song.lrc"));
 
         let ttml_content = "<tt><body><p>Test</p></body></tt>";
         let lrc_content = "[00:01.00]Test";
@@ -1759,7 +1746,7 @@ mod tests {
           </LyricInfo>
         </QrcInfos>"#;
 
-        let lines = detect_and_parse_lyrics(xml);
+        let lines = parse_lyrics_auto(xml);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].time_secs, 0.0);
         assert_eq!(lines[0].text, "Never gonna");

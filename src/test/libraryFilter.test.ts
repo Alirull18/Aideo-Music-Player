@@ -1,85 +1,54 @@
 import { describe, it, expect } from 'vitest';
+import { isStreamTrack, isLosslessTrack, parseDuration } from '../utils';
+import { buildAlbumKey } from '../utils/albumUtils';
+import { extractPrimaryArtist } from '../utils/unifiedSources';
 
-const isStreamTrack = (path: string, format?: string | null) => {
-  return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'Qobuz FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
-};
-
-const isLosslessTrack = (t: any) => {
-  const f = (t.format || '').toLowerCase();
-  return f.includes('flac') || f.includes('wav') || f.includes('alac') || f.includes('dsf') || f.includes('dff') || f.includes('dsd');
-};
-
-type QuickFilterType = 'all' | 'loved' | 'lossless' | 'local' | 'streams';
-
-function filterLibraryTracks(
-  tracks: any[],
-  activeFilter: QuickFilterType,
-  searchQuery: string = ''
-) {
-  return tracks.filter((t: any) => {
-    // 1. Quick Filter Chip
-    if (activeFilter === 'loved' && t.loved !== 1) return false;
-    if (activeFilter === 'lossless' && !isLosslessTrack(t)) return false;
-    if (activeFilter === 'local' && isStreamTrack(t.path, t.format)) return false;
-    if (activeFilter === 'streams' && !isStreamTrack(t.path, t.format)) return false;
-
-    // 2. Search Query
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      t.title?.toLowerCase().includes(q) ||
-      t.artist?.toLowerCase().includes(q) ||
-      t.path.toLowerCase().includes(q)
-    );
-  });
-}
-
-describe('Library Quick Filter Logic', () => {
-  const mockTracks = [
-    { id: 1, path: 'C:\\Music\\song1.flac', title: 'Moonlight Sonata', artist: 'Beethoven', format: 'FLAC', loved: 1 },
-    { id: 2, path: 'C:\\Music\\song2.mp3', title: 'Clair de Lune', artist: 'Debussy', format: 'MP3', loved: 0 },
-    { id: 3, path: 'C:\\Music\\song3.dsf', title: 'Symphony No. 5', artist: 'Beethoven', format: 'DSD', loved: 1 },
-    { id: 4, path: 'https://youtube.com/watch?v=abc', title: 'Chill Lo-Fi', artist: 'Lofi Girl', format: 'YouTube Direct', loved: 1 },
-    { id: 5, path: 'https://subsonic.local/stream/123', title: 'Cloud Beats', artist: 'Subsonic Artist', format: 'SUBSONIC', loved: 0 },
-  ];
-
-  it('should return all tracks when activeFilter is "all"', () => {
-    const result = filterLibraryTracks(mockTracks, 'all');
-    expect(result).toHaveLength(5);
+describe('Library track classification and canonical metadata', () => {
+  it.each([
+    ['mms://station/live', null],
+    ['rtsp://station/live', 'RADIO'],
+    ['aideo://track/123', null],
+    ['123', 'Tidal FLAC'],
+    ['dQw4w9WgXcQ', null],
+    ['https://server/stream', 'FLAC'],
+  ])('classifies %s as a stream', (path, format) => {
+    expect(isStreamTrack(path, format)).toBe(true);
   });
 
-  it('should filter only loved tracks when activeFilter is "loved"', () => {
-    const result = filterLibraryTracks(mockTracks, 'loved');
-    expect(result).toHaveLength(3);
-    expect(result.every(t => t.loved === 1)).toBe(true);
+  it('keeps local files out of streams even for eleven-character file paths', () => {
+    expect(isStreamTrack('song01.flac', 'FLAC')).toBe(false);
+    expect(isStreamTrack('abcdefghijk', 'FLAC')).toBe(false);
+    expect(isStreamTrack(null, 'RADIO')).toBe(false);
   });
 
-  it('should filter only lossless/DSD tracks when activeFilter is "lossless"', () => {
-    const result = filterLibraryTracks(mockTracks, 'lossless');
-    expect(result).toHaveLength(2);
-    expect(result.map(t => t.format)).toEqual(['FLAC', 'DSD']);
+  it('handles missing format metadata without losing lossless classifications', () => {
+    expect(isLosslessTrack(null)).toBe(false);
+    expect(isLosslessTrack({ format: null })).toBe(false);
+    expect(isLosslessTrack({ format: 'Tidal FLAC' })).toBe(true);
+    expect(isLosslessTrack({ format: 'DSD' })).toBe(true);
+    expect(isLosslessTrack({ format: 'MP3' })).toBe(false);
   });
 
-  it('should filter only local offline tracks when activeFilter is "local"', () => {
-    const result = filterLibraryTracks(mockTracks, 'local');
-    expect(result).toHaveLength(3);
-    expect(result.every(t => !isStreamTrack(t.path, t.format))).toBe(true);
+  it.each([undefined, null, '', 'bogus', 'Infinity', '-5', '-1:30', '1::20', '1:2:3:4'])('returns zero for invalid duration %s', raw => {
+    expect(parseDuration(raw)).toBe(0);
   });
 
-  it('should filter only web/cloud streams when activeFilter is "streams"', () => {
-    const result = filterLibraryTracks(mockTracks, 'streams');
-    expect(result).toHaveLength(2);
-    expect(result.every(t => isStreamTrack(t.path, t.format))).toBe(true);
+  it('parses duration units while leaving discovery fallback to its caller', () => {
+    expect(parseDuration('3:45')).toBe(225);
+    expect(parseDuration('1:02:30')).toBe(3750);
+    expect(parseDuration(' 90.5 ')).toBe(90.5);
+    expect(parseDuration('0')).toBe(0);
   });
 
-  it('should compose activeFilter with search queries properly', () => {
-    const result = filterLibraryTracks(mockTracks, 'loved', 'beethoven');
-    expect(result).toHaveLength(2);
-    expect(result.map(t => t.title)).toEqual(['Moonlight Sonata', 'Symphony No. 5']);
-  });
-
-  it('should return empty array when no tracks match activeFilter + search query', () => {
-    const result = filterLibraryTracks(mockTracks, 'lossless', 'lofi');
-    expect(result).toHaveLength(0);
+  it('groups albums with the same normalized primary artist and collaboration syntax', () => {
+    const album = 'Shared Album';
+    expect(buildAlbumKey({ album, artist: 'Calvin Harris + Dua Lipa - Topic' }))
+      .toBe(buildAlbumKey({ album, artist: 'CALVIN HARRIS feat. Dua Lipa' }));
+    expect(buildAlbumKey({ album, artist: 'Calvin Harris; Dua Lipa' }))
+      .toBe(buildAlbumKey({ album, artist: 'Calvin Harris' }));
+    expect(extractPrimaryArtist('Foxes')).toBe('foxes');
+    expect(extractPrimaryArtist('The xx')).toBe('the xx');
+    expect(buildAlbumKey({ album, artist: null })).toBe('unknown artist:::shared album');
+    expect(buildAlbumKey({ album, artist: 'A', album_artist: 'Album Owner' })).toBe('album owner:::shared album');
   });
 });

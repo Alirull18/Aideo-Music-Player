@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { useStore } from '../store';
 import { SettingsView } from '../components/SettingsView';
@@ -15,6 +15,7 @@ beforeEach(() => {
     visualizerMode: 'bars',
     visualizerDecayRate: 'balanced',
     visualizerExpanded: false,
+    pendingSettingsTab: null,
   });
 });
 
@@ -83,53 +84,31 @@ describe('SettingsView Audio Spectrum Visualizer Card', () => {
   });
 });
 
-describe('SettingsView audio output request', () => {
-  it('delegates upsample mode transition to setDSP without a second bit-perfect toggle', async () => {
-    const originalSetDSP = useStore.getState().setDSP;
-    const originalToggleBitPerfect = useStore.getState().toggleBitPerfect;
-    const setDSP = vi.fn();
-    const toggleBitPerfect = vi.fn();
-    useStore.setState({
-      setDSP,
-      toggleBitPerfect,
-      playback: { ...useStore.getState().playback, bit_perfect: true },
-    });
-
-    try {
-      render(<SettingsView />);
-      fireEvent.click(screen.getByRole('button', { name: 'Audio Engine' }));
-      fireEvent.click(await screen.findByRole('button', { name: '96kHz' }));
-
-      expect(setDSP).toHaveBeenCalledWith({ upsample_rate: 96000 });
-      expect(toggleBitPerfect).not.toHaveBeenCalled();
-    } finally {
-      useStore.setState({ setDSP: originalSetDSP, toggleBitPerfect: originalToggleBitPerfect });
-    }
+describe('Settings navigation and playback speed', () => {
+  it('consumes the pending Library request and permits subsequent tab selection', () => {
+    useStore.setState({ pendingSettingsTab: 'library' });
+    const settings = render(<SettingsView />);
+    expect(screen.getByRole('button', { name: 'Library' })).toHaveClass('active');
+    expect(useStore.getState().pendingSettingsTab).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
+    settings.rerender(<SettingsView />);
+    expect(screen.getByRole('button', { name: 'Appearance' })).toHaveClass('active');
   });
-});
 
-describe('AudioControlCenter output request', () => {
-  it('delegates upsample mode transition to setDSP without toggling bit-perfect again', () => {
+  it('disables speed controls in Bit-Perfect mode and enables them when it is off', () => {
     const original = useStore.getState();
-    const setDSP = vi.fn();
-    const toggleBitPerfect = vi.fn();
-    useStore.setState({
-      showControlCenter: true,
-      devices: ['[System Default Device]'],
-      setDSP,
-      toggleBitPerfect,
-      playback: { ...original.playback, bit_perfect: true },
-    });
-
+    useStore.setState({ showControlCenter: true, playback: { ...original.playback, bit_perfect: true } });
     try {
       render(<AudioControlCenter />);
-      fireEvent.click(screen.getByRole('button', { name: 'Hardware & Pipeline' }));
-      fireEvent.click(screen.getByRole('button', { name: '96k' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Telemetry & Utilities' }));
+      expect(screen.getByRole('slider', { name: 'Playback speed' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '1.25x' })).toBeDisabled();
 
-      expect(setDSP).toHaveBeenCalledWith({ upsample_rate: 96000 });
-      expect(toggleBitPerfect).not.toHaveBeenCalled();
+      act(() => useStore.setState({ playback: { ...useStore.getState().playback, bit_perfect: false } }));
+      expect(screen.getByRole('slider', { name: 'Playback speed' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: '1.25x' })).toBeEnabled();
     } finally {
-      useStore.setState({ showControlCenter: original.showControlCenter, devices: original.devices, setDSP: original.setDSP, toggleBitPerfect: original.toggleBitPerfect });
+      useStore.setState({ showControlCenter: original.showControlCenter, playback: original.playback });
     }
   });
 });

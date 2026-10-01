@@ -210,26 +210,27 @@ describe('Tidal Store Slice', () => {
 });
 
 describe('notifyTidalAuthFailure', () => {
-  it('should fire nudge toast, navigation event and pending tab on auth failure', () => {
-    const events = spyOnWindowEvents('ui-toast', 'ui-goto-settings-tab');
-
-    const handled = notifyTidalAuthFailure('User is not authenticated with Tidal');
+  it('navigates directly to Library settings on auth failure', () => {
+    const events = spyOnWindowEvents('ui-toast');
+    useStore.setState({ view: 'nowplaying', pendingSettingsTab: null });
+    const handled = notifyTidalAuthFailure('User is not authenticated with Tidal', useStore.setState);
 
     expect(handled).toBe(true);
     const toast = events.find(e => e.type === 'ui-toast' && String(e.detail?.message || '').includes('Tidal'));
     expect(toast).toBeTruthy();
-    const nav = events.find(e => e.type === 'ui-goto-settings-tab');
-    expect(nav?.detail?.tab).toBe('library');
-    expect(useStore.getState().pendingSettingsTab).toBe(null);
+    expect(useStore.getState().view).toBe('settings');
+    expect(useStore.getState().pendingSettingsTab).toBe('library');
   });
 
   it('should ignore unrelated errors', () => {
-    const events = spyOnWindowEvents('ui-toast', 'ui-goto-settings-tab');
-
-    const handled = notifyTidalAuthFailure('Network timeout while streaming');
+    const events = spyOnWindowEvents('ui-toast');
+    useStore.setState({ view: 'nowplaying', pendingSettingsTab: null });
+    const handled = notifyTidalAuthFailure('Network timeout while streaming', useStore.setState);
 
     expect(handled).toBe(false);
     expect(events).toHaveLength(0);
+    expect(useStore.getState().view).toBe('nowplaying');
+    expect(useStore.getState().pendingSettingsTab).toBeNull();
   });
 });
 
