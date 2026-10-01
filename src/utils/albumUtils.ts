@@ -1,4 +1,5 @@
 import { Track } from '../store/types';
+import { extractPrimaryArtist } from './unifiedSources';
 
 /**
  * Extracts the disc number from track metadata or directory/filename fallback.
@@ -124,15 +125,6 @@ export function groupTracksByDisc<T extends Partial<Track> | any>(tracks: T[]): 
     .map(([disc, discTracks]) => ({ disc, tracks: discTracks }));
 }
 
-/**
- * Extracts the primary artist name by stripping collaborator suffixes
- * such as "feat.", "ft.", "featuring", "with", "x", "vs.", commas, ampersands, slashes, or semicolons.
- */
-export function extractPrimaryArtist(artist?: string | null): string {
-  if (!artist || !artist.trim()) return 'Unknown Artist';
-  const primary = artist.split(/\s+(?:feat\.|ft\.|featuring|with|x|vs\.?)\s+|[,/;&]|\s+&\s+/i)[0]?.trim();
-  return primary || artist.trim();
-}
 
 /**
  * Generates a unique, collision-resistant album grouping key for a track.
@@ -154,6 +146,6 @@ export function buildAlbumKey(t: Partial<Track> | any): string {
   }
 
   // 3. Extract primary artist (handling featured collaborators so tracks on the same album stay grouped)
-  const primaryArtist = extractPrimaryArtist(trackArtist);
+  const primaryArtist = extractPrimaryArtist(trackArtist) || 'Unknown Artist';
   return `${primaryArtist.toLowerCase()}:::${albumTitle.toLowerCase()}`;
 }

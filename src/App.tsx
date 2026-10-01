@@ -412,12 +412,22 @@ function AideoApp() {
     cleanups.push(() => clearInterval(clockInterval));
 
     const setupListeners = async () => {
-      const uStateChanged = await listen('playback-state-changed', (event: any) => {
+      for (const provider of ['tidal', 'qobuz']) {
+        const unlisten = await listen<{ filename: string; track_id: string; error: string }>(`${provider}-download-error`, event => {
+          if (isCancelled) return;
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: { message: `${provider === 'tidal' ? 'Tidal' : 'Qobuz'} download failed (${event.payload.filename}): ${event.payload.error}`, type: 'error' }
+          }));
+        });
+        if (isCancelled) { unlisten(); return; }
+        cleanups.push(unlisten);
+      }
+      const uScannerError = await listen<string>('scanner-error', event => {
         if (isCancelled) return;
-        useStore.getState().handlePlaybackStateChanged(event.payload);
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: event.payload, title: 'Library Scan', type: 'error' } }));
       });
-      if (isCancelled) { uStateChanged(); return; }
-      cleanups.push(uStateChanged);
+      if (isCancelled) { uScannerError(); return; }
+      cleanups.push(uScannerError);
 
       const uSourceError = await listen<{ path: string; error: string; attempt_id?: string }>('source-playback-error', event => {
         if (isCancelled) return;
@@ -492,17 +502,18 @@ function AideoApp() {
       if (isCancelled) { uEnded(); return; }
       cleanups.push(uEnded);
 
-      const uPlaybackError = await listen<string | { path?: string; attempt_id?: string; error: string }>('playback-error', (event) => {
+      const uPlaybackError = await listen<{ path: string; attempt_id?: string; error: string }>('playback-error', (event) => {
         if (isCancelled) return;
         const state = useStore.getState();
         const payload = event.payload;
-        const error = typeof payload === 'string' ? payload : payload.error;
-        const incomingAttemptId = typeof payload === 'string' ? undefined : payload.attempt_id;
+        const error = payload.error;
+        const incomingAttemptId = payload.attempt_id;
         if (!state.currentTrack || !state.currentAttemptId || incomingAttemptId !== state.currentAttemptId
-          || (typeof payload !== 'string' && payload.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
+          || (payload.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
         void state.stopTrack();
-        useStore.setState({ playbackError: error });
+        useStore.setState(s => ({ playbackError: error, playback: { ...s.playback, is_buffering: false } }));
         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: error, type: 'error' } }));
+        window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
       });
       if (isCancelled) { uPlaybackError(); return; }
       cleanups.push(uPlaybackError);
@@ -620,6 +631,9 @@ function AideoApp() {
         if (!state.currentTrack || !state.currentAttemptId || typeof payload === 'string' || payload.attempt_id !== state.currentAttemptId
           || ((state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
         useStore.setState((s) => ({ playback: { ...s.playback, is_buffering: true } }));
+        window.dispatchEvent(new CustomEvent('ui-stream-buffering', {
+          detail: { active: true, title: state.currentTrack.title || 'Online Stream', artist: state.currentTrack.artist || 'Preparing stream & buffering...' }
+        }));
       });
       if (isCancelled) { uBufferingStart(); return; }
       cleanups.push(uBufferingStart);
@@ -631,6 +645,7 @@ function AideoApp() {
         if (!state.currentTrack || !state.currentAttemptId || typeof payload === 'string' || payload.attempt_id !== state.currentAttemptId
           || ((state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
         useStore.setState((s) => ({ playback: { ...s.playback, is_buffering: false } }));
+        window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
       });
       if (isCancelled) { uBufferingEnd(); return; }
       cleanups.push(uBufferingEnd);
@@ -824,25 +839,6 @@ function AideoApp() {
   }, []);
 
 
-  useEffect(() => {
-    let isCancelled = false;
-    let unlistenGotoSettings: (() => void) | undefined;
-
-    const setup = async () => {
-      const u1 = await listen<{ tab?: string }>('ui-goto-settings-tab', (event) => {
-        if (isCancelled) return;
-        useStore.setState({ view: 'settings', pendingSettingsTab: event.payload?.tab || 'appearance' });
-      });
-      if (isCancelled) { u1(); return; }
-      unlistenGotoSettings = u1;
-    };
-    setup();
-
-    return () => {
-      isCancelled = true;
-      if (unlistenGotoSettings) unlistenGotoSettings();
-    };
-  }, []);
 
   useEffect(() => {
     // Prefetch secondary views during browser idle time so transitions never pause for chunk loading

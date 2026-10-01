@@ -13,14 +13,14 @@ import {
   Play, Tag, ListPlus, Plus, FolderPlus, Image, FileText, MinusCircle, Sliders, Layers, Terminal, BookOpen, Waves, LayoutGrid, ChevronDown 
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
-import { Track, Playlist, LibraryDesign } from '../store/types';
+import { Track, CloudTrack as ProviderCloudTrack, Playlist, LibraryDesign } from '../store/types';
 import { useVirtualList } from '../utils/useVirtualList';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { matchesSearchQuery } from '../utils/searchParser';
 import { useRef } from 'react';
 import { AlbumsView } from './AlbumsView';
 import { SimpleLRU } from '../utils/lruCache';
-import { fmt } from '../utils';
+import { fmt, baseName, isStreamTrack, isLosslessTrack, cloudTrackToVirtualTrack, getMenuPosition, startSonicMix } from '../utils';
 import { shuffleArray } from '../utils/shuffle';
 import './LibraryDesigns.css';
 
@@ -44,47 +44,12 @@ const persistQueueState = (newQueue: any[], otherState?: Record<string, any>) =>
 };
 
 
-const isStreamTrack = (path: string, format?: string | null) => {
-  return path.startsWith('http://') || path.startsWith('https://') || format === 'YouTube Direct' || format === 'Tidal FLAC' || format === 'Qobuz FLAC' || format === 'SUBSONIC' || format === 'JELLYFIN';
-};
-
-const isLosslessTrack = (t: any) => {
-  const f = (t.format || '').toLowerCase();
-  return f.includes('flac') || f.includes('wav') || f.includes('alac') || f.includes('dsf') || f.includes('dff') || f.includes('dsd');
-};
 
 type QuickFilterType = 'all' | 'loved' | 'lossless' | 'local' | 'streams';
+type CloudTrack = ProviderCloudTrack & { path_hash?: string | null };
 
 
-interface CloudTrack {
-  id: string;
-  title: string;
-  artist: string;
-  album: string;
-  duration: number;
-  cover_url: string | null;
-  stream_url: string;
-  provider: 'subsonic' | 'jellyfin';
-  path_hash?: string | null;
-}
 
-const cloudTrackToVirtualTrack = (ct: CloudTrack) => {
-  return {
-    id: -1,
-    path: ct.stream_url,
-    title: ct.title,
-    artist: ct.artist,
-    duration: ct.duration,
-    format: ct.provider.toUpperCase(),
-    lyric_offset: 0,
-    cover_url: ct.cover_url,
-    path_hash: ct.path_hash
-  };
-};
-
-function baseName(p: string | null) {
-  return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
-}
 
 interface CloudCacheButtonProps {
   streamUrl: string;
@@ -255,33 +220,6 @@ function TrackThumbnail({ path, coverUrl }: { path: string, coverUrl?: string | 
   );
 }
 
-const getMenuPosition = (anchor: DOMRect | { x: number; y: number }): React.CSSProperties => {
-  const menuWidth = 220;
-  const isRect = 'bottom' in anchor;
-  let left = isRect ? anchor.right - menuWidth : anchor.x;
-  if (left < 12) left = 12;
-  if (left + menuWidth > window.innerWidth - 12) left = window.innerWidth - menuWidth - 12;
-
-  const yPos = isRect ? anchor.bottom : anchor.y;
-  const spaceBelow = window.innerHeight - yPos;
-  const openUpwards = spaceBelow < 380 && (isRect ? anchor.top : anchor.y) > 380;
-
-  const style: React.CSSProperties = {
-    position: 'fixed',
-    left,
-    zIndex: 9999,
-  };
-
-  if (openUpwards) {
-    style.bottom = Math.round(window.innerHeight - (isRect ? anchor.top : anchor.y) + 4);
-    style.transformOrigin = isRect ? 'bottom right' : 'bottom left';
-  } else {
-    style.top = Math.round(yPos + (isRect ? 4 : 0));
-    style.transformOrigin = isRect ? 'top right' : 'top left';
-  }
-
-  return style;
-};
 
 interface TrackActionMenuProps {
   track: any;
@@ -299,7 +237,6 @@ interface TrackActionMenuProps {
   setMatchData: (data: { track: Track; match: any } | null) => void;
   setIsMatching: (id: number | null) => void;
   isMatching: number | null;
-  playTrack: (track: Track) => Promise<void> | void;
   currentPlaylist: Playlist | null;
   reorderPlaylistTracks: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void> | void;
   removeFromPlaylist: (playlistId: number, track: string | Track) => Promise<void> | void;
@@ -321,7 +258,6 @@ function TrackActionMenu({
   setMatchData,
   setIsMatching,
   isMatching,
-  playTrack,
   currentPlaylist,
   reorderPlaylistTracks,
   removeFromPlaylist,
@@ -477,22 +413,7 @@ function TrackActionMenu({
           className="track-action-menu-item emerald"
           onClick={async () => {
             onClose();
-            try {
-              const similar: any[] = await invoke('get_similar_tracks', { path: track.path });
-              if (similar && similar.length > 0) {
-                const store = useStore.getState();
-                await store.clearQueue();
-                for (const t of similar) {
-                  await store.addToQueue(t);
-                }
-                playTrack(similar[0]);
-                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix: Queued ${similar.length} similar tracks!`, type: 'success' } }));
-              } else {
-                window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' } }));
-              }
-            } catch (err) {
-              window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } }));
-            }
+            await startSonicMix(track.path, useStore.getState());
           }}
         >
           <span className="menu-item-icon"><Sparkles size={15} /></span>
@@ -2742,7 +2663,6 @@ export function LibraryView() {
           setMatchData={setMatchData}
           setIsMatching={setIsMatching}
           isMatching={isMatching}
-          playTrack={playTrack}
           currentPlaylist={currentPlaylist}
           reorderPlaylistTracks={reorderPlaylistTracks}
           removeFromPlaylist={removeFromPlaylist}

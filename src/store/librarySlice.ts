@@ -4,7 +4,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
+import { pathsEqual, baseName, parseDuration, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
@@ -597,8 +597,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality, effectiveTrackId));
           if (!isCurrentRequest()) return;
           console.error('Failed to resolve streaming URL in playTrack:', e);
-          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(e)) ||
-                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(e));
+          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(e, set)) ||
+                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(e, set));
           if (!notified) {
             window.dispatchEvent(new CustomEvent('ui-toast', {
               detail: { message: `Failed to load ${track.format} stream: ${e}`, type: 'error' }
@@ -1128,8 +1128,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           } catch (e) {
             trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
             console.error(`[Pre-Cache] Failed to pre-cache ${providerName} track:`, e);
-            notifyTidalAuthFailure(e);
-            notifyQobuzAuthFailure(e);
+            notifyTidalAuthFailure(e, set);
+            notifyQobuzAuthFailure(e, set);
           }
         })();
       } 
@@ -1357,28 +1357,13 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
             discoveryLevel,
           });
 
-          const parseDuration = (raw: string): number => {
-            if (!raw) return 180;
-            const parts = raw.split(':').map(Number);
-            if (parts.some(isNaN)) return 180;
-            let secs = 0;
-            if (parts.length === 3) {
-              secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
-            } else if (parts.length === 2) {
-              secs = parts[0] * 60 + parts[1];
-            } else {
-              secs = parts[0] || 0;
-            }
-            return secs > 0 ? secs : 180;
-          };
-
           if (Array.isArray(tracks)) {
             return tracks.map((t, idx) => ({
               id: -30000 - Math.floor(Math.random() * 1000000) - idx,
               path: t.url,
               title: t.title || 'Unknown Title',
               artist: t.artist || 'Unknown Artist',
-              duration: parseDuration(t.duration_raw),
+              duration: parseDuration(t.duration_raw) || 180,
               format: 'YouTube Direct',
               lyric_offset: 0,
               cover_url: t.cover_url || null,

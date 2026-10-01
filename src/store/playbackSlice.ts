@@ -405,12 +405,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       playback: {
         ...s.playback,
         status: 'Stopped',
+        is_buffering: false,
         attempt_id: undefined,
         effective_audio_path: null,
         last_stop_time: stopTime,
         backend_stop_detected_at: 0,
       }
     }));
+    window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
     try {
       await get().recordPlaybackTransition(null);
       const current = get().playback.current_track;
@@ -892,29 +894,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     }
   },
 
-  handlePlaybackStateChanged: (payload: any) => {
-    if (!payload) return;
-    const current = get().playback;
-    const newStatus = payload.status || current.status;
-    const newTrack = payload.current_track !== undefined ? payload.current_track : current.current_track;
-    const newPos = typeof payload.position_secs === 'number' ? payload.position_secs : current.position_secs;
-    const newVol = typeof payload.volume === 'number' ? payload.volume : current.volume;
-
-    set(s => ({
-      playback: {
-        ...s.playback,
-        status: newStatus,
-        current_track: newTrack,
-        position_secs: newPos,
-        volume: newVol,
-      }
-    }));
-
-    if (newTrack && typeof newTrack === 'string' && newTrack.trim().length > 0 && !pathsEqual(newTrack, current.current_track) && !pathsEqual(newTrack, get().currentTrack?.path)) {
-      get().handleTrackTransition(newTrack).catch(() => {});
-    }
-  },
-
   setDSP: async (newDSP: Partial<DSPState>) => {
     // 🛡️ Bit-Perfect vs. DSP Coexistence: If the user interacts with any Aideo Lab DSP/equalizer controls
     // while Bit-Perfect is active, automatically turn Bit-Perfect OFF so their audio adjustments take effect immediately.
@@ -1150,6 +1129,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await get().setVolume(1.0);
       }
       set(s => ({
+        playbackRate: nextMode ? 1.0 : s.playbackRate,
         playback: {
           ...s.playback,
           bit_perfect: nextMode,
@@ -1200,6 +1180,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         }
 
         set(s => ({
+          playbackRate: bitPerfectEnabled ? 1.0 : s.playbackRate,
           playback: {
             ...s.playback,
             exclusive: exclusiveEnabled,
@@ -1318,12 +1299,17 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   playbackRate: 1.0,
   setPlaybackRate: async (rate: number) => {
+    if (!Number.isFinite(rate)) return;
     const clamped = Math.max(0.5, Math.min(2.0, rate));
-    set({ playbackRate: clamped });
+    if (get().playback.bit_perfect && clamped !== 1.0) {
+      toast.warning('Disable Bit-Perfect mode to change playback speed. Speed changes also change pitch.', { title: 'Playback Speed', dedupKey: 'playback-speed' });
+      return;
+    }
     try {
       await invoke('set_playback_rate', { rate: clamped });
+      set({ playbackRate: clamped });
       if (clamped !== 1.0) {
-        toast.info(`Playback speed: ${clamped.toFixed(2)}x (Pitch Preserved)`, {
+        toast.info(`Playback speed: ${clamped.toFixed(2)}x (Pitch changes with speed)`, {
           title: 'Playback Speed',
           dedupKey: 'playback-speed',
         });
@@ -1333,7 +1319,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           dedupKey: 'playback-speed',
         });
       }
-    } catch (e) { console.error('Failed to set playback rate:', e); }
+    } catch (e) {
+      console.error('Failed to set playback rate:', e);
+      toast.error(`Playback speed unchanged: ${e}`, { title: 'Playback Speed', dedupKey: 'playback-speed' });
+    }
   },
 
   setDriverType: (type: 'WASAPI' | 'ASIO') => {
@@ -1580,8 +1569,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         } catch (err) {
           trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
           console.error('Failed to resolve stream in addToQueue:', err);
-          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
-                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
+          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err, set)) ||
+                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err, set));
           if (!notified) {
             window.dispatchEvent(new CustomEvent('ui-toast', {
               detail: { message: `Cannot queue track: ${err}`, type: 'error' }
@@ -1640,8 +1629,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         } catch (err) {
           trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
           console.error('Failed to resolve stream in playNextInQueue:', err);
-          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err)) ||
-                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err));
+          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err, set)) ||
+                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err, set));
           if (!notified) {
             window.dispatchEvent(new CustomEvent('ui-toast', {
               detail: { message: `Cannot queue next: ${err}`, type: 'error' }
@@ -1831,8 +1820,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
                 } catch (err) {
                   trackIdToStreamUrl.delete(streamCacheKey(t, requestedQuality));
                   console.error('Failed to resolve stream in initializeQueue:', err);
-                  notifyTidalAuthFailure(err);
-                  notifyQobuzAuthFailure(err);
+                  notifyTidalAuthFailure(err, set);
+                  notifyQobuzAuthFailure(err, set);
                   continue;
                 }
               }

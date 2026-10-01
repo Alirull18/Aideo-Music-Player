@@ -649,6 +649,15 @@ export function SettingsView() {
 
   // Tab navigation State
   const [activeTab, setActiveTab] = useState<'appearance' | 'library' | 'plugins' | 'scrobbling' | 'audio' | 'system' | 'updates' | 'account' | 'shortcuts'>('appearance');
+  const pendingSettingsTab = useStore(s => s.pendingSettingsTab);
+
+  useEffect(() => {
+    if (!pendingSettingsTab) return;
+    if (['appearance', 'library', 'plugins', 'scrobbling', 'audio', 'system', 'updates', 'account', 'shortcuts'].includes(pendingSettingsTab)) {
+      setActiveTab(pendingSettingsTab as typeof activeTab);
+    }
+    useStore.setState({ pendingSettingsTab: null });
+  }, [pendingSettingsTab]);
   const [recordingAction, setRecordingAction] = useState<string | null>(null);
   const [recordingGlobalAction, setRecordingGlobalAction] = useState<string | null>(null);
   const [showDebugModal, setShowDebugModal] = useState(false);

@@ -1202,7 +1202,7 @@ export function NowPlayingView() {
           </div>
         </div>
         <div 
-          className="np-visualizer-container relative group transition-all duration-200 ease-out" 
+          className="np-visualizer-container"
           style={{ 
             height: visualizerExpanded ? 140 : 64, 
             width: '100%', 
@@ -1219,9 +1219,10 @@ export function NowPlayingView() {
               e.stopPropagation();
               setVisualizerExpanded(!visualizerExpanded);
             }}
-            className="absolute top-1 right-1 opacity-0 group-hover:opacity-75 hover:!opacity-100 p-1 rounded bg-black/40 text-white/80 hover:text-white transition-opacity z-10"
+            className="np-visualizer-toggle"
             title={visualizerExpanded ? "Collapse Visualizer" : "Expand Visualizer"}
             aria-label={visualizerExpanded ? "Collapse visualizer" : "Expand visualizer"}
+            aria-expanded={visualizerExpanded}
           >
             {visualizerExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           </button>

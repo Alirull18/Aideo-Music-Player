@@ -1,3 +1,7 @@
+import type { CSSProperties } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import type { CloudTrack, PlayerState, Track } from './store/types';
+
 export function fmt(s: number | null) {
   if (!s || isNaN(s) || s < 0) return '0:00';
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -5,15 +9,11 @@ export function fmt(s: number | null) {
 
 export function parseDuration(raw: string | null | undefined): number {
   if (!raw) return 0;
-  const parts = String(raw).trim().split(':').map(Number);
-  if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-    return parts[0] * 60 + parts[1];
-  }
-  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  }
-  const n = Number(raw);
-  return !isNaN(n) && n > 0 ? n : 0;
+  const fields = String(raw).trim().split(':');
+  if (fields.length > 3 || fields.some(field => !field.trim())) return 0;
+  const parts = fields.map(Number);
+  if (parts.some(part => !Number.isFinite(part) || part < 0)) return 0;
+  return parts.reduce((seconds, part) => seconds * 60 + part, 0);
 }
 
 export function sortLyricLines<T extends { time_secs: number }>(lines: T[]): T[] {
@@ -23,6 +23,59 @@ export function sortLyricLines<T extends { time_secs: number }>(lines: T[]): T[]
 
 export function baseName(p: string | null) {
   return p ? (p.split(/[\\/]/).pop() ?? p) : '—';
+}
+
+export function isLosslessTrack(track?: { format?: string | null } | null): boolean {
+  const format = (track?.format || '').toLowerCase();
+  return format.includes('flac') || format.includes('wav') || format.includes('alac') || format.includes('dsf') || format.includes('dff') || format.includes('dsd');
+}
+
+export function cloudTrackToVirtualTrack(track: CloudTrack & { path_hash?: string | null }): Track {
+  return {
+    id: -1,
+    path: track.stream_url,
+    title: track.title,
+    artist: track.artist,
+    duration: track.duration,
+    format: track.provider?.toUpperCase() || 'STREAM',
+    lyric_offset: 0,
+    cover_url: track.cover_url,
+    path_hash: track.path_hash,
+  };
+}
+
+export function getMenuPosition(anchor: DOMRect | { x: number; y: number }): CSSProperties {
+  const menuWidth = 220;
+  const isRect = 'bottom' in anchor;
+  let left = isRect ? anchor.right - menuWidth : anchor.x;
+  if (left < 12) left = 12;
+  if (left + menuWidth > window.innerWidth - 12) left = window.innerWidth - menuWidth - 12;
+  const yPos = isRect ? anchor.bottom : anchor.y;
+  const openUpwards = window.innerHeight - yPos < 380 && (isRect ? anchor.top : anchor.y) > 380;
+  return {
+    position: 'fixed', left, zIndex: 9999,
+    ...(openUpwards
+      ? { bottom: Math.round(window.innerHeight - (isRect ? anchor.top : anchor.y) + 4), transformOrigin: isRect ? 'bottom right' : 'bottom left' }
+      : { top: Math.round(yPos + (isRect ? 4 : 0)), transformOrigin: isRect ? 'top right' : 'top left' }),
+  };
+}
+
+export async function startSonicMix(path: string, player: Pick<PlayerState, 'clearQueue' | 'addToQueue' | 'playTrack'>, albumTitle?: string): Promise<void> {
+  const toast = (message: string, type: 'success' | 'warning' | 'error') =>
+    window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message, type } }));
+  try {
+    const similar = await invoke<Track[]>('get_similar_tracks', { path });
+    if (!similar?.length) {
+      toast('Sonic Mix: No similar tracks found in library.', 'warning');
+      return;
+    }
+    await player.clearQueue();
+    for (const track of similar) await player.addToQueue(track);
+    await player.playTrack(similar[0]);
+    toast(albumTitle ? `Sonic Mix: Queued ${similar.length} tracks based on ${albumTitle}!` : `Sonic Mix: Queued ${similar.length} similar tracks!`, 'success');
+  } catch (error) {
+    toast(`Sonic Mix failed: ${error}`, 'error');
+  }
 }
 
 export function getStreamName(url: string | null) {

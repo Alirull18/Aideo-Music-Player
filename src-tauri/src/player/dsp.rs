@@ -45,13 +45,6 @@ impl BiquadFilter {
         )
     }
 
-    #[allow(dead_code)]
-    pub fn reset_state(&mut self) {
-        self.x1 = 0.0;
-        self.x2 = 0.0;
-        self.y1 = 0.0;
-        self.y2 = 0.0;
-    }
 
     /// Store normalized coefficients as slew targets and derive the one-pole
     /// smoothing factor for this sample rate (~5ms time constant).
@@ -189,22 +182,6 @@ impl BiquadFilter {
         y
     }
 
-    /// Process a block of samples in 4-wide unrolled SIMD-friendly chunks
-    #[allow(dead_code)]
-    #[inline]
-    pub fn process_block(&mut self, samples: &mut [f32]) {
-        let mut chunks = samples.chunks_exact_mut(4);
-        for chunk in &mut chunks {
-            chunk[0] = self.process(chunk[0]);
-            chunk[1] = self.process(chunk[1]);
-            chunk[2] = self.process(chunk[2]);
-            chunk[3] = self.process(chunk[3]);
-        }
-        let rem = chunks.into_remainder();
-        for s in rem {
-            *s = self.process(*s);
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

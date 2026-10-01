@@ -201,25 +201,27 @@ describe('Qobuz Store Slice', () => {
 });
 
 describe('notifyQobuzAuthFailure', () => {
-  it('should fire nudge toast and navigation event on auth failure', () => {
-    const events = spyOnWindowEvents('ui-toast', 'ui-goto-settings-tab');
-
-    const handled = notifyQobuzAuthFailure('User is not authenticated with Qobuz');
+  it('navigates directly to Library settings on auth failure', () => {
+    const events = spyOnWindowEvents('ui-toast');
+    useStore.setState({ view: 'nowplaying', pendingSettingsTab: null });
+    const handled = notifyQobuzAuthFailure('User is not authenticated with Qobuz', useStore.setState);
 
     expect(handled).toBe(true);
     const toast = events.find(e => e.type === 'ui-toast' && String(e.detail?.message || '').includes('Qobuz'));
     expect(toast).toBeTruthy();
-    const nav = events.find(e => e.type === 'ui-goto-settings-tab');
-    expect(nav?.detail?.tab).toBe('library');
+    expect(useStore.getState().view).toBe('settings');
+    expect(useStore.getState().pendingSettingsTab).toBe('library');
   });
 
   it('should ignore unrelated errors', () => {
-    const events = spyOnWindowEvents('ui-toast', 'ui-goto-settings-tab');
-
-    const handled = notifyQobuzAuthFailure('Network timeout while streaming');
+    const events = spyOnWindowEvents('ui-toast');
+    useStore.setState({ view: 'nowplaying', pendingSettingsTab: null });
+    const handled = notifyQobuzAuthFailure('Network timeout while streaming', useStore.setState);
 
     expect(handled).toBe(false);
     expect(events).toHaveLength(0);
+    expect(useStore.getState().view).toBe('nowplaying');
+    expect(useStore.getState().pendingSettingsTab).toBeNull();
   });
 });
 

@@ -1,4 +1,5 @@
 pub static SOURCE_QUEUE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static LOCAL_QUEUE_GENERATION: AtomicU64 = AtomicU64::new(0);
 use std::sync::{Arc, Mutex};
 use std::io::BufRead;
 use std::thread;
@@ -46,6 +47,107 @@ struct DecoderInfo {
     pub source_bits_per_sample: Option<u16>,
     pub source_channel_mask: Option<u32>,
     pub resolved_path: String,
+    _decrypted_process: DecryptedProcessGuard,
+    _decrypted_file: Option<Arc<DecryptedPlaybackFile>>,
+}
+
+struct DecryptedPlaybackFile(std::path::PathBuf);
+
+impl DecryptedPlaybackFile {
+    fn create(bytes: &[u8], extension: &str) -> std::io::Result<Arc<Self>> {
+        use std::io::Write;
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        loop {
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!("aideo_cache_{}_{}.{}", std::process::id(), id, extension));
+            let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => file,
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err),
+            };
+            let owner = Arc::new(Self(path));
+            let result = file.write_all(bytes);
+            drop(file);
+            result?;
+            return Ok(owner);
+        }
+    }
+}
+
+impl Drop for DecryptedPlaybackFile {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_file(&self.0) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("[player] Could not remove owned decrypted playback file: {err}");
+            }
+        }
+    }
+}
+
+struct DecryptedProcessGuard(Option<(Arc<Mutex<Option<std::process::Child>>>, u32)>);
+
+impl Drop for DecryptedProcessGuard {
+    fn drop(&mut self) {
+        if let Some((process, owned_id)) = &self.0 {
+            let child = {
+                let mut slot = safe_lock(process);
+                if slot.as_ref().is_some_and(|child| child.id() == *owned_id) { slot.take() } else { None }
+            };
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
+struct CrossfadeReservation {
+    path: Option<String>,
+    queue: Arc<Mutex<VecDeque<String>>>,
+    queue_generation: u64,
+    cancel: Arc<AtomicBool>,
+    process: Arc<Mutex<Option<std::process::Child>>>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl CrossfadeReservation {
+    fn cancel_preparation(&mut self) {
+        self.cancel.store(true, Ordering::SeqCst);
+        kill_current_process(&self.process);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        kill_current_process(&self.process);
+    }
+}
+
+impl Drop for CrossfadeReservation {
+    fn drop(&mut self) {
+        self.cancel_preparation();
+        let mut queue = safe_lock(&self.queue);
+        if should_restore_fade_reservation(self.queue_generation, LOCAL_QUEUE_GENERATION.load(Ordering::SeqCst), SOURCE_QUEUE_MODE.load(Ordering::SeqCst)) {
+            if let Some(path) = self.path.take() { queue.push_front(path); }
+        }
+    }
+}
+
+fn should_restore_fade_reservation(reserved_generation: u64, current_generation: u64, source_mode: bool) -> bool {
+    !source_mode && reserved_generation == current_generation
+}
+
+fn cancel_crossfade_handoff(reservation: &mut Option<CrossfadeReservation>, handoff: &mut bool, next_track: &mut Option<(String, f64, Option<String>)>) {
+    *handoff = false;
+    *next_track = None;
+    drop(reservation.take());
+}
+
+fn crossfade_trigger_position(dsp: &DSPState, duration: f64, bit_perfect: bool, source_mode: bool) -> Option<f64> {
+    if !dsp.crossfade_transition_enabled || bit_perfect || source_mode
+        || dsp.crossfade_transition_duration <= 0.0 || duration <= dsp.crossfade_transition_duration as f64 {
+        None
+    } else {
+        Some(duration - dsp.crossfade_transition_duration as f64)
+    }
 }
 
 pub static SESSION_DOWNLOADED_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -2134,6 +2236,7 @@ fn prepare_decoder(
     }
 
     let mut resolved_path = path.to_string();
+    let mut decrypted_file = None;
 
     // Intercept YouTube watch URLs and route them to growing Cache file
     let is_youtube_stream = is_youtube_url_or_id(path);
@@ -2173,12 +2276,9 @@ fn prepare_decoder(
                         println!("[player] Warning: Cached file for '{}' is corrupted (HTML/invalid bytes). Deleting and forcing online stream fallback...", path);
                         let _ = std::fs::remove_file(&cache_path);
                     } else {
-                        let ext = "wav";
-                        let temp_dir = std::env::temp_dir();
-                        let hash = format!("{:x}", md5::compute(canonical_url.as_bytes()));
-                        let decrypted_temp_path = temp_dir.join(format!("aideo_cache_{}.{}", hash, ext));
-                        if std::fs::write(&decrypted_temp_path, decrypted_bytes).is_ok() {
-                            resolved_path = decrypted_temp_path.to_string_lossy().to_string();
+                        if let Ok(owner) = DecryptedPlaybackFile::create(&decrypted_bytes, "wav") {
+                            resolved_path = owner.0.to_string_lossy().to_string();
+                            decrypted_file = Some(owner);
                             println!("[player] INTERCEPT: Playing YouTube track from offline decrypted cache file!");
                             use_cache = true;
                             let _ = app_handle.emit("stream-buffering-end", serde_json::json!({ "path": path, "attempt_id": attempt_id.unwrap_or("") }));
@@ -2316,10 +2416,9 @@ fn prepare_decoder(
                     let _ = std::fs::remove_file(&cache_path);
                 } else {
                     let ext = detect_audio_extension(&decrypted_bytes);
-                    let temp_dir = std::env::temp_dir();
-                    let temp_path = temp_dir.join(format!("aideo_cache_{}.{}", hash, ext));
-                    if std::fs::write(&temp_path, decrypted_bytes).is_ok() {
-                        resolved_path = temp_path.to_string_lossy().to_string();
+                    if let Ok(owner) = DecryptedPlaybackFile::create(&decrypted_bytes, ext) {
+                        resolved_path = owner.0.to_string_lossy().to_string();
+                        decrypted_file = Some(owner);
                         println!("[player] INTERCEPT: Playing cloud track from offline decrypted cache file!");
                     }
                 }
@@ -2330,6 +2429,7 @@ fn prepare_decoder(
     let path = resolved_path.as_str();
 
     let is_stream = path.starts_with("http://") || path.starts_with("https://");
+    let mut decrypted_process = DecryptedProcessGuard(None);
     let is_dsd = if !is_stream {
         if let Some(ext) = std::path::Path::new(path).extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
@@ -2449,6 +2549,8 @@ fn prepare_decoder(
                         source_bits_per_sample,
                         source_channel_mask,
                         resolved_path: resolved_path.clone(),
+                        _decrypted_process: decrypted_process,
+                        _decrypted_file: decrypted_file,
                     });
                 }
             }
@@ -2680,6 +2782,7 @@ fn prepare_decoder(
                             let _ = child.wait();
                             return Err("Decoder preparation aborted: generation obsolete".to_string());
                         }
+                        if decrypted_file.is_some() { decrypted_process.0 = Some((Arc::clone(current_process), child.id())); }
                         *proc_lock = Some(child);
                     }
                     let source = symphonia::core::io::ReadOnlySource::new(stdout);
@@ -2722,6 +2825,7 @@ fn prepare_decoder(
                             let _ = child.wait();
                             return Err("Decoder preparation aborted: generation obsolete".to_string());
                         }
+                        if decrypted_file.is_some() { decrypted_process.0 = Some((Arc::clone(current_process), child.id())); }
                         *proc_lock = Some(child);
                     }
                     let source = symphonia::core::io::ReadOnlySource::new(stdout);
@@ -2780,6 +2884,8 @@ fn prepare_decoder(
             source_bits_per_sample,
             source_channel_mask,
             resolved_path: resolved_path.clone(),
+            _decrypted_process: decrypted_process,
+            _decrypted_file: decrypted_file,
         })
     } else {
         Err("Invalid state: neither native nor FFmpeg decoder path executed".to_string())
@@ -2865,7 +2971,6 @@ pub struct DSPState {
     pub crossfade_transition_enabled: bool,
     pub crossfade_transition_duration: f32,
     pub stream_engine: String,
-    pub lookahead_prebuffer_enabled: bool,
     pub playback_rate: f64,
 }
 
@@ -2924,7 +3029,6 @@ impl Default for DSPState {
             crossfade_transition_enabled: false,
             crossfade_transition_duration: 3.0,
             stream_engine: "auto".to_string(),
-            lookahead_prebuffer_enabled: true,
             playback_rate: 1.0,
         }
     }
@@ -3442,7 +3546,8 @@ fn player_loop(
 
 
 fn kill_current_process(current_process: &Arc<Mutex<Option<std::process::Child>>>) {
-    if let Some(mut child) = safe_lock(current_process).take() {
+    let child = safe_lock(current_process).take();
+    if let Some(mut child) = child {
         let _ = child.kill();
         let _ = child.wait(); // reap zombie process immediately
     }
@@ -4174,12 +4279,9 @@ impl ConvolutionNode {
                         while let Ok(packet) = format.next_packet() {
                             if packet.track_id() == track.id {
                                 if let Ok(decoded) = decoder.decode(&packet) {
-                                    let n_frames = decoded_frames(&decoded);
                                     let ch_count = decoded.spec().channels.count();
-                                    let l_src = extract_f32_channel_data(&decoded, 0, n_frames);
-                                    let r_src = if ch_count > 1 { extract_f32_channel_data(&decoded, 1, n_frames) } else { l_src.clone() };
-                                    left_samples.extend(l_src);
-                                    right_samples.extend(r_src);
+                                    append_f32_channel_data(&decoded, 0, 0, &mut left_samples);
+                                    append_f32_channel_data(&decoded, usize::from(ch_count > 1), 0, &mut right_samples);
                                 }
                             }
                         }
@@ -4196,19 +4298,25 @@ impl ConvolutionNode {
     }
 }
 
-fn pcm_s16_to_f32(sample: i16) -> f32 { sample as f32 / 32_768.0 }
-fn pcm_s24_to_f32(sample: i32) -> f32 { sample as f32 / 8_388_608.0 }
-fn pcm_s32_to_f32(sample: i32) -> f32 { sample as f32 / 2_147_483_648.0 }
 
-fn extract_f32_channel_data(buf: &AudioBufferRef<'_>, ch: usize, n_frames: usize) -> Vec<f32> {
+fn append_f32_channel_data(buf: &AudioBufferRef<'_>, ch: usize, skip: usize, out: &mut impl Extend<f32>) {
+    use symphonia::core::conv::FromSample;
+    macro_rules! append {
+        ($buffer:expr) => {
+            out.extend($buffer.chan(ch).iter().skip(skip).map(|&sample| f32::from_sample(sample)))
+        };
+    }
     match buf {
-        AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
-        AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| pcm_s16_to_f32(s)).collect(),
-        AudioBufferRef::S32(b) => b.chan(ch).iter().map(|&s| pcm_s32_to_f32(s)).collect(),
-        AudioBufferRef::U8(b)  => b.chan(ch).iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
-        AudioBufferRef::S24(b) => b.chan(ch).iter().map(|&s| pcm_s24_to_f32(s.inner())).collect(),
-        AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
-        _ => vec![0.0; n_frames],
+        AudioBufferRef::U8(b) => append!(b),
+        AudioBufferRef::U16(b) => append!(b),
+        AudioBufferRef::U24(b) => append!(b),
+        AudioBufferRef::U32(b) => append!(b),
+        AudioBufferRef::S8(b) => append!(b),
+        AudioBufferRef::S16(b) => append!(b),
+        AudioBufferRef::S24(b) => append!(b),
+        AudioBufferRef::S32(b) => append!(b),
+        AudioBufferRef::F32(b) => append!(b),
+        AudioBufferRef::F64(b) => append!(b),
     }
 }
 
@@ -4447,8 +4555,8 @@ fn background_decode(
     complete: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     file_rate: usize,
-    file_ch: usize,
     cache_codec: &'static str,
+    _decrypted_file: Option<Arc<DecryptedPlaybackFile>>,
 ) {
     #[cfg(target_os = "windows")]
     unsafe {
@@ -4537,7 +4645,6 @@ fn background_decode(
             use std::os::windows::process::CommandExt;
 
             let rate_str = file_rate.to_string();
-            let ch_str = file_ch.to_string();
             let mut cmd = std::process::Command::new(&ffmpeg_path);
             cmd.args([
                 "-probesize", "32768",
@@ -4546,7 +4653,7 @@ fn background_decode(
                 "-f", "wav",
                 "-acodec", cache_codec,
                 "-ar", &rate_str,
-                "-ac", &ch_str,
+                "-ac", "2",
                 "-"
             ])
             .stdout(std::process::Stdio::piped())
@@ -4594,6 +4701,10 @@ fn background_decode(
         Some(f) => f,
         None => {
             println!("[player-bg] Error: All decoding methods failed for {}.", path);
+            if let Some(mut child) = child_process.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
             complete.store(true, Ordering::SeqCst); // Avoid hanging caller in waiting loop
             return;
         }
@@ -4632,16 +4743,7 @@ fn background_decode(
 
             if skip_frames < n_frames {
                 for (ch, buf) in local_buffers.iter_mut().enumerate().take(file_ch) {
-                    let src: Vec<f32> = match &decoded {
-                        AudioBufferRef::F32(b) => b.chan(ch)[skip_frames..].to_vec(),
-                        AudioBufferRef::S16(b) => b.chan(ch)[skip_frames..].iter().map(|&s| pcm_s16_to_f32(s)).collect(),
-                        AudioBufferRef::S32(b) => b.chan(ch)[skip_frames..].iter().map(|&s| pcm_s32_to_f32(s)).collect(),
-                        AudioBufferRef::U8(b)  => b.chan(ch)[skip_frames..].iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
-                        AudioBufferRef::S24(b) => b.chan(ch)[skip_frames..].iter().map(|&s| pcm_s24_to_f32(s.inner())).collect(),
-                        AudioBufferRef::F64(b) => b.chan(ch)[skip_frames..].iter().map(|&s| s as f32).collect(),
-                        _ => vec![0.0; n_frames - skip_frames],
-                    };
-                    buf.extend(src);
+                    append_f32_channel_data(&decoded, ch, skip_frames, buf);
                 }
 
                 packet_count += 1;
@@ -4678,16 +4780,7 @@ fn background_decode(
     // Encoder delay was skipped at ingestion time, keeping samples strictly append-only.
     // At EOF, only trailing encoder padding is truncated from the tail, preserving ram_cursor.
     if encoder_padding > 0 {
-        let padding = encoder_padding as usize;
-        let mut lock = safe_lock(&samples);
-        for ch in lock.iter_mut() {
-            if padding > 0 && ch.len() > padding {
-                let truncate_to = ch.len() - padding;
-                ch.truncate(truncate_to);
-            } else if padding >= ch.len() {
-                ch.clear();
-            }
-        }
+        trim_encoder_padding(&mut safe_lock(&samples), encoder_padding as usize);
     }
 
     complete.store(true, Ordering::SeqCst);
@@ -4956,7 +5049,8 @@ pub fn should_switch_default_device(
 }
 
 pub fn should_bypass_ram_cache(file_bytes: u64, duration_secs: f64, file_rate: usize, file_ch: usize) -> bool {
-    if file_bytes > 150 * 1024 * 1024 || duration_secs > 900.0 {
+    // Unknown duration has no safe compressed-size expansion bound: decode on demand.
+    if !duration_secs.is_finite() || duration_secs <= 0.0 || file_ch > 2 || file_bytes > 150 * 1024 * 1024 || duration_secs > 900.0 {
         return true;
     }
     if duration_secs > 0.0 && file_rate > 0 && file_ch > 0 {
@@ -5035,6 +5129,14 @@ pub fn downmix_to_stereo(planar: &mut [Vec<f32>], frames: usize) {
             planar[0][i] = sum_l * norm;
             planar[1][i] = sum_r * norm;
         }
+    }
+}
+
+fn fold_for_stereo_output(planar: &mut Vec<Vec<f32>>, output_channels: usize) {
+    if output_channels == 2 && planar.len() > 2 {
+        let frames = planar[0].len();
+        downmix_to_stereo(planar, frames);
+        planar.truncate(2);
     }
 }
 
@@ -5122,30 +5224,9 @@ pub fn can_reuse_stream_session(
     session_sample_rate == target_rate && session_channels == file_ch
 }
 
-#[allow(dead_code)]
-pub fn trim_encoder_delay_and_padding(
-    samples: &mut [Vec<f32>],
-    delay: u32,
-    padding: u32,
-) {
-    let delay = delay as usize;
-    let padding = padding as usize;
-    for ch in samples.iter_mut() {
-        if delay > 0 {
-            if ch.len() > delay {
-                ch.drain(0..delay);
-            } else {
-                ch.clear();
-            }
-        }
-        if padding > 0 {
-            if ch.len() > padding {
-                let truncate_to = ch.len() - padding;
-                ch.truncate(truncate_to);
-            } else {
-                ch.clear();
-            }
-        }
+fn trim_encoder_padding(samples: &mut [Vec<f32>], padding: usize) {
+    for channel in samples {
+        channel.truncate(channel.len().saturating_sub(padding));
     }
 }
 
@@ -5340,6 +5421,8 @@ fn play_file(
     };
 
     let resolved_path = info.resolved_path.clone();
+    let decrypted_file = info._decrypted_file;
+    let _decrypted_process = info._decrypted_process;
 
     let mut file_rate = info.file_rate;
     let mut file_ch = info.file_ch;
@@ -5364,9 +5447,7 @@ fn play_file(
     }).unwrap_or(0.0);
 
     let is_too_large = if !is_stream {
-        if resolved_path.contains(".tmp") {
-            false
-        } else {
+        {
             let file_bytes = std::fs::metadata(&resolved_path).map(|m| m.len()).unwrap_or(0);
             let too_large = should_bypass_ram_cache(file_bytes, duration_secs, file_rate, file_ch);
             if too_large {
@@ -5451,8 +5532,9 @@ fn play_file(
             let c_clone = Arc::clone(&complete);
             let sd_clone = Arc::clone(&decode_shutdown);
             let cache_codec = cache_pcm_codec(source_sample_format.as_deref(), &transcode_quality);
+            let decrypted_file = decrypted_file.clone();
             thread::spawn(move || {
-                background_decode(path_str, s_clone, c_clone, sd_clone, file_rate, file_ch, cache_codec);
+                background_decode(path_str, s_clone, c_clone, sd_clone, file_rate, cache_codec, decrypted_file);
             });
 
             // Wait for initial pre-buffer cushion if it's an actively growing stream (.tmp)
@@ -6577,7 +6659,7 @@ fn play_file(
     };
 
     // Crossfade State Variables
-    let next_child_process = Arc::new(Mutex::new(None::<std::process::Child>));
+    let mut next_child_process = Arc::new(Mutex::new(None::<std::process::Child>));
     let mut next_track_path: Option<String> = None;
     let mut next_decoder_rx: Option<std::sync::mpsc::Receiver<Result<DecoderInfo, String>>> = None;
     let mut next_decoder_info: Option<DecoderInfo> = None;
@@ -6587,6 +6669,8 @@ fn play_file(
     let mut next_resample_ratio = 1.0f64;
     let mut crossfade_frame_counter = 0usize;
     let mut crossfade_triggered = false;
+    let mut next_reservation: Option<CrossfadeReservation> = None;
+    let mut fade_frames = 0usize;
 
     while running {
         loop {
@@ -6621,6 +6705,7 @@ fn play_file(
                 }
                 Ok(PlayerCommand::Seek(secs)) => {
                     // Reset crossfade transition states to prevent stale next-track bleed
+                    cancel_crossfade_handoff(&mut next_reservation, &mut crossfade_handoff, &mut next_track_info);
                     kill_current_process(&next_child_process);
                     crossfade_frame_counter = 0;
                     crossfade_triggered = false;
@@ -6754,7 +6839,13 @@ fn play_file(
         let true_pos = (ram_cursor as f64 / file_rate as f64) - delay_secs;
         let true_pos = true_pos.max(0.0);
 
-        if SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && crossfade_triggered {
+        let source_mode = SOURCE_QUEUE_MODE.load(Ordering::SeqCst);
+        let trigger = crossfade_trigger_position(&current_dsp, duration_secs, bp_now, source_mode);
+        if crossfade_triggered && (!current_dsp.crossfade_transition_enabled
+            || current_dsp.crossfade_transition_duration <= 0.0 || bp_now || source_mode) {
+            drop(next_decoder_info.take());
+            drop(next_decoder_rx.take());
+            drop(next_reservation.take());
             kill_current_process(&next_child_process);
             crossfade_triggered = false;
             crossfade_frame_counter = 0;
@@ -6765,30 +6856,33 @@ fn play_file(
             next_pending.clear();
             next_output.clear();
         }
-        if dsp_now.crossfade_transition_enabled && duration_secs > dsp_now.crossfade_transition_duration as f64 {
-            let crossfade_trigger_pos = duration_secs - dsp_now.crossfade_transition_duration as f64;
+        if let Some(crossfade_trigger_pos) = trigger {
             if true_pos >= crossfade_trigger_pos && !crossfade_triggered {
                 let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
                 if is_local_next {
                     crossfade_triggered = true;
-                    let next_path_opt = {
+                    let (next_path_opt, queue_generation) = {
                         let mut q = safe_lock(&queue);
-                        q.pop_front()
+                        let generation = LOCAL_QUEUE_GENERATION.load(Ordering::SeqCst);
+                        let path = if SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { None } else { q.pop_front() };
+                        (path, generation)
                     };
                     if let Some(next_path) = next_path_opt {
+                        next_child_process = Arc::new(Mutex::new(None));
+                        fade_frames = (current_dsp.crossfade_transition_duration as f64 * dev_rate as f64) as usize;
                         println!("[player-crossfade] Triggering crossfade to next track: {}", next_path);
                         let app_h = app_handle.clone();
                         let ffmpeg_p = ffmpeg_path.to_string();
                         let process_c = Arc::clone(&next_child_process);
                         let quality = last_ffmpeg_quality.clone();
-                        let dsp_c = dsp_now.clone();
+                        let dsp_c = current_dsp.clone();
                         let next_path_c = next_path.clone();
 
                         let (tx, rx_next_decoder) = std::sync::mpsc::channel();
                         let next_cancel_token = Arc::new(AtomicBool::new(false));
                         let next_cancel_clone = Arc::clone(&next_cancel_token);
                         let next_gen = PLAYBACK_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-                        std::thread::spawn(move || {
+                        let worker = std::thread::spawn(move || {
                             let res = prepare_decoder(
                                 &next_path_c,
                                 0.0,
@@ -6802,6 +6896,11 @@ fn play_file(
                                 next_gen,
                             );
                             let _ = tx.send(res);
+                        });
+                        next_reservation = Some(CrossfadeReservation {
+                            path: Some(next_path.clone()), queue: Arc::clone(&queue),
+                            queue_generation,
+                            cancel: next_cancel_token, process: Arc::clone(&next_child_process), worker: Some(worker),
                         });
                         next_decoder_rx = Some(rx_next_decoder);
                         next_track_path = Some(next_path);
@@ -6818,9 +6917,9 @@ fn play_file(
                         println!("[player-crossfade] Next track decoder prepared successfully for: {}", info.resolved_path);
                         next_pending = vec![VecDeque::new(); info.file_ch];
 
-                        let sinc_len = dsp_now.resampler_sinc_len as usize;
-                        let oversampling = dsp_now.resampler_oversampling as usize;
-                        let interp_type = match dsp_now.resampler_interpolation.as_str() {
+                        let sinc_len = current_dsp.resampler_sinc_len as usize;
+                        let oversampling = current_dsp.resampler_oversampling as usize;
+                        let interp_type = match current_dsp.resampler_interpolation.as_str() {
                             "linear" => rubato::SincInterpolationType::Linear,
                             _ => rubato::SincInterpolationType::Cubic,
                         };
@@ -6845,17 +6944,15 @@ fn play_file(
                             }
                             Err(e) => {
                                 eprintln!("[player-crossfade] Failed to create resampler for next track: {}", e);
-                                if let Some(path) = next_track_path.take() {
-                                    if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
-                                }
+                                next_track_path = None;
+                                drop(next_reservation.take());
                             }
                         }
                     }
                     Err(e) => {
                         eprintln!("[player-crossfade] Failed to prepare next track decoder: {}", e);
-                        if let Some(path) = next_track_path.take() {
-                            if !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) { safe_lock(&queue).push_front(path); }
-                        }
+                        next_track_path = None;
+                        drop(next_reservation.take());
                     }
                 }
                 next_decoder_rx = None;
@@ -6936,16 +7033,7 @@ fn play_file(
                                 let frames = decoded_frames(&decoded);
                                 ram_cursor += frames;
                                 for (ch, buf) in pending.iter_mut().enumerate().take(file_ch) {
-                                    let src: Vec<f32> = match &decoded {
-                                         AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
-                                         AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| pcm_s16_to_f32(s)).collect(),
-                                         AudioBufferRef::S32(b) => b.chan(ch).iter().map(|&s| pcm_s32_to_f32(s)).collect(),
-                                         AudioBufferRef::U8(b)  => b.chan(ch).iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
-                                         AudioBufferRef::S24(b) => b.chan(ch).iter().map(|&s| pcm_s24_to_f32(s.inner())).collect(),
-                                         AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
-                                         _ => vec![0.0; decoded_frames(&decoded)],
-                                     };
-                                    buf.extend(src);
+                                    append_f32_channel_data(&decoded, ch, 0, buf);
                                 }
                             }
                         }
@@ -7014,16 +7102,7 @@ fn play_file(
                 if packet.track_id() == info.track_id {
                     if let Ok(decoded) = info.decoder.decode(&packet) {
                         for ch in 0..info.file_ch {
-                            let src: Vec<f32> = match &decoded {
-                                 AudioBufferRef::F32(b) => b.chan(ch).to_vec(),
-                                 AudioBufferRef::S16(b) => b.chan(ch).iter().map(|&s| pcm_s16_to_f32(s)).collect(),
-                                 AudioBufferRef::S32(b) => b.chan(ch).iter().map(|&s| pcm_s32_to_f32(s)).collect(),
-                                 AudioBufferRef::U8(b)  => b.chan(ch).iter().map(|&s| (s as f32 - 128.0) / 128.0).collect(),
-                                 AudioBufferRef::S24(b) => b.chan(ch).iter().map(|&s| pcm_s24_to_f32(s.inner())).collect(),
-                                 AudioBufferRef::F64(b) => b.chan(ch).iter().map(|&s| s as f32).collect(),
-                                 _ => vec![0.0; decoded_frames(&decoded)],
-                            };
-                            next_pending[ch].extend(src);
+                            append_f32_channel_data(&decoded, ch, 0, &mut next_pending[ch]);
                         }
                     }
                 }
@@ -7064,7 +7143,7 @@ fn play_file(
 
             let is_bp = bp_now && file_rate == dev_rate && file_ch == dev_ch;
 
-            let (mut out_planar, n_out) = if is_bp {
+            let (out_planar, n_out) = if is_bp {
                 feed_visualizer_fft(&chunk_planar, &mut fft_buffer, fft_tx, dev_rate as f32, current_dsp.low_spec_mode);
                 (chunk_planar, valid_input_frames)
             } else {
@@ -7104,9 +7183,11 @@ fn play_file(
                     }
                 }
 
+                feed_visualizer_fft(&processed, &mut fft_buffer, fft_tx, dev_rate as f32, current_dsp.low_spec_mode);
+                fold_for_stereo_output(&mut processed, dev_ch);
                 if let (Some(next_res), Some(info)) = (&mut next_resampler, &next_decoder_info) {
                     if next_output.is_empty() {
-                        next_output = vec![VecDeque::new(); info.file_ch];
+                        next_output = vec![VecDeque::new(); if dev_ch == 2 { info.file_ch.min(2) } else { info.file_ch }];
                     }
                     while next_output[0].len() < processed[0].len() && next_pending[0].len() >= chunk_size {
                         let mut next_chunk_planar = vec![vec![0.0; chunk_size]; info.file_ch];
@@ -7118,7 +7199,8 @@ fn play_file(
                         update_playback_ratio(next_res, &mut next_resample_ratio, dsp_now.playback_rate);
                         let refs_next: Vec<&[f32]> = next_chunk_planar.iter().map(Vec::as_slice).collect();
                         match next_res.process(&refs_next, None) {
-                            Ok(next_processed) => {
+                            Ok(mut next_processed) => {
+                                fold_for_stereo_output(&mut next_processed, dev_ch);
                                 for (pending, output) in next_output.iter_mut().zip(next_processed) {
                                     pending.extend(output);
                                 }
@@ -7130,7 +7212,8 @@ fn play_file(
                         }
                     }
 
-                    let crossfade_frames = (current_dsp.crossfade_transition_duration as f64 * dev_rate as f64) as usize;
+                    // Duration is latched when preparation starts; disable cancels immediately.
+                    let crossfade_frames = fade_frames;
                     let remaining = crossfade_frames.saturating_sub(crossfade_frame_counter);
                     if remaining > 0 && !next_output[0].is_empty() {
                         let mixed = mix_crossfade_frames(&mut processed, &mut next_output, crossfade_frame_counter, crossfade_frames);
@@ -7138,7 +7221,7 @@ fn play_file(
                         if crossfade_frame_counter >= crossfade_frames {
                             processed.iter_mut().for_each(|channel| channel.truncate(mixed));
                             let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
-                            let npath = next_track_path.clone().unwrap_or_default();
+                            let npath = next_track_path.take().unwrap();
                             let next_attempt_id = generate_handoff_attempt_id();
                             let _ = app_handle.emit("track-transitioned", serde_json::json!({
                                 "previous_path": path,
@@ -7152,9 +7235,6 @@ fn play_file(
                     }
                 }
 
-                // 🚀 Pre-DSP FFT Extraction: Extract visualizer spectrum BEFORE DSP gain/headroom cuts
-                // so the visualizer stays energetic, full, and bouncy when toggling DSP options.
-                feed_visualizer_fft(&processed, &mut fft_buffer, fft_tx, dev_rate as f32, current_dsp.low_spec_mode);
 
                 if !should_bypass_dsp_for_bit_perfect(is_bp, current_dsp.enabled) {
                     for node in &mut nodes {
@@ -7165,10 +7245,6 @@ fn play_file(
                 (processed, len)
             };
 
-            // Multichannel folddown / downmix to stereo when outputting to 2-channel hardware
-            if out_planar.len() > 2 && dev_ch == 2 {
-                downmix_to_stereo(&mut out_planar, n_out);
-            }
 
             let mut interleaved = Vec::with_capacity(n_out * dev_ch);
             let mut out_idx = 0;
@@ -7258,6 +7334,7 @@ fn play_file(
                     }
                     Ok(PlayerCommand::Seek(secs)) => {
                         // Reset crossfade transition states to prevent stale next-track bleed
+                        cancel_crossfade_handoff(&mut next_reservation, &mut crossfade_handoff, &mut next_track_info);
                         kill_current_process(&next_child_process);
                         crossfade_frame_counter = 0;
                         crossfade_triggered = false;
@@ -7376,6 +7453,9 @@ fn play_file(
     // 5. WAIT FOR BUFFER TO DRAIN ENTIRELY
     // This prevents cutting off audio when the ringbuffer is full at EOF,
     // ensuring the track plays to 100% completion before advancing to the next track.
+    drop(next_decoder_info.take());
+    drop(next_decoder_rx.take());
+    if let Some(reservation) = next_reservation.as_mut() { reservation.cancel_preparation(); }
     let endpoint_drain = if crossfade_handoff {
         std::time::Duration::ZERO
     } else if let ActiveStream::Wasapi(wasapi) = &stream {
@@ -7490,6 +7570,14 @@ fn play_file(
             }
         }
     }
+    if running && !is_restart_stream && !is_manual_change {
+        if let Some(reservation) = next_reservation.as_mut() {
+            if next_track_info.as_ref().map(|next| &next.0) == reservation.path.as_ref() {
+                reservation.path = None;
+            }
+        }
+    }
+    drop(next_reservation.take());
 
     if running && next_track_info.is_none() {
         let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
@@ -7542,10 +7630,10 @@ fn play_file(
         return (next_track_info, None);
     }
 
-    // Keep the stream open for a compatible next track; decoder preparation can still introduce a gap.
-    if let Some(next_proc) = safe_lock(&next_child_process).take() {
-        *safe_lock(&current_process) = Some(next_proc);
-    }
+    // The next play prepares its own decoder; cancel and reap the speculative one.
+    drop(next_decoder_info.take());
+    drop(next_decoder_rx.take());
+    drop(next_reservation.take());
 
     let actual_is_exclusive = matches!(stream, ActiveStream::Wasapi(_))
         || route.share_mode == "exclusive"
@@ -7570,15 +7658,7 @@ fn play_file(
 }
 
 fn decoded_frames(buf: &AudioBufferRef<'_>) -> usize {
-    match buf {
-        AudioBufferRef::F32(b) => b.frames(),
-        AudioBufferRef::S16(b) => b.frames(),
-        AudioBufferRef::S32(b) => b.frames(),
-        AudioBufferRef::U8(b)  => b.frames(),
-        AudioBufferRef::S24(b) => b.frames(),
-        AudioBufferRef::F64(b) => b.frames(),
-        _ => 0,
-    }
+    buf.frames()
 }
 
 /// Pick the sample for one output channel from planar frames.
@@ -7761,17 +7841,13 @@ mod transcode_tests {
     }
 
     #[test]
-    fn signed_pcm_negative_endpoint_normalizes_to_minus_one() {
-        assert_eq!(super::pcm_s16_to_f32(i16::MIN), -1.0);
-        assert_eq!(super::pcm_s24_to_f32(-8_388_608), -1.0);
-        assert_eq!(super::pcm_s32_to_f32(i32::MIN), -1.0);
-        assert_eq!(super::pcm_s16_to_f32(16_384), 0.5);
-        assert_eq!(super::pcm_s24_to_f32(4_194_304), 0.5);
-        assert_eq!(super::pcm_s32_to_f32(1_073_741_824), 0.5);
-        assert_eq!(super::pcm_s16_to_f32(i16::MAX), 32_767.0 / 32_768.0);
-        assert_eq!(super::pcm_s24_to_f32(8_388_607), 8_388_607.0 / 8_388_608.0);
-        assert_eq!(super::pcm_s32_to_f32(i32::MAX), 1.0);
-        assert_eq!(super::pcm_s32_to_f32(i32::MAX - 1), 1.0);
+    fn signed_pcm_endpoint_conversion_exposes_32_bit_precision_loss() {
+        use symphonia::core::conv::FromSample;
+        assert_eq!(f32::from_sample(i16::MIN), -1.0);
+        assert_eq!(f32::from_sample(i16::MAX), 32767.0 / 32768.0);
+        // The production f32 ring cannot distinguish adjacent high-resolution PCM words.
+        assert_eq!(f32::from_sample(i32::MAX), f32::from_sample(i32::MAX - 1));
+        assert_ne!((f32::from_sample(i32::MAX) as f64 * 2_147_483_648.0) as i64, i32::MAX as i64);
     }
 
     #[test]

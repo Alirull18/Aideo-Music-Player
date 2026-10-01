@@ -445,12 +445,6 @@ export function ToastContainer() {
   );
 
   useEffect(() => {
-    // Listen for backend playback-errors
-    const unlistenPlaybackError = listen<string>('playback-error', (event) => {
-      addToast({ message: event.payload, type: 'error', title: 'Playback System' });
-      updateBufferingState(null);
-    });
-
     const unlistenUiToast = listen<{ message?: string; title?: string; type?: ToastType; duration?: number } | string>(
       'ui-toast',
       (event) => {
@@ -466,33 +460,8 @@ export function ToastContainer() {
       }
     );
 
-    const unlistenInfo = listen<string>('ui-toast-info', (event) => {
-      addToast({ message: event.payload, type: 'info' });
-    });
-
-    const unlistenSuccess = listen<string>('ui-toast-success', (event) => {
-      addToast({ message: event.payload, type: 'success' });
-      updateBufferingState(null);
-    });
-
-    const unlistenStreamStart = listen<string>('stream-buffering-start', (event) => {
-      const state = useStore.getState();
-      if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
-        updateBufferingState(null);
-        return;
-      }
-      const currentTrack = state.currentTrack;
-      const title = currentTrack?.title || event.payload.split(/[\\/]/).pop() || 'Online Stream';
-      const artist = currentTrack?.artist || 'Preparing stream & buffering...';
-      updateBufferingState({ title, artist });
-    });
-
-    const unlistenStreamEnd = listen<string>('stream-buffering-end', () => {
-      updateBufferingState(null);
-    });
-
     const unsubStore = useStore.subscribe((state) => {
-      if (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2) {
+      if (!state.currentAttemptId || state.playback.status === 'Stopped' || (state.playback.status === 'Playing' && (state.playback.position_secs || 0) > 0.2)) {
         updateBufferingState(null);
       }
     });
@@ -540,12 +509,7 @@ export function ToastContainer() {
         clearTimeout(bufferingTimerRef.current);
         bufferingTimerRef.current = null;
       }
-      unlistenPlaybackError.then((f) => f());
       unlistenUiToast.then((f) => f());
-      unlistenInfo.then((f) => f());
-      unlistenSuccess.then((f) => f());
-      unlistenStreamStart.then((f) => f());
-      unlistenStreamEnd.then((f) => f());
       unsubStore();
       window.removeEventListener('ui-toast', handleCustomToast);
       window.removeEventListener('ui-stream-buffering', handleBuffering);

@@ -14,6 +14,31 @@ mod tests {
         assert!(column_exists(&conn, "playlists", "name"), "playlists table should contain name column");
     }
 
+    #[test]
+    fn new_tracks_remain_unanalysed_on_legacy_schema_and_rescans_keep_profiles() {
+        use crate::db::*;
+        let mut conn = init_db(":memory:").unwrap();
+        // Old databases retain numeric column defaults; new inserts must override them.
+        conn.execute_batch("DROP TABLE tracks;
+            CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL,
+                title TEXT, artist TEXT, album TEXT, duration REAL, format TEXT,
+                lyric_offset INTEGER DEFAULT 0, loved INTEGER DEFAULT 0, disliked INTEGER DEFAULT 0,
+                cover_url TEXT, track_number INTEGER, disc_number INTEGER, path_hash TEXT,
+                replaygain_gain REAL, genre TEXT, bpm REAL DEFAULT 120,
+                energy REAL DEFAULT 0.5, bass_ratio REAL DEFAULT 0.33, treble_ratio REAL DEFAULT 0.33);
+            INSERT INTO tracks (path) VALUES ('historical');").unwrap();
+        let historical = get_track_by_path(&conn, "historical").unwrap();
+        let mut new_track = historical.clone();
+        new_track.path = "new".into();
+        save_tracks(&mut conn, &mut [new_track.clone()]).unwrap();
+        let new = get_track_by_path(&conn, "new").unwrap();
+        assert_eq!((new.bpm, new.energy, new.bass_ratio, new.treble_ratio), (None, None, None, None));
+        update_track_sonic_profile(&conn, "new", 120.0, 0.5, 0.33, 0.33, None).unwrap();
+        save_tracks(&mut conn, &mut [new_track]).unwrap();
+        assert_eq!(get_track_by_path(&conn, "new").unwrap().bpm, Some(120.0));
+        assert_eq!(get_track_by_path(&conn, "historical").unwrap().bpm, historical.bpm);
+    }
+
     fn auto_sources() -> crate::db::RecordingSources {
         serde_json::from_value(serde_json::json!({
             "recording_id": "recording-1",

@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useStore } from '../store';
+import { invoke } from '@tauri-apps/api/core';
 
 describe('Playback Engine, Queue & Audio Routing', () => {
   beforeEach(() => {
@@ -92,5 +93,49 @@ describe('Playback Engine, Queue & Audio Routing', () => {
 
     await store.setDSP({ spatial_enabled: false, crossfeed_enabled: false });
     expect(useStore.getState().playback.bit_perfect).toBe(true);
+  });
+  it('keeps the displayed rate unchanged until accepted and after a rejection', async () => {
+    const original = useStore.getState();
+    useStore.setState({ playbackRate: 1, playback: { ...original.playback, bit_perfect: false } });
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'set_playback_rate') throw new Error('Output mode changed');
+      return null;
+    });
+    try {
+      const request = useStore.getState().setPlaybackRate(1.5);
+      expect(useStore.getState().playbackRate).toBe(1);
+      await request;
+      expect(useStore.getState().playbackRate).toBe(1);
+      vi.mocked(invoke).mockResolvedValue(null);
+      await useStore.getState().setPlaybackRate(1.25);
+      expect(useStore.getState().playbackRate).toBe(1.25);
+    } finally {
+      vi.mocked(invoke).mockReset().mockResolvedValue(null);
+      useStore.setState({ playbackRate: original.playbackRate, playback: original.playback });
+    }
+  });
+
+  it('rejects speed changes under Bit-Perfect without changing the active rate', async () => {
+    const original = useStore.getState();
+    useStore.setState({ playbackRate: 1, playback: { ...original.playback, bit_perfect: true } });
+    try {
+      await useStore.getState().setPlaybackRate(1.5);
+      expect(useStore.getState().playbackRate).toBe(1);
+    } finally {
+      useStore.setState({ playbackRate: original.playbackRate, playback: original.playback });
+    }
+  });
+  it('resets the displayed speed when Bit-Perfect is accepted', async () => {
+    const original = useStore.getState();
+    useStore.setState({ playbackRate: 1.5, playback: { ...original.playback, bit_perfect: false } });
+    vi.mocked(invoke).mockImplementation(async command => command === 'toggle_bit_perfect_mode' ? true : null);
+    try {
+      await useStore.getState().toggleBitPerfect(true);
+      expect(useStore.getState().playback.bit_perfect).toBe(true);
+      expect(useStore.getState().playbackRate).toBe(1);
+    } finally {
+      vi.mocked(invoke).mockReset().mockResolvedValue(null);
+      useStore.setState({ playbackRate: original.playbackRate, playback: original.playback, dsp: original.dsp });
+    }
   });
 });

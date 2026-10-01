@@ -1,4 +1,4 @@
-import React, { useEffect, useState, memo } from 'react';
+import { useEffect, useState, memo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ListPlus,
@@ -17,10 +17,9 @@ import {
   Heart,
   Download,
 } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store';
 import { Track, CloudTrack, Playlist } from '../store/types';
-import { pathsEqual } from '../utils';
+import { pathsEqual, cloudTrackToVirtualTrack, getMenuPosition, startSonicMix } from '../utils';
 import { discoveryTrack } from '../utils/discoveryFeed';
 import { SourceMenu } from './SourceMenu';
 
@@ -36,47 +35,6 @@ export interface TrackContextMenuProps {
   removeFromPlaylist?: (playlistId: number, track: string | Track) => Promise<void> | void;
 }
 
-const cloudTrackToVirtualTrack = (ct: CloudTrack): Track => {
-  return {
-    id: -1,
-    path: ct.stream_url,
-    title: ct.title,
-    artist: ct.artist,
-    duration: ct.duration,
-    format: ct.provider?.toUpperCase() || 'STREAM',
-    lyric_offset: 0,
-    cover_url: ct.cover_url,
-    ...((ct as any).path_hash ? { path_hash: (ct as any).path_hash } : {}),
-  } as Track;
-};
-
-const getMenuPosition = (anchor: DOMRect | { x: number; y: number }): React.CSSProperties => {
-  const menuWidth = 220;
-  const isRect = 'bottom' in anchor;
-  let left = isRect ? anchor.right - menuWidth : anchor.x;
-  if (left < 12) left = 12;
-  if (left + menuWidth > window.innerWidth - 12) left = window.innerWidth - menuWidth - 12;
-
-  const yPos = isRect ? anchor.bottom : anchor.y;
-  const spaceBelow = window.innerHeight - yPos;
-  const openUpwards = spaceBelow < 380 && (isRect ? anchor.top : anchor.y) > 380;
-
-  const style: React.CSSProperties = {
-    position: 'fixed',
-    left,
-    zIndex: 9999,
-  };
-
-  if (openUpwards) {
-    style.bottom = Math.round(window.innerHeight - (isRect ? anchor.top : anchor.y) + 4);
-    style.transformOrigin = isRect ? 'bottom right' : 'bottom left';
-  } else {
-    style.top = Math.round(yPos + (isRect ? 4 : 0));
-    style.transformOrigin = isRect ? 'top right' : 'top left';
-  }
-
-  return style;
-};
 
 export const TrackContextMenu = memo(function TrackContextMenu({
   track,
@@ -270,32 +228,7 @@ export const TrackContextMenu = memo(function TrackContextMenu({
               className="track-action-menu-item emerald"
               onClick={async () => {
                 onClose();
-                try {
-                  const similar: any[] = await invoke('get_similar_tracks', { path: effectiveTrack.path });
-                  if (similar && similar.length > 0) {
-                    const store = useStore.getState();
-                    await store.clearQueue();
-                    for (const t of similar) {
-                      await store.addToQueue(t);
-                    }
-                    store.playTrack(similar[0]);
-                    window.dispatchEvent(
-                      new CustomEvent('ui-toast', {
-                        detail: { message: `Sonic Mix: Queued ${similar.length} similar tracks!`, type: 'success' },
-                      })
-                    );
-                  } else {
-                    window.dispatchEvent(
-                      new CustomEvent('ui-toast', {
-                        detail: { message: 'Sonic Mix: No similar tracks found in library.', type: 'warning' },
-                      })
-                    );
-                  }
-                } catch (err) {
-                  window.dispatchEvent(
-                    new CustomEvent('ui-toast', { detail: { message: `Sonic Mix failed: ${err}`, type: 'error' } })
-                  );
-                }
+                await startSonicMix(effectiveTrack.path, useStore.getState());
               }}
             >
               <span className="menu-item-icon">

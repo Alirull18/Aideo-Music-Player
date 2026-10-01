@@ -898,28 +898,6 @@ mod dsp_tests {
         assert_eq!(resolve_exclusive_target_rate(96000, 192000), 192000);
     }
 
-    #[test]
-    fn test_trim_encoder_delay_and_padding() {
-        use crate::player::trim_encoder_delay_and_padding;
-
-        // 2-channel buffer with 1000 samples
-        let mut samples = vec![
-            (0..1000).map(|i| i as f32).collect::<Vec<f32>>(),
-            (0..1000).map(|i| i as f32).collect::<Vec<f32>>(),
-        ];
-
-        // Trim 100 delay frames (primer) and 50 padding frames
-        trim_encoder_delay_and_padding(&mut samples, 100, 50);
-
-        assert_eq!(samples[0].len(), 850);
-        assert_eq!(samples[1].len(), 850);
-        // First sample should now be what was previously index 100
-        assert_eq!(samples[0][0], 100.0);
-        assert_eq!(samples[1][0], 100.0);
-        // Last sample should now be what was index 949 (1000 - 50 - 1)
-        assert_eq!(samples[0][849], 949.0);
-        assert_eq!(samples[1][849], 949.0);
-    }
 
     #[test]
     fn test_active_stream_session_manual_change_flush_signal() {
@@ -965,69 +943,6 @@ mod dsp_tests {
         assert!(pending[1].is_empty(), "Pending channel 1 must be cleared of stale audio");
     }
 
-    #[test]
-    fn test_ingestion_delay_skipping_prevents_cache_index_shift() {
-        use crate::player::trim_encoder_delay_and_padding;
-
-        // Model decoded packets arriving chunk by chunk (e.g. 500 samples per packet)
-        let total_frames = 2000;
-        let encoder_delay = 100usize;
-        let encoder_padding = 50usize;
-
-        let mut remaining_delay = encoder_delay;
-        let mut samples: Vec<Vec<f32>> = vec![Vec::new(), Vec::new()];
-
-        let raw_stream: Vec<f32> = (0..total_frames).map(|i| i as f32).collect();
-
-        // Simulate chunk ingestion with front-skipping
-        for chunk in raw_stream.chunks(500) {
-            let n_frames = chunk.len();
-            let skip_frames = if remaining_delay > 0 {
-                let skip = remaining_delay.min(n_frames);
-                remaining_delay -= skip;
-                skip
-            } else {
-                0
-            };
-
-            if skip_frames < n_frames {
-                for ch in 0..2 {
-                    samples[ch].extend_from_slice(&chunk[skip_frames..]);
-                }
-            }
-        }
-
-        // Reader starts consuming at ram_cursor = 0 concurrently
-        let mut ram_cursor = 0usize;
-        let read_chunk = 200usize;
-        let first_read = samples[0][ram_cursor..ram_cursor + read_chunk].to_vec();
-        ram_cursor += read_chunk;
-
-        // First sample read by playback was already sample 100.0 (the primer delay was skipped at ingestion!)
-        assert_eq!(first_read[0], 100.0);
-
-        // At EOF, only trailing padding is truncated
-        if encoder_padding > 0 {
-            for ch in samples.iter_mut() {
-                let truncate_to = ch.len() - encoder_padding;
-                ch.truncate(truncate_to);
-            }
-        }
-
-        // Verify: ram_cursor is STILL valid! The sample at ram_cursor is exactly sample 300.0 (100 + 200)
-        // No drain occurred from index 0, so NO samples were skipped mid-stream!
-        assert_eq!(samples[0][ram_cursor], 300.0);
-        assert_eq!(samples[0].len(), total_frames - encoder_delay - encoder_padding);
-
-        // Also test robust boundary handling for trim_encoder_delay_and_padding
-        let mut empty_buf: Vec<Vec<f32>> = vec![vec![]];
-        trim_encoder_delay_and_padding(&mut empty_buf, 1000, 500);
-        assert!(empty_buf[0].is_empty());
-
-        let mut short_buf: Vec<Vec<f32>> = vec![vec![1.0, 2.0]];
-        trim_encoder_delay_and_padding(&mut short_buf, 5, 5);
-        assert!(short_buf[0].is_empty());
-    }
 
     #[test]
     fn test_playback_generation_aborts_stale_worker() {
@@ -1546,52 +1461,6 @@ mod dsp_tests {
         ));
     }
 
-    #[test]
-    fn test_crossfade_failed_prep_restores_queue() {
-        use std::collections::VecDeque;
-
-        let mut queue = VecDeque::new();
-        queue.push_back("track_2.flac".to_string());
-        queue.push_back("track_3.flac".to_string());
-
-        // Simulate crossfade triggering: pop_front
-        let popped = queue.pop_front().unwrap();
-        assert_eq!(popped, "track_2.flac");
-
-        // Simulate preparation failure: restore to front
-        queue.push_front(popped);
-
-        // Verify queue order is completely restored
-        assert_eq!(queue.pop_front(), Some("track_2.flac".to_string()));
-        assert_eq!(queue.pop_front(), Some("track_3.flac".to_string()));
-        assert_eq!(queue.pop_front(), None);
-    }
-
-    #[test]
-    fn test_background_decode_ffmpeg_args_format() {
-        let file_rate: usize = 176400;
-        let file_ch: usize = 2;
-
-        let rate_str = file_rate.to_string();
-        let ch_str = file_ch.to_string();
-
-        let args = [
-            "-probesize", "32768",
-            "-analyzeduration", "100000",
-            "-i", "sample.dsf",
-            "-f", "wav",
-            "-acodec", "pcm_s16le",
-            "-ar", &rate_str,
-            "-ac", &ch_str,
-            "-"
-        ];
-
-        let ar_idx = args.iter().position(|&x| x == "-ar").unwrap();
-        assert_eq!(args[ar_idx + 1], "176400");
-
-        let ac_idx = args.iter().position(|&x| x == "-ac").unwrap();
-        assert_eq!(args[ac_idx + 1], "2");
-    }
 
     #[cfg(target_os = "windows")]
     #[test]

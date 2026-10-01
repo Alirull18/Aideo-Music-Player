@@ -71,12 +71,12 @@ export const createQobuzSlice: StateCreator<PlayerState, [], [], any> = (set, ge
   },
 });
 
-export function notifyQobuzAuthFailure(err: unknown): boolean {
+export function notifyQobuzAuthFailure(err: unknown, setState: (state: Partial<PlayerState>) => void): boolean {
   const msg = typeof err === 'string' ? err : (err instanceof Error ? err.message : '');
   const authFailure = msg.toLowerCase().includes('not authenticated') ||
     (msg.toLowerCase().includes('rejected your session token') && msg.toLowerCase().includes('qobuz'));
   if (!authFailure) return false;
   window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Qobuz in Settings > Library > Qobuz to resume lossless playback.', type: 'warning' } }));
-  window.dispatchEvent(new CustomEvent('ui-goto-settings-tab', { detail: { tab: 'library' } }));
+  setState({ view: 'settings', pendingSettingsTab: 'library' });
   return true;
 }

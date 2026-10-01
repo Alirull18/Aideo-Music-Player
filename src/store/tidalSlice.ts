@@ -72,12 +72,12 @@ export const createTidalSlice: StateCreator<PlayerState, [], [], any> = (set, ge
   },
 });
 
-export function notifyTidalAuthFailure(err: unknown): boolean {
+export function notifyTidalAuthFailure(err: unknown, setState: (state: Partial<PlayerState>) => void): boolean {
   const msg = typeof err === 'string' ? err : (err instanceof Error ? err.message : '');
   const authFailure = msg.toLowerCase().includes('not authenticated') ||
     (msg.toLowerCase().includes('expired') && msg.toLowerCase().includes('tidal'));
   if (!authFailure) return false;
   window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal in Settings > Library > Tidal to resume lossless playback.', type: 'warning' } }));
-  window.dispatchEvent(new CustomEvent('ui-goto-settings-tab', { detail: { tab: 'library' } }));
+  setState({ view: 'settings', pendingSettingsTab: 'library' });
   return true;
 }

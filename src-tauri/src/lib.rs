@@ -1036,12 +1036,19 @@ fn clear_discord_presence() {
 
 // ── FX Commands ────────────────────────────────────────────────────────────
 #[tauri::command]
-fn set_dsp_state(state: State<'_, AppState>, mut dsp: player::DSPState) -> Result<(), String> {
-    dsp.sanitize();
+fn set_dsp_state(state: State<'_, AppState>, dsp: player::DSPState) -> Result<(), String> {
     let player = safe_lock(&state.player);
     let mut current = safe_lock(&player.dsp_state);
-    *current = dsp;
+    apply_client_dsp(&mut current, dsp);
     Ok(())
+}
+
+fn apply_client_dsp(current: &mut player::DSPState, mut incoming: player::DSPState) {
+    incoming.sanitize();
+    // Track loading and set_playback_rate own these fields under the same lock.
+    incoming.track_replaygain_gain = current.track_replaygain_gain;
+    incoming.playback_rate = current.playback_rate;
+    *current = incoming;
 }
 
 #[tauri::command]
@@ -1320,8 +1327,8 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
                 if let Ok(tx) = conn.transaction() {
                     for track in &chunk {
                         let _ = tx.execute(
-                            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, track_number, disc_number, genre)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                            "INSERT INTO tracks (path, title, artist, album, duration, format, lyric_offset, track_number, disc_number, genre, bpm, energy, bass_ratio, treble_ratio)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL, NULL, NULL)
                              ON CONFLICT(path) DO UPDATE SET 
                                  title = COALESCE(NULLIF(excluded.title, ''), tracks.title),
                                  artist = COALESCE(NULLIF(excluded.artist, ''), tracks.artist),
@@ -1457,8 +1464,8 @@ fn add_track(
 ) -> Result<(), String> {
     let conn = safe_lock(&state.db);
     conn.execute(
-        "INSERT OR IGNORE INTO tracks (path, title, artist, album, duration, format, loved, cover_url)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT OR IGNORE INTO tracks (path, title, artist, album, duration, format, loved, cover_url, bpm, energy, bass_ratio, treble_ratio)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, NULL, NULL)",
         rusqlite::params![path, title, artist, album, duration, format, 0, cover_url],
     ).map_err(|e| e.to_string())?;
     Ok(())
@@ -2110,6 +2117,8 @@ fn toggle_bit_perfect_mode(state: State<'_, AppState>, enable: Option<bool>) -> 
     player.bit_perfect.store(next_mode, Ordering::Relaxed);
     if next_mode {
         player.exclusive_mode.store(true, Ordering::Relaxed);
+        let mut dsp = safe_lock(&player.dsp_state);
+        apply_playback_rate(&mut dsp, 1.0, true)?;
     }
     player::EXCLUSIVE_STREAM_FAILURES.store(0, Ordering::Relaxed);
     player::EXCLUSIVE_FALLBACK_NOTIFIED.store(false, Ordering::Relaxed);
@@ -2653,7 +2662,12 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
 #[tauri::command]
 fn set_source_queue_mode(enabled: bool, state: State<'_, AppState>) {
     player::SOURCE_QUEUE_MODE.store(enabled, Ordering::SeqCst);
-    if enabled { crate::safe_lock(&crate::safe_lock(&state.player).queue).clear(); }
+    if enabled {
+        let player = crate::safe_lock(&state.player);
+        let mut queue = crate::safe_lock(&player.queue);
+        player::LOCAL_QUEUE_GENERATION.fetch_add(1, Ordering::SeqCst);
+        queue.clear();
+    }
 }
 
 #[tauri::command]
@@ -2799,10 +2813,16 @@ fn seek_track(secs: f64, state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_playback_rate(rate: f64, state: State<'_, AppState>) -> Result<(), String> {
-    let clamped = if rate.is_finite() { rate.clamp(0.5, 2.0) } else { 1.0 };
     let player = safe_lock(&state.player);
     let mut dsp = safe_lock(&player.dsp_state);
-    dsp.playback_rate = clamped;
+    apply_playback_rate(&mut dsp, rate, player.bit_perfect.load(Ordering::Relaxed))
+}
+
+fn apply_playback_rate(dsp: &mut player::DSPState, rate: f64, bit_perfect: bool) -> Result<(), String> {
+    if bit_perfect && rate != 1.0 {
+        return Err("Playback speed is unavailable in bit-perfect mode".to_string());
+    }
+    dsp.playback_rate = if rate.is_finite() { rate.clamp(0.5, 2.0) } else { 1.0 };
     Ok(())
 }
 
@@ -3205,7 +3225,7 @@ async fn acoustid_identify_track(state: State<'_, AppState>, path: String) -> Re
 
     {
         let conn = safe_lock(&state.db);
-        let _ = crate::db::update_track_sonic_profile(
+        crate::db::update_track_sonic_profile(
             &conn,
             &path,
             profile.bpm,
@@ -3213,7 +3233,7 @@ async fn acoustid_identify_track(state: State<'_, AppState>, path: String) -> Re
             profile.bass_ratio,
             profile.treble_ratio,
             Some(profile.lufs_gain_db),
-        );
+        ).map_err(|e| format!("Failed to save sonic profile: {e}"))?;
     }
 
     let client = crate::get_http_client();
@@ -3246,6 +3266,11 @@ async fn acoustid_identify_track(state: State<'_, AppState>, path: String) -> Re
     }))
 }
 
+fn sonic_features(bpm: Option<f64>, energy: Option<f64>, bass: Option<f64>, treble: Option<f64>) -> Option<(f64, f64, f64, f64)> {
+    let values = (bpm?, energy?, bass?, treble?);
+    [values.0, values.1, values.2, values.3].iter().all(|v| v.is_finite()).then_some(values)
+}
+
 fn rank_similar_tracks(all_tracks: Vec<crate::db::Track>, path: &str, excluded_paths: &[String]) -> Result<Vec<crate::db::Track>, String> {
     let seed = all_tracks.iter().find(|t| t.path == path)
         .ok_or_else(|| "Seed track not found in database".to_string())?;
@@ -3270,17 +3295,10 @@ fn rank_similar_tracks(all_tracks: Vec<crate::db::Track>, path: &str, excluded_p
         let is_same_artist = !seed_artist_lower.is_empty() && seed_artist_lower != "unknown artist" && track_artist_lower == seed_artist_lower;
         let is_same_genre = !seed_genre_lower.is_empty() && track_genre_lower == seed_genre_lower;
 
-        let has_dsp_features = seed_bpm.is_some() && track.bpm.is_some() && seed_energy.is_some() && track.energy.is_some();
+        let features = sonic_features(seed_bpm, seed_energy, seed_bass, seed_treble)
+            .zip(sonic_features(track.bpm, track.energy, track.bass_ratio, track.treble_ratio));
 
-        let mut distance = if has_dsp_features {
-            let s_bpm = seed_bpm.unwrap();
-            let t_bpm = track.bpm.unwrap();
-            let s_energy = seed_energy.unwrap();
-            let t_energy = track.energy.unwrap();
-            let s_bass = seed_bass.unwrap_or(0.33);
-            let t_bass = track.bass_ratio.unwrap_or(0.33);
-            let s_treble = seed_treble.unwrap_or(0.33);
-            let t_treble = track.treble_ratio.unwrap_or(0.33);
+        let mut distance = if let Some(((s_bpm, s_energy, s_bass, s_treble), (t_bpm, t_energy, t_bass, t_treble))) = features {
 
             let bpm_diff = (s_bpm - t_bpm) / 60.0;
             let energy_diff = s_energy - t_energy;
@@ -3300,21 +3318,23 @@ fn rank_similar_tracks(all_tracks: Vec<crate::db::Track>, path: &str, excluded_p
         };
 
         if is_same_artist {
-            distance = (distance - 1.0).max(0.05);
+            distance = (distance - 1.0).max(0.0);
         } else if is_same_genre {
-            distance = (distance - 0.5).max(0.1);
+            distance = (distance - 0.5).max(0.0);
         }
 
         if distance < 1.8 {
-            scored_tracks.push((track, distance));
+            scored_tracks.push((track, distance, is_same_artist, is_same_genre));
         }
     }
 
-    scored_tracks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored_tracks.sort_by(|a, b| a.1.total_cmp(&b.1)
+        .then_with(|| b.2.cmp(&a.2))
+        .then_with(|| b.3.cmp(&a.3)));
 
     Ok(scored_tracks.into_iter()
         .take(15)
-        .map(|(t, _)| t)
+        .map(|(t, _, _, _)| t)
         .collect())
 }
 
@@ -3375,7 +3395,7 @@ fn clear_application_cache() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_cache_size_info() -> Result<serde_json::Value, String> {
+fn get_cache_size_info(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let mut total_bytes: u64 = 0;
     let mut file_count: usize = 0;
 
@@ -3433,7 +3453,7 @@ fn get_cache_size_info() -> Result<serde_json::Value, String> {
         "bytes": total_bytes,
         "formatted": formatted,
         "count": file_count,
-        "limit_gb": 5.0
+        "limit_gb": cloud::cache_limit_gb(&app_handle)
     }))
 }
 
@@ -4474,4 +4494,69 @@ mod similar_tracks_tests {
         }
     }
 
+    #[test]
+    fn equal_profiles_prefer_artist_then_genre_without_numeric_sentinels() {
+        let paths: Vec<_> = ["ties-seed", "ties-other", "ties-genre", "ties-artist"]
+            .iter().map(|name| temp_track_path(name)).collect();
+        for path in &paths { std::fs::write(path, b"").unwrap(); }
+        let mut tracks: Vec<_> = paths.iter().enumerate()
+            .map(|(id, path)| track(id as i32, path.to_string_lossy().into_owned(), 120.0, "Other")).collect();
+        tracks[0].artist = Some("Seed".into());
+        tracks[1].genre = Some("Unrelated".into());
+        tracks[3].artist = Some("seed".into());
+        let ranked = rank_similar_tracks(tracks, &paths[0].to_string_lossy(), &[]).unwrap();
+        assert_eq!(ranked.iter().map(|track| track.id).collect::<Vec<_>>(), vec![3, 2, 1]);
+        for path in paths { std::fs::remove_file(path).unwrap(); }
+    }
+
+    #[test]
+    fn unanalysed_tracks_use_metadata_without_fabricating_features() {
+        let paths: Vec<_> = ["null-seed", "null-other", "null-artist"]
+            .iter().map(|name| temp_track_path(name)).collect();
+        for path in &paths { std::fs::write(path, b"").unwrap(); }
+        let mut tracks: Vec<_> = paths.iter().enumerate()
+            .map(|(id, path)| track(id as i32, path.to_string_lossy().into_owned(), 120.0, "Seed")).collect();
+        tracks[0].energy = None;
+        tracks[1].artist = Some("Other".into());
+        tracks[1].genre = None;
+        let ranked = rank_similar_tracks(tracks, &paths[0].to_string_lossy(), &[]).unwrap();
+        assert_eq!(ranked.iter().map(|track| track.id).collect::<Vec<_>>(), vec![2]);
+        assert!(sonic_features(Some(120.0), Some(0.5), Some(0.33), Some(0.33)).is_some());
+        assert!(sonic_features(Some(f64::NAN), Some(0.5), Some(0.33), Some(0.33)).is_none());
+        for path in paths { std::fs::remove_file(path).unwrap(); }
+    }
+
+}
+
+#[cfg(test)]
+mod client_dsp_tests {
+    use super::*;
+
+    #[test]
+    fn client_updates_preserve_track_gain_and_deliberate_rate_changes() {
+        let mut current = player::DSPState::default();
+        current.track_replaygain_gain = -6.5;
+        current.playback_rate = 1.5;
+        let mut incoming = player::DSPState::default();
+        incoming.eq_enabled = true;
+        incoming.eq_graphic_gains[0] = f32::NAN;
+        apply_client_dsp(&mut current, incoming);
+        assert!(current.eq_enabled);
+        assert_eq!(current.eq_graphic_gains[0], 0.0);
+        assert_eq!(current.track_replaygain_gain, -6.5);
+        assert_eq!(current.playback_rate, 1.5);
+        apply_playback_rate(&mut current, 0.75, false).unwrap();
+        apply_client_dsp(&mut current, player::DSPState::default());
+        assert_eq!(current.playback_rate, 0.75);
+        assert_eq!(current.track_replaygain_gain, -6.5);
+        apply_playback_rate(&mut current, f64::NAN, false).unwrap();
+        assert_eq!(current.playback_rate, 1.0);
+        apply_playback_rate(&mut current, 9.0, false).unwrap();
+        assert_eq!(current.playback_rate, 2.0);
+        apply_playback_rate(&mut current, 1.0, true).unwrap();
+        assert!(apply_playback_rate(&mut current, 1.5, true).is_err());
+        assert_eq!(current.playback_rate, 1.0);
+        apply_client_dsp(&mut current, player::DSPState::default());
+        assert_eq!(current.playback_rate, 1.0);
+    }
 }

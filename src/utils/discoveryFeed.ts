@@ -46,11 +46,9 @@ export interface UnifiedTabDef {
   count: number;
 }
 
-const trackKey = (artist: string, title: string): string =>
-  `${(artist || '').trim().toLowerCase()}::${(title || '').trim().toLowerCase()}`;
 
-export const trackSignature = (t: YoutubeTrack): string =>
-  trackKey(t.artist, t.title);
+export const trackSignature = (track: Pick<YoutubeTrack, 'artist' | 'title'>): string =>
+  `${(track.artist || '').trim().toLowerCase()}::${(track.title || '').trim().toLowerCase()}`;
 
 export function dedupeTracks(tracks: YoutubeTrack[]): YoutubeTrack[] {
   const seen = new Set<string>();

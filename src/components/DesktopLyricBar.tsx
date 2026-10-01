@@ -136,17 +136,9 @@ export function DesktopLyricBar() {
     const interval = setInterval(poll, 2000);
     poll();
 
-    // Event-driven state updates
-    const unlistenState = listen<any>('playback-state-changed', (event) => {
-      if (active && event.payload) {
-        applyStatus(event.payload);
-      }
-    });
-
     return () => {
       active = false;
       clearInterval(interval);
-      unlistenState.then(u => u());
     };
   }, []);
 
