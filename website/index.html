@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aideo Music Player — Bit-Perfect Desktop Audio Console for Windows</title>
+  <meta name="description" content="Aideo Music Player is a modern open-source desktop audio player for Windows 10 & 11. Features WASAPI Exclusive bit-perfect output, 4,000+ AutoEQ headphone calibrations, synchronized Romaji karaoke lyrics, and zero telemetry.">
+  <meta name="keywords" content="Aideo, Aideo Music Player, Windows Music Player, Audiophile Music Player, WASAPI Exclusive, Bit-Perfect Audio, AutoEQ, Parametric EQ, Synced Lyrics, FLAC Player, Rust Audio Player">
+  
+  <!-- Open Graph / Social Meta -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Aideo Music Player — Bit-Perfect Desktop Audio Console">
+  <meta property="og:description" content="Studio-grade sound, direct DAC hardware streaming via WASAPI Exclusive, 4,000+ AutoEQ profiles, and synchronized Romaji lyrics in a 50MB lightweight footprint.">
+  <meta property="og:image" content="assets/placeholders/hero-player-mockup.svg">
+  <meta property="og:url" content="https://alirull18.github.io/Aideo-Music-Player/">
+
+  <link rel="canonical" href="https://alirull18.github.io/Aideo-Music-Player/">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/svg+xml" href="assets/placeholders/hero-player-mockup.svg">
+
+  <!-- Schema.org JSON-LD -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Aideo Music Player",
+        "operatingSystem": "Windows 10, Windows 11",
+        "applicationCategory": "MultimediaApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0.00",
+          "priceCurrency": "USD"
+        },
+        "description": "High-fidelity audiophile desktop music player for Windows with bit-perfect WASAPI Exclusive playback, AutoEQ calibrations, and synchronized Romaji lyrics.",
+        "downloadUrl": "https://github.com/Alirull18/Aideo-Music-Player/releases/latest",
+        "softwareVersion": "0.9.11",
+        "license": "https://www.gnu.org/licenses/gpl-3.0.html"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "How does Aideo achieve bit-perfect audio on Windows?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Aideo communicates directly with your external DAC or soundcard using Windows Audio Session API (WASAPI) Exclusive mode, completely bypassing the Windows Audio Engine mixer, sample rate converter, and volume limiter."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Aideo collect any telemetry or listening data?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Aideo is built with an offline-first architecture. It contains zero telemetry frameworks, zero tracking pixels, and does not record or upload your listening habits."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to main content</a>
+
+  <!-- Floating Island Navigation -->
+  <header class="nav-wrapper">
+    <nav class="nav-island" aria-label="Main Navigation">
+      <a href="index.html" class="brand-logo">
+        <div class="logo-badge" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+          </svg>
+        </div>
+        <span class="logo-text">Aideo</span>
+        <span class="logo-version">v0.9.11</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#visualizer">Visualizer</a></li>
+        <li><a href="#pipeline">Audio Engine</a></li>
+        <li><a href="#showcase">Console Tour</a></li>
+        <li><a href="#comparison">Compare</a></li>
+        <li><a href="#specs">Specs</a></li>
+        <li><a href="#download">Download</a></li>
+        <li><a href="#faq">FAQ</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <a href="https://github.com/Alirull18/Aideo-Music-Player" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" aria-label="GitHub Repository">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+          </svg>
+          <span>Source</span>
+        </a>
+
+        <a href="#download" class="btn btn-primary btn-sm">
+          <span>Get v0.9.11</span>
+          <span class="btn-icon-capsule">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </span>
+        </a>
+
+        <button class="mobile-toggle" aria-label="Toggle Navigation Menu" aria-expanded="false" type="button">
+          <span class="hamburger-line"></span>
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- Hero Section -->
+    <section class="hero-section">
+      <div class="container">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <div class="kicker-pill">
+              <span class="kicker-dot"></span>
+              <span>TAURI v2 + RUST ENGINE CORE • STABLE v0.9.11</span>
+            </div>
+
+            <h1 class="hero-title">Bit-perfect desktop listening. Direct hardware control.</h1>
+            <p class="lead">
+              Aideo is a dedicated Windows audiophile player designed for pure playback. It routes direct bitstreams to your external DAC via WASAPI Exclusive mode, auto-corrects 4,000+ headphones with AutoEQ biquad filters, and delivers synchronized Romaji lyrics without cloud lock-in.
+            </p>
+
+            <div class="hero-actions">
+              <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary">
+                <span>Download for Windows 10 & 11 (64-bit)</span>
+                <span class="btn-icon-capsule">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                </span>
+              </a>
+
+              <a href="#pipeline" class="btn btn-secondary">
+                <span>Inspect Audio Architecture</span>
+              </a>
+            </div>
+
+            <div class="platform-compatibility-strip">
+              <div class="compat-item">
+                <span class="compat-badge">✓</span>
+                <span>Windows 10 / 11 (x64)</span>
+              </div>
+              <div class="compat-item">
+                <span class="compat-badge">✓</span>
+                <span>WASAPI Exclusive Mode</span>
+              </div>
+              <div class="compat-item">
+                <span class="compat-badge">✓</span>
+                <span>Zero Telemetry / 100% Offline</span>
+              </div>
+              <div class="compat-item">
+                <span class="compat-badge">✓</span>
+                <span>GPL-3.0 Open Source</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hero App Showcase Placeholder Frame -->
+          <div class="hero-showcase">
+            <div class="showcase-outer">
+              <div class="showcase-inner">
+                <img src="assets/placeholders/hero-player-mockup.svg" alt="Aideo Music Player Desktop Interface Screenshot Placeholder" class="placeholder-image" width="1200" height="675" loading="eager">
+                <div class="placeholder-caption-bar">
+                  <span>App Interface Architecture Blueprint (1920x1080)</span>
+                  <span class="placeholder-status-tag">
+                    <span class="kicker-dot"></span>
+                    <span>WASAPI 24-bit / 96kHz ACTIVE</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Real-Time Ballistic Audio Visualizer Interactive Playground -->
+    <section id="visualizer" class="visualizer-interactive-section">
+      <div class="container">
+        <div class="section-header text-center">
+          <div class="kicker-pill">
+            <span class="kicker-dot amber"></span>
+            <span>REAL-TIME DSP SIMULATOR</span>
+          </div>
+          <h2>Studio Ballistic Visualizer Engine</h2>
+          <p>
+            Hardware-accelerated 60fps audio analysis. Switch between ballistic modes with falling peak caps and dynamic gravity decay physics.
+          </p>
+        </div>
+
+        <div class="hardware-bezel">
+          <div class="bezel-core" style="padding: 0;">
+            <div class="visualizer-stage-box">
+              <div class="canvas-toolbar">
+                <div class="mode-selector" role="group" aria-label="Visualizer Modes">
+                  <button type="button" class="mode-btn active" data-mode="peak-decay">Peak Decay</button>
+                  <button type="button" class="mode-btn" data-mode="bilateral">Bilateral Mirror</button>
+                  <button type="button" class="mode-btn" data-mode="oscilloscope">Oscilloscope</button>
+                  <button type="button" class="mode-btn" data-mode="radial">Radial Orbit</button>
+                  <button type="button" class="mode-btn" data-mode="matrix">Phosphor Matrix</button>
+                </div>
+
+                <div class="canvas-status">
+                  <button id="visPlayToggle" class="btn btn-secondary btn-sm" type="button" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;">Simulate: Running</button>
+                  <span id="visSampleRate" class="mono" style="color: var(--primary);">96.0 kHz / 24-bit WASAPI</span>
+                </div>
+              </div>
+
+              <canvas id="visualizerCanvas" height="280"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Asymmetric Bento Grid / Core Architectural Pillars -->
+    <section id="features" class="bento-section">
+      <div class="container">
+        <div class="section-header">
+          <div class="kicker-pill">
+            <span class="kicker-dot"></span>
+            <span>ENGINEERING REASONING</span>
+          </div>
+          <h2>Designed for fidelity, control, and responsiveness.</h2>
+          <p>
+            Every subsystem in Aideo is built to serve listening accuracy. We replaced web audio wrappers with native Rust audio threads and bloated browser backends with instant local SQLite indexing.
+          </p>
+        </div>
+
+        <div class="bento-grid">
+          <!-- Bento 1: WASAPI Exclusive (Span 8) -->
+          <div class="bento-card col-span-8">
+            <div class="hardware-bezel">
+              <div class="bezel-core bento-card-content">
+                <div>
+                  <div class="bento-icon-wrapper">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                      <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                      <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                      <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                    </svg>
+                  </div>
+                  <h3 class="bento-card-title">WASAPI Exclusive Bit-Perfect Streaming</h3>
+                  <p class="bento-card-desc">
+                    Standard Windows media players route sound through the Windows Audio Engine mixer, which forces sample-rate conversion, introduces digital limiter distortion, and degrades dynamic range. Aideo claims exclusive hardware ownership over your sound card or USB DAC.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">01</span>
+                      <span><strong>Mixer Bypass:</strong> Direct memory access buffer eliminates OS mixer resampling noise.</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">02</span>
+                      <span><strong>Unity Gain Path:</strong> Audio frames pass bit-for-bit to DAC hardware with zero added dither.</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">03</span>
+                      <span><strong>Lossless Resolution:</strong> Native support for 16, 24, and 32-bit PCM up to 384kHz and DSD.</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bento 2: AutoEQ 4,000+ Profiles (Span 4) -->
+          <div class="bento-card col-span-4">
+            <div class="hardware-bezel">
+              <div class="bezel-core bento-card-content">
+                <div>
+                  <div class="bento-icon-wrapper amber">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="4" y1="21" x2="4" y2="14"></line>
+                      <line x1="4" y1="10" x2="4" y2="3"></line>
+                      <line x1="12" y1="21" x2="12" y2="12"></line>
+                      <line x1="12" y1="8" x2="12" y2="3"></line>
+                      <line x1="20" y1="21" x2="20" y2="16"></line>
+                      <line x1="20" y1="12" x2="20" y2="3"></line>
+                      <line x1="1" y1="14" x2="7" y2="14"></line>
+                      <line x1="9" y1="8" x2="15" y2="8"></line>
+                      <line x1="17" y1="16" x2="23" y2="16"></line>
+                    </svg>
+                  </div>
+                  <h3 class="bento-card-title">4,000+ AutoEQ Profiles</h3>
+                  <p class="bento-card-desc">
+                    Search your specific headphone or IEM model to automatically load scientifically-calibrated biquad IIR parametric equalizer curves tuned to Harman or neutral targets.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Sennheiser, Moondrop, Beyerdynamic, Hifiman, Sony</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>5 and 10-Band real-time parametric biquad DSP</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Export configuration to Equalizer APO .txt format</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bento 3: Synced Romaji Lyrics & HUD (Span 4) -->
+          <div class="bento-card col-span-4">
+            <div class="hardware-bezel">
+              <div class="bezel-core bento-card-content">
+                <div>
+                  <div class="bento-icon-wrapper">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                      <line x1="12" y1="19" x2="12" y2="22"></line>
+                    </svg>
+                  </div>
+                  <h3 class="bento-card-title">Romaji Karaoke & Desktop HUD</h3>
+                  <p class="bento-card-desc">
+                    Synchronized lyric scrolling with 1-click Japanese Kanji-to-Romaji transliteration and English translations. Includes a transparent click-through HUD for fullscreen gaming.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Auto-fetch from LRCLIB & Musixmatch APIs</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Local .LRC file pairing & timeline synchronization</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Click-through borderless window with zero input lag</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bento 4: Offline-First SQLite FTS5 Engine (Span 8) -->
+          <div class="bento-card col-span-8">
+            <div class="hardware-bezel">
+              <div class="bezel-core bento-card-content">
+                <div>
+                  <div class="bento-icon-wrapper amber">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                      <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                      <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                    </svg>
+                  </div>
+                  <h3 class="bento-card-title">Offline-First Library with SQLite FTS5 Search</h3>
+                  <p class="bento-card-desc">
+                    Your collection remains your own. Aideo indexes large music libraries (50,000+ files) in seconds using embedded SQLite with Full-Text Search (FTS5). Search by artist, album, composer, codec, or bit-depth with sub-10ms response times.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">01</span>
+                      <span><strong>Zero Cloud Dependence:</strong> 100% functionality without internet connection.</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">02</span>
+                      <span><strong>Lightweight Footprint:</strong> Consumes under 50MB RAM at idle, 0.0% CPU when paused.</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">03</span>
+                      <span><strong>Aideo Connect:</strong> Control playback from your smartphone over local home Wi-Fi via QR code with no app install.</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Deep Technical Audio Pipeline & Signal Flow Split -->
+    <section id="pipeline" class="pipeline-section">
+      <div class="container">
+        <div class="pipeline-split">
+          <div>
+            <div class="kicker-pill">
+              <span class="kicker-dot"></span>
+              <span>HARDWARE SIGNAL PATH</span>
+            </div>
+            <h2>Direct-to-DAC Signal Pipeline</h2>
+            <p>
+              Inspect how audio travels through Aideo. By separating UI rendering from the native audio worker thread, playback never stutters, drops frames, or suffers UI event loop interference.
+            </p>
+
+            <div class="pipeline-steps">
+              <div class="pipeline-step-item">
+                <div class="step-number">01</div>
+                <div class="step-details">
+                  <h4>Symphonia Lossless Decoding</h4>
+                  <p>Pure Rust decoder reads FLAC, ALAC, WAV, and DSD into a lock-free ring buffer.</p>
+                  <span class="step-tag">Lock-Free Concurrency</span>
+                </div>
+              </div>
+
+              <div class="pipeline-step-item">
+                <div class="step-number">02</div>
+                <div class="step-details">
+                  <h4>Biquad DSP & True Bypass</h4>
+                  <p>When AutoEQ is active, 64-bit float biquad filters shape response curves. In Bit-Perfect mode, the DSP stage is completely bypassed with unity gain.</p>
+                  <span class="step-tag">64-bit IEEE 754 Floating Point</span>
+                </div>
+              </div>
+
+              <div class="pipeline-step-item">
+                <div class="step-number">03</div>
+                <div class="step-details">
+                  <h4>WASAPI Exclusive Hardware Endpoint</h4>
+                  <p>CPAL driver streams audio directly to the DAC hardware buffer, locking sample rates and preventing OS limiter compression.</p>
+                  <span class="step-tag">Exclusive Stream Direct</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="hardware-bezel">
+              <div class="bezel-core" style="padding: 8px;">
+                <img src="assets/placeholders/architecture-diagram.svg" alt="Aideo Audio Engine Architecture and Hardware Signal Flow Diagram Placeholder" class="placeholder-image" width="900" height="480" loading="lazy">
+                <div class="placeholder-caption-bar">
+                  <span>Signal Flow Architectural Diagram Placeholder</span>
+                  <span class="mono" style="color: var(--primary);">CPAL / RUST NATIVE</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Console Showcase Tour (Tabs) -->
+    <section id="showcase" class="tabs-section">
+      <div class="container">
+        <div class="section-header text-center">
+          <div class="kicker-pill">
+            <span class="kicker-dot amber"></span>
+            <span>CONSOLE TOUR</span>
+          </div>
+          <h2>Explore Every Interface Subsystem</h2>
+          <p>
+            Designed with dark obsidian aesthetics, high visual hierarchy, and tactile hardware controls.
+          </p>
+        </div>
+
+        <div class="tab-nav-bar" role="tablist" aria-label="Feature Tour Tabs">
+          <button type="button" class="tab-nav-btn active" role="tab" aria-selected="true" aria-controls="tab-autoeq" data-tab="tab-autoeq">
+            <span class="tab-indicator"></span>
+            <span>AutoEQ Parametric Studio</span>
+          </button>
+          <button type="button" class="tab-nav-btn" role="tab" aria-selected="false" aria-controls="tab-lyrics" data-tab="tab-lyrics">
+            <span class="tab-indicator"></span>
+            <span>Romaji Lyrics & HUD</span>
+          </button>
+          <button type="button" class="tab-nav-btn" role="tab" aria-selected="false" aria-controls="tab-connect" data-tab="tab-connect">
+            <span class="tab-indicator"></span>
+            <span>Aideo Connect LAN Remote</span>
+          </button>
+          <button type="button" class="tab-nav-btn" role="tab" aria-selected="false" aria-controls="tab-visualizer" data-tab="tab-visualizer">
+            <span class="tab-indicator"></span>
+            <span>Ballistic Spectrum Visualizer</span>
+          </button>
+        </div>
+
+        <!-- Tab 1: AutoEQ -->
+        <div id="tab-autoeq" class="tab-panel active" role="tabpanel">
+          <div class="hardware-bezel">
+            <div class="bezel-core">
+              <div class="tab-panel-grid">
+                <div>
+                  <img src="assets/placeholders/autoeq-studio.svg" alt="AutoEQ Parametric Equalizer Studio Interface Placeholder" class="placeholder-image" width="800" height="480" loading="lazy">
+                </div>
+                <div>
+                  <div class="kicker-pill">
+                    <span class="kicker-dot amber"></span>
+                    <span>HARMAN CALIBRATION</span>
+                  </div>
+                  <h3>Precision Headphone Equalization</h3>
+                  <p style="margin-bottom: 1rem;">
+                    Most headphones have non-linear frequency peaks that veil micro-details. AutoEQ calculates the exact inverse acoustic profile to align your headphones to scientifically validated targets.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Instant parametric biquad calculation with Q-factor width control</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Real-time pre-amplification gain compensation to prevent digital clipping</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Full export support for Equalizer APO config text files</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Synced Lyrics -->
+        <div id="tab-lyrics" class="tab-panel" role="tabpanel">
+          <div class="hardware-bezel">
+            <div class="bezel-core">
+              <div class="tab-panel-grid">
+                <div>
+                  <img src="assets/placeholders/synced-lyrics.svg" alt="Synchronized Romaji Lyrics and Desktop HUD Interface Placeholder" class="placeholder-image" width="800" height="480" loading="lazy">
+                </div>
+                <div>
+                  <div class="kicker-pill">
+                    <span class="kicker-dot"></span>
+                    <span>KARAOKE & HUD</span>
+                  </div>
+                  <h3>Sing Along in Any Language</h3>
+                  <p style="margin-bottom: 1rem;">
+                    Aideo integrates automatic transliteration. For Japanese tracks, Kanji and Kana are converted into phonetic Romaji in real time, accompanied by synchronized English translations.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Sub-millisecond lyric synchronization with word-by-word highlights</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Click-through transparent HUD for gaming and productive multitasking</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Automatic matching from LRCLIB open database and local .LRC files</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Aideo Connect -->
+        <div id="tab-connect" class="tab-panel" role="tabpanel">
+          <div class="hardware-bezel">
+            <div class="bezel-core">
+              <div class="tab-panel-grid">
+                <div>
+                  <img src="assets/placeholders/wireless-connect.svg" alt="Aideo Connect Mobile Remote Control Interface Placeholder" class="placeholder-image" width="800" height="480" loading="lazy">
+                </div>
+                <div>
+                  <div class="kicker-pill">
+                    <span class="kicker-dot"></span>
+                    <span>LOCAL WI-FI REMOTE</span>
+                  </div>
+                  <h3>Control Music From Your Phone</h3>
+                  <p style="margin-bottom: 1rem;">
+                    Listen from your couch or sound lounge. Enable Aideo Connect in settings, scan the on-screen QR code with your smartphone, and control playback, volume, and playlists directly in your mobile browser.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>No iOS App Store or Android Play Store app installation required</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Operates strictly over your local Wi-Fi LAN without internet servers</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>DLNA / UPnP Hi-Fi streaming support to smart speakers and AV receivers</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Ballistic Spectrum -->
+        <div id="tab-visualizer" class="tab-panel" role="tabpanel">
+          <div class="hardware-bezel">
+            <div class="bezel-core">
+              <div class="tab-panel-grid">
+                <div>
+                  <img src="assets/placeholders/visualizer-engine.svg" alt="Studio Audio Visualizer Interface Placeholder" class="placeholder-image" width="800" height="480" loading="lazy">
+                </div>
+                <div>
+                  <div class="kicker-pill">
+                    <span class="kicker-dot amber"></span>
+                    <span>BALLISTIC DYNAMICS</span>
+                  </div>
+                  <h3>True Audio Ballistics</h3>
+                  <p style="margin-bottom: 1rem;">
+                    Rather than erratic digital noise, Aideo applies calibrated gravity decay constants modeled on physical VU meters and studio spectrum analyzers.
+                  </p>
+                  <ul class="spec-list">
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>5 display modes: Peak Decay, Bilateral, Ribbon, Orbit, Phosphor Matrix</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Dual stages: 64px compact bar or 140px full panoramic stage</span>
+                    </li>
+                    <li class="spec-item">
+                      <span class="spec-bullet">✓</span>
+                      <span>Smart sleep efficiency: 0.0% CPU when paused, zero background draw</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture & Comparison Table -->
+    <section id="comparison" class="comparison-section">
+      <div class="container">
+        <div class="section-header text-center">
+          <div class="kicker-pill">
+            <span class="kicker-dot"></span>
+            <span>OBJECTIVE COMPARISON</span>
+          </div>
+          <h2>Engineered differently from day one.</h2>
+          <p>
+            Comparing Aideo against conventional electron-based players and legacy utility players.
+          </p>
+        </div>
+
+        <div class="hardware-bezel">
+          <div class="bezel-core" style="padding: 0;">
+            <div class="table-responsive">
+              <table class="spec-table">
+                <thead>
+                  <tr>
+                    <th>Capability / Specification</th>
+                    <th class="highlight-col">Aideo Music Player</th>
+                    <th>Legacy Players (foobar2000)</th>
+                    <th>Electron Players (Spotify / Tidal)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Core Architecture</strong></td>
+                    <td class="highlight-col">Tauri v2 + Rust Native Engine</td>
+                    <td>Win32 C++ (Legacy)</td>
+                    <td>Chromium / Node.js (Electron)</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Idle Memory Footprint</strong></td>
+                    <td class="highlight-col"><span class="spec-check">~45 MB RAM</span></td>
+                    <td>~25 MB RAM</td>
+                    <td><span class="spec-cross">350 MB to 750 MB RAM</span></td>
+                  </tr>
+                  <tr>
+                    <td><strong>WASAPI Exclusive Direct Mode</strong></td>
+                    <td class="highlight-col"><span class="spec-check">Native (Zero Setup)</span></td>
+                    <td>Requires Component Plugin</td>
+                    <td><span class="spec-cross">Not Supported / Limited</span></td>
+                  </tr>
+                  <tr>
+                    <td><strong>AutoEQ Database Integration</strong></td>
+                    <td class="highlight-col"><span class="spec-check">Built-in (4,000+ Headphone Models)</span></td>
+                    <td>Manual Plugin Configuration</td>
+                    <td><span class="spec-cross">Unavailable</span></td>
+                  </tr>
+                  <tr>
+                    <td><strong>Synchronized Romaji Lyrics</strong></td>
+                    <td class="highlight-col"><span class="spec-check">1-Click Transliteration + HUD</span></td>
+                    <td>Third-party scripts</td>
+                    <td>Standard English/Roman only</td>
+                  </tr>
+                  <tr>
+                    <td><strong>LAN Mobile Remote Control</strong></td>
+                    <td class="highlight-col"><span class="spec-check">Built-in (QR Code / No App Needed)</span></td>
+                    <td>Third-party HTTP server plugin</td>
+                    <td>Cloud account required</td>
+                  </tr>
+                  <tr>
+                    <td><strong>User Telemetry & Tracking</strong></td>
+                    <td class="highlight-col"><span class="spec-check">Zero Telemetry (100% Offline)</span></td>
+                    <td>Zero Telemetry</td>
+                    <td><span class="spec-cross">Continuous User Profiling</span></td>
+                  </tr>
+                  <tr>
+                    <td><strong>Open Source License</strong></td>
+                    <td class="highlight-col"><span class="spec-check">GNU GPL v3.0 (Inspectable)</span></td>
+                    <td>Proprietary Freeware</td>
+                    <td>Proprietary Closed Source</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Technical Specifications Section -->
+    <section id="specs" class="pipeline-section">
+      <div class="container">
+        <div class="section-header">
+          <div class="kicker-pill">
+            <span class="kicker-dot amber"></span>
+            <span>HARDWARE CAPABILITIES</span>
+          </div>
+          <h2>Technical Specifications</h2>
+          <p>Comprehensive support for modern high-resolution lossless audio standards.</p>
+        </div>
+
+        <div class="bento-grid">
+          <div class="bento-card col-span-4">
+            <div class="hardware-bezel">
+              <div class="bezel-core">
+                <h4 style="margin-bottom: 0.85rem; color: var(--ink);">Supported Audio Formats</h4>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">Lossless, uncompressed, and high-resolution stream formats:</p>
+                <div class="mono" style="font-size: 0.82rem; line-height: 2; color: var(--primary);">
+                  FLAC (up to 32-bit / 384kHz)<br>
+                  ALAC (Apple Lossless)<br>
+                  WAV / AIFF (Linear PCM)<br>
+                  DSD (DSF / DFF via DoP or PCM conversion)<br>
+                  MP3, AAC, OGG Vorbis, Opus
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bento-card col-span-4">
+            <div class="hardware-bezel">
+              <div class="bezel-core">
+                <h4 style="margin-bottom: 0.85rem; color: var(--ink);">Audio Hardware Engine</h4>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">Direct hardware interface and DSP specifications:</p>
+                <div class="mono" style="font-size: 0.82rem; line-height: 2; color: var(--primary);">
+                  WASAPI Exclusive Mode (Bit-Perfect)<br>
+                  DirectSound Shared Mode Fallback<br>
+                  Lock-Free Symphonia Ring Buffer<br>
+                  Parametric 10-Band Biquad Filter Bank<br>
+                  2048-Point Hann FFT Spectral Analysis
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bento-card col-span-4">
+            <div class="hardware-bezel">
+              <div class="bezel-core">
+                <h4 style="margin-bottom: 0.85rem; color: var(--ink);">System Requirements</h4>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">Minimum specifications for smooth 60fps playback:</p>
+                <div class="mono" style="font-size: 0.82rem; line-height: 2; color: var(--muted);">
+                  OS: Windows 10 (1809+) or Windows 11<br>
+                  Architecture: 64-bit x86_64<br>
+                  Memory: 4GB RAM (Aideo uses &lt;50MB)<br>
+                  Disk Space: 250MB free space<br>
+                  Output: External DAC or Stereo Audio Card
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Release Downloads & Distribution Matrix -->
+    <section id="download" class="download-section">
+      <div class="container">
+        <div class="section-header text-center">
+          <div class="kicker-pill">
+            <span class="kicker-dot"></span>
+            <span>GET AIDEO TODAY</span>
+          </div>
+          <h2>Download Stable Release v0.9.11</h2>
+          <p>Free, open source, and verified safe. Choose your preferred distribution package.</p>
+        </div>
+
+        <div class="download-cards-grid">
+          <!-- Card 1: Standard Installer (Recommended) -->
+          <div class="hardware-bezel">
+            <div class="bezel-core">
+              <span class="download-badge badge-recommended">RECOMMENDED FOR MOST USERS</span>
+              <h3>Windows Installer (.exe)</h3>
+              <p style="font-size: 0.9rem; margin: 0.85rem 0 1.5rem 0;">
+                Standard standalone desktop setup. Automatically configures file associations and desktop shortcuts.
+              </p>
+              <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-primary" style="width: 100%; justify-content: space-between;">
+                <span>Download Installer (.exe)</span>
+                <span class="btn-icon-capsule">↓</span>
+              </a>
+              <div class="sha256-block">
+                Target: x86_64-pc-windows-msvc<br>
+                SHA256: Available on GitHub Release
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Portable Archive -->
+          <div class="hardware-bezel">
+            <div class="bezel-core">
+              <span class="download-badge badge-neutral">STANDALONE PORTABLE</span>
+              <h3>Portable Archive (.zip)</h3>
+              <p style="font-size: 0.9rem; margin: 0.85rem 0 1.5rem 0;">
+                Zero installation required. Extract to any folder or run directly from a high-speed USB flash drive.
+              </p>
+              <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest" class="btn btn-secondary" style="width: 100%; justify-content: space-between;">
+                <span>Download Portable (.zip)</span>
+                <span class="btn-icon-capsule">↓</span>
+              </a>
+              <div class="sha256-block">
+                Portable Mode: Stores data in executable folder<br>
+                SHA256: Verified against GitHub Release
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3: Windows Package Manager (winget) -->
+          <div class="hardware-bezel">
+            <div class="bezel-core">
+              <span class="download-badge badge-neutral">COMMAND LINE AUTOMATION</span>
+              <h3>Windows Terminal (winget)</h3>
+              <p style="font-size: 0.9rem; margin: 0.85rem 0 1.5rem 0;">
+                Install and update seamlessly via Windows Package Manager command prompt.
+              </p>
+              <div style="background: #080a0d; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0.85rem; margin-bottom: 1rem;">
+                <code class="mono" style="color: var(--primary); font-size: 0.85rem;">winget install Alirul.AideoMusicPlayer</code>
+              </div>
+              <div class="sha256-block">
+                Repository: Microsoft Community WinGet Manifest<br>
+                Auto-updates supported
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ Accordion Section -->
+    <section id="faq" class="faq-section">
+      <div class="container">
+        <div class="section-header text-center">
+          <div class="kicker-pill">
+            <span class="kicker-dot amber"></span>
+            <span>FREQUENT QUESTIONS</span>
+          </div>
+          <h2>Frequently Asked Questions</h2>
+          <p>Everything you need to know about bit-perfect playback, AutoEQ, and privacy.</p>
+        </div>
+
+        <div class="faq-accordion">
+          <!-- FAQ 1 -->
+          <div class="faq-item">
+            <button class="faq-trigger" aria-expanded="false" type="button">
+              <span>How does Aideo achieve bit-perfect audio on Windows?</span>
+              <span class="faq-icon">▼</span>
+            </button>
+            <div class="faq-body">
+              <p>
+                Aideo connects to your audio device using WASAPI (Windows Audio Session API) in Exclusive Mode via the CPAL Rust audio library. When active, Windows grants Aideo exclusive direct hardware access, preventing the Windows Shared Audio Engine from resampling sample rates, applying limiter dynamic range compression, or injecting dither noise.
+              </p>
+            </div>
+          </div>
+
+          <!-- FAQ 2 -->
+          <div class="faq-item">
+            <button class="faq-trigger" aria-expanded="false" type="button">
+              <span>What is AutoEQ and how does it improve sound?</span>
+              <span class="faq-icon">▼</span>
+            </button>
+            <div class="faq-body">
+              <p>
+                AutoEQ is an open-source database containing laboratory-measured frequency response curves for more than 4,000 headphone and in-ear monitor (IEM) models. Aideo integrates this database directly, allowing you to select your headphone model and automatically apply corrective parametric biquad filters to achieve standard Harman or neutral acoustic target curves.
+              </p>
+            </div>
+          </div>
+
+          <!-- FAQ 3 -->
+          <div class="faq-item">
+            <button class="faq-trigger" aria-expanded="false" type="button">
+              <span>How does Aideo Connect mobile remote work?</span>
+              <span class="faq-icon">▼</span>
+            </button>
+            <div class="faq-body">
+              <p>
+                Aideo includes a built-in lightweight local web server. When toggled on, your computer generates a local IP address and QR code. Scanning this with your phone's camera opens an interactive web remote in your browser. You can play, pause, seek, adjust volume, and switch tracks over your home Wi-Fi network without installing any mobile app.
+              </p>
+            </div>
+          </div>
+
+          <!-- FAQ 4 -->
+          <div class="faq-item">
+            <button class="faq-trigger" aria-expanded="false" type="button">
+              <span>Does Aideo collect telemetry or upload my listening history?</span>
+              <span class="faq-icon">▼</span>
+            </button>
+            <div class="faq-body">
+              <p>
+                No. Aideo has a zero-telemetry policy. Your listening history, playlists, search queries, and local audio file paths are stored exclusively in your local SQLite database on your own computer. We do not use Google Analytics, Sentry, or third-party telemetry tools.
+              </p>
+            </div>
+          </div>
+
+          <!-- FAQ 5 -->
+          <div class="faq-item">
+            <button class="faq-trigger" aria-expanded="false" type="button">
+              <span>How is Aideo different from foobar2000 or MusicBee?</span>
+              <span class="faq-icon">▼</span>
+            </button>
+            <div class="faq-body">
+              <p>
+                While foobar2000 and MusicBee are legendary players, they require manual installation of complex external plugins to achieve WASAPI Exclusive playback, AutoEQ compensation, or lyrics syncing. Aideo bundles all of these features out of the box with modern fluid visuals, synchronized Japanese Romaji transliteration, and a mobile Wi-Fi remote in a lightweight Tauri v2 architecture.
+              </p>
+            </div>
+          </div>
+
+          <!-- FAQ 6 -->
+          <div class="faq-item">
+            <button class="faq-trigger" aria-expanded="false" type="button">
+              <span>What audio formats and resolutions are supported?</span>
+              <span class="faq-icon">▼</span>
+            </button>
+            <div class="faq-body">
+              <p>
+                Aideo supports all standard lossless and lossy formats: FLAC, WAV, ALAC, AIFF, DSD (DSF/DFF), MP3, AAC, and OGG Vorbis. Sample rates from 44.1kHz up to 384kHz and 16, 24, or 32-bit audio are decoded natively using Symphonia.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="brand-logo">
+            <div class="logo-badge" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+            </div>
+            <span class="logo-text">Aideo Music Player</span>
+          </div>
+          <p>
+            Bit-perfect desktop audio console for Windows 10 & 11. Built with Tauri v2, Rust native audio engine, and React 19.
+          </p>
+          <div class="system-status">
+            <span class="status-dot"></span>
+            <span>100% Offline-First • Zero Telemetry</span>
+          </div>
+        </div>
+
+        <div class="footer-col">
+          <h5>NAVIGATION</h5>
+          <ul class="footer-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#visualizer">Ballistic Visualizer</a></li>
+            <li><a href="#pipeline">WASAPI Engine</a></li>
+            <li><a href="#specs">Specifications</a></li>
+            <li><a href="#download">Downloads</a></li>
+            <li><a href="#faq">FAQ</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h5>LEGAL & POLICIES</h5>
+          <ul class="footer-links">
+            <li><a href="privacy.html">Privacy Policy</a></li>
+            <li><a href="terms.html">Terms of Service</a></li>
+            <li><a href="cookies.html">Cookie Policy</a></li>
+            <li><button id="openCookieSettings" style="background: none; border: none; color: var(--muted); cursor: pointer; padding: 0; font-family: inherit; font-size: inherit; text-align: left;">Cookie Settings</button></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h5>COMMUNITY & SOURCE</h5>
+          <ul class="footer-links">
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player" target="_blank" rel="noopener noreferrer">GitHub Repository</a></li>
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player/releases" target="_blank" rel="noopener noreferrer">Release Notes</a></li>
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player/issues" target="_blank" rel="noopener noreferrer">Report Bug / Issue</a></li>
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0 License</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div>
+          © 2026 Aideo Music Player Contributors. Distributed under the GNU General Public License v3.0 or later.
+        </div>
+        <div class="footer-legal-links">
+          <a href="privacy.html">Privacy</a>
+          <a href="terms.html">Terms</a>
+          <a href="cookies.html">Cookies</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Cookie Consent Floating Banner -->
+  <aside id="cookieBanner" class="cookie-banner" role="region" aria-label="Cookie and Privacy Consent">
+    <div class="cookie-header">
+      <span class="kicker-dot"></span>
+      <h3 class="cookie-title">Privacy & Storage Notice</h3>
+    </div>
+    <p class="cookie-text">
+      Aideo uses essential local storage to remember your audio console preferences and settings. We respect your autonomy: we do not use third-party tracking or advertising cookies. Read our <a href="cookies.html">Cookie Policy</a>.
+    </p>
+    <div class="cookie-actions">
+      <button id="cookieCustomize" class="btn btn-secondary btn-sm" type="button">Customize</button>
+      <button id="cookieEssentialOnly" class="btn btn-secondary btn-sm" type="button">Essential Only</button>
+      <button id="cookieAcceptAll" class="btn btn-primary btn-sm" type="button">
+        <span>Accept Preferences</span>
+        <span class="btn-icon-capsule">✓</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Cookie Preferences Modal -->
+  <div id="cookieModalBackdrop" class="cookie-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="cookie-modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Storage & Cookie Preferences</h3>
+        <button id="cookieCloseModal" class="modal-close-btn" type="button" aria-label="Close modal">✕</button>
+      </div>
+
+      <div class="cookie-pref-list">
+        <div class="cookie-pref-item">
+          <div class="cookie-pref-info">
+            <h5>Strictly Necessary Storage</h5>
+            <p>Required to remember your theme selection, audio visualizer state, and cookie consent preferences. Cannot be disabled.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked disabled>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="cookie-pref-item">
+          <div class="cookie-pref-info">
+            <h5>Functional Preferences</h5>
+            <p>Saves your visualizer ballistic mode and testing presets in your browser's local storage.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="prefFunctional" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="cookie-pref-item">
+          <div class="cookie-pref-info">
+            <h5>Analytics & Tracking</h5>
+            <p>Permanently disabled. Aideo operates zero behavioral analytics or telemetry trackers.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="prefAnalytics" disabled>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+        <button id="cookieSavePreferences" class="btn btn-primary btn-sm" type="button">Save Preferences</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 480" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="connect-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14181f" />
+      <stop offset="100%" stop-color="#0a0c0f" />
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="480" rx="14" fill="url(#connect-bg)" stroke="#262e39" stroke-width="1.5" />
+
+  <!-- Header -->
+  <rect x="0" y="0" width="800" height="46" rx="14" fill="#181d24" />
+  <rect x="0" y="24" width="800" height="22" fill="#181d24" />
+  <line x1="0" y1="46" x2="800" y2="46" stroke="#28323e" stroke-width="1" />
+
+  <text x="24" y="28" fill="#f3f6f8" font-family="system-ui, sans-serif" font-size="13" font-weight="700">AIDEO CONNECT & WIRELESS DLNA CASTING</text>
+  <text x="360" y="28" fill="#8e9ca8" font-family="monospace" font-size="11">LOCAL WI-FI • ZERO APP INSTALLATION NEEDED</text>
+  
+  <rect x="670" y="12" width="106" height="22" rx="4" fill="#00b8d4" fill-opacity="0.12" stroke="#00b8d4" stroke-opacity="0.4" stroke-width="1" />
+  <text x="684" y="27" fill="#00e5ff" font-family="monospace" font-size="11">LAN ACTIVE</text>
+
+  <!-- Left Side: QR Code & Connection Info -->
+  <rect x="40" y="70" width="340" height="370" rx="12" fill="#101318" stroke="#222b36" stroke-width="1" />
+  <text x="60" y="104" fill="#f3f6f8" font-family="system-ui, sans-serif" font-size="16" font-weight="700">Scan to Connect Mobile</text>
+  <text x="60" y="126" fill="#8e9ca8" font-family="system-ui, sans-serif" font-size="12">Open any phone camera on your home Wi-Fi network</text>
+
+  <!-- QR Code Wireframe Blueprint -->
+  <rect x="100" y="150" width="180" height="180" rx="10" fill="#18202a" stroke="#2e3a49" stroke-width="1.5" />
+  <!-- Corner Squares -->
+  <rect x="116" y="166" width="36" height="36" fill="#00e5ff" rx="4" />
+  <rect x="122" y="172" width="24" height="24" fill="#18202a" rx="2" />
+  <rect x="128" y="178" width="12" height="12" fill="#00e5ff" />
+
+  <rect x="228" y="166" width="36" height="36" fill="#00e5ff" rx="4" />
+  <rect x="234" y="172" width="24" height="24" fill="#18202a" rx="2" />
+  <rect x="240" y="178" width="12" height="12" fill="#00e5ff" />
+
+  <rect x="116" y="278" width="36" height="36" fill="#00e5ff" rx="4" />
+  <rect x="122" y="284" width="24" height="24" fill="#18202a" rx="2" />
+  <rect x="128" y="290" width="12" height="12" fill="#00e5ff" />
+
+  <!-- Data Matrix Simulation Dots -->
+  <rect x="168" y="166" width="8" height="8" fill="#00e5ff" />
+  <rect x="184" y="166" width="8" height="8" fill="#00e5ff" />
+  <rect x="200" y="178" width="8" height="8" fill="#00e5ff" />
+  <rect x="168" y="194" width="12" height="12" fill="#00e5ff" />
+  <rect x="190" y="200" width="8" height="8" fill="#00e5ff" />
+  <rect x="174" y="220" width="14" height="14" fill="#e28c30" /> <!-- center emblem -->
+  <rect x="200" y="226" width="8" height="8" fill="#00e5ff" />
+  <rect x="216" y="220" width="10" height="10" fill="#00e5ff" />
+  <rect x="168" y="246" width="12" height="8" fill="#00e5ff" />
+  <rect x="188" y="254" width="14" height="10" fill="#00e5ff" />
+  <rect x="210" y="250" width="8" height="8" fill="#00e5ff" />
+  <rect x="168" y="278" width="8" height="8" fill="#00e5ff" />
+  <rect x="184" y="290" width="10" height="10" fill="#00e5ff" />
+  <rect x="200" y="278" width="8" height="8" fill="#00e5ff" />
+  <rect x="226" y="286" width="12" height="12" fill="#00e5ff" />
+
+  <!-- LAN Address -->
+  <rect x="60" y="356" width="260" height="34" rx="6" fill="#141920" stroke="#252e3b" stroke-width="1" />
+  <text x="76" y="378" fill="#00e5ff" font-family="monospace" font-size="12">http://192.168.1.142:5488</text>
+  <text x="274" y="378" fill="#8e9ca8" font-family="monospace" font-size="11">PORT</text>
+
+  <!-- Right Side: Mobile Phone Device Frame -->
+  <rect x="440" y="60" width="310" height="395" rx="24" fill="#161b22" stroke="#2e3846" stroke-width="2" />
+  
+  <!-- Notch / Dynamic Speaker -->
+  <rect x="545" y="72" width="100" height="14" rx="7" fill="#0b0e12" />
+
+  <!-- Phone Screen Area -->
+  <rect x="454" y="96" width="282" height="340" rx="16" fill="#0f1217" />
+  
+  <!-- Mobile Mini Header -->
+  <text x="472" y="125" fill="#f3f6f8" font-family="system-ui, sans-serif" font-size="12" font-weight="700">Aideo Remote</text>
+  <text x="670" y="125" fill="#00e5ff" font-family="monospace" font-size="10">CONNECTED</text>
+
+  <!-- Mobile Track Artwork Card -->
+  <rect x="472" y="142" width="246" height="130" rx="10" fill="#181e26" stroke="#2a3543" stroke-width="1" />
+  <circle cx="530" cy="207" r="38" fill="#12161c" stroke="#00e5ff" stroke-width="1.5" />
+  <circle cx="530" cy="207" r="14" fill="#1f2631" stroke="#e28c30" stroke-width="1" />
+  
+  <text x="585" y="195" fill="#f3f6f8" font-family="system-ui, sans-serif" font-size="12" font-weight="600">Acoustic Suite</text>
+  <text x="585" y="214" fill="#00e5ff" font-family="system-ui, sans-serif" font-size="10.5">Aideo Masters</text>
+  <text x="585" y="232" fill="#8e9ca8" font-family="monospace" font-size="9.5">FLAC 24/96k</text>
+
+  <!-- Mobile Playback Scrubber -->
+  <line x1="472" y1="294" x2="718" y2="294" stroke="#262f3c" stroke-width="3" stroke-linecap="round" />
+  <line x1="472" y1="294" x2="570" y2="294" stroke="#00b8d4" stroke-width="3" stroke-linecap="round" />
+  <circle cx="570" cy="294" r="5" fill="#00e5ff" />
+
+  <text x="472" y="312" fill="#8e9ca8" font-family="monospace" font-size="9.5">02:18</text>
+  <text x="686" y="312" fill="#8e9ca8" font-family="monospace" font-size="9.5">06:42</text>
+
+  <!-- Mobile Controls -->
+  <!-- Prev -->
+  <polygon points="530,350 518,358 530,366" fill="#8e9ca8" />
+  <line x1="516" y1="350" x2="516" y2="366" stroke="#8e9ca8" stroke-width="2" />
+
+  <!-- Play Circle -->
+  <circle cx="595" cy="358" r="18" fill="#00b8d4" />
+  <rect x="590" y="350" width="3" height="16" rx="1" fill="#0a0c0e" />
+  <rect x="597" y="350" width="3" height="16" rx="1" fill="#0a0c0e" />
+
+  <!-- Next -->
+  <polygon points="660,350 672,358 660,366" fill="#8e9ca8" />
+  <line x1="674" y1="350" x2="674" y2="366" stroke="#8e9ca8" stroke-width="2" />
+
+  <!-- Mobile Volume Bar -->
+  <rect x="472" y="394" width="246" height="24" rx="6" fill="#151b22" />
+  <circle cx="488" cy="406" r="4" stroke="#00e5ff" stroke-width="1.5" />
+  <line x1="504" y1="406" x2="702" y2="406" stroke="#252f3d" stroke-width="3" stroke-linecap="round" />
+  <line x1="504" y1="406" x2="650" y2="406" stroke="#00e5ff" stroke-width="3" stroke-linecap="round" />
+</svg>

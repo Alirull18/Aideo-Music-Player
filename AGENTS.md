@@ -28,7 +28,7 @@ Tauri v2 desktop music player. Two separately-built halves: a React 19 + TypeScr
 ## Tauri / runtime quirks
 - Dev URL must be exactly `http://localhost:1420` (matches `tauri.conf.json` `devUrl`). Vite ignores `src-tauri/` in its watcher.
 - Deep-link scheme is `aideo://`; app identifier `com.alirul.music-player`.
-- Styling is Tailwind v4 + daisyui v5 + custom CSS — there is no `tailwind.config.js`; configure via CSS, not a JS config.
+- Styling: Custom CSS (`src/App.css`). Note that `tailwindcss` and `daisyui` packages are not currently wired into Vite; do not use Tailwind utility classes without explicitly configuring them.
 
 ## Secrets & env
 - `.env` (root) and `src-tauri/.env` hold Supabase keys and signing material. Both are gitignored — never commit them. The Rust build reads `src-tauri/.env`.
@@ -46,6 +46,8 @@ Fall back to Grep/Glob/Read only when the graph doesn't cover it.
 - **Simplicity first**: minimal code, no speculative abstractions or unrequested config.
 - **Surgical changes**: touch only what's asked; match existing style; remove only your own orphans.
 - **Goal-driven**: turn tasks into verifiable goals and verify before declaring done.
+- **IPC command hygiene**: never declare Tauri commands dead or delete them from `generate_handler!` based only on exact string search. Check for dynamic template-literal invocations (e.g. ``invoke(`${provider}_resolve_source`)``) and store variable dispatchers.
+- **Event bus separation**: do not mix DOM custom events and Tauri IPC events. Tauri's `listen()` only catches backend `app.emit()` / `@tauri-apps/api/event` calls, never DOM `window.dispatchEvent(new CustomEvent(...))`. For DOM events, use `window.addEventListener()`; for IPC events, use Tauri `listen()`.
 
 ## Verification gate
 - Never declare a fix done without running, all green: `npx tsc --noEmit`, `npx vitest run src/test`, `cargo check --manifest-path src-tauri/Cargo.toml`, `cargo test --manifest-path src-tauri/Cargo.toml`.

@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Aideo Music Player</title>
+  <meta name="description" content="Privacy Policy for Aideo Music Player: 100% offline-first desktop architecture, zero telemetry, zero behavioral tracking, and total user privacy.">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" type="image/svg+xml" href="assets/placeholders/hero-player-mockup.svg">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to main content</a>
+
+  <!-- Header Navigation -->
+  <header class="nav-wrapper">
+    <nav class="nav-island" aria-label="Main Navigation">
+      <a href="index.html" class="brand-logo">
+        <div class="logo-badge" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+          </svg>
+        </div>
+        <span class="logo-text">Aideo</span>
+        <span class="logo-version">v0.9.11</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="index.html#features">Features</a></li>
+        <li><a href="index.html#engine">Audio Engine</a></li>
+        <li><a href="index.html#specs">Specifications</a></li>
+        <li><a href="index.html#faq">FAQ</a></li>
+        <li><a href="index.html#download">Download</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <a href="index.html#download" class="btn btn-primary btn-sm">
+          <span>Get Aideo</span>
+          <span class="btn-icon-capsule">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </span>
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="legal-page-header">
+      <div class="container">
+        <a href="index.html" class="back-to-home-link">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          <span>Back to Home</span>
+        </a>
+        <div class="kicker-pill">
+          <span class="kicker-dot"></span>
+          <span>COMPLIANCE & TRANSPARENCY</span>
+        </div>
+        <h1>Privacy Policy</h1>
+        <p class="lead">Last updated: October 1, 2026. Effective immediately for all versions of Aideo Music Player and this website.</p>
+      </div>
+    </section>
+
+    <section class="legal-content-section">
+      <div class="container">
+        <article class="legal-article">
+          <h2>1. Executive Summary & Core Principle</h2>
+          <p>
+            Aideo Music Player ("Aideo", "we", "us", or "our") is designed from the ground up as an <strong>offline-first, zero-telemetry desktop application</strong>. We believe your musical tastes, listening history, and local audio files are private personal property.
+          </p>
+          <p>
+            Unlike conventional streaming platforms and proprietary media players, <strong>we do not collect, track, store, or monetize your listening habits, search queries, IP addresses, or personal audio collection contents</strong>.
+          </p>
+
+          <h2>2. Data Collection Practices: Desktop Application</h2>
+          <h3>2.1 Local Audio Files and Metadata</h3>
+          <p>
+            When you point Aideo to your local music folders, the embedded SQLite database creates a local full-text search index (FTS5) solely on your computer's local storage. This indexed metadata (artist names, album titles, file paths, sample rates) never leaves your local machine. No telemetry or inventory data is ever transmitted to us or any remote server.
+          </p>
+
+          <h3>2.2 Zero Telemetry and Diagnostics</h3>
+          <p>
+            Aideo does not contain Google Analytics, Sentry, Mixpanel, Crashlytics, or any other telemetry framework. Application crash logs and playback statistics are stored strictly on your local disk in your user data directory and are never uploaded automatically.
+          </p>
+
+          <h3>2.3 Optional Network Services Initiated by You</h3>
+          <p>When you explicitly use features requiring network connectivity, direct connections are established strictly to fulfill your request:</p>
+          <ul>
+            <li><strong>Synchronized Lyrics (LRCLIB, Musixmatch):</strong> When a song plays and local lyrics are missing, Aideo queries public lyric databases using the track title and artist name to fetch synchronized lyrics. No user identifiers or IP addresses are logged by Aideo.</li>
+            <li><strong>Aideo Connect (LAN Remote):</strong> The mobile remote control server runs exclusively on your local home network (LAN). It does not route through any cloud relay, STUN server, or external signaling server.</li>
+            <li><strong>Auto-Updater:</strong> When checking for updates, Aideo queries the official GitHub Releases API (`api.github.com`). This request is governed by GitHub's Privacy Policy.</li>
+          </ul>
+
+          <h2>3. Data Collection Practices: Website</h2>
+          <p>
+            This website (`alirull18.github.io/Aideo-Music-Player`) is hosted as static open-source documentation. We do not use third-party advertising cookies, cross-site trackers, or user behavioral profiling scripts.
+          </p>
+          <p>
+            We use HTML5 `localStorage` strictly to preserve your selected UI preferences (such as dark mode preferences, audio visualizer simulator state, and your cookie consent preference). You can review our full details in the <a href="cookies.html" style="color: var(--primary);">Cookie Policy</a>.
+          </p>
+
+          <h2>4. European Union General Data Protection Regulation (GDPR)</h2>
+          <p>
+            Under the GDPR (Regulation EU 2016/679), individuals located in the European Economic Area (EEA) have specific legal rights regarding their personal data:
+          </p>
+          <ul>
+            <li><strong>Right of Access and Portability:</strong> Because all your listening data and playlists reside exclusively on your local computer in an open SQLite database, you already possess complete, unfettered access to all your data at all times.</li>
+            <li><strong>Right to Rectification and Erasure:</strong> You can edit audio tags or delete playlists and history directly inside the application, which immediately modifies or deletes the local database records without any retention by us.</li>
+            <li><strong>Legal Basis for Processing:</strong> We do not process personal data on remote servers. Any ephemeral network request initiated by you (such as fetching lyrics) is processed based on your direct instruction (Contractual Necessity / Consent).</li>
+          </ul>
+
+          <h2>5. California Consumer Privacy Act (CCPA / CPRA)</h2>
+          <p>
+            Under the California Consumer Privacy Act of 2018 (CCPA) and the California Privacy Rights Act (CPRA):
+          </p>
+          <ul>
+            <li><strong>We do not sell your personal information.</strong></li>
+            <li><strong>We do not share your personal information for cross-context behavioral advertising.</strong></li>
+            <li>We do not collect sensitive personal information as defined by California law.</li>
+          </ul>
+
+          <h2>6. Children's Online Privacy Protection (COPPA)</h2>
+          <p>
+            Aideo Music Player does not knowingly collect or solicit personal information from children under the age of 13. Because the application operates offline without requiring user registration, no age verification is requested.
+          </p>
+
+          <h2>7. Open Source Code Verification</h2>
+          <p>
+            Because Aideo is open-source software licensed under GPLv3, our source code is publicly inspectable by any security researcher or user. You can verify every network socket, IPC call, and database operation directly in our public repository at <a href="https://github.com/Alirull18/Aideo-Music-Player" target="_blank" rel="noopener noreferrer" style="color: var(--primary);">GitHub</a>.
+          </p>
+
+          <h2>8. Contact Information</h2>
+          <p>
+            If you have questions, feedback, or concerns regarding this Privacy Policy or our architectural privacy commitments, please reach out via GitHub Issues or contact the maintainer:
+          </p>
+          <p class="mono" style="color: var(--ink);">
+            Project Maintainer: Alirul<br>
+            Repository: https://github.com/Alirull18/Aideo-Music-Player<br>
+            Issue Tracker: https://github.com/Alirull18/Aideo-Music-Player/issues
+          </p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="brand-logo">
+            <div class="logo-badge" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+            </div>
+            <span class="logo-text">Aideo Music Player</span>
+          </div>
+          <p>
+            Bit-perfect desktop audio console for Windows 10 & 11. Built with Tauri v2, Rust native audio engine, and React 19.
+          </p>
+          <div class="system-status">
+            <span class="status-dot"></span>
+            <span>100% Offline-First • Zero Telemetry</span>
+          </div>
+        </div>
+
+        <div class="footer-col">
+          <h5>NAVIGATION</h5>
+          <ul class="footer-links">
+            <li><a href="index.html#features">Features</a></li>
+            <li><a href="index.html#engine">WASAPI Audio Engine</a></li>
+            <li><a href="index.html#specs">Tech Specifications</a></li>
+            <li><a href="index.html#download">Release Downloads</a></li>
+            <li><a href="index.html#faq">FAQ</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h5>LEGAL & POLICIES</h5>
+          <ul class="footer-links">
+            <li><a href="privacy.html">Privacy Policy</a></li>
+            <li><a href="terms.html">Terms of Service</a></li>
+            <li><a href="cookies.html">Cookie Policy</a></li>
+            <li><button id="openCookieSettings" style="background: none; border: none; color: var(--muted); cursor: pointer; padding: 0; font-family: inherit; font-size: inherit; text-align: left;">Cookie Settings</button></li>
+          </ul>
+        </div>
+
+        <div class="footer-col">
+          <h5>COMMUNITY & SOURCE</h5>
+          <ul class="footer-links">
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player" target="_blank" rel="noopener noreferrer">GitHub Repository</a></li>
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player/releases" target="_blank" rel="noopener noreferrer">Release Notes</a></li>
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player/issues" target="_blank" rel="noopener noreferrer">Report Bug / Issue</a></li>
+            <li><a href="https://github.com/Alirull18/Aideo-Music-Player/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0 License</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div>
+          © 2026 Aideo Music Player Contributors. Distributed under the GNU General Public License v3.0 or later.
+        </div>
+        <div class="footer-legal-links">
+          <a href="privacy.html">Privacy</a>
+          <a href="terms.html">Terms</a>
+          <a href="cookies.html">Cookies</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Cookie Consent Banner -->
+  <aside id="cookieBanner" class="cookie-banner" role="region" aria-label="Cookie and Privacy Consent">
+    <div class="cookie-header">
+      <span class="kicker-dot"></span>
+      <h3 class="cookie-title">Privacy & Storage Notice</h3>
+    </div>
+    <p class="cookie-text">
+      Aideo uses essential local storage to remember your audio console preferences and settings. We respect your autonomy: we do not use third-party tracking or advertising cookies. Read our <a href="cookies.html">Cookie Policy</a>.
+    </p>
+    <div class="cookie-actions">
+      <button id="cookieCustomize" class="btn btn-secondary btn-sm" type="button">Customize</button>
+      <button id="cookieEssentialOnly" class="btn btn-secondary btn-sm" type="button">Essential Only</button>
+      <button id="cookieAcceptAll" class="btn btn-primary btn-sm" type="button">
+        <span>Accept Preferences</span>
+        <span class="btn-icon-capsule">✓</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Cookie Preferences Modal -->
+  <div id="cookieModalBackdrop" class="cookie-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="cookie-modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Storage & Cookie Preferences</h3>
+        <button id="cookieCloseModal" class="modal-close-btn" type="button" aria-label="Close modal">✕</button>
+      </div>
+
+      <div class="cookie-pref-list">
+        <div class="cookie-pref-item">
+          <div class="cookie-pref-info">
+            <h5>Strictly Necessary Storage</h5>
+            <p>Required to remember your theme selection, audio visualizer state, and cookie consent preferences. Cannot be disabled.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked disabled>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="cookie-pref-item">
+          <div class="cookie-pref-info">
+            <h5>Functional Preferences</h5>
+            <p>Saves your visualizer ballistic mode and testing presets in your browser's local storage.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="prefFunctional" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="cookie-pref-item">
+          <div class="cookie-pref-info">
+            <h5>Analytics & Tracking</h5>
+            <p>Permanently disabled. Aideo operates zero behavioral analytics or telemetry trackers.</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="prefAnalytics" disabled>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+        <button id="cookieSavePreferences" class="btn btn-primary btn-sm" type="button">Save Preferences</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
