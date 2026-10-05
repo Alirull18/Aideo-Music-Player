@@ -67,7 +67,8 @@ afterEach(() => {
 describe('Tidal Store Slice', () => {
   describe('checkTidalStatus', () => {
     it('should set tidalConnected=true when backend reports an existing session', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_login_poll_status') return true;
         return null;
       });
@@ -79,7 +80,8 @@ describe('Tidal Store Slice', () => {
     });
 
     it('should remain disconnected when backend reports no session', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_login_poll_status') return false;
         return null;
       });
@@ -103,7 +105,8 @@ describe('Tidal Store Slice', () => {
         { id: '9988776', title: 'Aerials', artist: 'System Of A Down', album: 'Toxicity', duration: 211, cover_url: 'https://cover.tidal.com/x.jpg', quality: 'LOSSLESS' },
         { id: '5544332', title: 'Chop Suey!', artist: 'System Of A Down', album: 'Toxicity', duration: 210, cover_url: '', quality: 'HI_RES' }
       ];
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_search') return mockResults;
         return null;
       });
@@ -126,7 +129,8 @@ describe('Tidal Store Slice', () => {
     });
 
     it('should tolerate null/undefined backend responses', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_search') return null;
         return null;
       });
@@ -163,7 +167,8 @@ describe('Tidal Store Slice', () => {
 
   describe('downloadTidalTrack', () => {
     it('should invoke tidal_download with sanitized filename and track metadata', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_download') return true;
         return null;
       });
@@ -190,7 +195,8 @@ describe('Tidal Store Slice', () => {
     });
 
     it('should fire an error toast when download kickoff fails', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_download') throw new Error('User is not authenticated with Tidal');
         return null;
       });
@@ -237,7 +243,8 @@ describe('notifyTidalAuthFailure', () => {
 describe('TidalConnectCard', () => {
   it('should show Connect button when no session exists', async () => {
     const { default: TidalConnectCard } = await import('../components/TidalConnectCard');
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_login_poll_status') return false;
       return null;
     });
@@ -251,7 +258,8 @@ describe('TidalConnectCard', () => {
 
   it('should show connected state with disconnect when session exists', async () => {
     const { default: TidalConnectCard } = await import('../components/TidalConnectCard');
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_login_poll_status') return true;
       return null;
     });
@@ -266,7 +274,8 @@ describe('TidalConnectCard', () => {
 
   it('should start device flow, open pairing link and display user code on Connect', async () => {
     const { default: TidalConnectCard } = await import('../components/TidalConnectCard');
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_login_poll_status') return false;
       if (cmd === 'tidal_login_start')
         return { userCode: 'ABCD-EFGH', verificationUriComplete: 'https://link.tidal.com/auth?code=xyz' };
@@ -286,7 +295,8 @@ describe('TidalConnectCard', () => {
 
   it('should transition to connected when tidal-login-success arrives', async () => {
     const { default: TidalConnectCard } = await import('../components/TidalConnectCard');
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_login_poll_status') return false;
       if (cmd === 'tidal_login_start')
         return { userCode: 'ZZZZ-YYYY', verificationUriComplete: 'https://link.tidal.com/auth?code=1' };
@@ -306,7 +316,8 @@ describe('TidalConnectCard', () => {
 
   it('should reset to connect state when pairing expires', async () => {
     const { default: TidalConnectCard } = await import('../components/TidalConnectCard');
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_login_poll_status') return false;
       if (cmd === 'tidal_login_start')
         return { userCode: 'EXPI-CODE', verificationUriComplete: 'https://link.tidal.com/auth?code=2' };
@@ -326,7 +337,8 @@ describe('TidalConnectCard', () => {
 
   it('should invoke tidal_logout on Disconnect', async () => {
     const { default: TidalConnectCard } = await import('../components/TidalConnectCard');
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_login_poll_status') return true;
       if (cmd === 'tidal_logout') return true;
       return null;
@@ -356,6 +368,7 @@ describe('TidalConnectCard', () => {
 
     it('should abort playback and never call play_track with raw ID when stream resolution fails', async () => {
       vi.mocked(invoke).mockImplementation(async (cmd: string, args: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_get_stream_url') {
           throw new Error('User is not authenticated with Tidal');
         }
@@ -375,7 +388,8 @@ describe('TidalConnectCard', () => {
 
     it('should resolve stream URL and pass resolved CDN URL to play_track on success', async () => {
       const cdnUrl = 'https://sp-play.tidal.com/stream/455738980.flac?token=mock';
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_get_stream_url') return cdnUrl;
         if (cmd === 'play_track') return null;
         if (cmd === 'check_url_is_cached') return false;
@@ -405,7 +419,8 @@ describe('TidalConnectCard', () => {
     });
 
     it('should reject addToQueue when stream resolution fails', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_get_stream_url') {
           throw new Error('User is not authenticated with Tidal');
         }
@@ -429,7 +444,8 @@ describe('TidalConnectCard', () => {
         repeat: 'all',
       });
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_get_stream_url') return cdnUrl;
         if (cmd === 'play_track') return null;
         if (cmd === 'check_url_is_cached') return false;
@@ -450,7 +466,8 @@ describe('TidalConnectCard', () => {
       // Seed cache with a 2-minute-old URL (older than 30s)
       trackIdToStreamUrl.set(streamCacheKey(tidalTrack, 'best_available'), { url: staleUrl, resolvedAt: Date.now() - 120_000 });
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_get_stream_url') return freshUrl;
         if (cmd === 'play_track') return null;
         if (cmd === 'check_url_is_cached') return false;
@@ -470,14 +487,15 @@ describe('TidalConnectCard', () => {
         { id: '1002', title: 'Rec 2', artist: 'Artist 2', duration: 200, cover_url: null },
       ];
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_tidal_autoplay_recommendations') return recTracks;
         if (cmd === 'clear_queue') return null;
         if (cmd === 'add_to_queue_bulk') return null;
         return null;
       });
 
-      useStore.setState({ autoplayEnabled: true, queue: [] });
+      useStore.setState({ autoplayEnabled: true, queue: [], tidalConnected: true, recommendationEngine: 'tidal', appMode: 'hybrid' });
 
       await useStore.getState().triggerAutoplayRadio(tidalTrack, true);
 
@@ -502,7 +520,8 @@ describe('TidalConnectCard', () => {
         path: oldCdnUrl,
       };
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_get_stream_url') return freshCdnUrl;
         if (cmd === 'play_track') return null;
         if (cmd === 'check_url_is_cached') return false;
@@ -521,7 +540,8 @@ describe('TidalConnectCard', () => {
         queue: [tidalTrack],
       });
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_queue') return []; // Backend queue is empty
         return null;
       });
@@ -551,7 +571,8 @@ describe('TidalConnectCard', () => {
         currentTrack: tidalTrack,
       });
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'tidal_get_stream_url') return resolvedStreamUrl;
         if (cmd === 'play_track') return null;
         if (cmd === 'remove_from_queue') return null;
@@ -599,7 +620,8 @@ describe('TidalConnectCard', () => {
         },
       });
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_playback_status') {
           return {
             status: 'Stopped',

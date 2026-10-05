@@ -17,6 +17,8 @@ import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
 import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 import { baseName, getStreamName, isStreamTrack, isRadioStream } from '../utils';
 import { getAudioPathPresentation } from '../utils/audioPath';
+import { useAudioLevels } from '../utils/useAudioLevels';
+import { AudioLevelReadout } from './AudioLevelReadout';
 
 function formatArtworkTime(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '--:--';
@@ -181,6 +183,7 @@ export function NowPlayingView() {
   const current = currentTrack;
   const effectiveCover = coverArt || current?.cover_url || null;
   const [showArtInfo, setShowArtInfo] = useState(false);
+  const audioLevels = useAudioLevels(showArtInfo && Boolean(playbackCurrentTrack));
   const [artworkTagDetails, setArtworkTagDetails] = useState<AudioTagData | null>(null);
   const [artworkTagLoading, setArtworkTagLoading] = useState(false);
   const [artworkTagError, setArtworkTagError] = useState(false);
@@ -335,8 +338,10 @@ export function NowPlayingView() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const targetTag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (targetTag === 'input' || targetTag === 'textarea') return;
+      if (useStore.getState().view !== 'nowplaying') return;
+      if (e.defaultPrevented || e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
+      const target = e.target instanceof HTMLElement ? e.target : document.activeElement;
+      if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
 
       if (e.key.toLowerCase() === 'i') {
         e.preventDefault();
@@ -932,6 +937,7 @@ export function NowPlayingView() {
                     <strong className={artworkBitPerfect ? 'is-good' : ''}>{artworkProcessing}</strong>
                   </div>
                   <div className="np-art-detail-list">
+                    <AudioLevelReadout levels={audioLevels} />
                     <div className="np-art-detail-row">
                       <span>Output</span>
                       <strong>{artworkOutput}</strong>

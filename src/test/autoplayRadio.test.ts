@@ -7,8 +7,10 @@ import { Track } from '../store/types';
 describe('Autoplay & Recommendation Engine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     useStore.setState({
       recommendationEngine: 'our',
+      tidalConnected: true,
       appMode: 'hybrid',
       repeat: 'all',
       recordPlaybackTransition: useStore.getInitialState().recordPlaybackTransition,
@@ -65,6 +67,49 @@ describe('Autoplay & Recommendation Engine', () => {
   });
 
   describe('triggerAutoplayRadio Resilience & Handling', () => {
+    it('uses the active online source when a recording is represented by a local library path', async () => {
+      const seed: Track = { id: 1, path: 'C:/Music/song.flac', title: 'Seed', artist: 'Artist', duration: 180, format: 'FLAC', lyric_offset: 0,
+        active_source: { provider: 'youtube', id: 'aaaaaaaaaaa' } };
+      useStore.setState({ currentTrack: seed, tracks: [seed], recommendationEngine: 'youtube' });
+      vi.mocked(invoke).mockImplementation(async (command, args?: any) => {
+        if (command === 'get_recommendations') return { tracks: args.request.candidates, generation: args.request.generation, reasons: {} };
+        return null;
+      });
+      await useStore.getState().triggerAutoplayRadio(seed, true);
+      const calls = vi.mocked(invoke).mock.calls;
+      expect((calls.find(([command]) => command === 'get_youtube_autoplay_recommendations')![1] as any).videoId).toBe('aaaaaaaaaaa');
+      expect((calls.find(([command]) => command === 'get_recommendations')![1] as any).request.allow_local).toBe(false);
+    });
+
+    it.each([false, true])('mixes local files into online radio only when allowed (%s)', async allowLocal => {
+      const seed: Track = { id: -1, path: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', title: 'Seed', artist: 'Artist', duration: 180, format: 'YouTube Direct', lyric_offset: 0 };
+      const local: Track = { ...seed, id: 2, path: 'C:/Music/local.flac', title: 'Local', format: 'FLAC' };
+      localStorage.setItem('aideo_autoplay_local_for_cloud', String(allowLocal));
+      useStore.setState({ currentTrack: seed, tracks: [local], recommendationEngine: 'youtube' });
+      vi.mocked(invoke).mockImplementation(async (command, args?: any) => {
+        if (command === 'get_youtube_autoplay_recommendations') return [{ id: 'bbbbbbbbbbb', title: 'Online', artist: 'Artist', duration_raw: '3:00', url: 'https://www.youtube.com/watch?v=bbbbbbbbbbb' }];
+        if (command === 'get_recommendations') return { tracks: args.request.candidates, generation: args.request.generation, reasons: {} };
+        return null;
+      });
+      await useStore.getState().triggerAutoplayRadio(seed, true);
+      const request = (vi.mocked(invoke).mock.calls.find(([command]) => command === 'get_recommendations')![1] as any).request;
+      expect(request.allow_local).toBe(allowLocal);
+      expect(request.candidates.some((track: Track) => track.path === local.path)).toBe(allowLocal);
+      expect(useStore.getState().queue.some(track => track.path === local.path)).toBe(allowLocal);
+    });
+
+    it('does not silently fill online radio with local files when providers return nothing', async () => {
+      const seed: Track = { id: -1, path: '123', title: 'Seed', artist: 'Artist', duration: 180, format: 'Tidal FLAC', lyric_offset: 0 };
+      const local: Track = { ...seed, id: 2, path: 'C:/Music/local.flac', title: 'Local', format: 'FLAC' };
+      useStore.setState({ currentTrack: seed, tracks: [local], recommendationEngine: 'tidal' });
+      vi.mocked(invoke).mockImplementation(async (command, args?: any) => {
+        if (command === 'get_recommendations') return { tracks: args.request.candidates, generation: args.request.generation, reasons: {} };
+        return null;
+      });
+      await useStore.getState().triggerAutoplayRadio(seed, true);
+      expect(useStore.getState().queue).toEqual([]);
+    });
+
     it('should handle null or undefined responses from backend without throwing', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(null);
 
@@ -102,7 +147,8 @@ describe('Autoplay & Recommendation Engine', () => {
         }
       ];
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return mockRecommendations;
         }
@@ -129,7 +175,8 @@ describe('Autoplay & Recommendation Engine', () => {
       expect(queue[1].is_autoplay).toBe(true);
     });
     it('does not switch explicit Tidal radio to YouTube when no related Tidal recording matches', async () => {
-      vi.mocked(invoke).mockImplementation(async cmd => {
+      vi.mocked(invoke).mockImplementation(async (cmd, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_tidal_autoplay_recommendations') return [];
         return null;
       });
@@ -151,7 +198,8 @@ describe('Autoplay & Recommendation Engine', () => {
 
     it('should not commit a pending response after autoplay is disabled', async () => {
       let resolveRecommendations: ((value: unknown) => void) | undefined;
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return new Promise(resolve => { resolveRecommendations = resolve; });
         }
@@ -194,7 +242,8 @@ describe('Autoplay & Recommendation Engine', () => {
 
     it('should not commit a pending response after the seed track changes', async () => {
       const resolvers: Array<(value: unknown) => void> = [];
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return new Promise(resolve => { resolvers.push(resolve); });
         }
@@ -244,7 +293,8 @@ describe('Autoplay & Recommendation Engine', () => {
     });
     it('should discard a pending response when playback changes without another radio request', async () => {
       let resolveRecommendations: ((value: unknown) => void) | undefined;
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return new Promise(resolve => { resolveRecommendations = resolve; });
         }
@@ -287,7 +337,8 @@ describe('Autoplay & Recommendation Engine', () => {
       let finishPlaybackTransition: (() => void) | undefined;
       const transition = new Promise<void>(resolve => { finishPlaybackTransition = resolve; });
       let resolveRecommendations: ((value: unknown) => void) | undefined;
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return new Promise(resolve => { resolveRecommendations = resolve; });
         }
@@ -329,7 +380,8 @@ describe('Autoplay & Recommendation Engine', () => {
     });
 
     it('should not re-add played or cleared tracks when recommendations are exhausted', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return [{
             id: 'played',
@@ -374,20 +426,21 @@ describe('Autoplay & Recommendation Engine', () => {
     });
 
     it('should only append one copy of a song within a refill', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return [{
-            id: 'duplicate1',
+            id: 'duplicate01',
             title: 'Same Song',
             artist: 'Same Artist',
             duration_raw: '3:00',
-            url: 'https://www.youtube.com/watch?v=duplicate1',
+            url: 'https://www.youtube.com/watch?v=duplicate01',
           }, {
-            id: 'duplicate2',
+            id: 'duplicate02',
             title: 'Same Song (Official Audio)',
             artist: 'Same Artist',
             duration_raw: '3:00',
-            url: 'https://www.youtube.com/watch?v=duplicate2',
+            url: 'https://www.youtube.com/watch?v=duplicate02',
           }];
         }
         return null;
@@ -412,7 +465,8 @@ describe('Autoplay & Recommendation Engine', () => {
       const clearStarted = new Promise<void>(resolve => { resolveClearStarted = resolve; });
       const deferredClear = new Promise<void>(resolve => { resolveClear = resolve; });
       const bulkPaths: string[][] = [];
-      vi.mocked(invoke).mockImplementation(async (cmd, args) => {
+      vi.mocked(invoke).mockImplementation(async (cmd, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return [{
             id: 'radio1',
@@ -461,7 +515,8 @@ describe('Autoplay & Recommendation Engine', () => {
 
     it('should remove queued autoplay from the backend when entering repeat one', async () => {
       const commands: string[] = [];
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         commands.push(cmd);
         return null;
       });
@@ -486,7 +541,7 @@ describe('Autoplay & Recommendation Engine', () => {
       expect(commands).not.toContain('add_to_queue_bulk');
     });
 
-    it('should exclude played, cleared, queued, disliked and seed paths before local similarity truncation', async () => {
+    it('should exclude played, cleared, queued, disliked and seed paths before shared ranking limits', async () => {
       const seed: Track = {
         id: 1,
         path: 'C:\\Music\\seed.mp3',
@@ -505,23 +560,24 @@ describe('Autoplay & Recommendation Engine', () => {
         tracks: [disliked],
         queue: [manual],
       });
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_similar_tracks') return [];
         return null;
       });
 
       await useStore.getState().triggerAutoplayRadio(seed);
 
-      expect(invoke).toHaveBeenCalledWith('get_similar_tracks', {
-        path: seed.path,
-        excludedPaths: expect.arrayContaining([
+      expect(invoke).toHaveBeenCalledWith('get_recommendations', { request: expect.objectContaining({
+        candidates: expect.arrayContaining([expect.objectContaining({ path: disliked.path, disliked: 1 })]),
+        seed: expect.objectContaining({ path: seed.path }),
+        excluded_paths: expect.arrayContaining([
           seed.path,
           played.path,
-          disliked.path,
           manual.path,
           'C:\\Music\\cleared.mp3',
         ]),
-      });
+      }) });
     });
 
     it('should preserve manual queue priority during a forced radio refill', async () => {
@@ -535,7 +591,8 @@ describe('Autoplay & Recommendation Engine', () => {
         lyric_offset: 0,
       };
       useStore.setState({ queue: [manualTrack] });
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           return [{
             id: 'radio1',
@@ -567,24 +624,25 @@ describe('Autoplay & Recommendation Engine', () => {
     it('should filter out disliked and recently cleared tracks from recommendations', async () => {
       const mockRecommendations = [
         {
-          id: 'rec1',
+          id: 'recommend01',
           title: 'Disliked Song',
           artist: 'Artist A',
           cover_url: '',
           duration_raw: '3:00',
-          url: 'https://www.youtube.com/watch?v=rec1'
+          url: 'https://www.youtube.com/watch?v=recommend01'
         },
         {
-          id: 'rec2',
+          id: 'recommend02',
           title: 'Good Song',
           artist: 'Artist B',
           cover_url: '',
           duration_raw: '3:30',
-          url: 'https://www.youtube.com/watch?v=rec2'
+          url: 'https://www.youtube.com/watch?v=recommend02'
         }
       ];
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') return mockRecommendations;
         return null;
       });
@@ -593,7 +651,7 @@ describe('Autoplay & Recommendation Engine', () => {
         tracks: [
           {
             id: 1,
-            path: 'https://www.youtube.com/watch?v=rec1',
+            path: 'https://www.youtube.com/watch?v=recommend01',
             title: 'Disliked Song',
             artist: 'Artist A',
             disliked: 1,
@@ -678,17 +736,19 @@ describe('Autoplay & Recommendation Engine', () => {
       const seed: Track = { id: 1, path: 'C:/Music/seed.flac', title: 'Seed', artist: 'Artist', duration: 180, format: 'FLAC', lyric_offset: 0 };
       const local: Track = { ...seed, id: 2, path: 'C:/Music/local.flac', title: 'Local' };
       const commands: string[] = [];
-      vi.mocked(invoke).mockImplementation(async cmd => {
+      vi.mocked(invoke).mockImplementation(async (cmd, args?: any) => {
+        commands.push(cmd);
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         commands.push(cmd);
         if (cmd === 'get_similar_tracks') return [local];
         if (cmd === 'get_youtube_autoplay_recommendations') return [{ id: 'online', title: 'Online', artist: 'Artist', duration_raw: '3:00', url: 'https://youtube.com/watch?v=online' }];
         return null;
       });
-      useStore.setState({ appMode: 'local', recommendationEngine: 'youtube', currentTrack: seed });
+      useStore.setState({ appMode: 'local', recommendationEngine: 'youtube', currentTrack: seed, tracks: [seed, local] });
 
       await useStore.getState().triggerAutoplayRadio(seed, true);
 
-      expect(commands).toContain('get_similar_tracks');
+      expect(commands).toContain('get_recommendations');
       expect(commands).not.toContain('get_youtube_autoplay_recommendations');
       expect(useStore.getState().queue.map(t => t.path)).toEqual([local.path]);
     });
@@ -699,17 +759,18 @@ describe('Autoplay & Recommendation Engine', () => {
       let youtubeCalled = false;
       let localSimilarCalled = false;
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_youtube_autoplay_recommendations') {
           youtubeCalled = true;
           return [
             {
-              id: 'yt123',
+              id: 'youtube1234',
               title: 'YouTube Rec',
               artist: 'YT Artist',
               cover_url: '',
               duration_raw: '3:10',
-              url: 'https://www.youtube.com/watch?v=yt123'
+              url: 'https://www.youtube.com/watch?v=youtube1234'
             }
           ];
         }
@@ -744,7 +805,8 @@ describe('Autoplay & Recommendation Engine', () => {
 
       let tidalCalled = false;
 
-      vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
         if (cmd === 'get_tidal_autoplay_recommendations') {
           tidalCalled = true;
           return [

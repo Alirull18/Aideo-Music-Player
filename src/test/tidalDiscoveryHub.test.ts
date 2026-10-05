@@ -5,7 +5,7 @@ import {
   mergeTidalIntoHub,
   TidalHubTrack,
 } from '../utils/tidalHub';
-import { buildUnifiedTabs, getUnifiedTabTracks } from '../utils/discoveryFeed';
+import { buildUnifiedTabs, getUnifiedTabTracks, discoveryTrack } from '../utils/discoveryFeed';
 import { DiscoveryHubData, YoutubeTrack } from '../store/types';
 
 const isTidal = (t: YoutubeTrack): boolean => (t as TidalHubTrack).format === 'Tidal FLAC';
@@ -40,6 +40,15 @@ const tidalRaw = (id: string, title: string, artist: string, duration = 210) => 
 });
 
 describe('tidalResultsToHubTracks', () => {
+  it('preserves catalog evidence and related-recording provenance through discovery conversion', () => {
+    const evidence = { isrc: 'USAAA2600001', upc: '0123456789012', version: 'Live at Wembley', explicit: false };
+    const [hubTrack] = tidalResultsToHubTracks([{ ...tidalRaw('77', 'Song (Live at Wembley)', 'Artist', 245), recording_evidence: evidence }]);
+    expect(hubTrack.recording_evidence).toEqual(evidence);
+    expect(hubTrack.recommendation_source).toMatch(/related/i);
+    const track = discoveryTrack(hubTrack);
+    expect(track.recording_evidence).toEqual(evidence);
+    expect(track).toMatchObject({ path: '77', format: 'Tidal FLAC', title: 'Song (Live at Wembley)', duration: 245 });
+  });
   it('maps raw Tidal results to hub-card shape with Tidal FLAC format', () => {
     const [t] = tidalResultsToHubTracks([tidalRaw('77', 'Northern Lights', 'Aurora', 245)]);
     expect(isTidal(t)).toBe(true);

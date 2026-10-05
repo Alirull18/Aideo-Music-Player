@@ -8,6 +8,9 @@ describe('Queue Reset on Song Click & Algorithmic Population', () => {
     vi.clearAllMocks();
     localStorage.clear();
     useStore.setState({
+      appMode: 'hybrid',
+      recommendationEngine: 'our',
+      repeat: 'all',
       queue: [],
       tracks: [],
       currentTrack: null,
@@ -54,24 +57,25 @@ describe('Queue Reset on Song Click & Algorithmic Population', () => {
 
     const mockRecommendations = [
       {
-        id: 'rec_auto_1',
+        id: 'rec_auto_01',
         title: 'Algorithmic Rec 1',
         artist: 'Rec Artist 1',
         cover_url: 'https://example.com/cover1.jpg',
         duration_raw: '3:30',
-        url: 'https://www.youtube.com/watch?v=rec_auto_1',
+        url: 'https://www.youtube.com/watch?v=rec_auto_01',
       },
       {
-        id: 'rec_auto_2',
+        id: 'rec_auto_02',
         title: 'Algorithmic Rec 2',
         artist: 'Rec Artist 2',
         cover_url: 'https://example.com/cover2.jpg',
         duration_raw: '4:00',
-        url: 'https://www.youtube.com/watch?v=rec_auto_2',
+        url: 'https://www.youtube.com/watch?v=rec_auto_02',
       },
     ];
 
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_youtube_autoplay_recommendations') {
         return mockRecommendations;
       }
@@ -90,6 +94,7 @@ describe('Queue Reset on Song Click & Algorithmic Population', () => {
 
     // User clicks new song to play
     await useStore.getState().playTrack(newTrackToPlay);
+    await vi.waitFor(() => expect(useStore.getState().queue).toHaveLength(2));
 
     // Verify invoke('clear_queue') was called to clear the audio backend queue
     expect(invoke).toHaveBeenCalledWith('clear_queue');
@@ -229,14 +234,17 @@ describe('Queue Reset on Song Click & Algorithmic Population', () => {
       },
     ];
 
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_similar_tracks') {
         return mockSimilar;
       }
       return null;
     });
 
+    useStore.setState({ tracks: [localSeed, ...mockSimilar] });
     await useStore.getState().playTrack(localSeed);
+    await vi.waitFor(() => expect(useStore.getState().queue).toHaveLength(2));
 
     const queue = useStore.getState().queue;
     expect(queue.length).toBeGreaterThanOrEqual(2);

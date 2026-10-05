@@ -52,6 +52,8 @@ export interface Track {
   cover_url?: string | null;
   duration_raw?: string | null;
   is_autoplay?: boolean;
+  is_generated_mix?: boolean;
+  recommendation_reason?: string;
   loved?: number;
   disliked?: number;
   path_hash?: string | null;
@@ -116,6 +118,7 @@ export interface YoutubeTrack {
   duration?: number;
   album?: string | null;
   source_context?: RecordingSources;
+  recording_evidence?: RecordingEvidence;
 }
 
 export interface YoutubeMix {
@@ -381,6 +384,13 @@ export interface SidebarNavItemConfig {
 export type VisualizerMode = 'bars' | 'mirror' | 'wave' | 'circle' | 'dots' | 'baseline';
 export type VisualizerDecayRate = 'snappy' | 'balanced' | 'silky';
 
+export interface PlaybackRecovery {
+  track: Track;
+  position: number;
+  error: string;
+  action: 'retry' | 'reconnect' | 'output' | 'library';
+  pending: boolean;
+}
 export interface PlayerState {
   view: ViewMode;
   networkTelemetry: NetworkTelemetry | null;
@@ -422,6 +432,10 @@ export interface PlayerState {
   setStreamingQuality: (quality: StreamingQuality) => void;
   devices: string[];
   currentDevice: string | null;
+  audioDeviceSwitching: boolean;
+  requestedAudioModes: { exclusive: boolean; bitPerfect: boolean };
+  activeAutoEq: import('../utils/deviceProfiles').AutoEqIdentity | null;
+  setActiveAutoEq: (identity: import('../utils/deviceProfiles').AutoEqIdentity | null) => void;
   scanDirs: string[];
   scanStatus: string;
   librarySearchQuery: string;
@@ -459,6 +473,10 @@ export interface PlayerState {
   playlists: Playlist[];
   currentPlaylist: Playlist | null;
   playbackError: string | null;
+  playbackRecovery: PlaybackRecovery | null;
+  reportPlaybackFailure: (error: string, track?: Track, position?: number) => void;
+  retryPlaybackRecovery: () => Promise<void>;
+  dismissPlaybackRecovery: () => void;
   playbackSuccess: string | null;
   customPrompt: CustomPromptState;
   coverArtModalTrack: Track | null;
@@ -562,6 +580,14 @@ export interface PlayerState {
   syncBackendQueue: () => Promise<void>;
   handleTrackTransition: (path: string) => Promise<void>;
   handleNativeTrackTransition: (path: string, attemptId: string) => Promise<void>;
+  albumSession: { title: string; tracks: Track[]; index: number } | null;
+  stopBoundary: { kind: 'track' | 'album'; path: string } | null;
+  playAlbumToEnd: (tracks: Track[], title: string) => Promise<void>;
+  cancelAlbumSession: () => Promise<void>;
+  armStopAfter: (kind: 'track' | 'album') => Promise<void>;
+  cancelStopAfter: () => Promise<void>;
+  fulfillStopBoundary: () => Promise<void>;
+  handleNaturalTrackEnd: () => Promise<void>;
   playNext: () => Promise<void>;
   getNextTrackToPlay: () => Track | null;
   getNextTracksToPlay: (count?: number) => Track[];
@@ -592,7 +618,7 @@ export interface PlayerState {
   toggleBitPerfect: (enable?: boolean | unknown) => Promise<void>;
   restoreAudioModes: () => Promise<void>;
   fetchDevices: () => Promise<void>;
-  setAudioDevice: (name: string) => Promise<void>;
+  setAudioDevice: (name: string, options?: { backendSelected?: boolean; fallback?: boolean }) => Promise<void>;
   playbackRate: number;
   setPlaybackRate: (rate: number) => Promise<void>;
   adjustLyricOffset: (ms: number) => void;
@@ -616,6 +642,7 @@ export interface PlayerState {
   loadPlaylistTracks: (playlistId: number) => Promise<void>;
   toggleLoveTrack: (path: string, metadata?: Partial<Track>) => Promise<boolean | void>;
   toggleDislikeTrack: (path: string, metadata?: Partial<Track>) => Promise<void>;
+  setRecommendationInterest: (track: Track, interested: boolean) => Promise<void>;
   resetDislikedTracks: () => Promise<void>;
   cachedCloudHashes: string[];
   fetchCachedCloudHashes: () => Promise<void>;
@@ -842,20 +869,15 @@ export interface DayActivity {
 
 export interface AudiophileStats {
   lossless_count: number;
-  hires_count: number;
-  standard_count: number;
+  hi_res_count: number;
   bit_perfect_count: number;
-  bit_perfect_rate: number;
+  total_analyzed: number;
   avg_sample_rate: number;
-  top_resolution?: string | null;
 }
 
 export interface SourceDistribution {
-  local_count: number;
-  tidal_count: number;
-  qobuz_count: number;
-  webstream_count: number;
-  youtube_count?: number;
+  source: string;
+  play_count: number;
 }
 
 export interface ListeningInsightsPayload {
@@ -869,6 +891,6 @@ export interface ListeningInsightsPayload {
   top_genres: TopGenre[];
   hourly_activity: HourActivity[];
   daily_activity: DayActivity[];
-  audiophile: AudiophileStats;
-  sources: SourceDistribution;
+  audiophile_stats: AudiophileStats;
+  source_distribution: SourceDistribution[];
 }

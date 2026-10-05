@@ -18,7 +18,11 @@ use base64::Engine;
 
 mod artwork;
 mod db;
+mod recommendations;
 pub mod sources;
+mod downloads;
+mod backup;
+mod library_health;
 #[cfg(test)]
 mod db_tests;
 mod lyrics;
@@ -1242,6 +1246,7 @@ pub fn start_audio_device_watcher(
                     {
                         let p = safe_lock(&player);
                         *safe_lock(&p.target_device) = Some(matched_dev.clone());
+                        p.volume.store(0.0f32.to_bits(), Ordering::SeqCst);
                     }
 
                     if is_playing {
@@ -1270,6 +1275,7 @@ pub fn start_audio_device_watcher(
                     let new_def = current_default.clone();
                     crate::log_info!("AUDIO", "Windows default audio device changed to: {:?}", new_def);
                     last_default = new_def.clone();
+                    safe_lock(&player).volume.store(0.0f32.to_bits(), Ordering::SeqCst);
 
                     if is_playing {
                         let _ = cmd_tx.send(player::PlayerCommand::RestartStream);
@@ -1306,10 +1312,12 @@ pub fn start_audio_device_watcher(
 // ── Scanner commands ──────────────────────────────────────────────────────────
 #[tauri::command]
 async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
+    let activity = library_health::begin_library_activity()?;
     let db_conn_arc = Arc::clone(&state.db);
     let app_handle_clone = app_handle.clone();
     
     tokio::task::spawn_blocking(move || {
+        let _activity = activity;
         // Save registered library directories (SEC-01)
         {
             let conn = safe_lock(&db_conn_arc);
@@ -1511,6 +1519,11 @@ fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::Playlist>, String
 fn create_playlist(name: String, state: State<'_, AppState>) -> Result<i32, String> {
     let conn = safe_lock(&state.db);
     db::create_playlist(&conn, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_generated_playlist(name: String, paths: Vec<String>, state: State<'_, AppState>) -> Result<i32, String> {
+    db::save_generated_playlist(&mut safe_lock(&state.db), &name, &paths).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2203,6 +2216,10 @@ fn log_playback_start(
     sample_rate: Option<i32>,
     bit_depth: Option<i32>,
     bit_perfect: Option<i32>,
+    track: Option<db::Track>,
+    recording_evidence: Option<sources::RecordingEvidence>,
+    source_context: Option<db::RecordingSources>,
+    origin: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<i64, String> {
     let mut conn = safe_lock(&state.db);
@@ -2212,10 +2229,20 @@ fn log_playback_start(
         .unwrap_or(0);
     
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let track = match track {
+        Some(track) => track,
+        None => serde_json::from_value(serde_json::json!({ "id": 0, "path": path, "title": title, "artist": artist, "album": album, "duration": duration, "format": format, "genre": genre, "lyric_offset": 0 }))
+            .map_err(|e| e.to_string())?,
+    };
+    if track.path != path { return Err("Listening track path does not match playback".into()); }
+    if track.duration.is_some_and(|d| !d.is_finite() || d < 0.0) { return Err("Invalid track duration".into()); }
+    if let Some(context) = source_context { context.to_json().map_err(|e| e.to_string())?; }
+    let recording_id = recommendations::canonical_id_with_evidence(&tx, &track, recording_evidence.as_ref()).map_err(|e| e.to_string())?;
+    let source_key = recommendations::source_key(&track);
     tx.execute(
-        "INSERT INTO playback_history (track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, synced, genre, playback_source, sample_rate, bit_depth, bit_perfect, completion_rate)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0.0, 0, 0, ?8, ?9, ?10, ?11, ?12, 1.0)",
-        rusqlite::params![path, title, artist, album, duration, format, now, genre, playback_source, sample_rate, bit_depth, bit_perfect.unwrap_or(0)],
+        "INSERT INTO playback_history (track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, synced, genre, playback_source, sample_rate, bit_depth, bit_perfect, completion_rate, recording_id, source_key, signal_quality, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0.0, 0, 0, ?8, ?9, ?10, ?11, ?12, 0.0, ?13, ?14, 'observed', ?15)",
+        rusqlite::params![track.path, track.title, track.artist, track.album, track.duration, track.format, now, track.genre, playback_source, sample_rate, bit_depth, bit_perfect.unwrap_or(0), recording_id, source_key, origin],
     ).map_err(|e| e.to_string())?;
     
     let id = tx.last_insert_rowid();
@@ -2230,19 +2257,31 @@ fn log_playback_end(
     duration_played: f64,
     skipped: bool,
     completion_rate: Option<f64>,
+    end_reason: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let conn = safe_lock(&state.db);
-    let skipped_val = if skipped { 1 } else { 0 };
-    let comp_rate = completion_rate.unwrap_or(1.0);
-    
-    conn.execute(
-        "UPDATE playback_history 
-         SET duration_played = ?1, skipped = ?2, completion_rate = ?3
-         WHERE id = ?4",
-        rusqlite::params![duration_played, skipped_val, comp_rate, history_id],
-    ).map_err(|e| e.to_string())?;
-    
+    let _ = completion_rate;
+    persist_listening(&conn, history_id, duration_played, Some(end_reason.as_deref().unwrap_or(if skipped { "skipped" } else { "stopped" })))
+}
+
+#[tauri::command]
+fn checkpoint_listening(history_id: i64, listened_seconds: f64, state: State<'_, AppState>) -> Result<(), String> {
+    persist_listening(&safe_lock(&state.db), history_id, listened_seconds, None)
+}
+
+fn persist_listening(conn: &rusqlite::Connection, id: i64, seconds: f64, reason: Option<&str>) -> Result<(), String> {
+    if id <= 0 || !seconds.is_finite() || !(0.0..=21600.0).contains(&seconds)
+        || reason.is_some_and(|r| !matches!(r, "skipped" | "completed" | "stopped" | "error")) {
+        return Err("Invalid listening observation".into());
+    }
+    conn.execute("UPDATE playback_history SET
+        listened_seconds = MAX(listened_seconds, ?1), duration_played = MAX(listened_seconds, ?1),
+        signal_quality = CASE WHEN MAX(listened_seconds, ?1) >= CASE WHEN duration > 0 THEN MIN(120.0, duration / 2.0) ELSE 120.0 END THEN 'qualified' ELSE 'observed' END,
+        completion_rate = CASE WHEN duration > 0 THEN MIN(1.0, MAX(listened_seconds, ?1) / duration) ELSE 0.0 END,
+        skipped = CASE WHEN ?2 = 'skipped' THEN 1 ELSE 0 END,
+        end_reason = CASE WHEN ?2 = 'completed' AND (duration IS NULL OR duration <= 0 OR MAX(listened_seconds, ?1) < duration * 0.8) THEN 'stopped' ELSE ?2 END
+        WHERE id = ?3 AND end_reason IS NULL", rusqlite::params![seconds, reason, id]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2677,6 +2716,7 @@ fn play_track(
     attempt_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let _activity = library_health::begin_library_activity()?;
     if !path.starts_with("http://") && !path.starts_with("https://") && !std::path::Path::new(&path).exists() {
         return Err(format!("Cannot play track: file or stream not found: '{}'", path));
     }
@@ -3003,6 +3043,16 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "file_format": *safe_lock(&player.file_format),
         "effective_audio_path": effective_audio_path,
         "network_telemetry": telemetry,
+    }))
+}
+
+#[tauri::command]
+fn get_audio_levels(enabled: bool, state: State<'_, AppState>) -> Option<serde_json::Value> {
+    let player = safe_lock(&state.player);
+    player.effective_audio_path.meter.read(enabled).map(|levels| serde_json::json!({
+        "peak_dbfs": levels.peak_dbfs,
+        "headroom_db": levels.headroom_db,
+        "silent": levels.silent,
     }))
 }
 
@@ -3835,6 +3885,35 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            downloads::get_track_download_options,
+            downloads::get_download_folder,
+            downloads::set_download_folder,
+            downloads::get_track_download_jobs,
+            downloads::start_track_download,
+            downloads::cancel_track_download,
+            downloads::retry_track_download,
+            downloads::discard_track_download,
+            downloads::get_downloaded_file_paths,
+            library_health::scan_library_health,
+            library_health::cancel_library_health,
+            library_health::preview_library_relocation,
+            library_health::apply_library_relocation,
+            library_health::undo_library_relocation,
+            library_health::preview_library_relocation_undo,
+            player::set_stop_after_path,
+            library_health::pending_library_relocations,
+            library_health::ack_library_relocation,
+            backup::local_backup_export,
+            backup::local_backup_preview,
+            backup::local_backup_restore,
+            backup::local_backup_pending_settings,
+            backup::local_backup_ack_settings,
+            backup::local_backup_reconciliation_pending,
+            backup::local_backup_clear_reconciliation,
+            recommendations::get_recommendation_exclusions,
+            recommendations::get_recommendation_recordings,
+            recommendations::preview_recommendation_reset,
+            recommendations::apply_recommendation_reset,
             center_window,
             set_window_always_on_top,
             enter_borderless_fullscreen,
@@ -3867,6 +3946,7 @@ pub fn run() {
             update_media_metadata,
             update_media_playback,
             get_playback_status,
+            get_audio_levels,
             get_lyrics,
             get_cover_art,
             get_track_canvas,
@@ -3933,6 +4013,7 @@ pub fn run() {
             clear_discord_presence,
             get_playlists,
             create_playlist,
+            save_generated_playlist,
             delete_playlist,
             add_to_playlist,
             remove_from_playlist,
@@ -3944,6 +4025,9 @@ pub fn run() {
             delete_track,
             log_playback_start,
             log_playback_end,
+            checkpoint_listening,
+            recommendations::get_recommendations,
+            recommendations::set_recommendation_interest,
             get_unsynced_history,
             mark_history_synced,
             get_listening_insights,
@@ -4097,6 +4181,7 @@ pub fn run() {
                 *safe_lock(&qobuz_state.logged_in) = true;
             }
             app.manage(qobuz_state);
+            app.manage(downloads::DownloadState::default());
 
             dependencies::spawn_background_ytdlp_updater(app.handle().clone());
             
@@ -4235,6 +4320,7 @@ pub fn run() {
             });
 
             let app_handle_for_server = app.handle().clone();
+            sonic_analyzer::start_idle_analysis((*app_state_clone).clone());
             tauri::async_runtime::spawn(async move {
                 crate::remote_server::start_remote_server(app_handle_for_server, app_state_clone).await;
             });
@@ -4558,5 +4644,28 @@ mod client_dsp_tests {
         assert_eq!(current.playback_rate, 1.0);
         apply_client_dsp(&mut current, player::DSPState::default());
         assert_eq!(current.playback_rate, 1.0);
+    }
+}
+
+#[cfg(test)]
+mod listening_tests {
+    use super::*;
+
+    #[test]
+    fn checkpoints_do_not_complete_seeked_or_unfinished_listens() {
+        let conn = db::init_db(":memory:").unwrap();
+        conn.execute("INSERT INTO playback_history(track_path,timestamp,duration,signal_quality) VALUES ('C:/a.flac',0,180,'observed')", []).unwrap();
+        let id = conn.last_insert_rowid();
+        persist_listening(&conn, id, 31.0, None).unwrap();
+        let (quality, completion): (String, f64) = conn.query_row("SELECT signal_quality,completion_rate FROM playback_history WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(quality, "observed");
+        assert!(completion < 0.2);
+        persist_listening(&conn, id, 95.0, Some("completed")).unwrap();
+        let end: String = conn.query_row("SELECT end_reason FROM playback_history WHERE id=?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(end, "stopped");
+        persist_listening(&conn, id, 180.0, Some("completed")).unwrap();
+        let seconds: f64 = conn.query_row("SELECT listened_seconds FROM playback_history WHERE id=?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(seconds, 95.0);
+        assert!(persist_listening(&conn, id, f64::NAN, None).is_err());
     }
 }

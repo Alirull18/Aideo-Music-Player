@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
+import { TrackContextMenu } from '../TrackContextMenu';
+import type { Track } from '../../store/types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
@@ -58,6 +60,7 @@ export function TheaterQueueDrawer({ isOpen, onClose }: TheaterQueueDrawerProps)
   );
 
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [trackMenu, setTrackMenu] = useState<{ track: Track; anchor: { x: number; y: number } } | null>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
@@ -464,6 +467,13 @@ export function TheaterQueueDrawer({ isOpen, onClose }: TheaterQueueDrawerProps)
                       onMouseEnter={() => setHoveredIdx(idx)}
                       onMouseLeave={() => setHoveredIdx(null)}
                       onClick={() => playFromQueue(idx)}
+                      tabIndex={0}
+                      onKeyDown={event => {
+                        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                          event.preventDefault(); setTrackMenu({ track: t, anchor: event.currentTarget.getBoundingClientRect() });
+                        }
+                      }}
+                      onContextMenu={event => { event.preventDefault(); setTrackMenu({ track: t, anchor: { x: event.clientX, y: event.clientY } }); }}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -623,6 +633,7 @@ export function TheaterQueueDrawer({ isOpen, onClose }: TheaterQueueDrawerProps)
           </motion.aside>
         </>
       )}
+      {isOpen && trackMenu && <TrackContextMenu track={trackMenu.track} anchor={trackMenu.anchor} onClose={() => setTrackMenu(null)} />}
     </AnimatePresence>
   );
 }

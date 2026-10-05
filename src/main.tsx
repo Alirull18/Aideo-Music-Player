@@ -1,6 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
+import { isTauri, invoke } from '@tauri-apps/api/core';
+import { replayPendingBackupSettings } from './utils/localBackup';
+import { replayPendingLibraryRelocations } from './utils/libraryRelocation';
 import { logger } from "./utils/logger";
 
 if (typeof window !== "undefined") {
@@ -26,9 +28,19 @@ if (typeof window !== "undefined") {
   });
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
+async function start() {
+  try {
+    if (isTauri()) {
+      if (await invoke<boolean>('local_backup_reconciliation_pending')) localStorage.setItem('aideo_local_restore_sync', 'pending');
+      await replayPendingBackupSettings();
+      await replayPendingLibraryRelocations();
+    }
+    const { default: App } = await import('./App');
+    root.render(<React.StrictMode><App /></React.StrictMode>);
+  } catch (error) {
+    root.render(<main style={{ padding: 32 }}><h1>Restore needs attention</h1><p role="alert">{String(error)}</p><button onClick={() => void start()}>Retry startup</button></main>);
+  }
+}
+void start();
 

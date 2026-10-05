@@ -1,3 +1,4 @@
+import type { Track } from '../store/types';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store';
@@ -16,6 +17,10 @@ describe('Stream queue metadata persistence (regression: "Lgf.audio.tidal.com" q
       queue: [],
       currentTrack: null,
       playHistory: [],
+      recommendationEngine: 'tidal',
+      tidalConnected: true,
+      appMode: 'hybrid',
+      repeat: 'all',
       autoplayEnabled: true,
     });
   });
@@ -45,6 +50,7 @@ describe('Stream queue metadata persistence (regression: "Lgf.audio.tidal.com" q
     const track = { id: -1, path: TIDAL_ID, title: 'Blue Valentine', artist: 'NMIXX', duration: 186, format: 'Tidal FLAC', lyric_offset: 0 };
 
     vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_get_stream_url') return TIDAL_URL;
       if (cmd === 'add_to_queue') {
         expect(args.path).toBe(TIDAL_URL);
@@ -64,6 +70,7 @@ describe('Stream queue metadata persistence (regression: "Lgf.audio.tidal.com" q
   it('initializeQueue resolves Tidal track IDs to stream URLs before pushing to the backend', async () => {
     const bulkPaths: string[] = [];
     vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'tidal_get_stream_url') return TIDAL_URL;
       if (cmd === 'check_files_exist') return [];
       if (cmd === 'clear_queue') return null;
@@ -88,7 +95,8 @@ describe('Stream queue metadata persistence (regression: "Lgf.audio.tidal.com" q
   it('initializeQueue heals queue entries whose title degraded to a bare hostname', async () => {
     rememberResolvedPath(TIDAL_URL, TIDAL_ID);
     onlineTrackCache.set(TIDAL_URL, { id: -1, path: TIDAL_ID, title: 'Blue Valentine', artist: 'NMIXX', format: 'Tidal FLAC' });
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'check_files_exist') return [];
       if (cmd === 'clear_queue') return null;
       if (cmd === 'add_to_queue_bulk') return null;
@@ -105,7 +113,8 @@ describe('Stream queue metadata persistence (regression: "Lgf.audio.tidal.com" q
   });
 
   it('initializeQueue never mangles legitimate single-word titles', async () => {
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'check_files_exist') return [];
       if (cmd === 'clear_queue') return null;
       if (cmd === 'add_to_queue_bulk') return null;
@@ -155,7 +164,8 @@ describe('Queue clear behavior (regression: cleared songs repopulate after Clear
 
   it('Clear empties the queue without stopping playback or rebuilding the radio', async () => {
     const commands: string[] = [];
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       commands.push(cmd);
       if (cmd === 'get_queue') return [];
       return null;
@@ -183,7 +193,8 @@ describe('Queue clear behavior (regression: cleared songs repopulate after Clear
   });
 
   it('a fetchQueue after Clear keeps the queue empty (no resurrection)', async () => {
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_queue') return []; // backend was cleared
       return null;
     });
@@ -224,7 +235,8 @@ describe('Autoplay seed sanitization (regression: random songs fill queue on str
 
   it('never queries the providers with a degraded hostname/placeholder seed', async () => {
     const commands: string[] = [];
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       commands.push(cmd);
       if (cmd === 'get_tidal_autoplay_recommendations') {
         return [{ id: '999', title: 'Random Instrumental', artist: 'Unknown Band', duration: 200, cover_url: null }];
@@ -250,6 +262,7 @@ describe('Autoplay seed sanitization (regression: random songs fill queue on str
   it('sanitizes a partially degraded seed instead of searching the placeholder artist', async () => {
     let received: any = null;
     vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_tidal_autoplay_recommendations') {
         received = args;
         return [];
@@ -366,7 +379,8 @@ describe('pollStatus accepts a genuine backend stop after the grace window', () 
   });
 
   it('keeps the UI stable during the grace period (autoplay refill window)', async () => {
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_playback_status') return { status: 'Stopped', current_track: null, position_secs: 0, volume: 1 };
       return null;
     });
@@ -386,7 +400,8 @@ describe('pollStatus accepts a genuine backend stop after the grace window', () 
         backend_stop_detected_at: Date.now() - 6000,
       },
     });
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_playback_status') return { status: 'Stopped', current_track: null, position_secs: 0, volume: 1 };
       return null;
     });
@@ -406,7 +421,8 @@ describe('pollStatus accepts a genuine backend stop after the grace window', () 
         backend_stop_detected_at: 0,
       },
     });
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_playback_status') return { status: 'Stopped', current_track: null, position_secs: 0, volume: 1 };
       return null;
     });

@@ -123,6 +123,7 @@ describe('Playback lifecycle attempt correlation', () => {
     emit('stream-buffering-end', { path: track.path, attempt_id: 'new' });
     expect(useStore.getState().playback.is_buffering).toBe(false);
     emit('track-ended', { path: track.path, attempt_id: 'new' });
+    emit('track-ended', { path: track.path, attempt_id: 'new' });
     expect(playNext).toHaveBeenCalledTimes(1);
   });
 
@@ -202,11 +203,12 @@ describe('Playback lifecycle attempt correlation', () => {
     emit('playback-error', { path: url, attempt_id: 'old', error: 'old device' });
     expect(stopTrack).not.toHaveBeenCalled();
     emit('playback-error', { path: url, attempt_id: 'current', error: 'No audio output device' });
-    expect(stopTrack).toHaveBeenCalledTimes(1);
+    expect(stopTrack).not.toHaveBeenCalled();
+    expect(useStore.getState().playbackRecovery).toMatchObject({ track: unified, action: 'output' });
     expect(useStore.getState().playbackError).toBe('No audio output device');
   });
 
-  it('shows one current-attempt error toast and none for a stale attempt', () => {
+  it('shows one current-attempt recovery and none for a stale attempt', () => {
     const originalStopTrack = useStore.getState().stopTrack;
     const stopTrack = vi.fn();
     useStore.setState({ stopTrack, notificationsEnabled: true, developerNotifications: false, currentTrack: track, currentAttemptId: 'live', playbackError: null,
@@ -216,7 +218,8 @@ describe('Playback lifecycle attempt correlation', () => {
       expect(screen.queryByText('Expired media URL')).toBeNull();
       act(() => emit('playback-error', { path: track.path, attempt_id: 'live', error: 'Media URL expired' }));
       expect(screen.getAllByText('Media URL expired')).toHaveLength(1);
-      expect(stopTrack).toHaveBeenCalledTimes(1);
+      expect(stopTrack).not.toHaveBeenCalled();
+      expect(useStore.getState().playbackRecovery?.track.path).toBe(track.path);
       expect(useStore.getState().playbackError).toBe('Media URL expired');
     } finally {
       useStore.setState({ stopTrack: originalStopTrack });

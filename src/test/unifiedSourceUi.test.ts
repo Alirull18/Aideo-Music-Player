@@ -164,24 +164,26 @@ describe('Unified source controls', () => {
       tidal_hifi: [{ id: 'tidal-123', path: '123', url: '123', format: 'Tidal FLAC', title: 'Song', artist: 'Artist', cover_url: null, duration_raw: '3:00' }],
       global_charts: [], mixed_for_you: [],
     };
-    vi.mocked(invoke).mockImplementation(async cmd => {
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
       if (cmd === 'get_cached_discovery_hub' || cmd === 'get_personalized_discovery_hub') return hub;
       if (cmd === 'get_tidal_hub_recommendations') return [];
+      if (cmd === 'get_recommendations') {
+        const chosen = args.request.candidates.find((candidate: Track) => candidate.path === youtubeTrack.path);
+        return { tracks: chosen ? [{ ...chosen, source_context: undefined }] : [], generation: args.request.generation, reasons: {} };
+      }
       return String(cmd).includes('search') ? [] : null;
     });
     useStore.setState({ tracks: [localTrack], discoveryData: hub, aideoPageDesign, appMode: 'hybrid', isLoadingRecs: false });
     const play = vi.spyOn(useStore.getState(), 'playTrack').mockResolvedValue(undefined);
     const { container } = render(createElement(AideoView));
-    await waitFor(() => expect(container.querySelector('.home-song-sources')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('.discovery-grid-play-circle, .discovery-play-circle, .ah-play-btn')).not.toBeNull());
     expect(invoke).toHaveBeenCalledWith('get_tidal_hub_recommendations', expect.objectContaining({ excludeSignatures: [] }));
     expect(screen.queryByText('Tidal HiFi')).toBeNull();
     expect(screen.queryByText('Lossless Picks')).toBeNull();
     expect(container.querySelector('[style*="0 0 0 2px"]')).toBeNull();
-    const menu = (await screen.findAllByRole('button', { name: 'Change source for Song' }))[0];
-    fireEvent.click(menu);
-    expect(await screen.findByRole('dialog')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Change source for Song' })).toBeNull();
+    expect(container.querySelector('.home-song-sources')).toBeNull();
     expect(play).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     const playButton = container.querySelector('.discovery-grid-play-circle, .discovery-play-circle, .ah-play-btn');
     expect(playButton).not.toBeNull();
     fireEvent.click(playButton!);
@@ -375,4 +377,3 @@ describe('Unified source controls', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
-

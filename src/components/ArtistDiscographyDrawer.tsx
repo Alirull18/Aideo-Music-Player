@@ -1,4 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { TrackContextMenu } from './TrackContextMenu';
+import type { Track } from '../store/types';
 import { useStore } from '../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -25,6 +27,7 @@ export function ArtistDiscographyDrawer({
   onSelectAlbum 
 }: ArtistDiscographyDrawerProps) {
   const playTrack = useStore((s) => s.playTrack);
+  const [trackMenu, setTrackMenu] = useState<{ track: Track; anchor: { x: number; y: number } } | null>(null);
   const downloadBatchPlaylist = useStore((s) => s.downloadBatchPlaylist);
 
   // Filter tracks by artist
@@ -334,7 +337,14 @@ export function ArtistDiscographyDrawer({
                     {artistTracks.map((t, idx) => (
                       <tr 
                         key={t.id || idx} 
-                        onClick={() => playTrack(t)} 
+                        onClick={() => playTrack(t)}
+                        tabIndex={0}
+                        onKeyDown={event => {
+                          if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                            event.preventDefault(); setTrackMenu({ track: t, anchor: event.currentTarget.getBoundingClientRect() });
+                          }
+                        }}
+                        onContextMenu={event => { event.preventDefault(); setTrackMenu({ track: t, anchor: { x: event.clientX, y: event.clientY } }); }}
                         style={{ cursor: 'pointer', transition: 'background 0.2s' }}
                       >
                         <td style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>{idx + 1}</td>
@@ -352,6 +362,7 @@ export function ArtistDiscographyDrawer({
           </motion.div>
         </motion.div>
       )}
+      {artistName && trackMenu && <TrackContextMenu track={trackMenu.track} anchor={trackMenu.anchor} onClose={() => setTrackMenu(null)} />}
     </AnimatePresence>
   );
 }

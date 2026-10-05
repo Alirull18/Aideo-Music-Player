@@ -82,6 +82,8 @@ export function AideoLabView() {
     playbackStatus,
     playbackDevRate,
     playbackFileRate,
+    activeAutoEq,
+    setActiveAutoEq,
   } = useStore(
     useShallow(s => ({
       dsp: s.dsp,
@@ -92,6 +94,8 @@ export function AideoLabView() {
       playbackStatus: s.playback.status,
       playbackDevRate: s.playback.dev_rate,
       playbackFileRate: s.playback.file_rate,
+      activeAutoEq: s.activeAutoEq,
+      setActiveAutoEq: s.setActiveAutoEq,
     }))
   );
 
@@ -102,14 +106,8 @@ export function AideoLabView() {
   const [autoEqDb, setAutoEqDb] = useState<{ name: string; url: string; source: string; fullSource: string }[] | null>(null);
   const [isFetchingDb, setIsFetchingDb] = useState(false);
   const [autoEqError, setAutoEqError] = useState('');
-  const [activeAutoEqUrl, setActiveAutoEqUrl] = useState<string>(() => {
-    try {
-      return localStorage.getItem('aideo_active_autoeq_model') || '';
-    } catch {
-      return '';
-    }
-  });
-  const activeAutoEqProfile = autoEqDb?.find(profile => profile.url === activeAutoEqUrl);
+  const activeAutoEqUrl = activeAutoEq?.url || '';
+  const activeAutoEqProfile = activeAutoEq || autoEqDb?.find(profile => profile.url === activeAutoEqUrl);
 
   // Selected Node & Dragging state for Parametric EQ
   const [selectedBand, setSelectedBand] = useState<number>(0);
@@ -182,19 +180,6 @@ export function AideoLabView() {
       unlisten.then(f => f());
     };
   }, []);
-
-  // Keyboard shortcut [B] for A/B Compare
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 'b' || e.key === 'B') {
-        e.preventDefault();
-        toggleDspAB();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleDspAB]);
 
   // Waterfall canvas loop for interactive graph mode
   useEffect(() => {
@@ -347,7 +332,7 @@ export function AideoLabView() {
         preamp_gain: preamp,
       });
 
-      setActiveAutoEqUrl(headphone.url);
+      setActiveAutoEq(headphone);
       localStorage.setItem('aideo_active_autoeq_model', headphone.url);
       window.dispatchEvent(
         new CustomEvent('ui-toast', {

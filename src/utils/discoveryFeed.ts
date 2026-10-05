@@ -1,5 +1,6 @@
 import { DiscoveryHubData, Track, YoutubeTrack } from '../store/types';
 import { catalogTrack, groupRecordings, isMusicTrack, sourceFor, sourceKey, sourceSearchQuery } from './unifiedSources';
+import { sameRecommendationRecording } from './recommendations';
 
 export function discoveryTrack(track: YoutubeTrack): Track {
   const path = track.path || track.url;
@@ -51,18 +52,21 @@ export const trackSignature = (track: Pick<YoutubeTrack, 'artist' | 'title'>): s
   `${(track.artist || '').trim().toLowerCase()}::${(track.title || '').trim().toLowerCase()}`;
 
 export function dedupeTracks(tracks: YoutubeTrack[]): YoutubeTrack[] {
-  const seen = new Set<string>();
-  return tracks.filter(t => {
-    const key = trackSignature(t);
-    if (seen.has(key)) return false;
-    seen.add(key);
+  const groups: Track[][] = [];
+  return tracks.filter(track => {
+    const recording = discoveryTrack(track);
+    const group = groups.find(copies => copies.every(copy => sameRecommendationRecording(copy, recording)));
+    if (group) {
+      group.push(recording);
+      return false;
+    }
+    groups.push([recording]);
     return true;
   });
 }
 
 function mergeShelves(shelves: YoutubeTrack[][]): YoutubeTrack[] {
   const merged: YoutubeTrack[] = [];
-  const seen = new Set<string>();
   const cursors = shelves.map(() => 0);
 
   let remaining = shelves.reduce((sum, s) => sum + s.length, 0);
@@ -72,21 +76,15 @@ function mergeShelves(shelves: YoutubeTrack[][]): YoutubeTrack[] {
       const shelf = shelves[i];
       while (cursors[i] < shelf.length) {
         const track = shelf[cursors[i]++];
-        const key = trackSignature(track);
-        if (!seen.has(key)) {
-          seen.add(key);
-          merged.push(track);
-          remaining--;
-          advanced = true;
-          break;
-        }
+        merged.push(track);
         remaining--;
         advanced = true;
+        break;
       }
     }
     if (!advanced) break;
   }
-  return merged;
+  return dedupeTracks(merged);
 }
 
 export function buildMergedFeed(data: DiscoveryHubData): YoutubeTrack[] {
@@ -101,12 +99,12 @@ export function buildMergedFeed(data: DiscoveryHubData): YoutubeTrack[] {
 }
 
 export function buildUnifiedTabs(data: DiscoveryHubData): UnifiedTabDef[] {
-  const recs = data.recommendations || [];
-  const recent = data.recently_played || [];
-  const rotation = data.heavy_rotation || [];
-  const gems = data.forgotten_gems || [];
-  const tidal = data.tidal_hifi || [];
-  const charts = data.global_charts || [];
+  const recs = dedupeTracks(data.recommendations || []);
+  const recent = dedupeTracks(data.recently_played || []);
+  const rotation = dedupeTracks(data.heavy_rotation || []);
+  const gems = dedupeTracks(data.forgotten_gems || []);
+  const tidal = dedupeTracks(data.tidal_hifi || []);
+  const charts = dedupeTracks(data.global_charts || []);
 
   return [
     { id: 'all', label: 'All For You', count: mergeShelves([recent, rotation, gems, recs, tidal, charts]).length },
@@ -125,17 +123,17 @@ export function getUnifiedTabTracks(
 ): YoutubeTrack[] {
   switch (tabId) {
     case 'recs':
-      return data.recommendations || [];
+      return dedupeTracks(data.recommendations || []);
     case 'recent':
-      return data.recently_played || [];
+      return dedupeTracks(data.recently_played || []);
     case 'rotation':
-      return data.heavy_rotation || [];
+      return dedupeTracks(data.heavy_rotation || []);
     case 'gems':
-      return data.forgotten_gems || [];
+      return dedupeTracks(data.forgotten_gems || []);
     case 'tidal':
-      return data.tidal_hifi || [];
+      return dedupeTracks(data.tidal_hifi || []);
     case 'charts':
-      return data.global_charts || [];
+      return dedupeTracks(data.global_charts || []);
     case 'all':
     default:
       return buildMergedFeed(data);

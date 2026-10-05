@@ -12,12 +12,40 @@ import {
   playbackRequest,
 } from '../store/sourcePlayback';
 import { clearSourceCache, groupRecordings, inFlightResolutions, resolveSource } from '../utils/unifiedSources';
+import { radioAllowsLocal } from '../utils/recommendations';
 
 const track: Track = {
   id: 1, path: '123', title: 'Song', artist: 'Artist', duration: 180, format: 'Tidal FLAC', lyric_offset: 0,
   source_context: { recording_id: 'recording', sources: [{ provider: 'tidal', id: '123' }, { provider: 'qobuz', id: '123' }], selection: { mode: 'explicit', source: { provider: 'tidal', id: '123' } } },
 };
+const realRecordPlaybackTransition = useStore.getState().recordPlaybackTransition;
 describe('Source playback fallback', () => {
+  it('seeds subsequent radio refills from the source actually played, not the grouped representative', async () => {
+    const local: PlaybackSource = { provider: 'local', id: 'C:/Music/song.flac' };
+    useStore.setState({ appMode: 'hybrid', recommendationEngine: 'our', autoplayEnabled: false, autoplaySeedTrack: null });
+    await useStore.getState().playTrack({ ...track, path: local.id, format: 'FLAC',
+      source_context: { ...track.source_context!, sources: [local, { provider: 'tidal', id: '123' }] } });
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+    expect(useStore.getState().autoplaySeedTrack?.active_source?.provider).toBe('tidal');
+    expect(radioAllowsLocal(useStore.getState().autoplaySeedTrack)).toBe(false);
+    expect(useStore.getState().autoplaySessionHistory[0].active_source?.provider).toBe('tidal');
+  });
+
+  it.each([false, true])('applies online-radio local mixing to automatic source selection (%s)', async allowLocal => {
+    localStorage.setItem('aideo_autoplay_local_for_cloud', String(allowLocal));
+    const local: PlaybackSource = { provider: 'local', id: 'C:/Music/song.flac', catalog_quality: { lossless: true, sample_rate: 96000, bit_depth: 24 } };
+    useStore.setState({ appMode: 'hybrid', recommendationEngine: 'our', autoplayEnabled: false, autoplaySeedTrack: track, preferredSource: 'auto' });
+    vi.mocked(invoke).mockImplementation(async command => {
+      if (command === 'check_files_exist') return [true];
+      if (command === 'read_audio_tags') return { lossless: true, sample_rate: 96000, bit_depth: 24, format: 'FLAC' };
+      if (command === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
+      return null;
+    });
+    await useStore.getState().playTrack({ ...track, is_autoplay: true,
+      source_context: { ...track.source_context!, sources: [local, { provider: 'tidal', id: '123' }], selection: { mode: 'auto' } } }, false, false);
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe(allowLocal ? 'local' : 'tidal');
+  });
+
   beforeEach(() => {
     cancelSourcePlayback(); clearSourceCache(); clearEnrichmentState(); localStorage.clear();
     useStore.setState({ queue: [], tracks: [], currentTrack: null, playHistory: [], playCounts: {}, playbackError: null,
@@ -34,6 +62,7 @@ describe('Source playback fallback', () => {
   });
 
   it('falls back after resolution failure while retaining the explicit preference', async () => {
+    const notices = vi.spyOn(window, 'dispatchEvent');
     vi.mocked(invoke).mockImplementation(async cmd => {
       if (cmd === 'tidal_resolve_source') throw new Error('Unavailable');
       if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
@@ -48,14 +77,29 @@ describe('Source playback fallback', () => {
     expect(useStore.getState().coverArt).toBe('https://example.com/qobuz.jpg');
     expect(useStore.getState().currentTrack?.source_context?.selection).toEqual(track.source_context?.selection);
     expect(JSON.parse(localStorage.getItem('aideo_current_track')!).source_context.selection).toEqual(track.source_context?.selection);
+    expect(notices).toHaveBeenCalledWith(expect.objectContaining({ type: 'ui-toast', detail: expect.objectContaining({ message: expect.stringContaining('Source unavailable. Using Qobuz') }) }));
+    notices.mockRestore();
+  });
+
+  it.each(['is_autoplay', 'is_generated_mix'] as const)('keeps %s fallback inside the selected provider', async flag => {
+    useStore.setState({ recommendationEngine: 'tidal', appMode: 'hybrid', autoplayEnabled: false });
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'tidal_resolve_source') throw new Error('Unavailable');
+      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
+      return null;
+    });
+    await useStore.getState().playTrack({ ...track, [flag]: true });
+    expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'qobuz_resolve_source')).toBe(false);
+    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
   });
 
   it('replaces the old queue and shows recommendations for a directly selected unified song', async () => {
     const old = { ...track, path: 'old', title: 'Old', source_context: undefined };
     const radio = { id: 'radio123456', title: 'Radio Song', artist: 'Radio Artist', duration_raw: '3:00', url: 'https://www.youtube.com/watch?v=radio123456' };
-    vi.mocked(invoke).mockImplementation(async cmd => {
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
       if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
       if (cmd === 'get_youtube_autoplay_recommendations') return [radio];
+      if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((candidate: Track) => candidate.path === radio.url), generation: args.request.generation, reasons: {} };
       return null;
     });
     useStore.setState({ queue: [old], autoplayEnabled: true, recommendationEngine: 'youtube', appMode: 'hybrid' });
@@ -92,6 +136,158 @@ describe('Source playback fallback', () => {
     await Promise.resolve();
     expect(useStore.getState().currentAttemptId).toBe(currentAttemptId);
     expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+  });
+
+  it('does not send an abandoned source play after stop-arm acknowledgement', async () => {
+    let releaseArm!: () => void;
+    const arm = new Promise<void>(resolve => { releaseArm = resolve; });
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
+      if (cmd === 'set_stop_after_path') return arm;
+      return null;
+    });
+    useStore.setState({ stopBoundary: { kind: 'track', path: track.path }, autoplayEnabled: false });
+    const abandoned = useStore.getState().playTrack(track, undefined, false);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('set_stop_after_path', { path: 'https://tidal.example/audio' }));
+    cancelSourcePlayback();
+    useStore.setState({ stopBoundary: null });
+    const replacement = useStore.getState().playTrack({ ...track, path: 'next', title: 'Next' }, undefined, false);
+    releaseArm();
+    await Promise.all([abandoned, replacement]);
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(1);
+    expect(useStore.getState().currentTrack?.title).toBe('Next');
+  });
+
+  it('cannot stop a newer track when failed history persistence finishes late', async () => {
+    let finish!: () => void;
+    useStore.setState({ recordPlaybackTransition: vi.fn(async next => {
+      if (!next) await new Promise<void>(resolve => { finish = resolve; });
+    }) });
+    await useStore.getState().playTrack(track);
+    handleSourceFailure('https://tidal.example/audio', 'Decode failed');
+    await vi.waitFor(() => expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz'));
+    handleSourceFailure('https://qobuz.example/audio', 'Decode failed');
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    const next = { ...track, title: 'Next', path: 'next' };
+    await useStore.getState().playTrack(next);
+    finish();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(useStore.getState().currentTrack?.title).toBe('Next');
+    expect(useStore.getState().playback.status).toBe('Playing');
+    expect(useStore.getState().playbackError).toBeNull();
+  });
+
+  it('refreshes an expired URL after healthy playback beyond the startup deadline', async () => {
+    await useStore.getState().playTrack(track);
+    useStore.setState({ playback: { ...useStore.getState().playback, position_secs: 83 }, queue: [track] });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60000);
+    try {
+      handleSourceFailure('https://tidal.example/audio', 'Stream URL expired');
+      await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(2));
+      expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+      expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ startPos: 83 }));
+      expect(useStore.getState().queue).toEqual([track]);
+      expect(useStore.getState().recordPlaybackTransition).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'tidal_resolve_source')).toHaveLength(2);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('stops on permanent provider authentication failure and exposes reconnect', async () => {
+    await useStore.getState().playTrack(track);
+    handleSourceFailure('https://tidal.example/audio', 'User is not authenticated with Tidal');
+    await vi.waitFor(() => expect(useStore.getState().playback.status).toBe('Stopped'));
+    expect(useStore.getState().playbackError).toMatch(/reconnect/i);
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(1);
+  });
+
+  it('does not substitute another provider when resolution rejects the session token', async () => {
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'tidal_resolve_source') throw new Error('User is not authenticated with Tidal');
+      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
+      return null;
+    });
+    await useStore.getState().playTrack(track);
+    expect(useStore.getState().playback.status).toBe('Stopped');
+    expect(useStore.getState().playbackError).toMatch(/reconnect/i);
+    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
+    expect(useStore.getState().recordPlaybackTransition).toHaveBeenCalledWith(null);
+  });
+
+  it.each([0, 800])('stops auto pre-resolution when preferred authentication rejects after %i ms', async delay => {
+    useStore.setState({ autoplayEnabled: false, preferredSource: 'tidal' });
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'tidal_resolve_source') {
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        throw new Error('User is not authenticated with Tidal');
+      }
+      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
+      return null;
+    });
+    await useStore.getState().playTrack({ ...track, source_context: { ...track.source_context!, selection: { mode: 'auto' } } });
+    expect(useStore.getState().playback.status).toBe('Stopped');
+    expect(useStore.getState().playbackError).toMatch(/reconnect/i);
+    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
+  });
+
+  it('keeps the outgoing successful song skipped when the next recording never starts', async () => {
+    useStore.setState({ recordPlaybackTransition: realRecordPlaybackTransition, currentHistoryId: null, autoplayEnabled: false });
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
+      if (cmd === 'log_playback_start') return 71;
+      return null;
+    });
+    await useStore.getState().playTrack(track);
+    expect(useStore.getState().currentHistoryId).toBe(71);
+    clearSourceCache();
+    vi.mocked(invoke).mockImplementation(async cmd => {
+      if (String(cmd).endsWith('_resolve_source')) throw new Error('Unavailable');
+      return null;
+    });
+    await useStore.getState().playTrack({ ...track, path: 'failed', title: 'Failed Song' });
+    expect(useStore.getState().playback.status).toBe('Stopped');
+    expect(invoke).toHaveBeenCalledWith('log_playback_end', expect.objectContaining({ historyId: 71, endReason: 'skipped' }));
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'log_playback_start')).toHaveLength(1);
+    expect(useStore.getState().currentHistoryId).toBeNull();
+  });
+
+  it('bounds transport retries to one refresh per source before stopping', async () => {
+    await useStore.getState().playTrack(track);
+    for (const [path, count] of [
+      ['https://tidal.example/audio', 2], ['https://tidal.example/audio', 3], ['https://qobuz.example/audio', 4],
+    ] as const) {
+      handleSourceFailure(path, 'Network connection interrupted');
+      await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(count));
+    }
+    handleSourceFailure('https://qobuz.example/audio', 'Network connection interrupted');
+    await vi.waitFor(() => expect(useStore.getState().playback.status).toBe('Stopped'));
+    handleSourceFailure('https://qobuz.example/audio', 'Network connection interrupted');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(4);
+    expect(useStore.getState().playback.is_buffering).toBe(false);
+  });
+
+  it('abandons an expired URL refresh when the user rapidly selects another song', async () => {
+    await useStore.getState().playTrack(track);
+    let finish!: (value: unknown) => void;
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
+      if (cmd === 'tidal_resolve_source') {
+        if (args.trackId === '123') return new Promise(resolve => { finish = resolve; });
+        return { url: 'https://tidal.example/next', quality: { lossless: true } };
+      }
+      return null;
+    });
+    handleSourceFailure('https://tidal.example/audio', 'Stream URL expired');
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    const next = { ...track, title: 'Next', path: '456', source_context: {
+      recording_id: 'next', sources: [{ provider: 'tidal' as const, id: '456' }],
+      selection: { mode: 'explicit' as const, source: { provider: 'tidal' as const, id: '456' } },
+    } };
+    await useStore.getState().playTrack(next);
+    finish({ url: 'https://tidal.example/refreshed-old', quality: { lossless: true } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(useStore.getState().currentTrack?.title).toBe('Next');
+    expect(useStore.getState().playback.current_track).toBe('https://tidal.example/next');
+    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/refreshed-old' }));
   });
 
   it('prevents a late resolution from playing after stop', async () => {

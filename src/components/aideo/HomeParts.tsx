@@ -9,7 +9,7 @@ import { discoveryTrack, trackSignature } from '../../utils/discoveryFeed';
 import { SourceMenu } from '../SourceMenu';
 
 export function SongSources({ track }: { track: YoutubeTrack }) {
-  if (!track.source_context) return null;
+  if (!track.source_context || track.source_context.selection.mode === 'auto') return null;
   return <div className="home-song-sources" onClick={event => event.stopPropagation()}>
     <SourceMenu track={discoveryTrack(track)} compact />
   </div>;

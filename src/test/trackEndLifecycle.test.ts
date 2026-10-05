@@ -110,7 +110,7 @@ describe('Track-End Playback Lifecycle & Queue Invariants', () => {
     const old: Track = { id: 1, path: 'C:/music/old.mp3', title: 'Old', artist: 'Artist', format: 'MP3', duration: 180, lyric_offset: 0 };
     const selected: Track = { id: 2, path: 'C:/music/selected.mp3', title: 'Selected', artist: 'Artist', format: 'MP3', duration: 180, lyric_offset: 0 };
     const recommended: Track = { id: 3, path: 'C:/music/new.mp3', title: 'New', artist: 'Artist', format: 'MP3', duration: 180, lyric_offset: 0, is_autoplay: true };
-    vi.mocked(invoke).mockImplementation(async cmd => cmd === 'get_similar_tracks' ? [recommended] : null);
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => cmd === 'get_recommendations' ? { tracks: [recommended], generation: args.request.generation, reasons: {} } : null);
     useStore.setState({ queue: [old], tracks: [selected, recommended], recordPlaybackTransition: vi.fn().mockResolvedValue(undefined) });
 
     await useStore.getState().playTrack(selected);
@@ -124,7 +124,7 @@ describe('Track-End Playback Lifecycle & Queue Invariants', () => {
     const stream: Track = { id: 1, path: 'tidal-song', title: 'Stream', artist: 'Artist', format: 'Tidal FLAC', duration: 180, lyric_offset: 0, source_context: { recording_id: 'old', sources: [{ provider: 'tidal', id: 'tidal-song' }], selection: { mode: 'auto' } } };
     const local: Track = { id: 2, path: 'C:/music/local.mp3', title: 'Local', artist: 'Artist', format: 'MP3', duration: 180, lyric_offset: 0 };
     const radio: Track = { id: 3, path: 'C:/music/radio.mp3', title: 'Radio', artist: 'Artist', format: 'MP3', duration: 180, lyric_offset: 0 };
-    vi.mocked(invoke).mockImplementation(async cmd => cmd === 'get_similar_tracks' ? [radio] : null);
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => cmd === 'get_recommendations' ? { tracks: [radio], generation: args.request.generation, reasons: {} } : null);
     useStore.setState({ sourceQueueManaged: true, queue: [stream], tracks: [local, radio], recordPlaybackTransition: vi.fn().mockResolvedValue(undefined) });
 
     await useStore.getState().playTrack(local);
@@ -139,7 +139,7 @@ describe('Track-End Playback Lifecycle & Queue Invariants', () => {
       const current: Track = { id: 1, path: 'C:/music/current.mp3', title: 'Current', artist: 'Artist', format: 'MP3', duration: 180, lyric_offset: 0 };
       const next: Track = { ...current, id: 2, path: 'C:/music/library-next.mp3', title: 'Library Next' };
       const radio: Track = { ...current, id: 3, path: 'C:/music/radio.mp3', title: 'Radio', is_autoplay: true };
-      vi.mocked(invoke).mockImplementation(async cmd => cmd === 'get_similar_tracks' ? [radio] : null);
+      vi.mocked(invoke).mockImplementation(async (cmd, args: any) => cmd === 'get_recommendations' ? { tracks: [radio], generation: args.request.generation, reasons: {} } : null);
       useStore.setState({ currentTrack: current, tracks: [current, next, radio], queue: [], repeat: 'none', recordPlaybackTransition: vi.fn().mockResolvedValue(undefined) });
 
       await useStore.getState().playNext();

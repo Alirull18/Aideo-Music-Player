@@ -7,11 +7,14 @@ import { fmt, isStreamTrack } from '../utils';
 import { useVirtualList } from '../utils/useVirtualList';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { TrackContextMenu } from './TrackContextMenu';
+import type { Track } from '../store/types';
 
 
 export function QueueView() {
-  const { queue, showQueue, toggleQueue, playFromQueue, removeFromQueue, clearQueue, reorderQueue, cachedCloudHashes } = useStore(useShallow(s => ({
-    queue: s.queue,
+  const [trackMenu, setTrackMenu] = useState<{ track: Track; anchor: { x: number; y: number } } | null>(null);
+  const { queue, showQueue, toggleQueue, playFromQueue, removeFromQueue, clearQueue, reorderQueue, cachedCloudHashes, albumSession, cancelAlbumSession, playbackError } = useStore(useShallow(s => ({
+    queue: s.queue, albumSession: s.albumSession, cancelAlbumSession: s.cancelAlbumSession, playbackError: s.playbackError,
     showQueue: s.showQueue,
     toggleQueue: s.toggleQueue,
     playFromQueue: s.playFromQueue,
@@ -193,7 +196,18 @@ export function QueueView() {
               </div>
             </div>
 
-            <div 
+            {albumSession && (
+              <div role="status" style={{ padding: '12px 16px' }}>
+                                Album to end: {albumSession.title} · {albumSession.index + 1}/{albumSession.tracks.length}
+                <ol>{albumSession.tracks.slice(albumSession.index).map((t, i) => <li key={`${i}:${t.path}`}>{t.title || t.path}</li>)}</ol>
+                {playbackError && <div role="alert">Album track unavailable. {playbackError}
+                  <button onClick={() => void useStore.getState().playTrack(albumSession.tracks[albumSession.index], true, false, undefined, undefined, true)}>Retry album track</button>
+                  <button onClick={() => void useStore.getState().playNext()}>Skip album track</button>
+                </div>}
+                <button onClick={() => void cancelAlbumSession()}>Cancel album mode</button>
+              </div>
+            )}
+            <div
               ref={containerRef}
               className="queue-wrap" 
               style={{ padding: '16px', flex: 1, overflowY: 'auto', position: 'relative' }}
@@ -231,6 +245,13 @@ export function QueueView() {
                           opacity: isDraggingThis ? 0.45 : 1,
                         }}
                         onDoubleClick={() => playFromQueue(i)}
+                        tabIndex={0}
+                        onKeyDown={event => {
+                          if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                            event.preventDefault(); setTrackMenu({ track: t, anchor: event.currentTarget.getBoundingClientRect() });
+                          }
+                        }}
+                        onContextMenu={event => { event.preventDefault(); setTrackMenu({ track: t, anchor: { x: event.clientX, y: event.clientY } }); }}
                       >
                         <div 
                           onPointerDown={(e) => startPointerDrag(i, e)}
@@ -302,6 +323,7 @@ export function QueueView() {
           </motion.div>
         </>
       )}
+      {showQueue && trackMenu && <TrackContextMenu track={trackMenu.track} anchor={trackMenu.anchor} onClose={() => setTrackMenu(null)} />}
     </AnimatePresence>
   );
 }

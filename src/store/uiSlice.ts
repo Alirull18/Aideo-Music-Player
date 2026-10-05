@@ -4,7 +4,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { cancelSourcePlayback } from './sourcePlayback';
 import { isStreamTrack } from '../utils';
+import { filterAutomaticQueue } from '../utils/recommendations';
 
+let stopBoundaryRequest = 0;
 export const DEFAULT_SIDEBAR_NAV_ITEMS: SidebarNavItemConfig[] = [
   { id: 'aideo', label: 'Aideo', visible: true },
   { id: 'charts', label: 'Top Charts', visible: true, requiresHybrid: true },
@@ -131,6 +133,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   showSmartMixWidget: safeGetStorage('aideo-show-smart-mix') !== 'false',
   qobuzExperimentalEnabled: safeGetStorage('aideo-qobuz-experimental') === 'true',
   playbackError: null,
+  playbackRecovery: null,
   playbackSuccess: null,
   appMode: (safeGetStorage('aideo-app-mode') as 'local' | 'hybrid') || 'hybrid',
   onboardingCompleted: safeGetStorage('aideo-onboarding-completed') === 'true',
@@ -161,6 +164,51 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   miniPlayerMode: false,
   shortcuts: getSavedShortcuts(),
   globalHotkeys: getSavedGlobalHotkeys(),
+  albumSession: (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('aideo_album_session') || 'null');
+      return saved && typeof saved.title === 'string' && Array.isArray(saved.tracks) && saved.tracks.length
+        && saved.tracks.every((t: any) => t && typeof t.path === 'string') && Number.isInteger(saved.index)
+        && saved.index >= 0 && saved.index < saved.tracks.length ? saved : null;
+    } catch { return null; }
+  })(),
+  stopBoundary: null,
+  armStopAfter: async (kind: 'track' | 'album') => {
+    const state = get();
+    if (state.chromecast_connected || state.upnp_connected) throw new Error('End stopping is unavailable on remote output');
+    if (!state.currentTrack || (kind === 'album' && !state.albumSession)) return;
+    const request = ++stopBoundaryRequest;
+    const path = kind === 'track' ? state.currentTrack.path : state.albumSession!.tracks[state.albumSession!.tracks.length - 1].path;
+    set({ stopBoundary: { kind, path } });
+    try {
+      await invoke('set_stop_after_path', { path: kind === 'track' ? state.playback.current_track || path : null });
+      if (request !== stopBoundaryRequest || state.currentAttemptId !== get().currentAttemptId || state.currentTrack?.path !== get().currentTrack?.path) {
+        if (request === stopBoundaryRequest) await get().cancelStopAfter();
+        return;
+      }
+    } catch (error) {
+      if (request === stopBoundaryRequest) { set({ stopBoundary: null }); await invoke('set_stop_after_path', { path: null }); }
+      throw error;
+    }
+  },
+  cancelStopAfter: async () => {
+    ++stopBoundaryRequest;
+    set({ stopBoundary: null });
+    await invoke('set_stop_after_path', { path: null });
+  },
+  fulfillStopBoundary: async () => {
+    get().stopSleepTimer();
+    set({ albumSession: null });
+    localStorage.removeItem('aideo_album_session');
+    const stopping = get().stopTrack();
+    await get().cancelStopAfter();
+    await stopping;
+  },  handleNaturalTrackEnd: async () => {
+    const state = get();
+    if (state.stopBoundary?.kind === 'track' || (state.albumSession && state.albumSession.index === state.albumSession.tracks.length - 1)) {
+      await state.fulfillStopBoundary();
+    } else await state.playNext();
+  },
   sleepTimer: { duration: 0, remaining: 0, active: false },
   colorScheme: (safeGetStorage('aideo-color-scheme') as 'dark' | 'light' | 'system') || 'dark',
   albumArtFit: (safeGetStorage('aideo-album-art-fit') as 'cover' | 'contain') || 'contain',
@@ -224,7 +272,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   setPlaybackError: (err: string | null) => {
     set({ playbackError: err });
-    if (err) setTimeout(() => get().setPlaybackError(null), 5000);
+
   },
 
   setPlaybackSuccess: (msg: string | null) => {
@@ -284,6 +332,10 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     cancelSourcePlayback();
     localStorage.setItem('aideo-app-mode', mode);
     set({ appMode: mode });
+    const queue = filterAutomaticQueue(get());
+    set({ queue });
+    safeSetStorage('aideo_queue', JSON.stringify(queue));
+    void get().syncBackendQueue();
     if (mode === 'local') {
       const state = get();
       const currentTrack = state.currentTrack;
@@ -500,6 +552,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
         set({
           sleepTimer: { duration: 0, remaining: 0, active: false }
         });
+        void get().cancelStopAfter();
         get().pauseTrack();
         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Sleep timer finished. Playback paused.', type: 'info' } }));
       } else {

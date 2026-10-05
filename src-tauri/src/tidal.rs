@@ -995,9 +995,23 @@ pub async fn tidal_resolve_source(
     track_id: String,
     requested_quality: Option<crate::sources::StreamingQuality>,
 ) -> Result<crate::sources::ResolvedStream, String> {
+    resolve_formats(state.inner(), &app_handle, &track_id, requested_quality.unwrap_or_default().tidal(), false).await
+}
+
+pub(crate) async fn resolve_download_format(
+    state: &Arc<TidalState>, app_handle: &AppHandle, track_id: &str, format: &str,
+) -> Result<crate::sources::ResolvedStream, String> {
+    if !matches!(format, "HI_RES_LOSSLESS" | "LOSSLESS" | "HIGH" | "LOW") {
+        return Err("Unsupported Tidal download quality".into());
+    }
+    resolve_formats(state, app_handle, track_id, &[format], true).await
+}
+
+async fn resolve_formats(
+    state: &Arc<TidalState>, app_handle: &AppHandle, track_id: &str, qualities: &[&str], strict: bool,
+) -> Result<crate::sources::ResolvedStream, String> {
     crate::sources::validate_track_id(&track_id)?;
     let mut token = ensure_valid_token(&app_handle, &state, false).await?;
-    let qualities = requested_quality.unwrap_or_default().tidal();
     let mut last_error = "Failed to fetch any stream".to_string();
     let client = get_client();
     let mut token_refreshed = false;
@@ -1047,10 +1061,12 @@ pub async fn tidal_resolve_source(
         let status = res.status();
         if status.is_success() {
             if let Ok(json) = res.json::<serde_json::Value>().await {
+                if strict { require_download_quality(&json, q)?; }
                 if let Some(manifest_b64) = json["manifest"].as_str() {
                     match parse_manifest_b64(manifest_b64) {
                         Ok((direct_url, decoded_manifest)) => {
                             let manifest: serde_json::Value = serde_json::from_str(&decoded_manifest).unwrap_or_default();
+                            if strict { require_download_manifest(&decoded_manifest)?; }
                             println!("{BOLD}{GREEN}✔ [TIDAL ENGINE] Resolved direct stream URL at quality {}{RESET}", q);
                             return Ok(crate::sources::ResolvedStream {
                                 url: direct_url,
@@ -1058,7 +1074,7 @@ pub async fn tidal_resolve_source(
                                     lossless: json["audioQuality"].as_str().map(|q| matches!(q, "LOSSLESS" | "HI_RES_LOSSLESS")),
                                     sample_rate: json["sampleRate"].as_f64(),
                                     bit_depth: json["bitDepth"].as_u64().map(|v| v as u32),
-                                    codec: json["codec"].as_str().or_else(|| manifest["mimeType"].as_str()).map(str::to_owned),
+                                    codec: json["codec"].as_str().or_else(|| manifest["codecs"].as_str()).or_else(|| manifest["mimeType"].as_str()).map(str::to_owned),
                                 },
                             });
                         }
@@ -1082,6 +1098,25 @@ pub async fn tidal_resolve_source(
     }
 
     Err(last_error)
+}
+
+fn require_download_manifest(decoded: &str) -> Result<(), String> {
+    if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(decoded) {
+        if manifest["encryptionType"].as_str().is_some_and(|kind| !kind.eq_ignore_ascii_case("NONE")) {
+            return Err("This Tidal copy is encrypted and cannot be exported as a normal audio file".into());
+        }
+        if manifest["urls"].as_array().is_none_or(|urls| urls.len() != 1) {
+            return Err("This Tidal copy requires segmented downloading".into());
+        }
+    } else if decoded.contains("ContentProtection") || decoded.contains("SegmentTemplate") || decoded.contains("SegmentList") {
+        return Err("This Tidal copy is encrypted or segmented and cannot be exported directly".into());
+    }
+    Ok(())
+}
+
+fn require_download_quality(json: &serde_json::Value, requested: &str) -> Result<(), String> {
+    if json["audioQuality"].as_str() == Some(requested) { Ok(()) }
+    else { Err("Tidal returned a different quality than requested".into()) }
 }
 
 #[tauri::command]
@@ -1112,7 +1147,7 @@ fn clean_title(title: &str) -> String {
 fn is_semantic_noise(title: &str, seed_title: &str) -> bool {
     let title_lower = title.to_lowercase();
     let seed_lower = seed_title.to_lowercase();
-    let noise_words = ["instrumental", "karaoke", "backing track", "tribute", "cover", "acapella", "8d"];
+    let noise_words = ["karaoke", "backing track", "tribute", "cover", "acapella", "8d"];
     for &word in &noise_words {
         if title_lower.contains(word) && !seed_lower.contains(word) {
             return true;
@@ -1269,7 +1304,7 @@ pub(crate) fn build_radio_queue<T: RadioCandidate + Clone>(
     final_queue
 }
 
-fn match_tidal_related_track(related: &serde_json::Value, search: Vec<TidalTrackResult>) -> Option<TidalTrackResult> {
+pub(crate) fn match_related_catalog_track<T: RadioCandidate>(related: &serde_json::Value, search: Vec<T>) -> Option<T> {
     let title = related["name"].as_str()?.trim();
     let artist = related["artist"]["name"].as_str()?.trim();
     let normalized_artist = crate::youtube::normalize_artist_name(artist);
@@ -1278,11 +1313,18 @@ fn match_tidal_related_track(related: &serde_json::Value, search: Vec<TidalTrack
         return None;
     }
     search.into_iter().find(|track| {
-        track.title.trim().to_lowercase() == normalized_title
-            && crate::youtube::normalize_artist_name(&track.artist) == normalized_artist
-            && track.duration > 0 && track.duration <= 900
-            && !crate::youtube::is_third_party_or_instrumental(&track.title, &track.artist)
+        track.radio_title().trim().to_lowercase() == normalized_title
+            && crate::youtube::normalize_artist_name(track.radio_artist()) == normalized_artist
+            && track.radio_duration() > 0 && track.radio_duration() <= 900
+            && !crate::youtube::is_third_party_or_instrumental(track.radio_title(), track.radio_artist())
     })
+}
+
+pub(crate) async fn bounded_recommendation<T>(work: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+    static GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
+    let _permit = GATE.try_acquire().map_err(|_| "Recommendation requests are busy".to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(8), work).await
+        .map_err(|_| "Recommendation deadline exceeded".to_string())?
 }
 
 fn related_artist_candidates(
@@ -1309,15 +1351,36 @@ pub async fn get_tidal_autoplay_recommendations(
     artist: String,
     title: String,
 ) -> Result<Vec<TidalTrackResult>, String> {
-    let mut related = crate::lastfm_api::get_similar_tracks(&artist, &title).await?;
+    crate::tidal::bounded_recommendation(async {
+
+    let related = related_recordings(&artist, &title).await?;
+    resolve_tidal_recordings(state, app_handle, related, &artist, &title).await
+
+    }).await
+}
+
+pub(crate) async fn related_recordings(artist: &str, title: &str) -> Result<Vec<serde_json::Value>, String> {
+    let mut related = if title.trim().is_empty() { Vec::new() } else {
+        crate::lastfm_api::get_similar_tracks(artist, title).await.unwrap_or_default()
+    };
     if related.is_empty() && !artist.trim().is_empty() && artist != "Unknown Artist" {
-        let related_artists = crate::lastfm_api::get_similar_artists(&artist).await?;
+        let related_artists = crate::lastfm_api::get_similar_artists(artist).await?;
         let top_tracks = futures::stream::iter(related_artists.into_iter().take(5).map(|related_artist| async move {
             let tracks = crate::lastfm_api::get_artist_top_tracks(&related_artist).await.unwrap_or_default();
             (related_artist, tracks)
         })).buffered(4).collect::<Vec<_>>().await;
         related = related_artist_candidates(related, top_tracks);
     }
+    Ok(related)
+}
+
+async fn resolve_tidal_recordings(
+    state: State<'_, Arc<TidalState>>,
+    app_handle: AppHandle,
+    related: Vec<serde_json::Value>,
+    artist: &str,
+    title: &str,
+) -> Result<Vec<TidalTrackResult>, String> {
     let searches = futures::stream::iter(related.into_iter().take(15).map(|candidate| {
         let state = state.clone();
         let app_handle = app_handle.clone();
@@ -1328,7 +1391,7 @@ pub async fn get_tidal_autoplay_recommendations(
                 || candidate_artist.eq_ignore_ascii_case("Unknown Artist") { return None }
             let query = format!("{} {}", candidate_artist, candidate_title);
             let results = tidal_search(state, app_handle, query, None).await.ok()?;
-            match_tidal_related_track(&candidate, results)
+            match_related_catalog_track(&candidate, results)
         }
     })).buffered(4).collect::<Vec<_>>().await;
 
@@ -1384,8 +1447,7 @@ fn tidal_track_signature(artist: &str, title: &str) -> String {
     )
 }
 
-/// Map hub seed artists to Tidal search queries. Falls back to a generic
-/// "Top Tracks" search when no usable seed exists (cold start).
+/// Keep usable seed artists for related-recording retrieval.
 fn hub_seed_queries(seed_artists: Vec<String>) -> Vec<String> {
     let mut queries = Vec::new();
     for artist in seed_artists {
@@ -1393,13 +1455,10 @@ fn hub_seed_queries(seed_artists: Vec<String>) -> Vec<String> {
         if trimmed.is_empty() {
             continue;
         }
-        queries.push(format!("{} Radio", trimmed));
+        queries.push(trimmed.to_string());
         if queries.len() >= HUB_MAX_SEEDS {
             break;
         }
-    }
-    if queries.is_empty() {
-        queries.push("Top Tracks".to_string());
     }
     queries
 }
@@ -1433,7 +1492,7 @@ fn dedupe_hub_candidates(
     out
 }
 
-/// Discovery Hub command: resolves Tidal HiFi picks for the given seed artists.
+/// Discovery Hub command: validates related recordings in the Tidal catalog.
 /// Seed failures are silently skipped so the hub renders without this section
 /// rather than erroring.
 #[tauri::command]
@@ -1443,21 +1502,12 @@ pub async fn get_tidal_hub_recommendations(
     seed_artists: Vec<String>,
     exclude_signatures: Option<Vec<String>>,
 ) -> Result<Vec<TidalTrackResult>, String> {
-    let queries = hub_seed_queries(seed_artists);
-    println!("[tidal-hub] Fetching HiFi recommendations from {} search(es)", queries.len());
-
-    let searches: Vec<_> = queries
-        .iter()
-        .map(|q| tidal_search(state.clone(), app_handle.clone(), q.clone(), None))
-        .collect();
-    let results = futures::future::join_all(searches).await;
+    crate::tidal::bounded_recommendation(async {
 
     let mut candidates = Vec::new();
-    for res in results {
-        match res {
-            Ok(tracks) => candidates.extend(tracks),
-            Err(e) => println!("[tidal-hub] Skipping failed seed search: {}", e),
-        }
+    for artist in hub_seed_queries(seed_artists) {
+        let related = related_recordings(&artist, "").await.unwrap_or_default();
+        candidates.extend(resolve_tidal_recordings(state.clone(), app_handle.clone(), related, &artist, "").await.unwrap_or_default());
     }
 
     let exclude: std::collections::HashSet<String> =
@@ -1465,10 +1515,43 @@ pub async fn get_tidal_hub_recommendations(
     let deduped = dedupe_hub_candidates(candidates, &exclude);
     println!("[tidal-hub] Resolved {} unique HiFi recommendations", deduped.len());
     Ok(deduped)
+
+    }).await
 }
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn recommendation_gate_rejects_pileup_and_releases_cancelled_work() {
+        let mut jobs = Vec::new();
+        for _ in 0..3 {
+            let (ready, started) = tokio::sync::oneshot::channel();
+            jobs.push(tokio::spawn(super::bounded_recommendation(async move {
+                ready.send(()).unwrap();
+                std::future::pending::<Result<(), String>>().await
+            })));
+            started.await.unwrap();
+        }
+        assert_eq!(super::bounded_recommendation(async { Ok(()) }).await.unwrap_err(), "Recommendation requests are busy");
+        for job in jobs { job.abort(); let _ = job.await; }
+        assert!(super::bounded_recommendation(async { Ok(()) }).await.is_ok());
+    }
+
+    #[test]
+    fn downloads_reject_encrypted_or_segmented_manifests() {
+        assert!(super::require_download_manifest(r#"{"encryptionType":"NONE","urls":["https://example.com/audio"]}"#).is_ok());
+        assert!(super::require_download_manifest(r#"{"encryptionType":"OLD_AES","urls":["https://example.com/audio"]}"#).is_err());
+        assert!(super::require_download_manifest(r#"{"urls":["https://example.com/1","https://example.com/2"]}"#).is_err());
+        assert!(super::require_download_manifest("<MPD><ContentProtection /></MPD>").is_err());
+        assert!(super::require_download_manifest("<MPD><SegmentTemplate /></MPD>").is_err());
+    }
+
+    #[test]
+    fn downloads_reject_lower_or_unreported_quality() {
+        assert!(super::require_download_quality(&serde_json::json!({"audioQuality":"LOSSLESS"}), "LOSSLESS").is_ok());
+        assert!(super::require_download_quality(&serde_json::json!({"audioQuality":"HIGH"}), "LOSSLESS").is_err());
+        assert!(super::require_download_quality(&serde_json::json!({}), "HI_RES_LOSSLESS").is_err());
+    }
     use super::*;
 
     #[test]
@@ -1479,19 +1562,19 @@ mod tests {
             hub_track("2", "Bintang Kehidupan (Live)", "Nike Ardilla", 260),
             hub_track("3", "Bintang Kehidupan", "Nike Ardilla", 245),
         ];
-        assert_eq!(match_tidal_related_track(&related, search).map(|t| t.id), Some("3".to_string()));
+        assert_eq!(match_related_catalog_track(&related, search).map(|t| t.id), Some("3".to_string()));
     }
 
     #[test]
     fn tidal_radio_does_not_pad_unrelated_search_results() {
         let related = serde_json::json!({ "name": "Bintang Kehidupan", "artist": { "name": "Nike Ardilla" } });
-        assert!(match_tidal_related_track(&related, vec![hub_track("1", "Midnight Techno", "Other Artist", 210)]).is_none());
+        assert!(match_related_catalog_track(&related, vec![hub_track("1", "Midnight Techno", "Other Artist", 210)]).is_none());
     }
 
     #[test]
     fn tidal_radio_rejects_degraded_related_metadata() {
         let related = serde_json::json!({ "name": "Bintang Kehidupan", "artist": { "name": "Unknown Artist" } });
-        assert!(match_tidal_related_track(&related, vec![hub_track("1", "Bintang Kehidupan", "Unknown Artist", 210)]).is_none());
+        assert!(match_related_catalog_track(&related, vec![hub_track("1", "Bintang Kehidupan", "Unknown Artist", 210)]).is_none());
     }
 
     #[test]
@@ -1609,13 +1692,13 @@ mod tests {
     #[test]
     fn test_hub_seed_queries_empty_falls_back_to_top_tracks() {
         let queries = hub_seed_queries(vec![]);
-        assert_eq!(queries, vec!["Top Tracks".to_string()]);
+        assert!(queries.is_empty());
     }
 
     #[test]
     fn test_hub_seed_queries_maps_artists_to_radio_searches() {
         let queries = hub_seed_queries(vec!["Aurora".to_string(), "Sigur Rós".to_string()]);
-        assert_eq!(queries, vec!["Aurora Radio".to_string(), "Sigur Rós Radio".to_string()]);
+        assert_eq!(queries, vec!["Aurora".to_string(), "Sigur Rós".to_string()]);
     }
 
     #[test]
@@ -1626,8 +1709,8 @@ mod tests {
             .collect();
         let queries = hub_seed_queries(seeds);
         assert_eq!(queries.len(), 6);
-        assert_eq!(queries[0], "A Radio");
-        assert_eq!(queries[5], "F Radio");
+        assert_eq!(queries[0], "A");
+        assert_eq!(queries[5], "F");
     }
 
     #[test]

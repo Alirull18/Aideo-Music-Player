@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
 import { 
   Track, 
@@ -47,9 +47,9 @@ export function ListeningInsightsView() {
   const slideTimerRef = useRef<number | null>(null);
   const fetchSeq = useRef(0);
 
-  const fetchInsights = async () => {
+  const fetchInsights = useCallback(async (showLoading = true) => {
     const seq = ++fetchSeq.current;
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError(null);
     try {
       const res = await invoke<ListeningInsightsPayload>('get_listening_insights', { range });
@@ -64,11 +64,21 @@ export function ListeningInsightsView() {
         setLoading(false);
       }
     }
-  };
+  }, [range]);
 
   useEffect(() => {
     fetchInsights();
-  }, [range]);
+    const refresh = () => { void fetchInsights(false); };
+    window.addEventListener('playback-history-updated', refresh);
+    return () => {
+      window.removeEventListener('playback-history-updated', refresh);
+      fetchSeq.current++;
+    };
+  }, [fetchInsights]);
+
+  const audio = insights?.audiophile_stats;
+  const bitPerfectRate = audio && audio.total_analyzed > 0
+    ? audio.bit_perfect_count / audio.total_analyzed * 100 : 0;
 
   // Handle Wrapped Auto-Advance (7 slides: indices 0..6)
   useEffect(() => {
@@ -121,7 +131,7 @@ export function ListeningInsightsView() {
     }
     
     // 1. Audiophile check (over 70% bit-perfect or hi-res)
-    if (insights.audiophile && (insights.audiophile.bit_perfect_rate > 70 || insights.audiophile.hires_count > insights.total_plays * 0.5)) {
+    if (audio && (bitPerfectRate > 70 || audio.hi_res_count > insights.total_plays * 0.5)) {
       return {
         title: 'Audio format summary',
         desc: 'Many of your logged plays use a bit-perfect path or high-resolution source files.'
@@ -318,7 +328,7 @@ export function ListeningInsightsView() {
                 </div>
                 <div className="insights-metric-info">
                   <div className="insights-metric-label">Bit-Perfect Share</div>
-                  <div className="insights-metric-value">{insights.audiophile?.bit_perfect_rate.toFixed(1) || 0}%</div>
+                  <div className="insights-metric-value">{bitPerfectRate.toFixed(1)}%</div>
                 </div>
               </div>
 
@@ -441,28 +451,22 @@ export function ListeningInsightsView() {
                 </h3>
                 <div className="insights-audio-metrics">
                   <div className="insights-audio-stat-block">
-                    <span className="insights-audio-stat-val">{insights.audiophile?.hires_count || 0}</span>
+                    <span className="insights-audio-stat-val">{audio?.hi_res_count || 0}</span>
                     <span className="insights-audio-stat-label">Hi-Res Plays</span>
                   </div>
                   <div className="insights-audio-stat-block">
-                    <span className="insights-audio-stat-val">{insights.audiophile?.lossless_count || 0}</span>
+                    <span className="insights-audio-stat-val">{audio?.lossless_count || 0}</span>
                     <span className="insights-audio-stat-label">Lossless Plays</span>
                   </div>
                   <div className="insights-audio-stat-block">
-                    <span className="insights-audio-stat-val">{insights.audiophile?.standard_count || 0}</span>
+                    <span className="insights-audio-stat-val">{Math.max(0, insights.total_plays - (audio?.lossless_count || 0))}</span>
                     <span className="insights-audio-stat-label">Standard</span>
                   </div>
                   <div className="insights-audio-stat-block">
-                    <span className="insights-audio-stat-val">{formatSampleRate(insights.audiophile?.avg_sample_rate || 0)}</span>
+                    <span className="insights-audio-stat-val">{formatSampleRate(audio?.avg_sample_rate || 0)}</span>
                     <span className="insights-audio-stat-label">Avg Sample Rate</span>
                   </div>
                 </div>
-                {insights.audiophile?.top_resolution && (
-                  <div className="insights-resolution-badge">
-                    <span>Highest Native Format:</span>
-                    <strong>{insights.audiophile.top_resolution}</strong>
-                  </div>
-                )}
               </div>
 
               {/* Playback Source Distribution */}
@@ -472,12 +476,11 @@ export function ListeningInsightsView() {
                   <span>Playback Sources</span>
                 </h3>
                 {(() => {
-                  const rawSources = insights.sources;
-                  const sourceDist = (insights as any).source_distribution;
-                  let localCount = rawSources?.local_count ?? 0;
-                  let tidalCount = rawSources?.tidal_count ?? 0;
-                  let qobuzCount = rawSources?.qobuz_count ?? 0;
-                  let webstreamCount = rawSources?.webstream_count ?? rawSources?.youtube_count ?? 0;
+                  const sourceDist = insights.source_distribution;
+                  let localCount = 0;
+                  let tidalCount = 0;
+                  let qobuzCount = 0;
+                  let webstreamCount = 0;
 
                   if (Array.isArray(sourceDist)) {
                     for (const item of sourceDist) {
@@ -830,19 +833,19 @@ export function ListeningInsightsView() {
                       <div className="wrapped-audiophile-card">
                         <div className="wrapped-audio-row">
                           <span>Bit-perfect share</span>
-                          <strong>{insights!.audiophile?.bit_perfect_rate.toFixed(1) || 0}%</strong>
+                          <strong>{bitPerfectRate.toFixed(1)}%</strong>
                         </div>
                         <div className="wrapped-audio-row">
                           <span>Hi-Res plays</span>
-                          <strong>{insights!.audiophile?.hires_count || 0} tracks</strong>
+                          <strong>{audio?.hi_res_count || 0} tracks</strong>
                         </div>
                         <div className="wrapped-audio-row">
                           <span>Lossless plays</span>
-                          <strong>{insights!.audiophile?.lossless_count || 0} tracks</strong>
+                          <strong>{audio?.lossless_count || 0} tracks</strong>
                         </div>
                         <div className="wrapped-audio-row">
                           <span>Average Sample Rate</span>
-                          <strong>{formatSampleRate(insights!.audiophile?.avg_sample_rate || 0)}</strong>
+                          <strong>{formatSampleRate(audio?.avg_sample_rate || 0)}</strong>
                         </div>
                       </div>
                     </motion.div>

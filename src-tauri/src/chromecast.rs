@@ -1,3 +1,8 @@
+static ANALYSIS_PLAYBACK_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn analysis_playback_active() -> bool { ANALYSIS_PLAYBACK_ACTIVE.load(std::sync::atomic::Ordering::Acquire) }
+fn set_analysis_playback(active: bool) { ANALYSIS_PLAYBACK_ACTIVE.store(active, std::sync::atomic::Ordering::Release); }
+
 use tauri::command;
 use oxicast::{CastClient, CastApp, MediaInfo};
 use std::time::Duration;
@@ -483,6 +488,7 @@ pub async fn chromecast_disconnect() -> Result<(), String> {
         let _ = client.stop_media().await;
     }
     *client_lock = None;
+    set_analysis_playback(false);
     
     let mut shutdown_lock = LOCAL_SERVER_SHUTDOWN.lock().await;
     if let Some(tx) = shutdown_lock.take() {
@@ -548,6 +554,7 @@ pub async fn chromecast_play(
     duration: Option<f64>,
     start_time: Option<f64>,
 ) -> Result<(), String> {
+    set_analysis_playback(true);
     // If it's a YouTube link, resolve it to a direct audio stream URL using ytdlp outside the async mutex lock
     let path_clone = path.clone();
     let resolved_path = if crate::player::is_youtube_url_or_id(&path) {
@@ -647,6 +654,7 @@ pub async fn chromecast_control(action: String, value: Option<f64>) -> Result<()
     
     match action.as_str() {
         "play" | "resume" => {
+            set_analysis_playback(true);
             client.play()
                 .await
                 .map_err(|e| format!("Play command failed: {}", e))?;
@@ -655,6 +663,7 @@ pub async fn chromecast_control(action: String, value: Option<f64>) -> Result<()
             client.pause()
                 .await
                 .map_err(|e| format!("Pause command failed: {}", e))?;
+            set_analysis_playback(false);
         }
         "seek" => {
             if let Some(pos) = value {
@@ -669,6 +678,7 @@ pub async fn chromecast_control(action: String, value: Option<f64>) -> Result<()
             client.stop_media()
                 .await
                 .map_err(|e| format!("Stop command failed: {}", e))?;
+            set_analysis_playback(false);
         }
         _ => return Err(format!("Unknown control action: {}", action)),
     }
@@ -690,6 +700,7 @@ pub async fn chromecast_get_status() -> Result<serde_json::Value, String> {
                 oxicast::PlayerState::Idle => "Stopped",
                 _ => "Stopped",
             };
+            set_analysis_playback(state_str == "Playing");
             let idle_reason_str = status.idle_reason.as_ref().map(|r| match r {
                 oxicast::IdleReason::Finished => "Finished",
                 oxicast::IdleReason::Cancelled => "Cancelled",
@@ -706,6 +717,7 @@ pub async fn chromecast_get_status() -> Result<serde_json::Value, String> {
             }))
         }
         Ok(None) => {
+            set_analysis_playback(false);
             Ok(serde_json::json!({
                 "status": "Stopped",
                 "position_secs": 0.0,

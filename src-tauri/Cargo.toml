@@ -68,6 +68,7 @@ windows = { version = "0.52.0", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Registry",
+    "Win32_Storage_FileSystem",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Media_KernelStreaming",
     "Win32_Media_Multimedia"

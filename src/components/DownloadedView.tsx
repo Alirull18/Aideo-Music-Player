@@ -17,6 +17,9 @@ import {
 import { Track } from '../store/types';
 import defaultCover from '../assets/default_cover.png';
 import { fmt } from '../utils';
+import { useDownloadStore } from '../store/downloadStore';
+import { DownloadProgress } from './DownloadManager';
+import { TrackContextMenu } from './TrackContextMenu';
 
 interface CacheSizeInfo {
   bytes?: number;
@@ -30,6 +33,9 @@ interface CacheSizeInfo {
 }
 
 export function DownloadedView() {
+  const downloadJobs = useDownloadStore(s => s.jobs);
+  const downloadedPaths = useDownloadStore(s => s.paths);
+  const [trackMenu, setTrackMenu] = useState<{ track: Track; anchor: { x: number; y: number } } | null>(null);
   const { 
     tracks, 
     playTrack, 
@@ -152,7 +158,7 @@ export function DownloadedView() {
     const hashes = cachedCloudHashes || [];
     const isCachedStream = isStream && (t.path_hash ? hashes.includes(t.path_hash) : false);
     const isDirectlyCached = Boolean(t.path_hash && hashes.includes(t.path_hash));
-    return isLocalDownloaded || isCachedStream || isDirectlyCached;
+    return downloadedPaths.includes(t.path) || isLocalDownloaded || isCachedStream || isDirectlyCached;
   });
 
   const filteredTracks = cachedTracks.filter((t: Track) => {
@@ -219,7 +225,7 @@ export function DownloadedView() {
                 Downloaded & Offline Cache
               </h1>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--text-dim)' }}>
-                Offline audio tracks cached from Subsonic, Webstream, Tidal, and Qobuz
+                Downloaded audio files and cached tracks available offline
               </p>
             </div>
           </div>
@@ -241,7 +247,7 @@ export function DownloadedView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '8px 14px' }}
           >
             <FolderOpen size={14} />
-            Open Folder
+            Open Cache Folder
           </button>
           <button 
             className="btn btn-secondary" 
@@ -273,6 +279,11 @@ export function DownloadedView() {
       </div>
 
       {/* Active Batch Download Banner */}
+      {downloadJobs.length > 0 && <section className="download-jobs" aria-label="Track downloads">
+        <h2>Track downloads</h2>
+        {downloadJobs.map(job => <DownloadProgress key={job.id} job={job} />)}
+      </section>}
+      {trackMenu && <TrackContextMenu track={trackMenu.track} anchor={trackMenu.anchor} onClose={() => setTrackMenu(null)} />}
       <AnimatePresence>
         {batchDownloadProgress && !batchDownloadProgress.is_done && (
           <motion.div
@@ -445,6 +456,13 @@ export function DownloadedView() {
                     gap: 14
                   }}
                   className="downloaded-row"
+                  tabIndex={0}
+                  onKeyDown={event => {
+                    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                      event.preventDefault(); setTrackMenu({ track: t, anchor: event.currentTarget.getBoundingClientRect() });
+                    }
+                  }}
+                  onContextMenu={event => { event.preventDefault(); setTrackMenu({ track: t, anchor: { x: event.clientX, y: event.clientY } }); }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                     <div style={{
@@ -551,7 +569,7 @@ export function DownloadedView() {
                     >
                       <ListPlus size={14} />
                     </button>
-                    <button
+                    {!downloadedPaths.includes(t.path) && <button
                       className="icon-btn"
                       onClick={() => handleDeleteCachedTrack(t.path)}
                       style={{
@@ -569,7 +587,7 @@ export function DownloadedView() {
                       title="Remove from Cache"
                     >
                       <Trash2 size={14} />
-                    </button>
+                    </button>}
                   </div>
                 </motion.div>
               ))}

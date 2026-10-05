@@ -15,7 +15,8 @@ import { sortAlbumTracks, groupTracksByDisc, getTrackNumber, buildAlbumKey } fro
 import { extractPrimaryArtist } from '../utils/unifiedSources';
 import { AlbumThumbnail } from './AlbumThumbnail';
 import { parseSearchQuery, foldSearchText, simplifyPunctuation } from '../utils/searchParser';
-import { AlbumViewMode } from '../store/types';
+import { AlbumViewMode, Track } from '../store/types';
+import { TrackContextMenu } from './TrackContextMenu';
 
 export const ALBUM_VIEW_MODES: { id: AlbumViewMode; label: string; icon: React.ReactNode; desc: string }[] = [
   { id: 'classic', label: 'Grid', icon: <LayoutGrid size={14} />, desc: 'Album artwork grid' },
@@ -228,6 +229,7 @@ function AlbumContextMenu({
               <Play size={14} />
               Play Album
             </div>
+            <button className="btn-ghost" disabled={useStore.getState().chromecast_connected || useStore.getState().upnp_connected} onClick={() => { setMenuOpenFor(null); void useStore.getState().playAlbumToEnd(album.tracks, album.title).catch(e => useStore.getState().setPlaybackError(String(e))); }}>Play album to end</button>
 
             <div
               onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); handlePlayAlbumNext(album); }}
@@ -871,6 +873,8 @@ const CompactTableView = memo(function CompactTableView({
                                         key={t.id || t.path || idx}
                                         className={`compact-track-item ${isCurrent ? 'playing' : ''}`}
                                         onClick={() => handlePlayTrackFromAlbum(t)}
+                                        data-track-path={t.path}
+                                        tabIndex={0}
                                         onDoubleClick={() => handlePlayTrackFromAlbum(t)}
                                         title="Click or double-click to play"
                                       >
@@ -1131,6 +1135,8 @@ function HeroSpotlight({
                 key={t.id || t.path || idx}
                 className="sneak-peek-track"
                 onClick={() => handlePlayTrackFromAlbum(t)}
+                data-track-path={t.path}
+                tabIndex={0}
                 title="Play track"
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
@@ -1270,6 +1276,7 @@ export function AlbumsView({
   const isPlaying = playbackStatus === 'Playing';
 
   const [selectedAlbum, setSelectedAlbum] = useState<AlbumGroup | null>(null);
+  const [trackMenu, setTrackMenu] = useState<{ track: Track; anchor: { x: number; y: number } } | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
   const [lovedAlbumKeys, setLovedAlbumKeys] = useState<string[]>(getSavedLovedAlbums);
@@ -1676,7 +1683,17 @@ export function AlbumsView({
   };
 
   return (
-    <div ref={gridContainerRef} className={`albums-grid-wrap album-view-${effectiveViewMode}`} style={{ width: '100%' }}>
+    <div ref={gridContainerRef} className={`albums-grid-wrap album-view-${effectiveViewMode}`} style={{ width: '100%' }} onContextMenu={event => {
+      const path = (event.target as HTMLElement).closest<HTMLElement>('[data-track-path]')?.dataset.trackPath;
+      const track = path ? tracks.find(track => track.path === path) : null;
+      if (track) { event.preventDefault(); setTrackMenu({ track, anchor: { x: event.clientX, y: event.clientY } }); }
+    }} onKeyDown={event => {
+      if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+      const row = (event.target as HTMLElement).closest<HTMLElement>('[data-track-path]');
+      const track = row ? tracks.find(track => track.path === row.dataset.trackPath) : null;
+      if (track && row) { event.preventDefault(); setTrackMenu({ track, anchor: row.getBoundingClientRect() }); }
+    }}>
+      {trackMenu && <TrackContextMenu track={trackMenu.track} anchor={trackMenu.anchor} onClose={() => setTrackMenu(null)} />}
       
       {/* Header Segmented Toggle: [ Classic Wall | Audiophile Vault | Editorial Magazine ] */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
@@ -2137,6 +2154,7 @@ export function AlbumsView({
                       <Play size={16} fill="white" />
                       Play Album
                     </button>
+                    <button className="btn-ghost" onClick={() => void useStore.getState().playAlbumToEnd(selectedAlbum.tracks, selectedAlbum.title).catch(e => useStore.getState().setPlaybackError(String(e)))}>Play album to end</button>
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -2188,6 +2206,8 @@ export function AlbumsView({
                               <tr
                                 key={t.id || t.path || idx}
                                 onClick={() => handlePlayTrackFromAlbum(t)}
+                                data-track-path={t.path}
+                                tabIndex={0}
                                 style={{ cursor: 'pointer', transition: 'background 0.2s' }}
                               >
                                 <td style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
@@ -2222,6 +2242,8 @@ export function AlbumsView({
                           <tr
                             key={t.id || t.path || idx}
                             onClick={() => handlePlayTrackFromAlbum(t)}
+                            data-track-path={t.path}
+                            tabIndex={0}
                             style={{ cursor: 'pointer', transition: 'background 0.2s' }}
                           >
                             <td style={{ textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>

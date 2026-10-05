@@ -1,4 +1,94 @@
 pub static SOURCE_QUEUE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static STOP_ARMING: AtomicBool = AtomicBool::new(false);
+static STOP_ARM_STATUS: AtomicU8 = AtomicU8::new(0);
+static STOP_ARM_TIMED_OUT: AtomicBool = AtomicBool::new(false);
+static STOP_ARM_GENERATION: AtomicU64 = AtomicU64::new(0);
+static STOP_ARM_STOP_SENT: AtomicBool = AtomicBool::new(false);
+static STOP_ARM_ACK: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
+
+fn silence_while_arming<T: Default + Copy>(arming: bool, data: &mut [T]) -> bool {
+    if arming { data.fill(T::default()); }
+    arming
+}
+
+fn acknowledge_stop_arm() {
+    if let Some(ack) = safe_lock(&STOP_ARM_ACK).take() {
+        if !STOP_ARM_TIMED_OUT.load(Ordering::SeqCst) {
+            STOP_ARMING.store(false, Ordering::SeqCst);
+        }
+        let _ = ack.send(());
+    }
+}
+
+struct StopArmAckOnDrop;
+impl Drop for StopArmAckOnDrop {
+    fn drop(&mut self) { acknowledge_stop_arm(); }
+}
+
+fn finish_stop_arm() {
+    safe_lock(&STOP_ARM_ACK).take();
+    STOP_ARM_STATUS.store(0, Ordering::SeqCst);
+    STOP_ARM_TIMED_OUT.store(false, Ordering::SeqCst);
+    STOP_ARMING.store(false, Ordering::SeqCst);
+}
+
+fn claim_stop_arm_purge(generation: Option<u64>) -> bool {
+    let pending = safe_lock(&STOP_ARM_ACK);
+    if pending.is_none() || generation.is_some_and(|generation| generation != STOP_ARM_GENERATION.load(Ordering::SeqCst))
+        || STOP_ARM_STOP_SENT.swap(true, Ordering::SeqCst) { return false; }
+    STOP_ARM_TIMED_OUT.store(true, Ordering::SeqCst);
+    true
+}
+
+static STOP_AFTER_PATH: Mutex<Option<String>> = Mutex::new(None);
+
+fn stop_boundary_matches(boundary: Option<&str>, path: &str) -> bool {
+    boundary == Some(path)
+}
+
+fn stops_after(path: &str) -> bool {
+    stop_boundary_matches(safe_lock(&STOP_AFTER_PATH).as_deref(), path)
+}
+
+#[tauri::command]
+pub(crate) fn set_stop_after_path(path: Option<String>, state: tauri::State<'_, crate::AppState>) -> Result<(), String> {
+    let player = safe_lock(&state.player);
+    if path.is_none() {
+        *safe_lock(&STOP_AFTER_PATH) = None;
+        if claim_stop_arm_purge(None) {
+            if let Err(error) = player.cmd_tx.send(PlayerCommand::Stop) {
+                finish_stop_arm();
+                return Err(error.to_string());
+            }
+        }
+        return Ok(());
+    }
+    if STOP_ARMING.load(Ordering::SeqCst) { return Err("End stopping is already being armed".into()); }
+    // The frontend captures the current logical track; retries replace its resolved native path.
+    *safe_lock(&STOP_AFTER_PATH) = path;
+    let status = player.status.load(Ordering::SeqCst);
+    if status == 0 { return Ok(()); }
+    let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+    if STOP_ARMING.load(Ordering::SeqCst) { return Err("End stopping is already being armed".into()); }
+    let generation = STOP_ARM_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    STOP_ARMING.store(true, Ordering::SeqCst);
+    STOP_ARM_TIMED_OUT.store(false, Ordering::SeqCst);
+    STOP_ARM_STOP_SENT.store(false, Ordering::SeqCst);
+    STOP_ARM_STATUS.store(status, Ordering::SeqCst);
+    *safe_lock(&STOP_ARM_ACK) = Some(ack_tx);
+    if let Err(error) = player.cmd_tx.send(PlayerCommand::RestartStream) {
+        finish_stop_arm();
+        return Err(error.to_string());
+    }
+    let stop_tx = player.cmd_tx.clone();
+    drop(player);
+    let result = ack_rx.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| "Player did not acknowledge end stopping; output remains muted".to_string());
+    if result.is_err() && claim_stop_arm_purge(Some(generation)) {
+        if stop_tx.send(PlayerCommand::Stop).is_err() { finish_stop_arm(); }
+    }
+    result
+}
+
 pub static LOCAL_QUEUE_GENERATION: AtomicU64 = AtomicU64::new(0);
 use std::sync::{Arc, Mutex};
 use std::io::BufRead;
@@ -8,6 +98,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 pub mod dsp;
 pub use dsp::*;
+pub mod audio_meter;
 
 use ringbuf::RingBuffer;
 use crossbeam_channel::{Receiver, Sender};
@@ -342,6 +433,7 @@ pub fn evaluate_audio_path(
 pub struct EffectiveAudioPathState {
     route: Mutex<AudioRouteSnapshot>,
     underruns: AtomicU64,
+    pub meter: audio_meter::AudioMeter,
 }
 
 impl EffectiveAudioPathState {
@@ -349,6 +441,7 @@ impl EffectiveAudioPathState {
         Self {
             route: Mutex::new(AudioRouteSnapshot::default()),
             underruns: AtomicU64::new(0),
+            meter: audio_meter::AudioMeter::new(),
         }
     }
 
@@ -359,6 +452,7 @@ impl EffectiveAudioPathState {
     pub fn reset(&self) {
         *safe_lock(&self.route) = AudioRouteSnapshot::default();
         self.underruns.store(0, Ordering::Relaxed);
+        self.meter.clear();
     }
 
     pub fn record_underrun(&self) {
@@ -3420,6 +3514,8 @@ fn player_loop(
                         }
                         PlayerCommand::RestartStream => {
                             crate::log_debug!("AUDIO", "Dropping redundant RestartStream command during play start");
+                            drop(stream_session.take());
+                            acknowledge_stop_arm();
                         }
                         other => {
                             deferred_commands.push(other);
@@ -3435,6 +3531,7 @@ fn player_loop(
                     status.store(0, Ordering::Relaxed); // 0 = Stopped
                     let mut ct = safe_lock(&current_track);
                     *ct = None;
+                    finish_stop_arm();
                     continue;
                 }
 
@@ -3452,7 +3549,7 @@ fn player_loop(
                         EXCLUSIVE_FALLBACK_NOTIFIED.store(false, Ordering::SeqCst);
                         abort_inactive_stream_downloads(Some(&path));
                     }
-                    status.store(1, Ordering::Relaxed); // 1 = Playing
+                    status.store(if STOP_ARM_STATUS.swap(0, Ordering::SeqCst) == 2 { 2 } else { 1 }, Ordering::Relaxed); // Preserve pause while flushing a stop boundary.
                     let mut ct = safe_lock(&current_track);
                     *ct = Some(path.clone());
                     position_secs.store(start_pos.to_bits(), Ordering::Relaxed);
@@ -3464,9 +3561,11 @@ fn player_loop(
                 let ffmpeg_path = find_ffmpeg_path();
                 let (next, session) = play_file(&path, start_pos, attempt_id.clone(), Arc::clone(&status), Arc::clone(&current_track), Arc::clone(&position_secs), Arc::clone(&volume), Arc::clone(&exclusive_mode), Arc::clone(&bit_perfect), Arc::clone(&current_dev_rate), Arc::clone(&cache), Arc::clone(&dsp_state), Arc::clone(&target_device), Arc::clone(&queue), Arc::clone(&current_process), cmd_tx.clone(), &rx, &app_handle, &fft_tx, &ffmpeg_path, Arc::clone(&decode_shutdown), Arc::clone(&file_rate), Arc::clone(&file_ch), Arc::clone(&file_format), Arc::clone(&effective_audio_path), stream_session.take());
                 next_track = next;
+                acknowledge_stop_arm();
                 stream_session = session;
 
                 if next_track.is_none() {
+                    finish_stop_arm();
                     stream_session = None;
                     effective_audio_path.reset();
                     status.store(0, Ordering::Relaxed); // 0 = Stopped
@@ -3486,13 +3585,14 @@ fn player_loop(
                 *ct = None;
                 position_secs.store(0.0f64.to_bits(), Ordering::Relaxed);
                 consecutive_stream_restarts = 0;
+                finish_stop_arm();
             }
             PlayerCommand::RestartStream => {
                 stream_session = None;
                 let (path, pos) = {
                     let ct = safe_lock(&current_track);
                     let ps = f64::from_bits(position_secs.load(Ordering::Relaxed));
-                    if let Some(p) = ct.clone() { (p, ps) } else { continue; }
+                    if let Some(p) = ct.clone() { (p, ps) } else { finish_stop_arm(); continue; }
                 };
 
                 let now = std::time::Instant::now();
@@ -5267,6 +5367,7 @@ fn play_file(
     effective_audio_path: Arc<EffectiveAudioPathState>,
     mut existing_session: Option<ActiveStreamSession>,
 ) -> (Option<(String, f64, Option<String>)>, Option<ActiveStreamSession>) {
+    let _stop_arm_ack = StopArmAckOnDrop;
     // Enforce 1ms timer resolution and elevate audio pump thread priority, MMCSS, and EcoQoS opt-out
     let _timer_guard = TimePeriodGuard::new();
     #[cfg(target_os = "windows")]
@@ -5633,6 +5734,7 @@ fn play_file(
         };
 
         if dev.is_none() && tried_target {
+            volume.store(0.0f32.to_bits(), Ordering::SeqCst);
             output_fallback_reason = Some("selected_device_unavailable".to_string());
             *safe_lock(&target_device) = None;
             target = None;
@@ -5812,6 +5914,7 @@ fn play_file(
                 Arc::clone(&flush_signal),
                 dither_enabled,
                 move |data: &mut [f32]| {
+                    if silence_while_arming(STOP_ARMING.load(Ordering::SeqCst), data) { return; }
                     let ch_count = target_channels as usize;
                     if flush_cb.swap(false, Ordering::SeqCst) {
                         let l = cons.len();
@@ -5830,6 +5933,7 @@ fn play_file(
                             cons.discard(frames.min(data.len() / ch_count) * ch_count);
                         }
                         data.fill(0.0);
+                        audio_path_cb.meter.record(std::iter::once(0.0));
                         return;
                     }
 
@@ -5862,6 +5966,7 @@ fn play_file(
                             }
                         }
                     }
+                    audio_path_cb.meter.record(data.iter().copied());
                 },
                 move |err| {
                     EXCLUSIVE_STREAM_FAILURES.fetch_add(1, Ordering::SeqCst);
@@ -5955,6 +6060,7 @@ fn play_file(
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [f32], _| {
+                    if silence_while_arming(STOP_ARMING.load(Ordering::SeqCst), data) { return; }
                         #[cfg(target_os = "windows")]
                         {
                             thread_local! {
@@ -5987,6 +6093,7 @@ fn play_file(
 
                         if current_gain == 0.0 && target_gain == 0.0 {
                             data.fill(0.0);
+                            underruns_cb.meter.record(std::iter::once(0.0));
                             return;
                         }
 
@@ -6022,6 +6129,7 @@ fn play_file(
                                 }
                             }
                         }
+                        underruns_cb.meter.record(data.iter().copied());
                     },
                     move |e| {
                         eprintln!("[player] stream error: {e}");
@@ -6044,6 +6152,7 @@ fn play_file(
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [i16], _| {
+                    if silence_while_arming(STOP_ARMING.load(Ordering::SeqCst), data) { return; }
                         thread_local! {
                             static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
                         }
@@ -6072,6 +6181,7 @@ fn play_file(
 
                         if current_gain == 0.0 && target_gain == 0.0 {
                             data.fill(0);
+                            underruns_cb.meter.record(std::iter::once(0.0));
                             return;
                         }
 
@@ -6117,6 +6227,7 @@ fn play_file(
                                 }
                             }
                         }
+                        underruns_cb.meter.record(data.iter().map(|&sample| sample as f32 / 32768.0));
                     },
                     move |e| {
                         eprintln!("[player] stream error: {e}");
@@ -6138,6 +6249,7 @@ fn play_file(
                 device.build_output_stream(
                     &config_inner,
                     move |data: &mut [i32], _| {
+                    if silence_while_arming(STOP_ARMING.load(Ordering::SeqCst), data) { return; }
                         thread_local! {
                             static MMCSS_INITIALIZED: std::cell::Cell<bool> = std::cell::Cell::new(false);
                         }
@@ -6165,6 +6277,7 @@ fn play_file(
 
                         if current_gain == 0.0 && target_gain == 0.0 {
                             data.fill(0);
+                            underruns_cb.meter.record(std::iter::once(0.0));
                             return;
                         }
 
@@ -6206,6 +6319,7 @@ fn play_file(
                                 }
                             }
                         }
+                        underruns_cb.meter.record(data.iter().map(|&sample| sample as f32 / 2147483648.0));
                     },
                     move |e| {
                         eprintln!("[player] stream error: {e}");
@@ -6339,6 +6453,7 @@ fn play_file(
 
                             if current_gain == 0.0 && target_gain == 0.0 {
                                 d.fill(0.0);
+                                underruns_cb.meter.record(std::iter::once(0.0));
                                 return;
                             }
 
@@ -6369,6 +6484,7 @@ fn play_file(
                                     }
                                 }
                             }
+                            underruns_cb.meter.record(d.iter().copied());
                         }, move |e| {
                             eprintln!("[player] emergency stream error: {e}");
                             let _ = app_handle_cb.emit("ui-toast", serde_json::json!({
@@ -6412,6 +6528,7 @@ fn play_file(
 
                             if current_gain == 0.0 && target_gain == 0.0 {
                                 d.fill(0);
+                                underruns_cb.meter.record(std::iter::once(0.0));
                                 return;
                             }
 
@@ -6452,6 +6569,7 @@ fn play_file(
                                     }
                                 }
                             }
+                            underruns_cb.meter.record(d.iter().map(|&sample| sample as f32 / 32768.0));
                         }, move |e| {
                             eprintln!("[player] emergency stream error: {e}");
                             let _ = app_handle_cb.emit("ui-toast", serde_json::json!({
@@ -6840,9 +6958,10 @@ fn play_file(
         let true_pos = true_pos.max(0.0);
 
         let source_mode = SOURCE_QUEUE_MODE.load(Ordering::SeqCst);
-        let trigger = crossfade_trigger_position(&current_dsp, duration_secs, bp_now, source_mode);
+        let stop_at_end = stops_after(path);
+        let trigger = crossfade_trigger_position(&current_dsp, duration_secs, bp_now, source_mode || stop_at_end);
         if crossfade_triggered && (!current_dsp.crossfade_transition_enabled
-            || current_dsp.crossfade_transition_duration <= 0.0 || bp_now || source_mode) {
+            || current_dsp.crossfade_transition_duration <= 0.0 || bp_now || source_mode || stop_at_end) {
             drop(next_decoder_info.take());
             drop(next_decoder_rx.take());
             drop(next_reservation.take());
@@ -6858,7 +6977,7 @@ fn play_file(
         }
         if let Some(crossfade_trigger_pos) = trigger {
             if true_pos >= crossfade_trigger_pos && !crossfade_triggered {
-                let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                let is_local_next = !stops_after(path) && !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
                 if is_local_next {
                     crossfade_triggered = true;
                     let (next_path_opt, queue_generation) = {
@@ -6979,7 +7098,7 @@ fn play_file(
                         eof_draining = true;
                     }
                     if pending[0].is_empty() && !eof_draining {
-                        if crossfade_triggered && next_track_path.is_some() {
+                        if !stops_after(path) && crossfade_triggered && next_track_path.is_some() {
                             let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
                             let npath = next_track_path.take().unwrap();
                             let next_attempt_id = generate_handoff_attempt_id();
@@ -6991,7 +7110,7 @@ fn play_file(
                             }));
                             next_track_info = Some((npath, played_secs, Some(next_attempt_id)));
                         } else {
-                            let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                            let is_local_next = !stops_after(path) && !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
                             if is_local_next {
                                 let next_queued = safe_lock(&queue).pop_front();
                                 if let Some(npath) = next_queued {
@@ -7048,7 +7167,7 @@ fn play_file(
                     }
                     if pending[0].is_empty() && !eof_draining {
                         println!("[player] Stream pending samples drained completely at EOF. Exiting decode loop.");
-                        if crossfade_triggered && next_track_path.is_some() {
+                        if !stops_after(path) && crossfade_triggered && next_track_path.is_some() {
                             let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
                             let npath = next_track_path.take().unwrap();
                             let next_attempt_id = generate_handoff_attempt_id();
@@ -7060,7 +7179,7 @@ fn play_file(
                             }));
                             next_track_info = Some((npath, played_secs, Some(next_attempt_id)));
                         } else {
-                            let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+                            let is_local_next = !stops_after(path) && !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
                             if is_local_next {
                                 let next_queued = safe_lock(&queue).pop_front();
                                 if let Some(npath) = next_queued {
@@ -7215,10 +7334,10 @@ fn play_file(
                     // Duration is latched when preparation starts; disable cancels immediately.
                     let crossfade_frames = fade_frames;
                     let remaining = crossfade_frames.saturating_sub(crossfade_frame_counter);
-                    if remaining > 0 && !next_output[0].is_empty() {
+                    if !stops_after(path) && remaining > 0 && !next_output[0].is_empty() {
                         let mixed = mix_crossfade_frames(&mut processed, &mut next_output, crossfade_frame_counter, crossfade_frames);
                         crossfade_frame_counter += mixed;
-                        if crossfade_frame_counter >= crossfade_frames {
+                        if !stops_after(path) && crossfade_frame_counter >= crossfade_frames {
                             processed.iter_mut().for_each(|channel| channel.truncate(mixed));
                             let played_secs = crossfade_frame_counter as f64 / dev_rate as f64;
                             let npath = next_track_path.take().unwrap();
@@ -7580,7 +7699,7 @@ fn play_file(
     drop(next_reservation.take());
 
     if running && next_track_info.is_none() {
-        let is_local_next = !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
+        let is_local_next = !stops_after(path) && !SOURCE_QUEUE_MODE.load(Ordering::SeqCst) && safe_lock(&queue).front().map(|p| is_playable_local_path(p)).unwrap_or(false);
         if is_local_next {
             let next_queued = safe_lock(&queue).pop_front();
             if let Some(npath) = next_queued {
@@ -7621,11 +7740,13 @@ fn play_file(
     if next_track_info.is_none() {
         drop(stream);
         kill_current_process(&next_child_process);
+        acknowledge_stop_arm();
         return (None, None);
     }
 
     if is_restart_stream {
         drop(stream);
+        acknowledge_stop_arm();
         kill_current_process(&next_child_process);
         return (next_track_info, None);
     }

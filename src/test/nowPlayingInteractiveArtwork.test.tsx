@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { useStore } from '../store';
 import { NowPlayingView } from '../components/NowPlayingView';
 import { FullscreenView } from '../components/FullscreenView';
+import { invoke } from '@tauri-apps/api/core';
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
@@ -186,7 +187,26 @@ describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
     fireEvent.click(signalControl!);
 
     expect(screen.getByRole('dialog', { name: /Audio Signal Path & Telemetry/i })).toBeInTheDocument();
-    expect(screen.queryByText(/\d+(?:\.\d+)?\s*dBFS/i)).not.toBeInTheDocument();
+    const readout = screen.getByRole('group', { name: 'Output sample levels' });
+    expect(within(readout).queryByText(/\d+(?:\.\d+)?\s*dBFS/i, { selector: 'strong' })).not.toBeInTheDocument();
+    expect(within(readout).getAllByText('Unavailable')).toHaveLength(2);
+  });
+
+  it('starts and stops measured levels with the artwork inspector', async () => {
+    let measuring = false;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command !== 'get_audio_levels') return null;
+      measuring = (args as { enabled: boolean }).enabled;
+      return measuring ? { peak_dbfs: -6, headroom_db: 6, silent: false } : null;
+    });
+    render(<NowPlayingView />);
+    expect(measuring).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /Inspect track/i }));
+    await waitFor(() => expect(screen.getByText('-6.0 dBFS')).toBeInTheDocument());
+    expect(screen.getByText('6.0 dB')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Close track inspector/i }));
+    await waitFor(() => expect(measuring).toBe(false));
+    vi.mocked(invoke).mockResolvedValue(null);
   });
 
   it('toggles signal telemetry with the I shortcut', async () => {

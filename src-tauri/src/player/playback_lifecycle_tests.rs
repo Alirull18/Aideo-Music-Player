@@ -1,5 +1,17 @@
 #[cfg(test)]
 mod playback_lifecycle_tests {
+    #[test]
+    fn missing_output_devices_wait_for_the_preferred_device_to_reconnect() {
+        use crate::player::{find_best_matching_device_name, should_restore_preferred_device, should_switch_default_device};
+        let unavailable = Vec::new();
+        assert_eq!(find_best_matching_device_name("FiiO K5 Pro", &unavailable), None);
+        assert_eq!(should_restore_preferred_device(Some("[WASAPI] FiiO K5 Pro"), None, &unavailable), None);
+        assert!(!should_switch_default_device(None, Some("Speakers"), None));
+        let connected = vec!["[WASAPI] FiiO K5 Pro".to_string()];
+        assert_eq!(should_restore_preferred_device(Some("[WASAPI] FiiO K5 Pro"), None, &connected), Some(connected[0].clone()));
+        assert_eq!(should_restore_preferred_device(Some("[WASAPI] FiiO K5 Pro"), Some("Speakers"), &connected), None);
+    }
+
     use std::fs::{self, File};
     use std::io::Write;
     use crate::player::{
@@ -782,3 +794,50 @@ mod playback_lifecycle_tests {
 }
 
 
+
+#[test]
+fn stop_boundary_blocks_only_the_selected_native_track() {
+    assert!(super::stop_boundary_matches(Some("current.flac"), "current.flac"));
+    assert!(!super::stop_boundary_matches(Some("current.flac"), "next.flac"));
+    assert!(!super::stop_boundary_matches(None, "current.flac"));
+}
+
+#[test]
+fn late_stop_arming_mutes_buffered_next_audio_before_restart_acknowledgement() {
+    let mut mixed = [0.5_f32, -0.25, 1.0, -1.0];
+    assert!(super::silence_while_arming(true, &mut mixed));
+    assert_eq!(mixed, [0.0; 4]);
+    let mut current = [0.2_f32, -0.2];
+    assert!(!super::silence_while_arming(false, &mut current));
+    assert_eq!(current, [0.2, -0.2]);
+}
+
+#[test]
+fn stop_arm_timeout_and_cancel_keep_output_muted_until_purge() {
+    use std::sync::{atomic::Ordering, mpsc};
+    let (ack, received) = mpsc::channel();
+    super::finish_stop_arm();
+    super::STOP_ARM_GENERATION.store(42, Ordering::SeqCst);
+    super::STOP_ARMING.store(true, Ordering::SeqCst);
+    *super::safe_lock(&super::STOP_ARM_ACK) = Some(ack);
+    assert!(!super::claim_stop_arm_purge(Some(41))); // A stale timeout cannot stop a new arm.
+    assert!(super::claim_stop_arm_purge(Some(42)));
+    assert!(!super::claim_stop_arm_purge(None)); // Cancellation cannot queue a second Stop.
+    super::acknowledge_stop_arm();
+    assert!(received.recv().is_ok());
+    assert!(super::STOP_ARMING.load(Ordering::SeqCst)); // Late acknowledgement cannot unmute.
+    super::finish_stop_arm();
+    assert!(!super::STOP_ARMING.load(Ordering::SeqCst));
+
+    let (ack, received) = mpsc::channel();
+    super::STOP_ARMING.store(true, Ordering::SeqCst);
+    *super::safe_lock(&super::STOP_ARM_ACK) = Some(ack);
+    drop(super::StopArmAckOnDrop); // Early play_file return still acknowledges output teardown.
+    assert!(received.recv().is_ok());
+    assert!(!super::STOP_ARMING.load(Ordering::SeqCst));
+    super::finish_stop_arm();
+
+    let (tx, rx) = mpsc::channel::<super::PlayerCommand>();
+    drop(rx);
+    assert!(tx.send(super::PlayerCommand::Stop).is_err()); // Caller must use finish_stop_arm on send failure.
+}

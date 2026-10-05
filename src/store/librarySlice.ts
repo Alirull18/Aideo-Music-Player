@@ -1,4 +1,5 @@
-import { streamCacheKey, applySourcePreference, cleanSourceContext, isLocalUnifiedTrack } from '../utils/unifiedSources';
+import { sortAlbumTracks } from '../utils/albumUtils';
+import { streamCacheKey, applySourcePreference, cleanSourceContext, isLocalUnifiedTrack, bounded } from '../utils/unifiedSources';
 import { manageSourceQueue, cancelSourcePlayback, playbackRequest, playUnifiedTrack } from './sourcePlayback';
 import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
@@ -11,12 +12,14 @@ import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
 import { notifyTidalAuthFailure } from './tidalSlice';
 import { notifyQobuzAuthFailure } from './qobuzSlice';
 import { scheduleOsTrackNotification, cancelOsTrackNotification } from '../utils/notifications';
+import { feedbackContext, sameRecommendationRecording, rankRecommendations, recommendationAllowed, filterAutomaticQueue, startListening, finishListening, markListeningEnd, invalidateRecommendationPreferences } from '../utils/recommendations';
 
 let isTransitioning = false;
-let lastPlayedPathFromUI: string | null = null;
 let isSkipping = false;
 let autoplayReqSeq = 0;
 let localAttemptSequence = 0;
+let historyTransitionSequence = 0;
+let mixRequestSequence = 0;
 
 let metadataFetchSeq = 0;
 
@@ -279,6 +282,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   scanLibrary: async () => {
+    if (localStorage.getItem('aideo_local_restore_sync') === 'restoring') throw new Error('Library maintenance is in progress');
     const dirs = get().scanDirs;
     if (dirs.length === 0) { set({ scanStatus: 'Add a folder first' }); return; }
     set({ scanStatus: 'Scanning...' });
@@ -364,22 +368,19 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   recordPlaybackTransition: async (newTrack: Track | null, playbackSource?: string) => {
+    const transition = ++historyTransitionSequence;
     const prevHistoryId = get().currentHistoryId;
-    const prevTrack = get().currentTrack;
-    const currentPos = get().playback.position_secs;
-
     if (prevHistoryId !== null) {
-      const duration = prevTrack?.duration || 0;
-      const skipped = duration > 0 ? (currentPos < 30.0 && currentPos < duration * 0.5) : false;
-      const completionRate = duration > 0 ? Math.min(1.0, Math.max(0.0, currentPos / duration)) : null;
-      invoke('log_playback_end', {
-        historyId: prevHistoryId,
-        durationPlayed: currentPos,
-        skipped,
-        completionRate,
-      }).catch((e) => console.error("Failed to log playback end:", e));
       set({ currentHistoryId: null });
+      const observation = finishListening(prevHistoryId);
+      await invoke('log_playback_end', {
+        historyId: prevHistoryId, durationPlayed: observation.seconds,
+        skipped: observation.reason === 'skipped', completionRate: null, endReason: observation.reason,
+      }).then(() => window.dispatchEvent(new Event('playback-history-updated')))
+        .catch(e => console.error('Failed to log listening:', e));
     }
+
+    if (transition !== historyTransitionSequence) return;
 
     if (newTrack) {
       const currentHistory = get().autoplaySessionHistory || [];
@@ -390,7 +391,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         const pb = get().playback;
         const sampleRate = pb.file_rate || pb.effective_audio_path?.source?.sample_rate || null;
         const bitDepth = pb.effective_audio_path?.source?.bits_per_sample || pb.effective_audio_path?.source?.valid_bits_per_sample || null;
-        const bitPerfect = Boolean(pb.bit_perfect);
+        const bitPerfect = pb.bit_perfect ? 1 : 0;
 
         const id = await invoke<number>('log_playback_start', {
           path: newTrack.path,
@@ -404,8 +405,16 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
           sampleRate,
           bitDepth,
           bitPerfect,
+          track: newTrack, recordingEvidence: newTrack.recording_evidence || null,
+          sourceContext: feedbackContext(newTrack), origin: newTrack.is_autoplay ? 'radio' : newTrack.is_generated_mix ? 'mix' : 'manual',
         });
+        if (transition !== historyTransitionSequence) {
+          await invoke('log_playback_end', { historyId: id, durationPlayed: 0, skipped: false, completionRate: null, endReason: 'error' });
+          return;
+        }
+        startListening(id, newTrack);
         set({ currentHistoryId: id });
+        window.dispatchEvent(new Event('playback-history-updated'));
       } catch (e) {
         console.error("Failed to log playback start:", e);
       }
@@ -414,7 +423,15 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
   playTrack: async (track: Track, isHistory?: boolean, forceResetAutoplay = true, playbackSource?: string, startPos?: number, preservePlaybackSession = false) => {
     if (!track) return;
+    if (!preservePlaybackSession) ++historyTransitionSequence;
+    if (localStorage.getItem('aideo_local_restore_sync') === 'restoring') throw new Error('Library maintenance is in progress');
+    if (!preservePlaybackSession && forceResetAutoplay) {
+      if (get().albumSession) await get().cancelAlbumSession();
+      else if (get().stopBoundary) await get().cancelStopAfter();
+    }
+    if (!preservePlaybackSession) get().dismissPlaybackRecovery();
     const requestedQuality = get().streamingQuality;
+    if (!preservePlaybackSession) markListeningEnd('skipped');
     track = applySourcePreference(track);
     cancelSourcePlayback();
     if (get().playback.status === 'Playing') {
@@ -424,7 +441,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     if (track.source_context) return playUnifiedTrack(set, get, track, isHistory, forceResetAutoplay, startPos, preservePlaybackSession);
     set(s => ({ currentAttemptId: undefined, playback: { ...s.playback, attempt_id: undefined } }));
     const isCurrentRequest = () => request === playbackRequest();
-    if (forceResetAutoplay && get().sourceQueueManaged) {
+    if (get().albumSession) {
+      await manageSourceQueue(set);
+    } else if (forceResetAutoplay && get().sourceQueueManaged) {
       await invoke('set_source_queue_mode', { enabled: false });
       set({ sourceQueueManaged: false });
     } else if (!forceResetAutoplay && get().queue.some(t => t.source_context && !isLocalUnifiedTrack(t))) {
@@ -497,10 +516,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const history = prevTrack && !isHistory ? [...(get().playHistory || []), prevTrack].slice(-200) : (get().playHistory || []);
       localStorage.setItem('aideo_play_history', JSON.stringify(history));
 
-      lastPlayedPathFromUI = track.path;
-      const counts = { ...get().playCounts };
-      counts[track.path] = (counts[track.path] || 0) + 1;
-      localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
       markShufflePlayed(track.path);
 
       const isHttpUrl = track.path.startsWith('http://') || track.path.startsWith('https://');
@@ -519,7 +534,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         currentTrackIndex: index,
         currentTrack: track,
         playHistory: history,
-        playCounts: counts,
         lyricOffset: track.lyric_offset || 0,
         lyrics: [],
         lyricStatus: 'loading',
@@ -703,6 +717,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       } else {
         const attemptId = `local_attempt_${Date.now()}_${++localAttemptSequence}`;
         set(s => ({ currentAttemptId: attemptId, playback: { ...s.playback, attempt_id: attemptId } }));
+        if (get().stopBoundary?.kind === 'track') await invoke('set_stop_after_path', { path: finalPath });
+        if (!isCurrentRequest()) return;
         await invoke('play_track', { path: finalPath, startPos: startPos || 0.0, attemptId });
       }
       if (!isCurrentRequest()) return;
@@ -750,32 +766,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         detail: { message: `Playback failed: ${e}`, type: 'error' }
       }));
       
-      // Filter out the failed track from the queue if it's there
-      const currentQueue = get().queue;
-      const filteredQueue = currentQueue.filter((t: Track) => !pathsEqual(t.path, track.path));
-      if (filteredQueue.length !== currentQueue.length) {
-        set({ queue: filteredQueue });
-        localStorage.setItem('aideo_queue', JSON.stringify(filteredQueue));
-        const idx = currentQueue.findIndex((t: Track) => pathsEqual(t.path, track.path));
-        if (idx !== -1) {
-          invoke('remove_from_queue', { index: idx }).catch(console.error);
-        }
-      }
-      set(s => ({
-        currentAttemptId: undefined,
-        playback: {
-          ...s.playback,
-          attempt_id: undefined,
-          status: 'Stopped',
-          current_track: null,
-          is_buffering: false,
-          position_secs: 0
-        },
-        currentTrack: null
-      }));
-      setTimeout(() => {
-        get().playNext();
-      }, 1500);
+      get().reportPlaybackFailure(String(e), track, startPos ?? get().playback.position_secs);
+      return;
     }
 
     const state = get();
@@ -793,7 +785,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     let track: Track | undefined = saved.source_context ? applySourcePreference(saved) : get().tracks.find(t => pathsEqual(t.path, saved.path));
     if (!track) track = get().queue.find(t => pathsEqual(t.path, saved.path));
     if (!track) track = saved;
-    await get().playTrack(track, undefined, true, undefined, pos > 0 ? pos : undefined);
+    await get().playTrack(track, undefined, !get().albumSession, undefined, pos > 0 ? pos : undefined);
     set({ resumePosition: 0 });
     safeRemoveStorage('aideo_resume_position');
     return true;
@@ -877,15 +869,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       // Log the transition in SQLite so autoplayed tracks correctly appear in playback history!
       await get().recordPlaybackTransition(track, 'autoplay');
 
-      const counts = { ...state.playCounts };
-      if (lastPlayedPathFromUI && pathsEqual(path, lastPlayedPathFromUI)) {
-        // UI-driven play count already logged in playTrack, bypass duplication
-        lastPlayedPathFromUI = null;
-      } else {
-        counts[path] = (counts[path] || 0) + 1;
-        localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
-      }
-
       const isOnline = path.startsWith('http://') || path.startsWith('https://');
 
       if (track && track.title && track.title !== 'Web Audio Stream') {
@@ -903,7 +886,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         currentTrackIndex: index,
         currentTrack: track,
         playHistory: history,
-        playCounts: counts,
         lyricOffset: track?.lyric_offset || 0,
         lyrics: [],
         lyricStatus: 'loading',
@@ -931,7 +913,41 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   },
 
+  playAlbumToEnd: async (tracks: Track[], title: string) => {
+    if (!tracks.length) return;
+    if (get().chromecast_connected || get().upnp_connected) throw new Error('Album end stopping is unavailable on remote output');
+    await get().cancelStopAfter();
+    const session = { title, tracks: sortAlbumTracks(tracks), index: 0 };
+    set({ albumSession: session });
+    safeSetStorage('aideo_album_session', JSON.stringify(session));
+    // ponytail: mixed albums advance through the existing frontend queue policy; native album gapless needs session-correlated reservations.
+    await manageSourceQueue(set);
+    await get().playTrack(session.tracks[0], undefined, false);
+  },
+
+  cancelAlbumSession: async () => {
+    set({ albumSession: null });
+    safeRemoveStorage('aideo_album_session');
+    await get().cancelStopAfter();
+    if (!get().queue.some(t => t.source_context && !isLocalUnifiedTrack(t))) {
+      await invoke('set_source_queue_mode', { enabled: false });
+      set({ sourceQueueManaged: false });
+    }
+    await get().syncBackendQueue();
+  },
+
   playNext: async () => {
+    if (get().stopBoundary?.kind === 'track') await get().cancelStopAfter();
+    const album = get().albumSession;
+    if (album) {
+      if (album.index + 1 >= album.tracks.length) { await get().fulfillStopBoundary(); return; }
+      const next = { ...album, index: album.index + 1 };
+      set({ albumSession: next });
+      safeSetStorage('aideo_album_session', JSON.stringify(next));
+      await get().playTrack(next.tracks[next.index], undefined, false);
+      return;
+    }
+    if (get().stopBoundary?.kind === 'track') await get().cancelStopAfter();
     if (isSkipping) return;
     cancelSourcePlayback();
     isSkipping = true;
@@ -1013,6 +1029,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   getNextTrackToPlay: () => {
+    const session = get().albumSession;
+    if (session) return session.tracks[session.index + 1] ?? null;
+    if (get().stopBoundary) return null;
     const { tracks, shuffle, repeat, queue, currentTrack } = get();
 
     if (repeat === 'one' && currentTrack && (queue.length === 0 || queue[0]?.is_autoplay)) {
@@ -1050,6 +1069,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   getNextTracksToPlay: (count = 2) => {
+    const album = get().albumSession;
+    if (album) return album.tracks.slice(album.index + 1, album.index + 1 + count);
+    if (get().stopBoundary) return [];
     const { tracks, shuffle, repeat, queue, currentTrack } = get();
     const result: Track[] = [];
 
@@ -1141,7 +1163,15 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   playPrev: async () => {
-    cancelSourcePlayback();
+    if (get().stopBoundary?.kind === 'track') await get().cancelStopAfter();
+    const album = get().albumSession;
+    if (album) {
+      const previous = { ...album, index: Math.max(0, album.index - 1) };
+      set({ albumSession: previous });
+      safeSetStorage('aideo_album_session', JSON.stringify(previous));
+      await get().playTrack(previous.tracks[previous.index], undefined, false);
+      return;
+    }    cancelSourcePlayback();
     if (isSkipping) return;
     isSkipping = true;
     try {
@@ -1186,11 +1216,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   triggerAutoplayRadio: async (track: Track, forceReset = false) => {
-    // Dynamic seed: use the clicked track if forceReset, otherwise evolve using the current playing track
-    const seedTrack = forceReset ? track : (track || get().currentTrack || get().autoplaySeedTrack);
+    const seedTrack = forceReset ? track : (get().autoplaySeedTrack || track || get().currentTrack);
     if (!seedTrack) return;
-    const isCurrentTrackOnline = isStreamTrack(seedTrack.path, seedTrack.format);
-    if (!get().autoplayEnabled) return;
+    if (!get().autoplayEnabled || get().albumSession || get().stopBoundary) return;
 
     // Guard against degraded seed metadata (placeholder titles like "Web Audio Stream",
     // bare hostnames like "Lgf.audio.tidal.com", placeholder artists like "Online Stream").
@@ -1211,41 +1239,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     try {
       console.log(`[autoplay] Generating upcoming radio queue using seed: '${safeSeedTitle}' by '${safeSeedArtist}'...`);
       let recommendedTracks: Track[] = [];
-      const isTidal = seedTrack.format === 'Tidal FLAC' || seedTrack.path.includes('api.tidal.com');
-      const isQobuz = seedTrack.format === 'Qobuz FLAC';
       const engine = get().recommendationEngine || 'our';
-
-      const fetchLocalSimilar = async (): Promise<Track[]> => {
-        try {
-          const state = get();
-          const excludedPaths = Array.from(new Set([
-            seedTrack.path,
-            state.currentTrack?.path,
-            ...state.autoplaySessionHistory.map(t => t.path),
-            ...state.queue.map(t => t.path),
-            ...state.recentlyClearedAutoplayPaths,
-            ...state.tracks.filter(t => t.disliked === 1).map(t => t.path),
-          ].filter((path): path is string => !!path)));
-          const similar = await invoke<any[]>('get_similar_tracks', { path: seedTrack.path, excludedPaths });
-          if (Array.isArray(similar) && similar.length > 0) {
-            return similar.map((t: any) => ({
-              id: t.id,
-              path: t.path,
-              title: t.title || 'Unknown Title',
-              artist: t.artist || 'Unknown Artist',
-              album: t.album,
-              duration: t.duration,
-              format: t.format,
-              lyric_offset: t.lyric_offset || 0,
-              cover_url: t.cover_url || null,
-              is_autoplay: true
-            }));
-          }
-        } catch (err) {
-          console.warn('[autoplay] get_similar_tracks error for local track:', err);
-        }
-        return [];
-      };
 
       const fetchTidalRadio = async (): Promise<Track[]> => {
         try {
@@ -1263,6 +1257,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
               format: 'Tidal FLAC',
               lyric_offset: 0,
               cover_url: t.cover_url || null,
+              recording_evidence: t.recording_evidence,
               is_autoplay: true
             }));
           }
@@ -1288,6 +1283,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
               format: 'Qobuz FLAC',
               lyric_offset: 0,
               cover_url: t.cover_url || null,
+              recording_evidence: t.recording_evidence,
               is_autoplay: true
             }));
           }
@@ -1299,10 +1295,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       const fetchYoutubeRadio = async (): Promise<Track[]> => {
         try {
-          let videoId = '';
-          if (/^[a-zA-Z0-9_-]{11}$/.test(seedTrack.path)) {
+          let videoId = seedTrack.active_source?.provider === 'youtube' ? seedTrack.active_source.id : '';
+          if (!videoId && /^[a-zA-Z0-9_-]{11}$/.test(seedTrack.path)) {
             videoId = seedTrack.path;
-          } else {
+          } else if (!videoId) {
             const match = seedTrack.path.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/ ]{11})/);
             if (match && match[1]) {
               videoId = match[1];
@@ -1363,7 +1359,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
               path: t.url,
               title: t.title || 'Unknown Title',
               artist: t.artist || 'Unknown Artist',
-              duration: parseDuration(t.duration_raw) || 180,
+              duration: parseDuration(t.duration_raw) || null,
               format: 'YouTube Direct',
               lyric_offset: 0,
               cover_url: t.cover_url || null,
@@ -1376,29 +1372,23 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         return [];
       };
 
-      if (get().appMode === 'local') {
-        if (!isCurrentTrackOnline) recommendedTracks = await fetchLocalSimilar();
-      } else if (engine === 'youtube') {
-        recommendedTracks = await fetchYoutubeRadio();
-        if (recommendedTracks.length === 0 && !isCurrentTrackOnline) {
-          recommendedTracks = await fetchLocalSimilar();
-        }
-      } else if (engine === 'tidal') {
-        recommendedTracks = await fetchTidalRadio();
-      } else {
-        // engine === 'our' (Default Aideo Hybrid)
-        if (!isCurrentTrackOnline) {
-          recommendedTracks = await fetchLocalSimilar();
-        }
-        if (recommendedTracks.length === 0 && isTidal) {
-          recommendedTracks = await fetchTidalRadio();
-        } else if (recommendedTracks.length === 0 && isQobuz) {
-          recommendedTracks = await fetchQobuzRadio();
-        }
-        if (recommendedTracks.length === 0 && (isCurrentTrackOnline || get().appMode !== 'local')) {
-          recommendedTracks = await fetchYoutubeRadio();
-        }
+      const requested = get();
+      const local = requested.tracks.filter(t => !isStreamTrack(t.path, t.format));
+      const tasks: Promise<Track[]>[] = [];
+      if (requested.appMode !== 'local') {
+        if (engine !== 'tidal') tasks.push(bounded(fetchYoutubeRadio(), 8000).catch(() => []));
+        if (engine !== 'youtube' && requested.tidalConnected) tasks.push(bounded(fetchTidalRadio(), 8000).catch(() => []));
+        if (engine === 'our' && requested.qobuzConnected && requested.qobuzExperimentalEnabled) tasks.push(bounded(fetchQobuzRadio(), 8000).catch(() => []));
       }
+      const online = (await Promise.all(tasks)).flat();
+      const relatedness = Object.fromEntries(online.map((t, i) => [t.path, 1 - 0.5 * i / Math.max(1, online.length)]));
+      const excluded = [...requested.queue.map(t => t.path), ...requested.autoplaySessionHistory.map(t => t.path),
+        ...(requested.recentlyClearedAutoplayPaths || []), track.path];
+      recommendedTracks = await rankRecommendations(requested, [...online, ...local], 'radio', {
+        seed: seedTrack, generation: currentReqSeq, limit: 10, excluded, relatedness,
+      });
+      if (requested.appMode !== get().appMode || requested.recommendationEngine !== get().recommendationEngine
+        || requested.autoplayDiscoveryLevel !== get().autoplayDiscoveryLevel) return;
 
       if (currentReqSeq !== autoplayReqSeq || playbackSeq !== playbackRequest() || playingPath !== get().currentTrack?.path) {
         console.log('[autoplay] Stale recommendation request superseded, skipping queue update.');
@@ -1409,49 +1399,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const manualQueue = currentQueue.filter(t => !t.is_autoplay);
       const existingAutoplay = forceReset ? [] : currentQueue.filter(t => t.is_autoplay);
 
-      const cleanText = (str: string | null) => {
-        if (!str) return '';
-        let val = str.toLowerCase();
-        val = val.replace(/[\(\[][^\)\]]+[\)\]]/g, '');
-        val = val.replace(/\s+(feat|ft|featuring|official\s+audio|official\s+video).*$/i, '');
-        return val.trim();
-      };
-
-      const playedTitleArtistSet = new Set(
-        get().autoplaySessionHistory.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
-      );
-
-      const playedSet = new Set(get().autoplaySessionHistory.map(t => t.path));
-      const currentTrackPath = track.path;
-      const existingPaths = new Set([
-        currentTrackPath,
-        ...manualQueue.map(t => t.path),
-        ...existingAutoplay.map(t => t.path)
-      ]);
-      const existingTitleArtistSet = new Set([
-        `${cleanText(track.artist)} - ${cleanText(track.title)}`,
-        ...manualQueue.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`),
-        ...existingAutoplay.map(t => `${cleanText(t.artist)} - ${cleanText(t.title)}`)
-      ]);
-
-      const clearedSet = new Set(get().recentlyClearedAutoplayPaths || []);
-      const dislikedSet = new Set(get().tracks.filter(t => t.disliked === 1).map(t => t.path));
+      const avoided = [track, ...get().autoplaySessionHistory, ...manualQueue, ...existingAutoplay];
       const finalRecommended: Track[] = [];
-      const refillPaths = new Set(existingPaths);
-      const refillTitleArtists = new Set(existingTitleArtistSet);
       for (const recommendation of recommendedTracks) {
-        const titleArtist = `${cleanText(recommendation.artist)} - ${cleanText(recommendation.title)}`;
-        if (
-          playedSet.has(recommendation.path) ||
-          playedTitleArtistSet.has(titleArtist) ||
-          refillPaths.has(recommendation.path) ||
-          refillTitleArtists.has(titleArtist) ||
-          clearedSet.has(recommendation.path) ||
-          dislikedSet.has(recommendation.path)
-        ) continue;
-        refillPaths.add(recommendation.path);
-        refillTitleArtists.add(titleArtist);
-        finalRecommended.push(recommendation);
+        if (!recommendationAllowed(recommendation, get()) || avoided.some(t => sameRecommendationRecording(t, recommendation))
+          || finalRecommended.some(t => sameRecommendationRecording(t, recommendation))) continue;
+        finalRecommended.push({ ...recommendation, is_autoplay: true });
       }
 
       const needed = Math.max(0, 10 - existingAutoplay.length);
@@ -1461,7 +1414,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         return;
       }
 
-      if (!get().autoplayEnabled || currentReqSeq !== autoplayReqSeq || playbackSeq !== playbackRequest() || playingPath !== get().currentTrack?.path) {
+      if (!get().autoplayEnabled || get().albumSession || get().stopBoundary || currentReqSeq !== autoplayReqSeq || playbackSeq !== playbackRequest() || playingPath !== get().currentTrack?.path) {
         console.log('[autoplay] Autoplay disabled or stale request superseded, skipping queue update.');
         return;
       }
@@ -1504,11 +1457,23 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => {
     localStorage.setItem('aideo_autoplay_discovery_level', level);
     set({ autoplayDiscoveryLevel: level });
+    autoplayReqSeq++;
+    const queue = filterAutomaticQueue(get(), true);
+    set({ queue });
+    safeSetStorage('aideo_queue', JSON.stringify(queue));
+    void get().syncBackendQueue();
+    if (get().autoplayEnabled && get().currentTrack) void get().triggerAutoplayRadio(get().currentTrack!, false);
   },
 
   setRecommendationEngine: (engine: 'our' | 'youtube' | 'tidal') => {
     localStorage.setItem('aideo_recommendation_engine', engine);
     set({ recommendationEngine: engine });
+    autoplayReqSeq++;
+    const queue = filterAutomaticQueue(get());
+    set({ queue });
+    safeSetStorage('aideo_queue', JSON.stringify(queue));
+    void get().syncBackendQueue();
+    if (get().autoplayEnabled && get().currentTrack) void get().triggerAutoplayRadio(get().currentTrack!, false);
   },
 
   fetchPlaylists: async () => {
@@ -1643,7 +1608,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
   toggleLoveTrack: async (path: string, metadata?: Partial<Track>) => {
     try {
-      const track = (metadata?.source_context ? { path, ...metadata } as Track : null)
+      const track = (metadata?.source_context || metadata?.format ? { ...metadata, path } as Track : null)
         || get().tracks.find(t => pathsEqual(t.path, path))
         || (pathsEqual(get().currentTrack?.path, path) ? get().currentTrack : null)
         || (metadata ? { path, ...metadata } as Track : null);
@@ -1653,7 +1618,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const isLovedNow = (known || track).loved === 1 ? 0 : 1;
       const sameSavedEntry = (candidate: Track) => track.source_context
         ? candidate.source_context?.recording_id === track.source_context.recording_id
-        : !candidate.source_context && pathsEqual(candidate.path, path);
+        : !candidate.source_context && sameRecommendationRecording(track, candidate);
 
       await invoke('toggle_love_track', {
         path,
@@ -1670,9 +1635,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       // Update tracks array in-place
       const updatedTracks = get().tracks.map(t => {
         if (sameSavedEntry(t)) {
-          return { ...t, loved: isLovedNow };
+          return { ...t, loved: isLovedNow, ...(isLovedNow ? { disliked: 0 } : {}) };
         }
-        return t;
+        return isLovedNow && sameRecommendationRecording(track, t) ? { ...t, disliked: 0 } : t;
       });
       if (track.source_context && isLovedNow === 1 && !updatedTracks.some(sameSavedEntry)) updatedTracks.push({ ...track, loved: 1 });
       set({ tracks: updatedTracks });
@@ -1680,14 +1645,15 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       // Update currentTrack in-place if it matches
       const current = get().currentTrack;
       if (current && sameSavedEntry(current)) {
-        set({ currentTrack: { ...current, loved: isLovedNow } });
+        set({ currentTrack: { ...current, loved: isLovedNow, ...(isLovedNow ? { disliked: 0 } : {}) } });
       }
+      else if (current && isLovedNow && sameRecommendationRecording(track, current)) set({ currentTrack: { ...current, disliked: 0 } });
 
       const updatedQueue = get().queue.map(q => {
         if (sameSavedEntry(q)) {
-          return { ...q, loved: isLovedNow };
+          return { ...q, loved: isLovedNow, ...(isLovedNow ? { disliked: 0 } : {}) };
         }
-        return q;
+        return isLovedNow && sameRecommendationRecording(track, q) ? { ...q, disliked: 0 } : q;
       });
       set({ queue: updatedQueue });
 
@@ -1713,6 +1679,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       if (playlist) {
         await get().loadPlaylistTracks(playlist.id);
       }
+      window.dispatchEvent(new Event('recommendation-feedback-updated'));
       return isLovedNow === 1;
     } catch (e) {
       console.error('toggleLoveTrack:', e);
@@ -1720,84 +1687,30 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   },
 
-  toggleDislikeTrack: async (path: string, metadata?: Partial<Track>) => {
-    try {
-      const track = get().tracks.find(t => pathsEqual(t.path, path))
-        || (pathsEqual(get().currentTrack?.path, path) ? get().currentTrack : null)
-        || (metadata ? { path, ...metadata } as Track : null);
-
-      if (!track) return;
-      const isDislikedNow = track.disliked === 1 ? 0 : 1;
-
-      await invoke('toggle_dislike_track', {
-        path,
-        disliked: isDislikedNow === 1,
-        title: track.title || null,
-        artist: track.artist || null,
-        album: track.album || null,
-        duration: track.duration || null,
-        format: track.format || null,
-        coverUrl: track.cover_url || null
+  setRecommendationInterest: async (track: Track, interested: boolean) => {
+    await invoke('set_recommendation_interest', { track, interested, sourceContext: feedbackContext(track), recordingEvidence: track.recording_evidence || null });
+    const matches = (candidate: Track) => sameRecommendationRecording(track, candidate);
+    const update = (candidate: Track) => matches(candidate) ? { ...candidate, disliked: interested ? 0 : 1, loved: interested ? candidate.loved : 0 } : candidate;
+    const saved = get().tracks.map(update);
+    if (!saved.some(matches)) saved.push(update(track));
+    const queue = get().queue.filter(t => interested || !(t.is_autoplay || t.is_generated_mix) || !matches(t)).map(update);
+    set({ tracks: saved, queue, currentTrack: get().currentTrack ? update(get().currentTrack!) : null });
+    safeSetStorage('aideo_queue', JSON.stringify(queue));
+    if (get().sourceQueueManaged || queue.some(t => t.source_context)) await manageSourceQueue(set);
+    else {
+      await chainQueueOperation(async () => {
+        await invoke('clear_queue');
+        if (queue.length) await invoke('add_to_queue_bulk', { paths: queue.map(t => t.path) });
       });
-
-      // Update tracks array in-place
-      const updatedTracks = get().tracks.map(t => {
-        if (pathsEqual(t.path, path)) {
-          return { ...t, disliked: isDislikedNow, loved: isDislikedNow === 1 ? 0 : t.loved };
-        }
-        return t;
-      });
-      set({ tracks: updatedTracks });
-
-      // Update currentTrack in-place if it matches
-      const current = get().currentTrack;
-      if (current && pathsEqual(current.path, path)) {
-        set({ currentTrack: { ...current, disliked: isDislikedNow, loved: isDislikedNow === 1 ? 0 : current.loved } });
-      }
-
-      // If disliking, also remove it from the active queue!
-      if (isDislikedNow === 1) {
-        const currentQueue = get().queue;
-        const matchingIndices: number[] = [];
-        currentQueue.forEach((t, i) => {
-          if (pathsEqual(t.path, path)) {
-            matchingIndices.push(i);
-          }
-        });
-
-        if (matchingIndices.length > 0) {
-          const newQueue = currentQueue.filter(t => !pathsEqual(t.path, path));
-          set({ queue: newQueue });
-          localStorage.setItem('aideo_queue', JSON.stringify(newQueue));
-          
-          for (let i = matchingIndices.length - 1; i >= 0; i--) {
-            await invoke('remove_from_queue', { index: matchingIndices[i] }).catch(console.error);
-          }
-        }
-      }
-
-      const updatedQueue = get().queue.map(q => {
-        if (pathsEqual(q.path, path)) {
-          // If disliking, loved must be 0!
-          return { ...q, disliked: isDislikedNow, loved: isDislikedNow === 1 ? 0 : q.loved };
-        }
-        return q;
-      });
-      set({ queue: updatedQueue });
-
-      await get().fetchPlaylists();
-
-      const playlist = get().currentPlaylist;
-      if (playlist) {
-        await get().loadPlaylistTracks(playlist.id);
-      }
-      
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: isDislikedNow === 1 ? 'Added to disliked tracks' : 'Removed from disliked tracks', type: 'info' } 
-      }));
-    } catch (e) {
-      console.error('toggleDislikeTrack:', e);
     }
+    invalidateRecommendationPreferences();
+  },
+
+  toggleDislikeTrack: async (path: string, metadata?: Partial<Track>) => {
+    const track = get().tracks.find(t => pathsEqual(t.path, path))
+      || (pathsEqual(get().currentTrack?.path, path) ? get().currentTrack : null)
+      || (metadata ? { ...metadata, path } as Track : null);
+    if (track) await get().setRecommendationInterest(track, track.disliked === 1);
   },
 
   resetDislikedTracks: async () => {
@@ -1861,7 +1774,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
   },
 
-  generateSmartMix: async (mood: string, trendSource: string) => {
+  generateSmartMix: async (mood: string, _trendSource: string) => {
+    const generation = ++mixRequestSequence;
+    const startingPlayback = playbackRequest();
+    const requested = get();
+    const current = () => generation === mixRequestSequence && startingPlayback === playbackRequest()
+      && requested.appMode === get().appMode && requested.recommendationEngine === get().recommendationEngine
+      && requested.autoplayDiscoveryLevel === get().autoplayDiscoveryLevel && requested.tracks === get().tracks;
+
     const tracks = get().tracks;
     if (tracks.length === 0) {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Your library is empty. Add a music folder first.', type: 'warning' } }));
@@ -1869,95 +1789,19 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     }
 
     try {
-      // 1. Define Mood Keywords
-      let keywords: string[] = [];
-      const moodLower = mood.toLowerCase();
-      if (moodLower === 'energetic') {
-        keywords = ['rock', 'dance', 'metal', 'energy', 'upbeat', 'electronic', 'gym', 'fast', 'hype', 'hard', 'heavy', 'loud', 'synthwave', 'run', 'workout'];
-      } else if (moodLower === 'chill') {
-        keywords = ['chill', 'relax', 'acoustic', 'slow', 'ambient', 'lofi', 'lo-fi', 'sleep', 'jazz', 'folk', 'cozy', 'soft', 'calm', 'smooth'];
-      } else if (moodLower === 'focus') {
-        keywords = ['focus', 'study', 'coding', 'instrument', 'classical', 'piano', 'ambient', 'synth', 'study', 'instrumental', 'post-rock'];
-      } else if (moodLower === 'melancholic') {
-        keywords = ['sad', 'blue', 'rain', 'dark', 'tear', 'cry', 'slow', 'emotional', 'acoustic', 'autumn', 'cold', 'lost', 'memory', 'melancholic'];
-      } else if (moodLower === 'happy') {
-        keywords = ['happy', 'joy', 'sun', 'summer', 'pop', 'fun', 'disco', 'bright', 'smile', 'positive', 'feel-good', 'celebrate'];
+      const selectedMix = await rankRecommendations(requested, tracks, 'mood', { mood, limit: 20, generation });
+      if (!current()) return;
+      if (selectedMix.length === 0) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'No tracks have enough evidence for this mood yet.', type: 'info' } }));
+        return;
       }
 
-      // 2. Score tracks based on mood keywords
-      let moodTracks = tracks.filter(t => {
-        const title = (t.title || '').toLowerCase();
-        const artist = (t.artist || '').toLowerCase();
-        const album = (t.album || '').toLowerCase();
-        return keywords.some(k => title.includes(k) || artist.includes(k) || album.includes(k));
-      });
-
-      // Fallback if mood matches are thin
-      if (moodTracks.length < 5) {
-        moodTracks = [...tracks];
-      }
-
-      // 3. Re-rank based on seed/trend source
-      let sortedTracks = [...moodTracks];
-      const sourceLower = trendSource.toLowerCase();
-
-      if (sourceLower.includes('history')) {
-        // Library Play Counts
-        const counts = get().playCounts;
-        sortedTracks.sort((a, b) => (counts[b.path] || 0) - (counts[a.path] || 0));
-      } else if (sourceLower.includes('last.fm')) {
-        // Last.fm Top Artists scrobble trends
-        const lfmArtists = (get().lastfmTopArtists || []).map((a: any) => (a.name || '').toLowerCase());
-        if (lfmArtists.length > 0) {
-          sortedTracks.sort((a, b) => {
-            const aArtist = (a.artist || '').toLowerCase();
-            const bArtist = (b.artist || '').toLowerCase();
-            const aMatches = lfmArtists.some((la: string) => aArtist.includes(la) || la.includes(aArtist));
-            const bMatches = lfmArtists.some((la: string) => bArtist.includes(la) || la.includes(bArtist));
-            return (bMatches ? 1 : 0) - (aMatches ? 1 : 0);
-          });
-        }
-      } else if (sourceLower.includes('listenbrainz')) {
-        // ListenBrainz Recent Scrobbles scrobble trends
-        const lbListens = (get().listenbrainzRecent || []).map((l: any) => {
-          const meta = l.track_metadata;
-          return (meta?.artist_name || '').toLowerCase();
-        });
-        if (lbListens.length > 0) {
-          sortedTracks.sort((a, b) => {
-            const aArtist = (a.artist || '').toLowerCase();
-            const bArtist = (b.artist || '').toLowerCase();
-            const aMatches = lbListens.some((lb: string) => aArtist.includes(lb) || lb.includes(aArtist));
-            const bMatches = lbListens.some((lb: string) => bArtist.includes(lb) || lb.includes(bArtist));
-            return (bMatches ? 1 : 0) - (aMatches ? 1 : 0);
-          });
-        }
-      }
-
-      // Select top 20 tracks for our smart mix
-      const selectedMix = sortedTracks.slice(0, 20);
-      if (selectedMix.length === 0) return;
-
-      // 4. Create/Sync a local playlist named "AI Smart Mix - [Mood]"
       const playlistName = `AI Smart Mix - ${mood}`;
-      await get().fetchPlaylists();
-      const existingPlaylist = get().playlists.find(p => p.name === playlistName);
-      if (existingPlaylist) {
-        await invoke('delete_playlist', { id: existingPlaylist.id });
-      }
-      await invoke('create_playlist', { name: playlistName });
+      await invoke('save_generated_playlist', { name: playlistName, paths: selectedMix.map(track => track.path) });
       await get().fetchPlaylists();
 
-      // Find the playlist ID
-      const targetPlaylist = get().playlists.find(p => p.name === playlistName);
-      if (targetPlaylist) {
-        for (const t of selectedMix) {
-          await invoke('add_to_playlist', { playlistId: targetPlaylist.id, path: t.path });
-        }
-      }
-
-      // 5. Play first track and queue the rest
-      const upcoming = selectedMix.slice(1);
+      if (!current()) return;
+      const upcoming = selectedMix.slice(1).map(t => ({ ...t, is_generated_mix: true }));
       set({ queue: upcoming });
       localStorage.setItem('aideo_queue', JSON.stringify(upcoming));
 
@@ -1969,10 +1813,12 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
 
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Generated dynamic offline AI mix: "${playlistName}"`, type: 'success' } }));
       
-      await get().playTrack(selectedMix[0]);
+      if (!current()) return;
+      await get().playTrack(selectedMix[0], false, false);
       get().setView('nowplaying');
     } catch (err) {
       console.error('generateSmartMix:', err);
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Could not generate mix: ${String(err)}`, type: 'error' } }));
     }
   },
 
@@ -2016,76 +1862,29 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   playDynamicMix: async (mixType: 'supermix' | 'recap' | 'discovery' | 'chill') => {
+    const generation = ++mixRequestSequence;
+    const startingPlayback = playbackRequest();
+    const requested = get();
+    const current = () => generation === mixRequestSequence && startingPlayback === playbackRequest()
+      && requested.appMode === get().appMode && requested.recommendationEngine === get().recommendationEngine
+      && requested.autoplayDiscoveryLevel === get().autoplayDiscoveryLevel && requested.tracks === get().tracks;
+
     const tracks = get().tracks;
     if (tracks.length === 0) {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Your library is empty. Add a music folder first.', type: 'warning' } }));
       return;
     }
 
-    const counts = get().playCounts;
-    let selectedTracks: Track[] = [];
-
-    if (mixType === 'recap') {
-      // Top played tracks descending
-      selectedTracks = [...tracks]
-        .filter(t => (counts[t.path] || 0) > 0)
-        .sort((a, b) => (counts[b.path] || 0) - (counts[a.path] || 0))
-        .slice(0, 20);
-      
-      // Fallback if no songs played yet, pick random
-      if (selectedTracks.length === 0) {
-        selectedTracks = [...tracks].sort(() => 0.5 - Math.random()).slice(0, 20);
-      }
-    } else if (mixType === 'supermix') {
-      // Top 10 + 15 random other tracks from the library
-      const topTracks = [...tracks]
-        .filter(t => (counts[t.path] || 0) > 0)
-        .sort((a, b) => (counts[b.path] || 0) - (counts[a.path] || 0))
-        .slice(0, 10);
-      
-      const rest = tracks.filter(t => !topTracks.some(tt => tt.path === t.path));
-      const randomRest = [...rest].sort(() => 0.5 - Math.random()).slice(0, 15);
-      selectedTracks = [...topTracks, ...randomRest];
-      
-      if (selectedTracks.length === 0) {
-        selectedTracks = [...tracks].sort(() => 0.5 - Math.random()).slice(0, 25);
-      }
-    } else if (mixType === 'discovery') {
-      // Never or least played tracks
-      const unplayed = tracks.filter(t => (counts[t.path] || 0) === 0);
-      if (unplayed.length > 0) {
-        selectedTracks = [...unplayed].sort(() => 0.5 - Math.random()).slice(0, 20);
-      } else {
-        selectedTracks = [...tracks]
-          .sort((a, b) => (counts[a.path] || 0) - (counts[b.path] || 0))
-          .slice(0, 20);
-      }
-    } else if (mixType === 'chill') {
-      const hrs = new Date().getHours();
-      let keywords: string[] = [];
-      if (hrs >= 5 && hrs < 12) {
-        keywords = ['upbeat', 'energy', 'morning', 'sunrise', 'wake', 'start', 'pop', 'dance', 'bright', 'sun', 'happy'];
-      } else if (hrs >= 12 && hrs < 17) {
-        keywords = ['focus', 'study', 'work', 'productive', 'beats', 'flow', 'ambient', 'instrumental', 'jazz', 'coding', 'lofi', 'lo-fi', 'classical'];
-      } else {
-        keywords = ['chill', 'relax', 'acoustic', 'sleep', 'night', 'dark', 'slow', 'blues', 'moon', 'dream', 'unwind', 'mood'];
-      }
-
-      let matches = tracks.filter(t => {
-        const title = (t.title || '').toLowerCase();
-        const artist = (t.artist || '').toLowerCase();
-        return keywords.some(k => title.includes(k) || artist.includes(k));
-      });
-      
-      if (matches.length < 5) {
-        matches = tracks;
-      }
-      selectedTracks = [...matches].sort(() => 0.5 - Math.random()).slice(0, 20);
-    }
+    const hour = new Date().getHours();
+    const mood = hour >= 5 && hour < 12 ? 'energetic' : hour < 17 ? 'focus' : 'chill';
+    const selectedTracks = await rankRecommendations(requested, tracks,
+      mixType === 'chill' ? 'mood' : mixType,
+      { mood: mixType === 'chill' ? mood : undefined, limit: mixType === 'supermix' ? 25 : 20, generation });
+    if (!current()) return;
 
     if (selectedTracks.length === 0) return;
 
-    const upcomingTracks = selectedTracks.slice(1);
+    const upcomingTracks = selectedTracks.slice(1).map(t => ({ ...t, is_generated_mix: true }));
     set({ queue: upcomingTracks });
     localStorage.setItem('aideo_queue', JSON.stringify(upcomingTracks));
     
@@ -2099,7 +1898,8 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       console.error('Failed to sync dynamic mix queue to backend:', e);
     }
     
-    await get().playTrack(selectedTracks[0]);
+    if (!current()) return;
+    await get().playTrack(selectedTracks[0], false, false);
 
     let mixName = 'Chill Mix';
     if (mixType === 'supermix') mixName = 'Library Mix';

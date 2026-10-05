@@ -3,6 +3,10 @@ import { invoke } from '@tauri-apps/api/core';
 import type { PlayerState } from '../store/types';
 
 export async function syncToCloud(get: () => PlayerState, set: (state: Partial<PlayerState>) => void): Promise<void> {
+  if (localStorage.getItem('aideo_local_restore_sync')) {
+    get().setPlaybackError('Local backup restored data is awaiting review. Resume cloud sync from Local backup settings.');
+    return;
+  }
   const supabase = getSupabaseClient() as any;
   if (!supabase) return;
 
@@ -197,6 +201,10 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
   settings?: boolean;
   playCounts?: boolean;
 }): Promise<void> {
+  if (localStorage.getItem('aideo_local_restore_sync')) {
+    get().setPlaybackError('Local backup restored data is awaiting review. Resume cloud sync from Local backup settings.');
+    return;
+  }
   const supabase = getSupabaseClient() as any;
   if (!supabase) return;
 

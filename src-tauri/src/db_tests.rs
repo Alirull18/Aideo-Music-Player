@@ -3,6 +3,33 @@ mod tests {
     use crate::db::{column_exists, init_db, init_db_pool};
 
     #[test]
+    fn generated_playlist_reuses_identity_and_failed_insert_preserves_old_entries() {
+        let mut conn=init_db(":memory:").unwrap();
+        let directory=std::env::temp_dir().join("aideo-generated-playlist-fixture");std::fs::create_dir_all(&directory).unwrap();
+        let paths=["old.flac","new.flac"].map(|name| {let path=directory.join(name);std::fs::write(&path,b"fixture").unwrap();path.to_string_lossy().into_owned()});
+        for path in &paths {conn.execute("INSERT INTO tracks(path,format) VALUES (?1,'FLAC')",[path]).unwrap();}
+        let first=crate::db::save_generated_playlist(&mut conn,"Generated mix",&paths[..1]).unwrap();
+        conn.execute_batch("CREATE TRIGGER fail_generated_insert BEFORE INSERT ON playlist_tracks BEGIN SELECT RAISE(FAIL,'forced insert failure'); END;").unwrap();
+        assert!(crate::db::save_generated_playlist(&mut conn,"Generated mix",&paths[1..]).is_err());
+        assert_eq!(crate::db::get_playlist_entries(&conn,first).unwrap()[0].track.path,paths[0]);
+        conn.execute_batch("DROP TRIGGER fail_generated_insert").unwrap();
+        assert_eq!(crate::db::save_generated_playlist(&mut conn,"Generated mix",&paths[1..]).unwrap(),first);
+        assert_eq!(crate::db::get_playlist_entries(&conn,first).unwrap()[0].track.path,paths[1]);
+        assert!(crate::db::save_generated_playlist(&mut conn,"Generated mix",&[]).is_err());
+        assert!(crate::db::save_generated_playlist(&mut conn,"Generated mix",&["tidal:123".into()]).is_err());
+        assert_eq!(crate::db::get_playlist_entries(&conn,first).unwrap()[0].track.path,paths[1]);
+    }
+
+    #[test]
+    fn recommendation_history_does_not_upgrade_legacy_starts() {
+        let conn = init_db(":memory:").unwrap();
+        conn.execute("INSERT INTO playback_history(track_path,timestamp) VALUES ('old',1)", []).unwrap();
+        let evidence: (f64, String) = conn.query_row("SELECT listened_seconds,signal_quality FROM playback_history", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!(evidence, (0.0, "legacy".into()));
+        assert!(column_exists(&conn, "recommendation_aliases", "recording_id"));
+    }
+
+    #[test]
     fn test_init_db_in_memory() {
         let conn = init_db(":memory:").expect("In-memory SQLite database should initialize cleanly");
         

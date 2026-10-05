@@ -111,6 +111,7 @@ pub fn analyze_audio_file(path: &str) -> Result<(String, f64, SonicProfile), Str
     let mut all_mono_samples = Vec::new();
 
     loop {
+        if total_samples_decoded >= limit_samples { break; }
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(symphonia::core::errors::Error::IoError(ref err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
@@ -127,16 +128,15 @@ pub fn analyze_audio_file(path: &str) -> Result<(String, f64, SonicProfile), Str
             Ok(buf) => {
                 let interleaved = audio_buffer_to_interleaved_s16(&buf);
                 if total_samples_decoded < limit_samples {
-                    let _ = fp.feed(&interleaved);
-                    total_samples_decoded += interleaved.len();
+                    let take = interleaved.len().min(limit_samples - total_samples_decoded); let _ = fp.feed(&interleaved[..take]);
+                    total_samples_decoded += take;
                 }
                 
                 // Save mono f32 samples for sonic profiling (cap at first 120 seconds as well)
                 if all_mono_samples.len() < 120 * sample_rate as usize {
-                    all_mono_samples.extend(audio_buffer_to_mono_f32(&buf));
+                    let mono = audio_buffer_to_mono_f32(&buf); let take = mono.len().min(120 * sample_rate as usize - all_mono_samples.len()); all_mono_samples.extend_from_slice(&mono[..take]);
                 }
             }
-            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
             Err(e) => return Err(e.to_string()),
         }
     }
@@ -151,13 +151,24 @@ pub fn analyze_audio_file(path: &str) -> Result<(String, f64, SonicProfile), Str
 }
 
 fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> Result<SonicProfile, String> {
-    if samples.is_empty() || sample_rate == 0 || samples.iter().any(|s| !s.is_finite()) {
+    calculate_profile(samples, sample_rate, true, &|| false)
+}
+
+fn calculate_profile(samples: &[f32], sample_rate: usize, loudness: bool, cancelled: &dyn Fn() -> bool) -> Result<SonicProfile, String> {
+    if samples.is_empty() || sample_rate == 0 {
         return Err("Cannot analyze audio without finite decoded samples and a sample rate".to_string());
     }
 
     // 1. RMS Energy
-    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
-    let rms = (sum_sq / samples.len() as f32).sqrt();
+    let mut sum_sq = 0.0f64;
+    for chunk in samples.chunks(4096) {
+        if cancelled() { return Err("cancelled".into()); }
+        for &sample in chunk {
+            if !sample.is_finite() { return Err("Nonfinite decoded sample".into()); }
+            sum_sq += (sample as f64).powi(2);
+        }
+    }
+    let rms = (sum_sq / samples.len() as f64).sqrt();
     let energy = (rms as f64 * 3.0).clamp(0.0, 1.0); // Simple normalization scaling
 
     // 2. BPM / Tempo (Energy envelope onset detection + Autocorrelation with Parabolic Interpolation)
@@ -165,7 +176,7 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> Result<SonicP
     let block_size = (sample_rate / 50).max(1); // 20ms blocks
     let mut energy_envelope = Vec::new();
     
-    for chunk in samples.chunks(block_size) {
+    for chunk in samples.chunks(block_size) { if cancelled() { return Err("cancelled".into()); }
         let chunk_sum_sq: f32 = chunk.iter().map(|&s| s * s).sum();
         let chunk_rms = (chunk_sum_sq / chunk.len() as f32).sqrt();
         energy_envelope.push(chunk_rms);
@@ -229,53 +240,12 @@ fn calculate_sonic_profile(samples: &[f32], sample_rate: usize) -> Result<SonicP
         120.0
     };
 
-    // 3. Spectral Ratios (Lightweight FFT on a 2048-sample slice in the middle of the track)
-    let mut bass_ratio = 0.33;
-    let mut treble_ratio = 0.33;
-    
-    let fft_size = 2048;
-    if samples.len() > fft_size + 1000 {
-        // Take a slice from the middle of the track
-        let mid_index = samples.len() / 2;
-        let mut fft_buffer: Vec<Complex<f32>> = samples[mid_index..(mid_index + fft_size)]
-            .iter()
-            .map(|&s| Complex::new(s, 0.0))
-            .collect();
-            
-        let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(fft_size);
-        fft.process(&mut fft_buffer);
-
-        let hz_per_bin = sample_rate as f32 / fft_size as f32;
-        
-        let mut bass_sum = 0.0;
-        let mut mid_sum = 0.0;
-        let mut treble_sum = 0.0;
-        
-        // Loop over the positive frequency bins (first half)
-        for i in 0..(fft_size / 2) {
-            let freq = i as f32 * hz_per_bin;
-            let mag = fft_buffer[i].norm();
-            if freq < 250.0 {
-                bass_sum += mag;
-            } else if freq < 4000.0 {
-                mid_sum += mag;
-            } else {
-                treble_sum += mag;
-            }
-        }
-        
-        let total_spectral_sum = bass_sum + mid_sum + treble_sum;
-        if total_spectral_sum > 0.0 {
-            bass_ratio = (bass_sum / total_spectral_sum) as f64;
-            treble_ratio = (treble_sum / total_spectral_sum) as f64;
-        }
-    }
+    let (bass_ratio, treble_ratio) = spectral_ratios(samples, sample_rate, cancelled)?;
 
     // 4. EBU R128 Integrated LUFS & ReplayGain dB Calculation
-    let integrated_lufs = calculate_ebu_r128_lufs(samples, sample_rate);
+    let integrated_lufs = if loudness { calculate_ebu_r128_lufs(samples, sample_rate) } else { -70.0 };
     let lufs_gain_db = (-14.0 - integrated_lufs).clamp(-12.0, 12.0);
-    let waveform = calculate_waveform_peaks(samples, 100);
+    let waveform = if loudness { calculate_waveform_peaks(samples, 100) } else { Vec::new() };
 
     Ok(SonicProfile {
         bpm,
@@ -466,6 +436,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn idle_gate_excludes_local_and_remote_playback() {
+        assert!(analysis_busy(1, false, false));
+        assert!(analysis_busy(0, true, false));
+        assert!(analysis_busy(2, false, true));
+        assert!(!analysis_busy(2, false, false));
+    }
+
+    #[test]
+    fn spectral_profile_aggregates_windows() {
+        let sr = 16000;
+        let samples: Vec<f32> = (0..sr * 4).map(|i| {
+            let frequency = if i < sr * 2 { 100.0 } else { 6000.0 };
+            (2.0 * std::f32::consts::PI * frequency * i as f32 / sr as f32).sin()
+        }).collect();
+        let profile = calculate_sonic_profile(&samples, sr).unwrap();
+        assert!(profile.bass_ratio > 0.2 && profile.treble_ratio > 0.2);
+    }
+
+    #[test]
+    fn recommendation_analysis_cancels_before_opening_file() {
+        assert_eq!(analyze_recommendation("missing.wav", &|| true).unwrap_err(), "cancelled");
+        assert_eq!(calculate_profile(&[0.1; 4096], 8000, false, &|| true).unwrap_err(), "cancelled");
+    }
+
+    #[test]
+    fn recommendation_decode_stops_at_ninety_seconds_without_loudness() {
+        let path = std::env::temp_dir().join(format!("aideo-analysis-{}.wav", std::process::id()));
+        let rate = 8000u32;
+        let frames = rate * 91;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF"); wav.extend_from_slice(&(36 + frames * 2).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt "); wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes()); wav.extend_from_slice(&(rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes()); wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data"); wav.extend_from_slice(&(frames * 2).to_le_bytes());
+        for i in 0..frames { wav.extend_from_slice(&(if i < rate * 90 { 8192i16 } else { 32767i16 }).to_le_bytes()); }
+        std::fs::write(&path, wav).unwrap();
+        let result = analyze_recommendation(path.to_str().unwrap(), &|| false);
+        std::fs::remove_file(path).unwrap();
+        let profile = result.unwrap();
+        assert!((profile.energy - 0.75).abs() < 0.0001);
+        assert_eq!(profile.integrated_lufs, -70.0);
+    }
+
+    #[test]
     fn analyzer_converts_integer_formats_instead_of_silence() {
         use symphonia::core::audio::{AsAudioBufferRef, AudioBuffer, Channels, SignalSpec};
         use symphonia::core::sample::{u24, i24};
@@ -534,4 +550,116 @@ mod tests {
         // Standard K-weighted 1 kHz sine wave at -18 dBFS yields ~ -18.5 to -19.5 LUFS
         assert!(lufs > -22.0 && lufs < -16.0, "Expected LUFS around -19.0, got {:.2}", lufs);
     }
+}
+
+fn spectral_ratios(samples: &[f32], sample_rate: usize, cancelled: &dyn Fn() -> bool) -> Result<(f64, f64), String> {
+    let size = 2048;
+    let fft = FftPlanner::new().plan_fft_forward(size);
+    let mut buffer = vec![Complex::new(0.0f32, 0.0); size];
+    let mut sums = [0.0f64; 3];
+    // ponytail: 64 evenly spaced windows bound FFT work; increase only with measured benefit.
+    let windows = (samples.len() / size).min(64);
+    for window in 0..windows {
+        if cancelled() { return Err("cancelled".into()); }
+        let offset = if windows <= 1 { 0 } else { window * (samples.len() - size) / (windows - 1) };
+        for (i, value) in buffer.iter_mut().enumerate() {
+            let hann = 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (size - 1) as f32).cos();
+            *value = Complex::new(samples[offset + i] * hann, 0.0);
+        }
+        fft.process(&mut buffer);
+        for (i, value) in buffer.iter().enumerate().take(size / 2).skip(1) {
+            let hz = i * sample_rate / size;
+            sums[if hz < 250 { 0 } else if hz < 4000 { 1 } else { 2 }] += value.norm_sqr() as f64;
+        }
+    }
+    let total: f64 = sums.iter().sum();
+    Ok(if total > 0.0 { (sums[0] / total, sums[2] / total) } else { (0.0, 0.0) })
+}
+
+fn analyze_recommendation(path: &str, cancelled: &dyn Fn() -> bool) -> Result<SonicProfile, String> {
+    if cancelled() { return Err("cancelled".into()); }
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hint = Hint::new();
+    if let Some(ext) = std::path::Path::new(path).extension() { hint.with_extension(&ext.to_string_lossy()); }
+    let mut format = get_probe().format(&hint, MediaSourceStream::new(Box::new(file), Default::default()), &FormatOptions::default(), &MetadataOptions::default()).map_err(|e| e.to_string())?.format;
+    let track = format.default_track().ok_or("No audio track")?.clone();
+    let rate = track.codec_params.sample_rate.ok_or("Missing sample rate")? as usize;
+    if rate == 0 || rate > 192000 { return Err("Unsupported sample rate".into()); }
+    let mut decoder = get_codecs().make(&track.codec_params, &Default::default()).map_err(|e| e.to_string())?;
+    let mut samples = Vec::new();
+    let started = std::time::Instant::now();
+    while samples.len() < rate * 90 {
+        if cancelled() { return Err("cancelled".into()); }
+        if started.elapsed() > std::time::Duration::from_secs(30) { return Err("Analysis time limit".into()); }
+        let packet = match format.next_packet() {
+            Ok(packet) => packet,
+            Err(symphonia::core::errors::Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(e.to_string()),
+        };
+        if packet.track_id() != track.id { continue; }
+        let buffer = decoder.decode(&packet).map_err(|e| e.to_string())?;
+        if buffer.spec().rate as usize != rate { return Err("Changing sample rate".into()); }
+        let mono = audio_buffer_to_mono_f32(&buffer);
+        let take = mono.len().min(rate * 90 - samples.len());
+        samples.extend_from_slice(&mono[..take]);
+    }
+    if cancelled() { return Err("cancelled".into()); }
+    calculate_profile(&samples, rate, false, cancelled)
+}
+
+fn file_stamp(path: &str) -> Option<(i64, String)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || !std::path::Path::new(path).is_absolute() { return None; }
+    Some((i64::try_from(metadata.len()).ok()?, format!("{:?}", metadata.modified().ok()?)))
+}
+
+fn analysis_busy(local: u8, chromecast: bool, upnp: bool) -> bool {
+    local == 1 || chromecast || upnp
+}
+
+pub fn start_idle_analysis(state: crate::AppState) {
+    let status = match state.player.lock() { Ok(player) => player.status.clone(), Err(_) => return };
+    let _ = std::thread::Builder::new().name("idle-audio-analysis".into()).spawn(move || {
+        use std::sync::atomic::Ordering;
+        use std::time::{Duration, Instant};
+        let cancelled = || analysis_busy(status.load(Ordering::Acquire), crate::chromecast::analysis_playback_active(), crate::upnp::analysis_playback_active());
+        let mut idle_since = Instant::now();
+        let mut after_path = String::new();
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            if cancelled() { idle_since = Instant::now(); continue; }
+            if idle_since.elapsed() < Duration::from_secs(30) { continue; }
+            let candidates = (|| -> rusqlite::Result<Vec<String>> {
+                let db = state.db.lock().map_err(|_| rusqlite::Error::InvalidQuery)?;
+                db.execute_batch("CREATE TABLE IF NOT EXISTS audio_analysis (path TEXT PRIMARY KEY, file_size INTEGER NOT NULL, mtime TEXT NOT NULL, version INTEGER NOT NULL, succeeded INTEGER NOT NULL)")?;
+                let mut query = db.prepare("SELECT path FROM tracks WHERE path > ?1 ORDER BY path LIMIT 32")?;
+                let paths = query.query_map([&after_path], |row| row.get(0))?.collect();
+                paths
+            })();
+            let Ok(paths) = candidates else { continue; };
+            if paths.is_empty() { after_path.clear(); continue; }
+            for path in paths {
+                if cancelled() { idle_since = Instant::now(); break; }
+                let Some(stamp) = file_stamp(&path) else { after_path = path; continue; };
+                let fresh = state.db.lock().ok().and_then(|db| db.query_row("SELECT EXISTS(SELECT 1 FROM audio_analysis WHERE path=?1 AND file_size=?2 AND mtime=?3 AND version=1)", rusqlite::params![path, stamp.0, stamp.1], |row| row.get::<_, bool>(0)).ok()).unwrap_or(false);
+                if fresh { after_path = path; continue; }
+                let result = analyze_recommendation(&path, &cancelled);
+                if cancelled() || result.as_ref().err().is_some_and(|error| error == "cancelled") { idle_since = Instant::now(); break; }
+                if file_stamp(&path).as_ref() != Some(&stamp) { after_path = path; continue; }
+                let Ok(mut db) = state.db.lock() else { break; };
+                if cancelled() { idle_since = Instant::now(); break; }
+                let Ok(tx) = db.transaction() else { break; };
+                let stored = (|| -> rusqlite::Result<()> {
+                    if cancelled() { return Err(rusqlite::Error::InvalidQuery); }
+                    if let Ok(profile) = &result {
+                        crate::db::update_track_sonic_profile(&tx, &path, profile.bpm, profile.energy, profile.bass_ratio, profile.treble_ratio, None)?;
+                    }
+                    tx.execute("INSERT INTO audio_analysis(path,file_size,mtime,version,succeeded) VALUES(?1,?2,?3,1,?4) ON CONFLICT(path) DO UPDATE SET file_size=excluded.file_size,mtime=excluded.mtime,version=excluded.version,succeeded=excluded.succeeded", rusqlite::params![path, stamp.0, stamp.1, result.is_ok()])?;
+                    Ok(())
+                })();
+                if stored.is_ok() && !cancelled() && file_stamp(&path).as_ref() == Some(&stamp) { let _ = tx.commit(); }
+                after_path = path;
+            }
+        }
+    });
 }

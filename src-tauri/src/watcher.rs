@@ -128,6 +128,7 @@ fn debouncer_loop(
 }
 
 fn rescan_and_notify(app_handle: &AppHandle, watched_dirs: &[String]) {
+    let Ok(_activity) = crate::library_health::begin_library_activity() else { return; };
     println!("[watcher] FS change detected. Running debounced rescan on {:?}...", watched_dirs);
     let mut all_tracks = Vec::new();
     for dir in watched_dirs {

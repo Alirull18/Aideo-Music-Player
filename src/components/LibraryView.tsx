@@ -1,5 +1,7 @@
 import { manageSourceQueue } from '../store/sourcePlayback';
 import { SourceMenu } from './SourceMenu';
+import { LibraryHealthPanel } from './LibraryHealthPanel';
+import { useDownloadStore } from '../store/downloadStore';
 import { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../store';
@@ -294,6 +296,9 @@ function TrackActionMenu({
           }}
         />
         <div className="track-action-menu" style={menuStyle} onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="track-action-menu-item" onClick={() => { onClose(); useDownloadStore.getState().open(vt); }}>
+            <span className="menu-item-icon"><DownloadCloud size={15} /></span><span>Download Song</span>
+          </button>
           <button
             type="button"
             className="track-action-menu-item"
@@ -344,6 +349,9 @@ function TrackActionMenu({
         }}
       />
       <div className="track-action-menu" style={menuStyle} onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="track-action-menu-item" onClick={() => { onClose(); useDownloadStore.getState().open(track); }}>
+          <span className="menu-item-icon"><DownloadCloud size={15} /></span><span>Download Song</span>
+        </button>
         <button
           type="button"
           className="track-action-menu-item"
@@ -886,6 +894,13 @@ const CloudTrackRow = memo(({
 });
 
 export function LibraryView() {
+  const healthDetails = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const show = () => { if (healthDetails.current) { healthDetails.current.open = true; healthDetails.current.querySelector('summary')?.focus(); } };
+    if (useStore.getState().playbackRecovery?.action === 'library') show();
+    window.addEventListener('open-library-health', show);
+    return () => window.removeEventListener('open-library-health', show);
+  }, []);
   const { 
     view, tracks, currentTrackPath, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
     reorderPlaylistTracks,
@@ -1524,6 +1539,12 @@ export function LibraryView() {
           <h1 className="library-title" style={{ marginBottom: 4 }}>
             {currentPlaylist ? currentPlaylist.name : (isLovedStreamsView ? 'Loved Streams' : (viewMode === 'albums' ? 'Albums' : 'Music Library'))}
           </h1>
+          {!currentPlaylist && !isCloudTab && !isLovedStreamsView && (
+            <details ref={healthDetails} style={{ marginTop: 12 }}>
+              <summary style={{ cursor: 'pointer', padding: '8px 0', color: 'var(--text)' }}>Library health</summary>
+              <LibraryHealthPanel />
+            </details>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>
               {viewMode === 'albums' ? (

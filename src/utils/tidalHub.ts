@@ -1,6 +1,6 @@
-import { DiscoveryHubData, YoutubeTrack } from '../store/types';
+import { DiscoveryHubData, YoutubeTrack, RecordingEvidence } from '../store/types';
 
-export const TIDAL_SOURCE_LABEL = 'Tidal HiFi';
+export const TIDAL_SOURCE_LABEL = 'Tidal related recordings';
 const DEFAULT_MAX_BLEND = 8;
 
 /** Hybrid card shape: YoutubeTrack display fields + Tidal playback fields
@@ -10,6 +10,7 @@ export interface TidalHubTrack extends YoutubeTrack {
   format: 'Tidal FLAC';
   album?: string;
   duration?: number;
+  recording_evidence?: RecordingEvidence;
 }
 
 interface RawTidalResult {
@@ -20,6 +21,7 @@ interface RawTidalResult {
   duration?: number;
   cover_url?: string;
   quality?: string;
+  recording_evidence?: RecordingEvidence;
 }
 
 const formatDuration = (secs?: number): string => {
@@ -47,6 +49,7 @@ export function tidalResultsToHubTracks(results: RawTidalResult[]): TidalHubTrac
         path: String(t.id),
         format: 'Tidal FLAC',
         album: t.album,
+        recording_evidence: t.recording_evidence,
         recommendation_source: TIDAL_SOURCE_LABEL,
       };
     });

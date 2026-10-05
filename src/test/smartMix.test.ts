@@ -13,6 +13,9 @@ describe('AI Smart Mix Generator Duplicate Handling & Synchronization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useStore.setState({
+      appMode: 'local',
+      recommendationEngine: 'our',
+      autoplayEnabled: false,
       tracks: [...mockTracks],
       playlists: [],
       queue: [],
@@ -24,78 +27,52 @@ describe('AI Smart Mix Generator Duplicate Handling & Synchronization', () => {
     });
   });
 
-  it('deletes existing playlist with identical mood name before creating new one', async () => {
-    const existingPlaylistId = 77;
-    const mood = 'energetic';
-    const playlistName = `AI Smart Mix - ${mood}`;
-
-    let storedPlaylists = [{ id: existingPlaylistId, name: playlistName }];
-
-    // Mock invoke behavior
-    (invoke as any).mockImplementation((cmd: string, args?: any) => {
-      if (cmd === 'get_playlists') {
-        return Promise.resolve(storedPlaylists);
-      }
-      if (cmd === 'delete_playlist') {
-        storedPlaylists = storedPlaylists.filter((p) => p.id !== args.id);
-        return Promise.resolve(null);
-      }
-      if (cmd === 'create_playlist') {
-        const newId = 88;
-        storedPlaylists = [...storedPlaylists, { id: newId, name: args.name }];
-        return Promise.resolve(newId);
-      }
-      return Promise.resolve(null);
+  it('saves an existing generated playlist atomically and retains its ID', async () => {
+    const playlistName = 'AI Smart Mix - energetic';
+    const storedPlaylists = [{ id: 77, name: playlistName }];
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
+      if (cmd === 'get_recommendations') return { tracks: mockTracks, generation: args.request.generation, reasons: {} };
+      if (cmd === 'save_generated_playlist') return 77;
+      if (cmd === 'get_playlists') return storedPlaylists;
+      return null;
     });
-
-    const { generateSmartMix } = useStore.getState();
-    await generateSmartMix(mood, 'history');
-
-    // 1. Verify delete_playlist was called for the existing playlist ID before creating
-    expect(invoke).toHaveBeenCalledWith('delete_playlist', { id: existingPlaylistId });
-
-    // 2. Verify create_playlist was called with the target playlist name
-    expect(invoke).toHaveBeenCalledWith('create_playlist', { name: playlistName });
-
-    // 3. Verify add_to_playlist was called with the recreated playlist ID (88)
-    expect(invoke).toHaveBeenCalledWith('add_to_playlist', expect.objectContaining({
-      playlistId: 88,
-    }));
-
-    // 4. Verify view is switched to nowplaying
+    await useStore.getState().generateSmartMix('energetic', 'history');
+    expect(invoke).toHaveBeenCalledWith('save_generated_playlist', { name: playlistName, paths: mockTracks.map(t => t.path) });
+    expect(invoke).not.toHaveBeenCalledWith('delete_playlist', expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith('create_playlist', expect.anything());
+    expect(useStore.getState().playlists).toEqual(storedPlaylists);
     expect(useStore.getState().view).toBe('nowplaying');
   });
 
-  it('creates and populates new playlist cleanly when no prior playlist exists', async () => {
-    const mood = 'chill';
-    const playlistName = `AI Smart Mix - ${mood}`;
-    let storedPlaylists: { id: number; name: string }[] = [];
-
-    (invoke as any).mockImplementation((cmd: string, args?: any) => {
-      if (cmd === 'get_playlists') {
-        return Promise.resolve(storedPlaylists);
-      }
-      if (cmd === 'create_playlist') {
-        const newId = 99;
-        storedPlaylists = [{ id: newId, name: args.name }];
-        return Promise.resolve(newId);
-      }
-      return Promise.resolve(null);
+  it('saves a new generated playlist in one backend call', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
+      if (cmd === 'get_recommendations') return { tracks: mockTracks, generation: args.request.generation, reasons: {} };
+      if (cmd === 'save_generated_playlist') return 99;
+      if (cmd === 'get_playlists') return [{ id: 99, name: 'AI Smart Mix - chill' }];
+      return null;
     });
+    await useStore.getState().generateSmartMix('chill', 'history');
+    expect(invoke).toHaveBeenCalledWith('save_generated_playlist', { name: 'AI Smart Mix - chill', paths: mockTracks.map(t => t.path) });
+    expect(invoke).not.toHaveBeenCalledWith('add_to_playlist', expect.anything());
+  });
 
-    const { generateSmartMix } = useStore.getState();
-    await generateSmartMix(mood, 'history');
-
-    // 1. Verify delete_playlist was NOT called
+  it('preserves the old playlist, queue and playback when atomic saving fails', async () => {
+    const playlists = [{ id: 77, name: 'AI Smart Mix - energetic' }];
+    const queue = [mockTracks[1]];
+    const currentTrack = mockTracks[2];
+    useStore.setState({ playlists, queue, currentTrack });
+    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
+      if (cmd === 'get_recommendations') return { tracks: mockTracks, generation: args.request.generation, reasons: {} };
+      if (cmd === 'save_generated_playlist') throw new Error('Database write failed');
+      return null;
+    });
+    await useStore.getState().generateSmartMix('energetic', 'history');
+    expect(useStore.getState().playlists).toEqual(playlists);
+    expect(useStore.getState().queue).toEqual(queue);
+    expect(useStore.getState().currentTrack).toEqual(currentTrack);
+    expect(invoke).not.toHaveBeenCalledWith('clear_queue');
+    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
     expect(invoke).not.toHaveBeenCalledWith('delete_playlist', expect.anything());
-
-    // 2. Verify create_playlist was called
-    expect(invoke).toHaveBeenCalledWith('create_playlist', { name: playlistName });
-
-    // 3. Verify add_to_playlist was called with new playlist ID
-    expect(invoke).toHaveBeenCalledWith('add_to_playlist', expect.objectContaining({
-      playlistId: 99,
-    }));
   });
 
   it('handles empty library safely with toast notification', async () => {
@@ -106,7 +83,7 @@ describe('AI Smart Mix Generator Duplicate Handling & Synchronization', () => {
     const { generateSmartMix } = useStore.getState();
     await generateSmartMix('focus', 'history');
 
-    expect(invoke).not.toHaveBeenCalledWith('create_playlist', expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith('save_generated_playlist', expect.anything());
     expect(toastSpy).toHaveBeenCalled();
     window.removeEventListener('ui-toast', toastSpy);
   });

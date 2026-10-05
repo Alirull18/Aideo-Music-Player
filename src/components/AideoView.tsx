@@ -21,6 +21,12 @@ import { catalogTrack, groupRecordings, searchSources, extractPrimaryArtist, typ
 import { SongSources } from './aideo/HomeParts';
 import { discoveryTrack, unifyDiscoveryHub } from '../utils/discoveryFeed';
 import { TrackContextMenu } from './TrackContextMenu';
+import { LatestHubRequest, hubContext, hubTrack, filterRecommendationHub, rankRecommendationHub } from '../utils/recommendationHub';
+import { sameRecommendationRecording, recommendationSourceKey } from '../utils/recommendations';
+import { bounded } from '../utils/unifiedSources';
+import type { DiscoveryHubData } from '../store/types';
+
+let rankedHubCache: { context: string; time: number; data: DiscoveryHubData } | undefined;
 
 // Format track duration
 function fmt(s: number | null) {
@@ -420,6 +426,8 @@ export function AideoView() {
     setActiveDiscoveryTab,
     addToQueue,
     triggerAutoplayRadio,
+    recommendationEngine,
+    autoplayDiscoveryLevel,
     appMode,
     resumePosition,
     resumeLastSession,
@@ -466,6 +474,8 @@ export function AideoView() {
     setActiveDiscoveryTab: s.setActiveDiscoveryTab,
     addToQueue: s.addToQueue,
     triggerAutoplayRadio: s.triggerAutoplayRadio,
+    recommendationEngine: s.recommendationEngine,
+    autoplayDiscoveryLevel: s.autoplayDiscoveryLevel,
     appMode: s.appMode,
     resumePosition: s.resumePosition,
     resumeLastSession: s.resumeLastSession,
@@ -492,14 +502,17 @@ export function AideoView() {
     downloadBatchPlaylist: s.downloadBatchPlaylist,
   })));
 
+  const [recommendationRevision, setRecommendationRevision] = useState(0);
+  const recommendationRevisionRef = useRef(0);
   const discoveryData = useMemo(() => {
-    return unifyDiscoveryHub(rawDiscoveryData, tracks) || rawDiscoveryData;
-  }, [rawDiscoveryData, tracks]);
+    const unified = rawDiscoveryData?.recommendations.some(track => track.source_context)
+      ? rawDiscoveryData : unifyDiscoveryHub(rawDiscoveryData, tracks) || rawDiscoveryData;
+    return unified ? filterRecommendationHub(unified, useStore.getState()) : null;
+  }, [rawDiscoveryData, tracks, appMode, recommendationEngine, recommendationRevision]);
 
   const [greeting, setGreeting] = useState('Good morning');
-  const isFetchingRef = useRef(false);
-  const tidalHubPoolRef = useRef<any[]>([]);
-  const tidalRefreshCountRef = useRef(0);
+  const requestsRef = useRef(new LatestHubRequest());
+  const tidalHubPoolRef = useRef<{ context: string; tracks: any[] }>({ context: '', tracks: [] });
   const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
@@ -890,226 +903,89 @@ export function AideoView() {
   }, []);
 
   const fetchRecommendations = async (forceRefresh = false) => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
+    const context = () => hubContext(useStore.getState(), recommendationRevisionRef.current);
+    const request = requestsRef.current.begin(context());
+    const current = () => requestsRef.current.current(request, context());
+    const state = useStore.getState();
     setIsRefreshingRecs(true);
     setIsLoadingRecs(true);
     setVisibleRecsCount(15);
-
     if (forceRefresh) {
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Refreshing recommendations...', type: 'info' } }));
-    } else {
-      // Load cached discovery hub data first (offline-first instant load)
-      try {
-        const cached = await invoke<any>('get_cached_discovery_hub');
-        if (cached) {
-          const isLocalMode = useStore.getState().appMode === 'local';
-          if (isLocalMode) {
-            const isLocalTrack = (t: any) => t && (!t.url || (!t.url.startsWith('http://') && !t.url.startsWith('https://')));
-            cached.recommendations = (cached.recommendations || []).filter(isLocalTrack);
-            cached.global_charts = (cached.global_charts || []).filter(isLocalTrack);
-            cached.recently_played = (cached.recently_played || []).filter(isLocalTrack);
-            cached.heavy_rotation = (cached.heavy_rotation || []).filter(isLocalTrack);
-            cached.forgotten_gems = (cached.forgotten_gems || []).filter(isLocalTrack);
-          }
-          setDiscoveryData(cached);
-          setIsLoadingRecs(false);
-          setActiveDiscoveryTab('all');
-        }
-      } catch (e) {
-        console.warn('Failed to load cached discovery hub:', e);
-      }
-    }
-
-    try {
-      // 1. Fetch freshest state directly from store to prevent React closure/stale-state bugs
-      let currentStore = useStore.getState();
-      const currentTracks = currentStore.tracks;
-      const currentPlayCounts = currentStore.playCounts;
-      const isLfmConnected = !!currentStore.lastfmSessionKey;
-      const isLbConnected = !!currentStore.listenbrainzToken;
-      const discoveryLevel = currentStore.autoplayDiscoveryLevel;
-
-      // A. Load ListenBrainz collaborative filtering recommendations if connected
-      if (isLbConnected && (!currentStore.listenbrainzRecs || currentStore.listenbrainzRecs.length === 0)) {
-        try {
-          await Promise.race([
-            currentStore.fetchListenbrainzDashboard(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('LB timeout')), 2000))
-          ]);
-        } catch (e) {
-          console.warn('ListenBrainz dashboard timed out or failed:', e);
-        }
-      }
-
-      // B. Load Last.fm personalized top artists if connected
-      if (isLfmConnected && (!currentStore.lastfmTopArtists || currentStore.lastfmTopArtists.length === 0)) {
-        try {
-          await Promise.race([
-            currentStore.fetchLastfmDashboard(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('LFM timeout')), 2000))
-          ]);
-        } catch (e) {
-          console.warn('Last.fm dashboard timed out or failed:', e);
-        }
-      }
-
-      // Refresh store state after potential background fetches
-      currentStore = useStore.getState();
-
-      // --- Find seed artists from offline library play history or frequencies ---
-      let offlineSeedArtists: string[] = [];
-      const artistPlayCounts: Record<string, number> = {};
-      currentTracks.forEach(track => {
-        if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio' && track.artist !== 'Web Audio Stream') {
-          const count = currentPlayCounts[track.path] || 0;
-          if (count > 0) {
-            artistPlayCounts[track.artist] = (artistPlayCounts[track.artist] || 0) + count;
-          }
-        }
-      });
-
-      offlineSeedArtists = Object.entries(artistPlayCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(entry => entry[0])
-        .slice(0, 5);
-
-      if (offlineSeedArtists.length === 0) {
-        const artistFrequencies: Record<string, number> = {};
-        currentTracks.forEach(track => {
-          if (track.artist && track.artist !== 'Unknown Artist' && track.artist !== 'YouTube Audio' && track.artist !== 'Web Audio Stream') {
-            artistFrequencies[track.artist] = (artistFrequencies[track.artist] || 0) + 1;
-          }
-        });
-        const mostFrequent = Object.entries(artistFrequencies)
-          .sort((a, b) => b[1] - a[1])
-          .map(entry => entry[0])
-          .slice(0, 5);
-        offlineSeedArtists.push(...mostFrequent);
-      }
-
-      // Find top played artists for re-ranking
-      let topArtists = Object.entries(artistPlayCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(entry => entry[0])
-        .slice(0, 5);
-
-      if (topArtists.length === 0) {
-        topArtists.push(...offlineSeedArtists);
-      }
-
-      // Inject the currently playing artist as the number 1 seed and top artist
-      if (currentTrack && currentTrack.artist && currentTrack.artist !== 'Unknown Artist' && currentTrack.artist !== 'YouTube Audio' && currentTrack.artist !== 'Web Audio Stream' && currentTrack.artist !== 'Web Stream' && currentTrack.artist !== 'Online Stream') {
-        offlineSeedArtists = [currentTrack.artist, ...offlineSeedArtists.filter(a => a !== currentTrack.artist)].slice(0, 5);
-        topArtists = [currentTrack.artist, ...topArtists.filter(a => a !== currentTrack.artist)].slice(0, 5);
-      }
-
-      // Find library artists for re-ranking
-      const libraryArtists = Array.from(new Set(
-        currentTracks
-          .map(t => t.artist)
-          .filter((a): a is string => !!a && a !== 'Unknown Artist' && a !== 'YouTube Audio' && a !== 'Web Audio Stream' && a !== 'Web Stream')
-      ));
-
-      // C. Tidal HiFi picks (connected + online only; never cached, silent-omit on failure).
-      // Fired in parallel with everything below; first manual refresh reuses the session
-      // pool, repeated refreshes escalate to a fresh search.
-      const latestStore = useStore.getState();
-      const recEngine = latestStore.recommendationEngine || 'our';
-      const tidalEligible = latestStore.appMode !== 'local' && !!latestStore.tidalConnected && recEngine !== 'youtube';
-      const wantFreshTidalSearch = forceRefresh
-        ? tidalRefreshCountRef.current > 0 || tidalHubPoolRef.current.length === 0
-        : tidalHubPoolRef.current.length === 0;
-
-      let tidalPromise: Promise<any[]> | null = null;
-      if (tidalEligible && wantFreshTidalSearch) {
-        tidalPromise = (async () => {
-          try {
-            const raw = await invoke<any[]>('get_tidal_hub_recommendations', {
-              seedArtists: topArtists,
-              excludeSignatures: [],
-            });
-            return Array.isArray(raw) ? tidalResultsToHubTracks(raw) : [];
-          } catch {
-            return [];
-          }
-        })();
-        tidalPromise.catch(() => {});
-        if (forceRefresh) tidalRefreshCountRef.current += 1;
-        tidalHubPoolRef.current = []; // cleared until the fresh search resolves
-      }
-
-      // Gather Last.fm Top Artists names
-      const lastfmTopArtistsList = (currentStore.lastfmTopArtists || []).map((a: any) => a.name as string);
-
-      // Gather ListenBrainz Recommended Tracks
-      const lbTracks: string[] = [];
-      if (isLbConnected && currentStore.listenbrainzRecs) {
-        const recsArray = Array.isArray(currentStore.listenbrainzRecs)
-          ? currentStore.listenbrainzRecs
-          : Object.entries(currentStore.listenbrainzRecs).map(([_, val]: [string, any]) => ({ ...val }));
-
-        recsArray.slice(0, 8).forEach((rec: any) => {
-          const artist = rec.artist?.name || rec.artist_credit_name || rec.recording?.artist_credit_name || '';
-          const title = rec.recording?.name || rec.recording_name || '';
-          if (artist && title) {
-            lbTracks.push(`${artist} - ${title}`);
-          }
-        });
-      }
-
-      // Fetch the personalized discovery hub in parallel on the backend.
-      const resolved = await invoke<any>('get_personalized_discovery_hub', {
-        seedArtists: offlineSeedArtists,
-        topArtists,
-        libraryArtists,
-        discoveryLevel,
-        lastfmConnected: isLfmConnected,
-        lastfmTopArtists: lastfmTopArtistsList,
-        listenbrainzConnected: isLbConnected,
-        listenbrainzRecs: lbTracks,
-        appMode,
-        isOnline: typeof navigator !== 'undefined' ? (navigator.onLine ?? true) : true,
-      });
-
-      setDiscoveryData(resolved);
-      setActiveDiscoveryTab('all');
-
-      // Merge Tidal HiFi picks in once they resolve (or reuse session pool)
-      let tidalPool: any[] = tidalHubPoolRef.current;
-      if (tidalPromise) {
-        try {
-          tidalPool = await tidalPromise;
-          tidalHubPoolRef.current = tidalPool;
-        } catch {
-          tidalPool = []; // silent omit
-        }
-      }
-      if (tidalPool.length > 0 && useStore.getState().appMode !== 'local' && (useStore.getState().recommendationEngine || 'our') !== 'youtube') {
-        const currentHub = useStore.getState().discoveryData;
-        if (currentHub) setDiscoveryData(mergeTidalIntoHub(currentHub, tidalPool));
-      }
-    } catch (err) {
-      console.error('Failed to load personalized discovery recommendations:', err);
-    } finally {
+    } else if (rankedHubCache?.context === request.context && Date.now() - rankedHubCache.time < 30 * 60 * 1000 && current()) {
+      setDiscoveryData(filterRecommendationHub(rankedHubCache.data, state));
       setIsLoadingRecs(false);
-      setIsRefreshingRecs(false);
-      isFetchingRef.current = false;
+    }
+    const localHub: DiscoveryHubData = { recommendations: state.tracks.map(track => hubTrack(track)), global_charts: [], mixed_for_you: [] };
+    try {
+      const artistCounts = new Map<string, number>();
+      for (const track of state.tracks) {
+        if (track.artist && track.artist !== 'Unknown Artist' && track.disliked !== 1) {
+          artistCounts.set(track.artist, (artistCounts.get(track.artist) || 0) + (state.playCounts[track.path] || 0) + (track.loved ? 1 : 0));
+        }
+      }
+      const topArtists = [...artistCounts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([artist]) => artist);
+      const local = state.appMode === 'local';
+      const tidalOnly = state.recommendationEngine === 'tidal';
+      const tidalEligible = !local && state.tidalConnected && state.recommendationEngine !== 'youtube';
+      const cachedTidal = tidalHubPoolRef.current.context === request.context ? tidalHubPoolRef.current.tracks : [];
+      const tidalPromise = tidalEligible && (forceRefresh || !cachedTidal.length)
+        ? bounded(invoke<any[]>('get_tidal_hub_recommendations', { seedArtists: topArtists, excludeSignatures: [] }), 8000)
+          .then(raw => Array.isArray(raw) ? tidalResultsToHubTracks(raw) : []).catch(() => [])
+        : Promise.resolve(tidalEligible ? cachedTidal : []);
+      const lbRecs = !local && Array.isArray(state.listenbrainzRecs) ? state.listenbrainzRecs.slice(0, 8).flatMap((rec: any) => {
+        const artist = rec.artist?.name || rec.artist_credit_name || rec.recording?.artist_credit_name;
+        const title = rec.recording?.name || rec.recording_name;
+        return artist && title ? [`${artist} - ${title}`] : [];
+      }) : [];
+      const hubPromise = bounded(invoke<DiscoveryHubData>('get_personalized_discovery_hub', {
+        seedArtists: topArtists, topArtists, libraryArtists: [...artistCounts.keys()], discoveryLevel: state.autoplayDiscoveryLevel,
+        lastfmConnected: !local && !tidalOnly && !!state.lastfmSessionKey,
+        lastfmTopArtists: !local && !tidalOnly ? (state.lastfmTopArtists || []).map((artist: any) => artist.name) : [],
+        listenbrainzConnected: !local && !tidalOnly && !!state.listenbrainzToken,
+        listenbrainzRecs: tidalOnly ? [] : lbRecs,
+        appMode: local || tidalOnly ? 'local' : state.appMode,
+        isOnline: !local && !tidalOnly && (typeof navigator === 'undefined' || navigator.onLine),
+      }), 8000).catch(() => localHub);
+      const [retrieved, tidalPool] = await Promise.all([hubPromise, tidalPromise]);
+      if (!current()) return;
+      tidalHubPoolRef.current = { context: request.context, tracks: tidalPool };
+      const combined = tidalPool.length ? mergeTidalIntoHub(retrieved, tidalPool) : retrieved;
+      const ranked = await rankRecommendationHub(combined, useStore.getState(), request.generation);
+      if (!current()) return;
+      const safe = filterRecommendationHub(ranked, useStore.getState());
+      rankedHubCache = { context: request.context, time: Date.now(), data: safe };
+      setDiscoveryData(safe);
+      setActiveDiscoveryTab('all');
+    } catch (error) {
+      console.error('Failed to load personalized discovery recommendations:', error);
+      if (current()) {
+        const fallback = await rankRecommendationHub(localHub, useStore.getState(), request.generation);
+        if (current()) setDiscoveryData(filterRecommendationHub(fallback, useStore.getState()));
+      }
+    } finally {
+      if (current()) {
+        setIsLoadingRecs(false);
+        setIsRefreshingRecs(false);
+      }
     }
   };
 
-  // Load/refresh recommendations when library is loaded
   useEffect(() => {
-    if (tracks.length > 0) {
-      fetchRecommendations();
-    } else {
-      const timer = setTimeout(() => {
-        fetchRecommendations();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [tracks.length, appMode]);
+    void fetchRecommendations();
+    return () => { requestsRef.current.begin('unmounted'); };
+  }, [tracks, appMode, recommendationEngine, autoplayDiscoveryLevel, recommendationRevision]);
 
+  useEffect(() => {
+    const refresh = () => {
+      recommendationRevisionRef.current += 1;
+      setRecommendationRevision(recommendationRevisionRef.current);
+    };
+    window.addEventListener('recommendation-feedback-updated', refresh);
+    return () => {
+      window.removeEventListener('recommendation-feedback-updated', refresh);
+    };
+  }, []);
   const handleDownloadTrack = async (track: any) => {
     if (downloadingIds.has(track.id) || downloadedIds.has(track.id)) return;
     setDownloadingIds(prev => {
@@ -1628,7 +1504,7 @@ export function AideoView() {
   const recentTracks = [...playHistory]
     .reverse()
     // Show unique recent tracks, maintaining order (most recent first)
-    .filter((t, index, self) => self.findIndex(st => st.path === t.path) === index)
+    .filter((track, index, history) => history.findIndex(candidate => sameRecommendationRecording(candidate, track)) === index)
     .slice(0, 15);
 
   // Compute "Quick Recap" Tracks (frequently played)
@@ -1702,7 +1578,7 @@ export function AideoView() {
           if (isGrid) {
             return (
               <div
-                key={track.id}
+                key={recommendationSourceKey(discoveryTrack(track))}
                 className={`aideo-discovery-grid-card ${isPlaying ? 'is-playing' : ''}`}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -1821,7 +1697,7 @@ export function AideoView() {
           } else {
             return (
               <div
-                key={track.id}
+                key={recommendationSourceKey(discoveryTrack(track))}
                 className={`aideo-discovery-list-item ${isPlaying ? 'is-playing' : ''}`}
                 onContextMenu={(e) => {
                   e.preventDefault();

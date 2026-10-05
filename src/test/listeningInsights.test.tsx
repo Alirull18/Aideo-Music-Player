@@ -1,3 +1,4 @@
+import { startListening, sampleListening, markListeningEnd } from '../utils/recommendations';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ListeningInsightsView } from '../components/ListeningInsightsView';
@@ -39,22 +40,19 @@ describe('Aideo Insights & Telemetry', () => {
       { day: 5, play_count: 25 },
       { day: 6, play_count: 17 },
     ],
-    audiophile: {
+    audiophile_stats: {
       lossless_count: 35,
-      hires_count: 20,
-      standard_count: 7,
+      hi_res_count: 20,
       bit_perfect_count: 30,
-      bit_perfect_rate: 71.4,
+      total_analyzed: 42,
       avg_sample_rate: 96000,
-      top_resolution: '24-bit / 192.0 kHz FLAC',
     },
-    sources: {
-      local_count: 30,
-      tidal_count: 8,
-      qobuz_count: 4,
-      webstream_count: 5,
-      youtube_count: 0,
-    },
+    source_distribution: [
+      { source: 'local', play_count: 30 },
+      { source: 'tidal', play_count: 8 },
+      { source: 'qobuz', play_count: 4 },
+      { source: 'webstream', play_count: 5 },
+    ],
   };
 
   const existingTrack: Track = {
@@ -130,7 +128,6 @@ describe('Aideo Insights & Telemetry', () => {
     expect(screen.getAllByText('20').length).toBeGreaterThanOrEqual(1); // Hi-Res Plays
     expect(screen.getByText('35')).toBeDefined(); // Lossless Plays
     expect(screen.getByText('96.0 kHz')).toBeDefined(); // Avg Sample Rate
-    expect(screen.getByText('24-bit / 192.0 kHz FLAC')).toBeDefined();
 
     // Sources distribution
     expect(screen.getByText('Playback Sources')).toBeDefined();
@@ -214,7 +211,7 @@ describe('Aideo Insights & Telemetry', () => {
     });
   });
 
-  it('correctly calculates standardized skip rate and completion rate in recordPlaybackTransition', async () => {
+  it('records confirmed elapsed listening and completion independently of position', async () => {
     const store = useStore.getState();
 
     // Set current track and history ID
@@ -227,6 +224,13 @@ describe('Aideo Insights & Telemetry', () => {
       },
     });
 
+    startListening(888, existingTrack);
+    let clock = 0;
+    const time = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    sampleListening(888, 0, true);
+    for (clock = 1000; clock <= 550000; clock += 1000) sampleListening(888, clock / 1000, true);
+    markListeningEnd('completed');
+    time.mockRestore();
     // Transition to new track
     await store.recordPlaybackTransition({
       id: 202,
@@ -245,11 +249,12 @@ describe('Aideo Insights & Telemetry', () => {
       historyId: 888,
       durationPlayed: 550,
       skipped: false,
-      completionRate: 550 / 577,
+      completionRate: null,
+      endReason: 'completed',
     });
 
     // Verify log_playback_start was called with real album, genre, and audiophile telemetry
-    expect(invoke).toHaveBeenCalledWith('log_playback_start', {
+    expect(invoke).toHaveBeenCalledWith('log_playback_start', expect.objectContaining({
       path: 'C:/Music/Tool/Schism.flac',
       title: 'Schism',
       artist: 'Tool',
@@ -260,11 +265,11 @@ describe('Aideo Insights & Telemetry', () => {
       playbackSource: null,
       sampleRate: 96000,
       bitDepth: null,
-      bitPerfect: true,
-    });
+      bitPerfect: 1,
+    }));
   });
 
-  it('marks a track as skipped only when stopped early (<30s and <50%)', async () => {
+  it('records an intentional early skip from actual listening', async () => {
     const store = useStore.getState();
 
     useStore.setState({
@@ -276,13 +281,21 @@ describe('Aideo Insights & Telemetry', () => {
       },
     });
 
+    startListening(777, existingTrack);
+    let clock = 0;
+    const time = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    sampleListening(777, 0, true);
+    for (clock = 1000; clock <= 15000; clock += 1000) sampleListening(777, clock / 1000, true);
+    markListeningEnd('skipped');
+    time.mockRestore();
     await store.recordPlaybackTransition(null);
 
     expect(invoke).toHaveBeenCalledWith('log_playback_end', {
       historyId: 777,
       durationPlayed: 15,
       skipped: true,
-      completionRate: 15 / 577,
+      completionRate: null,
+      endReason: 'skipped',
     });
   });
 });

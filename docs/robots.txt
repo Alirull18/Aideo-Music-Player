@@ -34,5 +34,5 @@ User-agent: Bingbot
 Allow: /
 
 # Sitemaps & LLM Context
-Sitemap: https://alirull18.github.io/Aideo-Music-Player/sitemap.xml
-Sitemap: https://alirull18.github.io/Aideo-Music-Player/llms.txt
+Sitemap: https://aideo.qd.je/sitemap.xml
+Sitemap: https://aideo.qd.je/llms.txt

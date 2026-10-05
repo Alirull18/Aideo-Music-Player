@@ -22,6 +22,9 @@ import { DebugLogsModal } from './DebugLogsModal';
 import { LocalQRCode } from './LocalQRCode';
 import { logger } from '../utils/logger';
 import { getAudioPathPresentation } from '../utils/audioPath';
+import { LocalBackupControls } from './LocalBackupControls';
+import { RecommendationPreferences } from './RecommendationPreferences';
+import { filterAutomaticQueue, invalidateRecommendationPreferences } from '../utils/recommendations';
 
 interface PresetTheme {
   name: string;
@@ -667,7 +670,7 @@ export function SettingsView() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       if (e.key === 'Escape') {
         setRecordingGlobalAction(null);
         return;
@@ -726,7 +729,7 @@ export function SettingsView() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
-      e.stopPropagation();
+      e.stopImmediatePropagation();
 
       const keyName = e.key === ' ' ? 'Space' : e.key;
       setShortcut(recordingAction, keyName);
@@ -3001,6 +3004,16 @@ export function SettingsView() {
       )
     },
 
+    { id: 'local-backup', title: 'Local backup and restore', description: 'Portable playlists, favorites, preferences and listening history.', keywords: 'backup restore offline portable rollback', tab: 'library', element: <LocalBackupControls /> },
+    { id: 'recommendation-preferences', title: 'Recommendation preferences', description: 'Manage excluded recordings and learned taste.', keywords: 'recommendations exclusion taste reset learning', tab: 'library', element: <RecommendationPreferences onAllow={track => useStore.getState().setRecommendationInterest(track, true)} onChanged={async () => {
+      const state = useStore.getState();
+      await state.loadLibrary();
+      const queue = state.queue.filter(t => !t.is_autoplay && !t.is_generated_mix);
+      useStore.setState({ queue, autoplaySessionHistory: [] });
+      localStorage.setItem('aideo_queue', JSON.stringify(queue));
+      await state.syncBackendQueue();
+    }} /> },
+
     {
       id: 'cloud-connections',
       title: 'Self-Hosted Cloud Servers',
@@ -4479,17 +4492,17 @@ export function SettingsView() {
     },
     {
       id: 'cloud-autoplay-behavior',
-      title: 'Cloud Queue Autoplay',
-      description: 'Continue playback with local library tracks when a remote cloud queue ends.',
+      title: 'Local Mixing for Online Playback',
+      description: 'Allow local files in online radio and after remote cloud queues end.',
       keywords: 'cloud stream autoplay local library subsonic navidrome jellyfin connection end stop transition webstream',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ flex: 1, paddingRight: 24 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Autoplay Local Tracks after Cloud Stream</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Mix local tracks into online radio</div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                Transition to local library files when a Subsonic, Jellyfin, or stream list completes
+                Include local files in radio started from online music, and after cloud playlists end
               </div>
             </div>
             <SlidingSwitch 
@@ -4498,8 +4511,15 @@ export function SettingsView() {
                 const newVal = !autoplayLocal;
                 setAutoplayLocal(newVal);
                 localStorage.setItem('aideo_autoplay_local_for_cloud', String(newVal));
+                invalidateRecommendationPreferences();
+                const state = useStore.getState();
+                const queue = filterAutomaticQueue(state, true);
+                useStore.setState({ queue });
+                localStorage.setItem('aideo_queue', JSON.stringify(queue));
+                void state.syncBackendQueue().catch(error => console.error('Failed to sync radio queue after changing local mixing:', error));
+                if (state.autoplayEnabled && state.currentTrack) void state.triggerAutoplayRadio(state.currentTrack, true);
                 window.dispatchEvent(new CustomEvent('ui-toast', { 
-                  detail: { message: `Cloud Autoplay changed to: ${newVal ? 'Autoplay Local Tracks' : 'Stop Playback'}`, type: 'info' } 
+                  detail: { message: `Local mixing ${newVal ? 'enabled' : 'disabled'}`, type: 'info' }
                 }));
               }} 
             />

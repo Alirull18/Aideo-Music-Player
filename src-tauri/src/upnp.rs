@@ -1,3 +1,8 @@
+static ANALYSIS_PLAYBACK_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn analysis_playback_active() -> bool { ANALYSIS_PLAYBACK_ACTIVE.load(std::sync::atomic::Ordering::Acquire) }
+fn set_analysis_playback(active: bool) { ANALYSIS_PLAYBACK_ACTIVE.store(active, std::sync::atomic::Ordering::Release); }
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -228,6 +233,7 @@ pub async fn disconnect_upnp_device() -> Result<(), String> {
             ).await;
         }
     }
+    set_analysis_playback(false);
     Ok(())
 }
 
@@ -283,6 +289,7 @@ pub async fn upnp_play_stream(
 
     let av_url = device.av_transport_url.ok_or("Device does not support AVTransport")?;
 
+    set_analysis_playback(true);
     // 1. Build DIDL-Lite Metadata
     let didl_metadata = build_didl_metadata(title, artist, album, stream_url, mime_type);
 
@@ -333,6 +340,7 @@ pub async fn upnp_control_action(action: &str, value: Option<f64>) -> Result<(),
             ).await?;
         }
         "play" | "resume" => {
+            set_analysis_playback(true);
             let av_url = device.av_transport_url.ok_or("AVTransport URL missing")?;
             send_soap_action(
                 &av_url,
@@ -376,6 +384,7 @@ pub async fn upnp_control_action(action: &str, value: Option<f64>) -> Result<(),
         _ => return Err(format!("Unsupported UPnP action: {}", action)),
     }
 
+    if matches!(action.to_lowercase().as_str(), "pause" | "stop") { set_analysis_playback(false); }
     Ok(())
 }
 
@@ -413,7 +422,7 @@ pub async fn upnp_query_status() -> Result<UpnpStatus, String> {
             &format_soap_body("GetTransportInfo", "<InstanceID>0</InstanceID>"),
         ).await {
             if let Some(state) = extract_tag_value(&res, "CurrentTransportState") {
-                status.is_playing = state.eq_ignore_ascii_case("PLAYING");
+                status.is_playing = state.eq_ignore_ascii_case("PLAYING"); set_analysis_playback(status.is_playing || state.eq_ignore_ascii_case("TRANSITIONING"));
             }
         }
     }

@@ -663,13 +663,38 @@ async fn resolve_stream_url(
     track_id: &str,
     quality: crate::sources::StreamingQuality,
 ) -> Result<crate::sources::ResolvedStream, String> {
+    resolve_formats(state, app_handle, track_id, quality.qobuz()).await
+}
+
+pub(crate) async fn resolve_download_format(
+    state: &Arc<QobuzState>, app_handle: &AppHandle, track_id: &str, format: u32,
+) -> Result<crate::sources::ResolvedStream, String> {
+    if !matches!(format, 5 | 6 | 7 | 27) { return Err("Unsupported Qobuz download quality".into()); }
+    let resolved = resolve_formats(state, app_handle, track_id, &[format]).await?;
+    if !download_quality_matches(format, &resolved.quality) { return Err("Qobuz could not verify the requested download quality".into()); }
+    Ok(resolved)
+}
+
+fn download_quality_matches(format: u32, quality: &crate::sources::SourceQuality) -> bool {
+    match format {
+        5 => quality.codec.as_deref().is_some_and(|c| c.contains("mpeg")),
+        6 => quality.lossless == Some(true) && quality.bit_depth == Some(16) && quality.sample_rate == Some(44100.0),
+        7 => quality.lossless == Some(true) && quality.bit_depth == Some(24) && quality.sample_rate.is_some_and(|r| r > 0.0 && r <= 96000.0),
+        27 => quality.lossless == Some(true) && quality.bit_depth == Some(24) && quality.sample_rate.is_some_and(|r| r > 0.0 && r <= 192000.0),
+        _ => false,
+    }
+}
+
+async fn resolve_formats(
+    state: &Arc<QobuzState>, app_handle: &AppHandle, track_id: &str, formats: &[u32],
+) -> Result<crate::sources::ResolvedStream, String> {
     crate::sources::validate_track_id(track_id)?;
     let token = ensure_session_token(state)?;
     let mut creds = ensure_app_credentials(state, app_handle).await?;
     let client = get_client();
     let mut last_error = "Failed to fetch any Qobuz stream".to_string();
 
-    for fmt in quality.qobuz() {
+    for fmt in formats {
         let mut secret_idx: usize = 0;
         loop {
             let ts = now_secs();
@@ -909,32 +934,22 @@ pub async fn get_qobuz_autoplay_recommendations(
     artist: String,
     title: String,
 ) -> Result<Vec<QobuzTrackResult>, String> {
-    println!("[qobuz] Aideo Autoplay Engine v2: Resolving Qobuz Radio for '{}' by '{}'", title, artist);
+    crate::tidal::bounded_recommendation(async {
 
-    let query = if !artist.is_empty() && artist != "Unknown Artist" {
-        format!("{} Radio", artist)
-    } else if !title.is_empty() && title != "Unknown Title" {
-        title.clone()
-    } else {
-        "Top Tracks".to_string()
-    };
-
-    let mut search_results = qobuz_search_inner(state.inner(), &app_handle, &query).await;
-    if search_results.as_ref().map(|t| t.is_empty()).unwrap_or(true) && !artist.is_empty() && artist != "Unknown Artist" {
-        search_results = qobuz_search_inner(state.inner(), &app_handle, &artist).await;
+    let related = crate::tidal::related_recordings(&artist, &title).await?;
+    let mut candidates = Vec::new();
+    for candidate in related.into_iter().take(15) {
+        let Some(candidate_title) = candidate["name"].as_str() else { continue };
+        let Some(candidate_artist) = candidate["artist"]["name"].as_str() else { continue };
+        if candidate_title.trim().is_empty() || candidate_artist.trim().is_empty()
+            || candidate_artist.eq_ignore_ascii_case("Unknown Artist") { continue; }
+        let query = format!("{} {}", candidate_artist, candidate_title);
+        let results = qobuz_search_inner(state.inner(), &app_handle, &query).await.unwrap_or_default();
+        if let Some(track) = crate::tidal::match_related_catalog_track(&candidate, results) { candidates.push(track); }
     }
+    Ok(crate::tidal::build_radio_queue(candidates, &artist, &title))
 
-    match search_results {
-        Ok(tracks) => {
-            let final_queue = crate::tidal::build_radio_queue(tracks, &artist, &title);
-            println!("[autoplay] Engine v2 finalized Qobuz queue with {} highly matching tracks.", final_queue.len());
-            Ok(final_queue)
-        }
-        Err(e) => {
-            eprintln!("[qobuz] Autoplay search failed: {}", e);
-            Err(e)
-        }
-    }
+    }).await
 }
 
 async fn qobuz_search_inner(
@@ -1006,6 +1021,16 @@ async fn qobuz_search_inner(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn downloads_require_verified_resolution_instead_of_quality_fallback() {
+        let cd = crate::sources::SourceQuality { lossless: Some(true), bit_depth: Some(16), sample_rate: Some(44100.0), codec: Some("audio/flac".into()) };
+        assert!(super::download_quality_matches(6, &cd));
+        assert!(!super::download_quality_matches(27, &cd));
+        let hires = crate::sources::SourceQuality { bit_depth: Some(24), sample_rate: Some(192000.0), ..cd.clone() };
+        assert!(super::download_quality_matches(27, &hires));
+        assert!(!super::download_quality_matches(7, &hires));
+        assert!(!super::download_quality_matches(27, &crate::sources::SourceQuality { sample_rate: None, ..hires }));
+    }
     use super::*;
 
     const LOGIN_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/qobuz/login_page.html"));

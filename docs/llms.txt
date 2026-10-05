@@ -56,7 +56,7 @@ Aideo Music Player is an open-source desktop audio engine engineered for audioph
 - **Licensing**: Open Source (GPL-3.0-or-later)
 
 ## Resources & Documentation
-- Official Website: https://alirull18.github.io/Aideo-Music-Player/
+- Official Website: https://aideo.qd.je/
 - Product Hunt: https://www.producthunt.com/products/aideo-music-player
 - GitHub Repository: https://github.com/Alirull18/Aideo-Music-Player
 - Latest Releases: https://github.com/Alirull18/Aideo-Music-Player/releases/latest

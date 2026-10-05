@@ -6,14 +6,14 @@ This playbook contains exact, ready-to-use instructions to get **Aideo Music Pla
 
 ## 1. 🔍 Google Search Console (Fastest Indexing)
 
-Since the website is already live at `https://alirull18.github.io/Aideo-Music-Player/` and contains the verification code:
+Since the website is already live at `https://aideo.qd.je/` and contains the verification code:
 
 1. Open [Google Search Console](https://search.google.com/search-console).
-2. Add Property: `https://alirull18.github.io/Aideo-Music-Player/` (URL prefix).
+2. Add Property: `https://aideo.qd.je/` (URL prefix).
 3. Verify via HTML file or tag (already included in `docs/index.html`).
 4. In the left sidebar, click **Sitemaps**:
    - Submit: `sitemap.xml`
-5. At the top search bar, paste: `https://alirull18.github.io/Aideo-Music-Player/`
+5. At the top search bar, paste: `https://aideo.qd.je/`
 6. Click **"Request Indexing"**. This forces Googlebot to crawl the landing page within 24–48 hours instead of waiting weeks.
 
 ---
@@ -54,7 +54,7 @@ AlternativeTo is one of the highest-ranking websites globally for search queries
 1. Visit [AlternativeTo - Suggest an App](https://alternativeto.net/software/create/).
 2. Fill out the application details:
    - **Name**: `Aideo Music Player`
-   - **Website**: `https://alirull18.github.io/Aideo-Music-Player/`
+   - **Website**: `https://aideo.qd.je/`
    - **License**: `Open Source (GPL v3)`
    - **Platforms**: `Windows`
    - **Short description**: `A modern, lightweight desktop music player for Windows with bit-perfect WASAPI Exclusive audio, AutoEQ headphone calibrations, and real-time karaoke lyrics.`

@@ -981,7 +981,7 @@ pub async fn search_youtube_internal_impl(
         // Reject third-party slop (reactions, fancams, karaoke, tutorials, etc.) unless user explicitly searched for them
         if is_third_party_or_instrumental(&title, &artist) {
             let explicitly_requested = [
-                "karaoke", "instrumental", "reaction", "cover", "remix", "fancam", "slowed", "nightcore", "tutorial", "lesson",
+                "karaoke", "reaction", "cover", "remix", "fancam", "slowed", "nightcore", "tutorial", "lesson",
                 "sped up", "speed up", "spedup", "speedup", "piano", "tribute",
             ].iter().any(|&term| query_lower.contains(term));
 
@@ -996,7 +996,6 @@ pub async fn search_youtube_internal_impl(
             ("remix", -4.0),
             ("live", -3.0),
             ("karaoke", -6.0),
-            ("instrumental", -5.0),
             ("slowed", -5.0),
             ("reverb", -5.0),
             ("tribute", -5.0),
@@ -1615,7 +1614,7 @@ fn clean_title(title: &str) -> String {
 fn is_semantic_noise(title: &str, seed_title: &str) -> bool {
     let title_lower = title.to_lowercase();
     let seed_lower = seed_title.to_lowercase();
-    let noise_words = ["instrumental", "karaoke", "backing track", "tribute", "cover", "acapella", "8d"];
+    let noise_words = ["karaoke", "backing track", "tribute", "cover", "acapella", "8d"];
     for &word in &noise_words {
         if title_lower.contains(word) && !seed_lower.contains(word) {
             return true;
@@ -1844,6 +1843,8 @@ pub async fn get_youtube_autoplay_recommendations(
     discovery_level: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<YoutubeTrack>, String> {
+    crate::tidal::bounded_recommendation(async {
+
     let api_key = fetch_innertube_key().await;
     println!("[youtube] Aideo Autoplay Engine v2: Resolving Watch Next Radio for '{}' by '{}' (Discovery Level: {})", title, artist, discovery_level);
 
@@ -2313,6 +2314,8 @@ pub async fn get_youtube_autoplay_recommendations(
     final_queue.retain(|track| is_known_duration_within_limit(&track.duration_raw));
 
     Ok(final_queue)
+
+    }).await
 }
 
 fn parse_ytdlp_progress(line: &str) -> Option<(f64, f64, f64)> {
@@ -3213,6 +3216,43 @@ fn split_unmatched_for_shelves(
     (rotation, gems)
 }
 
+fn daily_recommendation_rng() -> rand::rngs::StdRng {
+    use rand::SeedableRng;
+    let day = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() / 86_400).unwrap_or(0);
+    rand::rngs::StdRng::seed_from_u64(day)
+}
+
+fn recording_title(title: &str) -> String {
+    static PRESENTATION: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\s*(?:[\(\[]\s*(?:official\s+(?:audio|music video|video)|audio|lyrics?|hd|4k)\s*[\)\]]|\s+-\s+official\s+(?:audio|music video|video))\s*").unwrap()
+    });
+    PRESENTATION.replace_all(title, " ").split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+fn recording_matches(track: &YoutubeTrack, artist: &str, title: &str) -> bool {
+    artist_matches(&track.artist, artist) && !title.trim().is_empty()
+        && recording_title(&track.title) == recording_title(title)
+        && is_known_duration_within_limit(&track.duration_raw)
+}
+
+fn saved_track_source_id(track: &crate::db::Track) -> String {
+    if saved_track_provider(track) == crate::db::SourceProvider::Youtube {
+        extract_video_id(&track.path).unwrap_or_else(|| track.path.clone())
+    } else {
+        track.path.strip_prefix("tidal:").or_else(|| track.path.strip_prefix("qobuz:"))
+            .map(|id| id.trim_start_matches('/').to_string()).unwrap_or_else(|| track.path.clone())
+    }
+}
+
+fn saved_track_provider(track: &crate::db::Track) -> crate::db::SourceProvider {
+    let format = track.format.as_deref().unwrap_or("").to_ascii_lowercase();
+    if format.contains("qobuz") || track.path.starts_with("qobuz:") { crate::db::SourceProvider::Qobuz }
+    else if format.contains("tidal") || track.path.starts_with("tidal:") { crate::db::SourceProvider::Tidal }
+    else if format.contains("youtube") || extract_video_id(&track.path).is_some() { crate::db::SourceProvider::Youtube }
+    else { crate::db::SourceProvider::Local }
+}
+
 /// Resolves non-library listening-history (title, artist) pairs to playable
 /// YouTube tracks, one concurrent search per pair, keeping only clean hits.
 async fn resolve_history_pairs_to_tracks(
@@ -3229,7 +3269,8 @@ async fn resolve_history_pairs_to_tracks(
         async move {
             match search_youtube_internal(&cl, &ak, &query, false).await {
                 Ok(tracks) => tracks.into_iter().find(|t| {
-                    !is_third_party_or_instrumental(&t.title, &t.artist)
+                    recording_matches(t, &artist, &title)
+                        && !is_third_party_or_instrumental(&t.title, &t.artist)
                         && !is_compilation_channel(&t.artist)
                         && !is_duration_too_long(&t.duration_raw)
                 }),
@@ -3247,6 +3288,7 @@ fn extract_library_shelves(
     play_counts: &std::collections::HashMap<String, i64>,
     recent_tracks: &[(String, String)],
     top_listened: &[(String, String)],
+    local_only: bool,
 ) -> (
     Vec<YoutubeTrack>,
     Vec<YoutubeTrack>,
@@ -3256,7 +3298,7 @@ fn extract_library_shelves(
     Vec<(String, String)>,
 ) {
     use rand::seq::SliceRandom;
-    let mut rng = rand::rng();
+    let mut rng = daily_recommendation_rng();
 
     let map_local = |t: &crate::db::Track, source: &str| -> YoutubeTrack {
         let duration_raw = if let Some(d) = t.duration {
@@ -3274,8 +3316,8 @@ fn extract_library_shelves(
         };
 
         let local_source = crate::db::PlaybackSource {
-            provider: crate::db::SourceProvider::Local,
-            id: t.path.clone(),
+            provider: saved_track_provider(t),
+            id: saved_track_source_id(t),
             catalog_quality: None,
             metadata: Some(crate::db::SourceMetadata {
                 title: t.title.clone(),
@@ -3378,7 +3420,7 @@ fn extract_library_shelves(
             if let Ok(tracks) = crate::db::get_playlist_tracks(conn, p.id) {
                 if !tracks.is_empty() {
                     let cover = tracks.iter().find_map(|t| t.cover_url.clone());
-                    let yt_tracks: Vec<YoutubeTrack> = tracks.iter().map(|t| map_local(t, &p.name)).collect();
+                    let yt_tracks: Vec<YoutubeTrack> = tracks.iter().filter(|t| t.disliked.unwrap_or(0) != 1 && (!local_only || (saved_track_provider(t) == crate::db::SourceProvider::Local && std::path::Path::new(&t.path).is_file()))).map(|t| map_local(t, &p.name)).collect();
                     playlist_mixes.push(YoutubeMix {
                         id: format!("local_playlist_{}", p.id),
                         title: p.name.clone(),
@@ -3400,16 +3442,16 @@ fn generate_local_mixes(
     top_artists: &[String],
 ) -> Vec<YoutubeMix> {
     use rand::seq::SliceRandom;
-    let mut rng = rand::rng();
+    let mut rng = daily_recommendation_rng();
 
-    let lib_tracks = crate::db::get_all_tracks(conn).unwrap_or_default();
+    let lib_tracks: Vec<_> = crate::db::get_all_tracks(conn).unwrap_or_default().into_iter().filter(|t| t.disliked.unwrap_or(0) != 1 && saved_track_provider(t) == crate::db::SourceProvider::Local && std::path::Path::new(&t.path).is_file()).collect();
     if lib_tracks.is_empty() {
         return Vec::new();
     }
 
     // History stats per track: (play_count, skip_count, last_played_timestamp)
     let mut track_history: std::collections::HashMap<String, (i64, i64, i64)> = std::collections::HashMap::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*), COALESCE(SUM(skipped), 0), COALESCE(MAX(timestamp), 0) FROM playback_history GROUP BY track_path") {
+    if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*), COALESCE(SUM(skipped), 0), COALESCE(MAX(timestamp), 0) FROM playback_history WHERE signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) GROUP BY track_path") {
         if let Ok(mut rows) = stmt.query([]) {
             while let Some(row) = rows.next().unwrap_or(None) {
                 if let (Ok(path), Ok(cnt), Ok(skip), Ok(last_ts)) = (
@@ -3426,7 +3468,7 @@ fn generate_local_mixes(
 
     // Artist stats from history: artist -> net plays (completed - skipped)
     let mut artist_scores: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-    if let Ok(mut stmt) = conn.prepare("SELECT artist, COUNT(*), COALESCE(SUM(skipped), 0) FROM playback_history WHERE artist IS NOT NULL AND artist != '' AND artist != 'Unknown Artist' GROUP BY artist") {
+    if let Ok(mut stmt) = conn.prepare("SELECT artist, COUNT(*), COALESCE(SUM(skipped), 0) FROM playback_history WHERE signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) AND artist IS NOT NULL AND artist != '' AND artist != 'Unknown Artist' GROUP BY artist") {
         if let Ok(mut rows) = stmt.query([]) {
             while let Some(row) = rows.next().unwrap_or(None) {
                 if let (Ok(art), Ok(cnt), Ok(skp)) = (row.get::<_, String>(0), row.get::<_, i64>(1), row.get::<_, i64>(2)) {
@@ -3470,8 +3512,8 @@ fn generate_local_mixes(
         };
 
         let local_source = crate::db::PlaybackSource {
-            provider: crate::db::SourceProvider::Local,
-            id: track.path.clone(),
+            provider: saved_track_provider(track),
+            id: saved_track_source_id(track),
             catalog_quality: None,
             metadata: Some(crate::db::SourceMetadata {
                 title: track.title.clone(),
@@ -3644,24 +3686,15 @@ fn generate_local_mixes(
     // ─────────────────────────────────────────────────────────────────────────
     // 4. On Repeat (Local)
     // ─────────────────────────────────────────────────────────────────────────
-    let mut recent_repeats = lib_tracks.clone();
-    recent_repeats.sort_by(|a, b| {
-        let (cnt_a, skip_a, ts_a) = track_history.get(&a.path).cloned().unwrap_or((0, 0, 0));
-        let (cnt_b, skip_b, ts_b) = track_history.get(&b.path).cloned().unwrap_or((0, 0, 0));
-        let recency_bonus_a = if ts_a >= thirty_days_ago { 5 } else { 0 };
-        let recency_bonus_b = if ts_b >= thirty_days_ago { 5 } else { 0 };
-        let score_a = (cnt_a - skip_a) * 2 + recency_bonus_a;
-        let score_b = (cnt_b - skip_b) * 2 + recency_bonus_b;
-        score_b.cmp(&score_a)
-    });
-
-    let mut on_repeat_candidates: Vec<crate::db::Track> = recent_repeats.into_iter()
-        .take(25)
-        .collect();
-
-    if on_repeat_candidates.is_empty() {
-        on_repeat_candidates = lib_tracks.iter().take(20).cloned().collect();
+    let mut recent_counts = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*) FROM playback_history WHERE timestamp >= ?1 AND signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) GROUP BY track_path HAVING COUNT(*) >= 2") {
+        if let Ok(rows) = stmt.query_map([std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0) - 7 * 86_400], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))) {
+            for row in rows.flatten() { recent_counts.insert(row.0, row.1); }
+        }
     }
+    let mut on_repeat_candidates: Vec<_> = lib_tracks.iter().filter(|track| recent_counts.contains_key(&track.path)).cloned().collect();
+    on_repeat_candidates.sort_by(|a, b| recent_counts[&b.path].cmp(&recent_counts[&a.path]).then_with(|| a.path.cmp(&b.path)));
+    on_repeat_candidates.truncate(25);
 
     mixes.push(YoutubeMix {
         id: "local_mix_on_repeat".to_string(),
@@ -3682,6 +3715,7 @@ pub async fn generate_hybrid_mixes(
     top_genre: &str,
     lib_tracks: &[crate::db::Track],
     play_counts: &std::collections::HashMap<String, i64>,
+    recent_repeats: &[(String, String, String)],
 ) -> Result<Vec<YoutubeMix>, String> {
     use rand::seq::SliceRandom;
 
@@ -3701,8 +3735,8 @@ pub async fn generate_hybrid_mixes(
         };
 
         let local_source = crate::db::PlaybackSource {
-            provider: crate::db::SourceProvider::Local,
-            id: track.path.clone(),
+            provider: saved_track_provider(track),
+            id: saved_track_source_id(track),
             catalog_quality: None,
             metadata: Some(crate::db::SourceMetadata {
                 title: track.title.clone(),
@@ -3808,19 +3842,10 @@ pub async fn generate_hybrid_mixes(
         "timeless classic hits official audio".to_string()
     };
 
-    let q4 = if !artist_1.is_empty() {
-        format!("{} latest trending hits official audio", artist_1)
-    } else if !top_genre.is_empty() {
-        format!("{} top trending hits official audio", top_genre)
-    } else {
-        "top trending hits official audio".to_string()
-    };
-
     let queries = vec![
         (q1, "supermix"),
         (q2, "spotlight"),
         (q3, "forgotten"),
-        (q4, "on_repeat"),
     ];
 
     let mut search_tasks = Vec::new();
@@ -3835,7 +3860,7 @@ pub async fn generate_hybrid_mixes(
 
     let search_results = futures::future::join_all(search_tasks).await;
 
-    let mut rng = rand::rng();
+    let mut rng = daily_recommendation_rng();
     let mut mixes = Vec::new();
 
     for (res, mix_type) in search_results {
@@ -3850,7 +3875,7 @@ pub async fn generate_hybrid_mixes(
                     "fancam", "concert", "live in", "live at", "live [", "[live", "live performance", "live at",
                     "tour", "compilation", "playlist", "nonstop", "non-stop", "lagu viral", "viral hits", "trending hits",
                     "full album", "album mp3", "full version", "||", "mashup", "tribute", "fanmade", "fan-made", "fmv",
-                    "slowed", "reverb", "nightcore", "10 hours", "10 hrs", "loop", "cover", "remix", "karaoke", "instrumental"
+                    "slowed", "reverb", "nightcore", "10 hours", "10 hrs", "loop", "cover", "remix", "karaoke"
                 ].iter().any(|&term| title_lower.contains(term));
 
                 let is_junk_artist = [
@@ -3931,17 +3956,6 @@ pub async fn generate_hybrid_mixes(
                 }
                 local_matches.shuffle(&mut rng);
             }
-            "on_repeat" => {
-                let mut top_played = lib_tracks.to_vec();
-                top_played.sort_by(|a, b| {
-                    let count_a = play_counts.get(&a.path).unwrap_or(&0);
-                    let count_b = play_counts.get(&b.path).unwrap_or(&0);
-                    count_b.cmp(count_a)
-                });
-                for t in top_played.iter().take(20) {
-                    local_matches.push(map_local_to_youtube_track(t));
-                }
-            }
             _ => {}
         }
 
@@ -3961,7 +3975,7 @@ pub async fn generate_hybrid_mixes(
                     "Artist Spotlight".to_string()
                 },
                 if !artist_1.is_empty() {
-                    format!("A deep dive into {}'s greatest songs, hits, and deep cuts.", artist_1)
+                    format!("Popular songs and library favorites from {}.", artist_1)
                 } else {
                     "A deep dive into your top artist's greatest songs and hits.".to_string()
                 },
@@ -3983,6 +3997,24 @@ pub async fn generate_hybrid_mixes(
             description,
             cover_url: None,
             tracks: interleaved,
+        });
+    }
+
+    let mut repeat_tracks = Vec::new();
+    let mut unresolved = Vec::new();
+    for (path, title, artist) in recent_repeats {
+        if let Some(track) = lib_tracks.iter().find(|track| &track.path == path) {
+            repeat_tracks.push(map_local_to_youtube_track(track));
+        } else { unresolved.push((title.clone(), artist.clone())); }
+    }
+    repeat_tracks.extend(resolve_history_pairs_to_tracks(client, api_key, unresolved).await);
+    for track in &mut repeat_tracks { track.recommendation_source = Some("Repeated this week".to_string()); }
+    repeat_tracks.truncate(20);
+    if !repeat_tracks.is_empty() {
+        mixes.push(YoutubeMix {
+            id: "hybrid_mix_on_repeat".to_string(), title: "On Repeat".to_string(),
+            description: "Recordings you listened to repeatedly in the past seven days.".to_string(),
+            cover_url: None, tracks: repeat_tracks,
         });
     }
 
@@ -4432,8 +4464,8 @@ fn map_local_to_youtube_track(track: &crate::db::Track, source: &str) -> Youtube
     };
 
     let local_source = crate::db::PlaybackSource {
-        provider: crate::db::SourceProvider::Local,
-        id: track.path.clone(),
+        provider: saved_track_provider(track),
+        id: saved_track_source_id(track),
         catalog_quality: None,
         metadata: Some(crate::db::SourceMetadata {
             title: track.title.clone(),
@@ -4475,7 +4507,7 @@ fn generate_local_discovery_fallback(
     for t in lib_tracks {
         if t.loved.unwrap_or(0) == 1 {
             seen_local.insert(t.path.clone());
-            recs.push(map_local_to_youtube_track(t, "Loved Local Track"));
+            recs.push(map_local_to_youtube_track(t, "Loved Saved Track"));
         }
     }
 
@@ -4492,7 +4524,7 @@ fn generate_local_discovery_fallback(
         }
     }
 
-    let mut rng = rand::rng();
+    let mut rng = daily_recommendation_rng();
     let mut rest_tracks: Vec<_> = lib_tracks.iter().filter(|t| !seen_local.contains(&t.path)).collect();
     rest_tracks.shuffle(&mut rng);
     for t in rest_tracks.into_iter().take(30) {
@@ -4501,7 +4533,7 @@ fn generate_local_discovery_fallback(
 
     let mut charts = Vec::new();
     for t in sorted_tracks.iter().take(15) {
-        charts.push(map_local_to_youtube_track(t, "Local Top Hits"));
+        charts.push(map_local_to_youtube_track(t, "Saved Favorites"));
     }
 
     (recs, charts)
@@ -4522,6 +4554,8 @@ pub async fn get_personalized_discovery_hub(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DiscoveryHubData, String> {
+    crate::tidal::bounded_recommendation(async {
+
     use rand::Rng;
     use rand::seq::SliceRandom;
 
@@ -4534,7 +4568,7 @@ pub async fn get_personalized_discovery_hub(
         if let Ok(mut stmt) = conn.prepare(
             "SELECT genre, COUNT(*) as c
              FROM playback_history
-             WHERE genre IS NOT NULL AND genre != '' AND genre != 'Unknown'
+             WHERE signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) AND genre IS NOT NULL AND genre != '' AND genre != 'Unknown'
              GROUP BY genre
              ORDER BY c DESC
              LIMIT 1"
@@ -4549,9 +4583,10 @@ pub async fn get_personalized_discovery_hub(
         }
 
         // B. All library tracks & signatures
-        let tracks = crate::db::get_all_tracks(&conn).unwrap_or_default();
+        let all_tracks = crate::db::get_all_tracks(&conn).unwrap_or_default();
+        let tracks: Vec<_> = all_tracks.iter().filter(|t| t.disliked.unwrap_or(0) != 1).cloned().collect();
         let mut sigs = std::collections::HashSet::new();
-        for t in &tracks {
+        for t in &all_tracks {
             if let (Some(ref title), Some(ref artist)) = (&t.title, &t.artist) {
                 let sig = format!("{}::{}", normalize_artist_name(artist), clean_title(title));
                 sigs.insert(sig);
@@ -4560,7 +4595,7 @@ pub async fn get_personalized_discovery_hub(
 
         // C. Play counts
         let mut p_counts = std::collections::HashMap::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*) FROM playback_history GROUP BY track_path") {
+        if let Ok(mut stmt) = conn.prepare("SELECT track_path, COUNT(*) FROM playback_history WHERE signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) GROUP BY track_path") {
             if let Ok(mut rows) = stmt.query([]) {
                 while let Some(row) = rows.next().unwrap_or(None) {
                     if let (Ok(path), Ok(count)) = (row.get::<_, String>(0), row.get::<_, i64>(1)) {
@@ -4596,7 +4631,7 @@ pub async fn get_personalized_discovery_hub(
         let mut recent_tracks = Vec::new();
         if let Ok(mut stmt) = conn.prepare(
             "SELECT DISTINCT title, artist FROM playback_history
-             WHERE title IS NOT NULL AND artist IS NOT NULL AND title != '' AND artist != '' AND artist != 'Unknown Artist' AND artist != 'YouTube Audio' AND skipped = 0
+             WHERE signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) AND title IS NOT NULL AND artist IS NOT NULL AND title != '' AND artist != '' AND artist != 'Unknown Artist' AND artist != 'YouTube Audio' AND NOT EXISTS (SELECT 1 FROM tracks d WHERE d.disliked = 1 AND (d.path = playback_history.track_path OR (lower(d.title) = lower(playback_history.title) AND lower(d.artist) = lower(playback_history.artist)))) AND skipped = 0
              ORDER BY timestamp DESC
              LIMIT 20"
         ) {
@@ -4618,7 +4653,7 @@ pub async fn get_personalized_discovery_hub(
         if let Ok(mut stmt) = conn.prepare(
             "SELECT title, artist, COUNT(*) as play_count
              FROM playback_history
-             WHERE title IS NOT NULL AND artist IS NOT NULL AND title != '' AND artist != '' AND artist != 'Unknown Artist' AND artist != 'YouTube Audio'
+             WHERE signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) AND title IS NOT NULL AND artist IS NOT NULL AND title != '' AND artist != '' AND artist != 'Unknown Artist' AND artist != 'YouTube Audio' AND NOT EXISTS (SELECT 1 FROM tracks d WHERE d.disliked = 1 AND (d.path = playback_history.track_path OR (lower(d.title) = lower(playback_history.title) AND lower(d.artist) = lower(playback_history.artist))))
              GROUP BY title, artist
              ORDER BY play_count DESC
              LIMIT 20"
@@ -4660,12 +4695,13 @@ pub async fn get_personalized_discovery_hub(
     // Fast return if offline or in local mode
     if app_mode == "local" || !is_online {
         println!("[discovery-hub] Generating offline/local discovery hub data.");
+        let lib_tracks: Vec<_> = lib_tracks.into_iter().filter(|track| saved_track_provider(track) == crate::db::SourceProvider::Local && std::path::Path::new(&track.path).is_file()).collect();
         let (recs, charts) = generate_local_discovery_fallback(&lib_tracks, &play_counts);
         let (mixed_for_you, recently_played, heavy_rotation, forgotten_gems, playlist_mixes) = {
             let conn = safe_lock(&state.db);
             let mixes = generate_local_mixes(&conn, &seed_artists, &top_artists);
             let (rec_p, heavy_r, forgot_g, p_mixes, unmatched_r, unmatched_t) =
-                extract_library_shelves(&conn, &lib_tracks, &play_counts, &recently_played_tracks, &top_listened_tracks);
+                extract_library_shelves(&conn, &lib_tracks, &play_counts, &recently_played_tracks, &top_listened_tracks, true);
             let _ = (unmatched_r, unmatched_t); // Offline: no network to resolve online counterparts
             (mixes, rec_p, heavy_r, forgot_g, p_mixes)
         };
@@ -4699,6 +4735,7 @@ pub async fn get_personalized_discovery_hub(
             priority_loved_artists.push(artist.clone());
         }
     }
+    let genuine_loved_artists = priority_loved_artists.clone();
     for ta in &top_artists {
         if !ta.is_empty() && unique_loved.insert(ta.to_lowercase()) {
             priority_loved_artists.push(ta.clone());
@@ -4718,11 +4755,11 @@ pub async fn get_personalized_discovery_hub(
     // ── TASK 1: GLOBAL CHARTS (Parallel) ──────────────────────────────────────
     let client_charts = client.clone();
     let api_key_charts = api_key.clone();
-    let charts_task = tokio::spawn(async move {
-        let chart_page = rand::rng().random_range(1u32..=3u32);
+    let charts_task = async move {
+        let chart_page = daily_recommendation_rng().random_range(1u32..=3u32);
         let genre_pool = ["pop", "hip-hop", "indie", "k-pop", "r&b", "rock", "electronic", "latin", "soul", "alternative", "dance"];
         let mut genre_indices: Vec<usize> = (0..genre_pool.len()).collect();
-        genre_indices.shuffle(&mut rand::rng());
+        genre_indices.shuffle(&mut daily_recommendation_rng());
         let picked_genres: Vec<&str> = genre_indices.into_iter().take(2).map(|i| genre_pool[i]).collect();
 
         let (chart_res, genre_res_a, genre_res_b) = futures::future::join3(
@@ -4746,7 +4783,7 @@ pub async fn get_personalized_discovery_hub(
         if let Ok(ref tracks) = genre_res_a { parse_tracks(tracks, &format!("Trending {}", capitalize_first(picked_genres[0])), &mut chart_candidates); }
         if let Ok(ref tracks) = genre_res_b { parse_tracks(tracks, &format!("Trending {}", capitalize_first(picked_genres[1])), &mut chart_candidates); }
 
-        chart_candidates.shuffle(&mut rand::rng());
+        chart_candidates.shuffle(&mut daily_recommendation_rng());
 
         let mut global_charts = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
@@ -4775,7 +4812,7 @@ pub async fn get_personalized_discovery_hub(
             }
         } else {
             let fallback_queries = ["trending songs worldwide 2024", "viral hits global", "top pop songs right now"];
-            let pick = rand::rng().random_range(0..fallback_queries.len());
+            let pick = daily_recommendation_rng().random_range(0..fallback_queries.len());
             if let Ok(tracks) = search_youtube_internal(&client_charts, &api_key_charts, fallback_queries[pick], false).await {
                 for mut t in tracks.into_iter().take(12) {
                     if !is_duration_too_long(&t.duration_raw) && !is_third_party_or_instrumental(&t.title, &t.artist) && !is_compilation_channel(&t.artist) && seen_ids.insert(t.id.clone()) {
@@ -4786,12 +4823,13 @@ pub async fn get_personalized_discovery_hub(
             }
         }
         global_charts
-    });
+    };
 
     // ── TASK 2: PERSONALIZED RECOMMENDATIONS (Parallel) ──────────────────────
     let client_recs = client.clone();
     let api_key_recs = api_key.clone();
     let priority_artists_c = priority_loved_artists.clone();
+    let genuine_loved_c = genuine_loved_artists.clone();
     let top_artists_c = top_artists.clone();
     let library_artists_c = library_artists.clone();
     let discovery_level_c = discovery_level.clone();
@@ -4803,7 +4841,7 @@ pub async fn get_personalized_discovery_hub(
     let library_sigs_c = library_signatures.clone();
     let skip_stats_c = artist_skip_stats.clone();
 
-    let recs_task = tokio::spawn(async move {
+    let recs_task = async move {
         #[derive(Debug, Clone)]
         struct CandidateTarget {
             target_artist: String,
@@ -4824,7 +4862,7 @@ pub async fn get_personalized_discovery_hub(
             for (t, a) in &top_listened_c {
                 if !track_seeds.iter().any(|(st, sa)| st == t && sa == a) { track_seeds.push((t.clone(), a.clone())); }
             }
-            track_seeds.shuffle(&mut rand::rng());
+            track_seeds.shuffle(&mut daily_recommendation_rng());
 
             let mut sim_futures = Vec::new();
             for (t_title, t_artist) in track_seeds.into_iter().take(3) {
@@ -4839,7 +4877,7 @@ pub async fn get_personalized_discovery_hub(
             for (seed_title, res) in sim_results {
                 if let Ok(similar_list) = res {
                     let mut sim_copy = similar_list;
-                    sim_copy.shuffle(&mut rand::rng());
+                    sim_copy.shuffle(&mut daily_recommendation_rng());
                     for item in sim_copy.into_iter().take(3) {
                         let s_title = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let s_artist = item.get("artist").and_then(|a| a.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
@@ -4859,7 +4897,7 @@ pub async fn get_personalized_discovery_hub(
         // 2. Similar Artists
         if !priority_artists_c.is_empty() {
             let mut artist_seeds = priority_artists_c.clone();
-            artist_seeds.shuffle(&mut rand::rng());
+            artist_seeds.shuffle(&mut daily_recommendation_rng());
             let mut sim_artist_futures = Vec::new();
             for seed_art in artist_seeds.into_iter().take(3) {
                 let seed_c = seed_art.clone();
@@ -4873,7 +4911,7 @@ pub async fn get_personalized_discovery_hub(
             for (seed_art, res) in sim_artist_results {
                 if let Ok(sim_artists) = res {
                     let mut arts_copy = sim_artists;
-                    arts_copy.shuffle(&mut rand::rng());
+                    arts_copy.shuffle(&mut daily_recommendation_rng());
                     for sim_art in arts_copy.into_iter().take(2) {
                         let seed_label = format!("Fans of {} also like", seed_art);
                         let sim_art_c = sim_art.clone();
@@ -4888,7 +4926,7 @@ pub async fn get_personalized_discovery_hub(
             for (sim_art, seed_label, top_res) in top_track_results {
                 if let Ok(tracks) = top_res {
                     let mut tr_copy = tracks;
-                    tr_copy.shuffle(&mut rand::rng());
+                    tr_copy.shuffle(&mut daily_recommendation_rng());
                     for t in tr_copy.into_iter().take(2) {
                         let t_name = t.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         if !t_name.is_empty() {
@@ -4904,10 +4942,10 @@ pub async fn get_personalized_discovery_hub(
             }
         }
 
-        // 3. Deep cuts from favorite artists
+        // 3. Popular tracks from favorite artists
         if !priority_artists_c.is_empty() {
             let mut fav_artists = priority_artists_c.clone();
-            fav_artists.shuffle(&mut rand::rng());
+            fav_artists.shuffle(&mut daily_recommendation_rng());
             let mut fav_futures = Vec::new();
             for fav_art in fav_artists.into_iter().take(2) {
                 let fav_c = fav_art.clone();
@@ -4920,7 +4958,7 @@ pub async fn get_personalized_discovery_hub(
             for (fav_art, res) in fav_results {
                 if let Ok(tracks) = res {
                     let mut tr_copy = tracks;
-                    tr_copy.shuffle(&mut rand::rng());
+                    tr_copy.shuffle(&mut daily_recommendation_rng());
                     for t in tr_copy.into_iter().take(2) {
                         let t_name = t.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         if !t_name.is_empty() {
@@ -4940,7 +4978,7 @@ pub async fn get_personalized_discovery_hub(
         if !top_genre_c.is_empty() && top_genre_c != "Unknown" {
             if let Ok(tag_tracks) = crate::lastfm_api::get_tag_top_tracks(&top_genre_c).await {
                 let mut tag_copy = tag_tracks;
-                tag_copy.shuffle(&mut rand::rng());
+                tag_copy.shuffle(&mut daily_recommendation_rng());
                 for t in tag_copy.into_iter().take(4) {
                     let title = t.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                     let artist = t.get("artist").and_then(|a| a.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
@@ -4959,7 +4997,7 @@ pub async fn get_personalized_discovery_hub(
         // 5. ListenBrainz
         if listenbrainz_connected && !listenbrainz_recs_c.is_empty() {
             let mut lb_copy = listenbrainz_recs_c;
-            lb_copy.shuffle(&mut rand::rng());
+            lb_copy.shuffle(&mut daily_recommendation_rng());
             for rec_str in lb_copy.into_iter().take(4) {
                 let parts: Vec<&str> = rec_str.split(" - ").collect();
                 if parts.len() >= 2 {
@@ -5004,7 +5042,7 @@ pub async fn get_personalized_discovery_hub(
         // Deduplicate candidate targets & cap to 14 parallel searches
         let mut unique_targets = Vec::new();
         let mut seen_target_keys = std::collections::HashSet::new();
-        candidate_targets.shuffle(&mut rand::rng());
+        candidate_targets.shuffle(&mut daily_recommendation_rng());
 
         for cand in candidate_targets {
             let key = format!("{}::{}", normalize_artist_name(&cand.target_artist), clean_title(&cand.target_title));
@@ -5033,7 +5071,7 @@ pub async fn get_personalized_discovery_hub(
             if let Ok(tracks) = res {
                 let mut added_for_target = 0;
                 for mut track in tracks.into_iter().take(4) {
-                    if !artist_matches(&track.artist, &target.target_artist) {
+                    if !artist_matches(&track.artist, &target.target_artist) || (!target.target_title.trim().is_empty() && !recording_matches(&track, &target.target_artist, &target.target_title)) {
                         continue;
                     }
                     if is_duration_too_long(&track.duration_raw) {
@@ -5052,7 +5090,7 @@ pub async fn get_personalized_discovery_hub(
                     if has_unofficial {
                         continue;
                     }
-                    track.recommendation_source = Some(target.source_label.clone());
+                    track.recommendation_source = Some(if target.target_title.trim().is_empty() { format!("From {}", target.target_artist) } else { target.source_label.clone() });
                     if seen_cand_ids.insert(track.id.clone()) {
                         raw_candidates.push((track, target.base_score));
                         added_for_target += 1;
@@ -5065,7 +5103,7 @@ pub async fn get_personalized_discovery_hub(
         }
 
         let hub_profile = DiscoveryTasteProfile {
-            loved_artists: &priority_artists_c,
+            loved_artists: &genuine_loved_c,
             top_artists: &top_artists_c,
             library_artists: &library_artists_c,
             discovery_level: &discovery_level_c,
@@ -5093,7 +5131,7 @@ pub async fn get_personalized_discovery_hub(
             }
         }
         final_recs
-    });
+    };
 
     // ── TASK 3: MIXES (Parallel) ──────────────────────────────────────────────
     let client_mixes = client.clone();
@@ -5101,22 +5139,33 @@ pub async fn get_personalized_discovery_hub(
     let seed_artists_mix = seed_artists.clone();
     let top_artists_mix = top_artists.clone();
     let top_genre_mix = top_genre.clone();
+    let recent_repeats_mix = {
+        let conn = safe_lock(&state.db);
+        let cutoff = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64 - 7 * 86_400).unwrap_or(0);
+        let mut repeats = Vec::new();
+        if let Ok(mut stmt) = conn.prepare("SELECT track_path, title, artist FROM playback_history WHERE timestamp >= ?1 AND signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) AND title IS NOT NULL AND artist IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tracks d WHERE d.disliked = 1 AND (d.path = playback_history.track_path OR (lower(d.title) = lower(playback_history.title) AND lower(d.artist) = lower(playback_history.artist)))) GROUP BY track_path, title, artist HAVING COUNT(*) >= 2 ORDER BY COUNT(*) DESC, MAX(timestamp) DESC LIMIT 20") {
+            if let Ok(rows) = stmt.query_map([cutoff], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))) {
+                repeats.extend(rows.flatten());
+            }
+        }
+        repeats
+    };
     let lib_tracks_mix = lib_tracks.clone();
     let play_counts_mix = play_counts.clone();
 
-    let mixes_task = tokio::spawn(async move {
-        match generate_hybrid_mixes(&client_mixes, &api_key_mixes, &seed_artists_mix, &top_artists_mix, &top_genre_mix, &lib_tracks_mix, &play_counts_mix).await {
+    let mixes_task = async move {
+        match generate_hybrid_mixes(&client_mixes, &api_key_mixes, &seed_artists_mix, &top_artists_mix, &top_genre_mix, &lib_tracks_mix, &play_counts_mix, &recent_repeats_mix).await {
             Ok(mixes) if !mixes.is_empty() => mixes,
             _ => Vec::new()
         }
-    });
+    };
 
     // ── JOIN ALL CONCURRENT TASKS ─────────────────────────────────────────────
     let (charts_res, recs_res, mixes_res) = tokio::join!(charts_task, recs_task, mixes_task);
 
-    let mut global_charts = charts_res.unwrap_or_default();
-    let mut recommendations = recs_res.unwrap_or_default();
-    let mut mixed_for_you = mixes_res.unwrap_or_default();
+    let mut global_charts = charts_res;
+    let mut recommendations = recs_res;
+    let mut mixed_for_you = mixes_res;
 
     // Guaranteed fallbacks if any online source was empty or errored
     let (local_recs, local_charts) = generate_local_discovery_fallback(&lib_tracks, &play_counts);
@@ -5134,7 +5183,7 @@ pub async fn get_personalized_discovery_hub(
 
     let (recently_played, heavy_rotation, forgotten_gems, playlist_mixes, unmatched_recent, unmatched_top) = {
         let conn = safe_lock(&state.db);
-        extract_library_shelves(&conn, &lib_tracks, &play_counts, &recently_played_tracks, &top_listened_tracks)
+        extract_library_shelves(&conn, &lib_tracks, &play_counts, &recently_played_tracks, &top_listened_tracks, false)
     };
 
     // ── BLEND ONLINE COUNTERPARTS INTO PERSONAL SHELVES ─────────────────────
@@ -5188,6 +5237,8 @@ pub async fn get_personalized_discovery_hub(
     }
 
     Ok(hub_data)
+
+    }).await
 }
 
 #[tauri::command]
@@ -5557,7 +5608,8 @@ mod tests {
     #[test]
     fn test_semantic_noise_and_third_party_filtering() {
         assert!(is_semantic_noise("Song (Karaoke Version)", "Song"));
-        assert!(is_semantic_noise("Song - Instrumental", "Song"));
+        assert!(!is_semantic_noise("Song - Instrumental", "Song"));
+        assert!(is_semantic_noise("Song (Cover Version)", "Song"));
         assert!(!is_semantic_noise("Song (Official Audio)", "Song"));
 
         assert!(is_third_party_or_instrumental("Top 50 Hits Compilation 2024", "Unknown"));
@@ -5972,6 +6024,44 @@ mod tests {
     }
 
     #[test]
+    fn history_resolution_requires_recording_artist_and_version() {
+        let mut track = YoutubeTrack { id: "x".into(), title: "Song".into(), artist: "Artist".into(), cover_url: None, duration_raw: "3:00".into(), url: String::new(), recommendation_source: None, source_context: None };
+        assert!(recording_matches(&track, "Artist", "Song"));
+        assert!(!recording_matches(&track, "Another", "Song"));
+        assert!(!recording_matches(&track, "Artist", "Other Song"));
+        track.title = "Song (Live)".into();
+        assert!(!recording_matches(&track, "Artist", "Song"));
+        assert!(recording_matches(&track, "Artist", "Song (Live)"));
+        track.title = "Song (Live at Wembley)".into();
+        assert!(!recording_matches(&track, "Artist", "Song (Live at Pompeii)"));
+        track.title = "Song (Remastered 2024)".into();
+        assert!(!recording_matches(&track, "Artist", "Song (Remastered 2009)"));
+        track.title = "Song (Official Audio)".into();
+        assert!(recording_matches(&track, "Artist", "Song"));
+    }
+
+    #[test]
+    fn saved_stream_shelves_preserve_provider_and_catalog_id() {
+        let conn = crate::db::init_db(":memory:").unwrap();
+        conn.execute("INSERT INTO tracks (path, title, artist, format) VALUES ('12345', 'Song', 'Artist', 'Qobuz FLAC'), ('67890', 'Tidal Song', 'Artist', 'Tidal FLAC'), ('https://youtu.be/dQw4w9WgXcQ', 'Other', 'Artist', 'YOUTUBE')", []).unwrap();
+        let tracks = crate::db::get_all_tracks(&conn).unwrap();
+        for track in tracks {
+            let mapped = map_local_to_youtube_track(&track, "Saved");
+            let source = &mapped.source_context.unwrap().sources[0];
+            if track.format.as_deref() == Some("Qobuz FLAC") {
+                assert_eq!(source.provider, crate::db::SourceProvider::Qobuz);
+                assert_eq!(source.id, "12345");
+            } else if track.format.as_deref() == Some("Tidal FLAC") {
+                assert_eq!(source.provider, crate::db::SourceProvider::Tidal);
+                assert_eq!(source.id, "67890");
+            } else {
+                assert_eq!(source.provider, crate::db::SourceProvider::Youtube);
+                assert_eq!(source.id, "dQw4w9WgXcQ");
+            }
+        }
+    }
+
+    #[test]
     fn test_generate_local_mixes_returns_four_curated_places() {
         let conn = crate::db::init_db(":memory:").expect("In-memory SQLite database should initialize");
         conn.execute(
@@ -5985,6 +6075,14 @@ mod tests {
             [],
         )
         .unwrap();
+
+        let fixture = std::env::temp_dir().join(format!("aideo-home-{}", std::process::id()));
+        std::fs::create_dir_all(&fixture).unwrap();
+        for index in 1..=6 {
+            let path = fixture.join(format!("{}.mp3", index));
+            std::fs::write(&path, []).unwrap();
+            conn.execute("UPDATE tracks SET path = ?1 WHERE path = ?2", rusqlite::params![path.to_string_lossy(), format!("C:/{}.mp3", index)]).unwrap();
+        }
 
         let now_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -6009,6 +6107,11 @@ mod tests {
             rusqlite::params![sixty_days_ago],
         ).unwrap();
 
+        conn.execute("UPDATE playback_history SET signal_quality = 'qualified', end_reason = 'completed', listened_seconds = duration_played", []).unwrap();
+        for index in [3, 4] {
+            conn.execute("UPDATE playback_history SET track_path = ?1 WHERE track_path = ?2", rusqlite::params![fixture.join(format!("{}.mp3", index)).to_string_lossy(), format!("C:/{}.mp3", index)]).unwrap();
+        }
+
         let seed_artists = vec!["Coldplay".to_string()];
         let top_artists = vec!["Coldplay".to_string()];
 
@@ -6032,6 +6135,7 @@ mod tests {
         for m in &mixes {
             assert!(!m.tracks.is_empty(), "Mix {} should not be empty", m.id);
         }
+        std::fs::remove_dir_all(fixture).unwrap();
     }
 
     #[test]

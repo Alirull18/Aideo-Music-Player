@@ -25,26 +25,17 @@ describe('Adversarial Stress Test: AI Smart Mix Generator (generateSmartMix)', (
     nextPlaylistId = 100;
 
     (invoke as any).mockImplementation((cmd: string, args?: any) => {
+        if (cmd === 'get_recommendations') return { tracks: (args.request.mood === 'sad' ? [] : args.request.candidates).filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
       if (cmd === 'get_playlists') {
         return Promise.resolve([...playlistDb]);
       }
-      if (cmd === 'create_playlist') {
-        const id = nextPlaylistId++;
-        // Emulate SQLite UNIQUE constraint on playlists.name
-        if (playlistDb.some(p => p.name === args.name)) {
-          return Promise.reject(new Error(`UNIQUE constraint failed: playlists.name for "${args.name}"`));
-        }
-        playlistDb.push({ id, name: args.name });
+      if (cmd === 'save_generated_playlist') {
+        const existing = playlistDb.find(p => p.name === args.name);
+        const id = existing?.id ?? nextPlaylistId++;
+        if (!existing) playlistDb.push({ id, name: args.name });
+        playlistTracksDb = playlistTracksDb.filter(pt => pt.playlistId !== id);
+        playlistTracksDb.push(...args.paths.map((path: string) => ({ playlistId: id, path })));
         return Promise.resolve(id);
-      }
-      if (cmd === 'delete_playlist') {
-        playlistDb = playlistDb.filter(p => p.id !== args.id);
-        playlistTracksDb = playlistTracksDb.filter(pt => pt.playlistId !== args.id);
-        return Promise.resolve(null);
-      }
-      if (cmd === 'add_to_playlist') {
-        playlistTracksDb.push({ playlistId: args.playlistId, path: args.path });
-        return Promise.resolve(null);
       }
       if (cmd === 'clear_queue' || cmd === 'add_to_queue_bulk' || cmd === 'play_track' || cmd === 'get_smart_playlists') {
         return Promise.resolve(null);
@@ -53,6 +44,9 @@ describe('Adversarial Stress Test: AI Smart Mix Generator (generateSmartMix)', (
     });
 
     useStore.setState({
+      appMode: 'local',
+      recommendationEngine: 'our',
+      autoplayEnabled: false,
       tracks: [...mockTracks],
       playlists: [],
       queue: [],
@@ -79,7 +73,7 @@ describe('Adversarial Stress Test: AI Smart Mix Generator (generateSmartMix)', (
     expect(playlistDb).toHaveLength(1);
     expect(playlistDb[0].name).toBe('AI Smart Mix - energetic');
     const secondId = playlistDb[0].id;
-    expect(secondId).not.toBe(firstId); // Recreated with new ID
+    expect(secondId).toBe(firstId);
     expect(playlistTracksDb.filter(pt => pt.playlistId === secondId).length).toBeGreaterThan(0);
 
     // 3rd generation (same mood)
@@ -87,7 +81,7 @@ describe('Adversarial Stress Test: AI Smart Mix Generator (generateSmartMix)', (
     expect(playlistDb).toHaveLength(1);
     expect(playlistDb[0].name).toBe('AI Smart Mix - energetic');
     const thirdId = playlistDb[0].id;
-    expect(thirdId).not.toBe(secondId);
+    expect(thirdId).toBe(secondId);
     expect(playlistTracksDb.filter(pt => pt.playlistId === thirdId).length).toBeGreaterThan(0);
   });
 
@@ -107,27 +101,27 @@ describe('Adversarial Stress Test: AI Smart Mix Generator (generateSmartMix)', (
 
     // Regenerate Energetic
     await generateSmartMix('energetic', 'history');
-    expect(playlistDb.map(p => p.name)).toEqual(['My Favorites', 'AI Smart Mix - chill', 'AI Smart Mix - energetic']);
+    expect(playlistDb.map(p => p.name)).toEqual(['My Favorites', 'AI Smart Mix - energetic', 'AI Smart Mix - chill']);
   });
 
-  it('Scenario 3: Fallback behavior when fewer than 5 tracks match mood keywords', async () => {
+  it('Scenario 3: Missing mood evidence never fills from arbitrary tracks', async () => {
     // Only 1 sad track exists in mockTracks
     const { generateSmartMix } = useStore.getState();
     await generateSmartMix('melancholic', 'history');
 
-    expect(playlistDb.some(p => p.name === 'AI Smart Mix - melancholic')).toBe(true);
-    const melancholicPl = playlistDb.find(p => p.name === 'AI Smart Mix - melancholic')!;
-    const tracksInMix = playlistTracksDb.filter(pt => pt.playlistId === melancholicPl.id);
-    // Because fallback triggers (moodTracks < 5 -> moodTracks = [...tracks]), all 7 tracks are included
-    expect(tracksInMix.length).toBe(7);
+    expect(playlistDb.some(p => p.name === 'AI Smart Mix - melancholic')).toBe(false);
+    expect(playlistTracksDb).toEqual([]);
+    expect(invoke).toHaveBeenCalledWith('get_recommendations', { request: expect.objectContaining({ surface: 'mood', mood: 'sad' }) });
   });
 
-  it('Scenario 4: Re-ranking works with Last.fm and ListenBrainz trend sources', async () => {
+  it('Scenario 4: Legacy trend arguments route through the shared mood ranker', async () => {
     const { generateSmartMix } = useStore.getState();
 
     // Last.fm trend source
     await generateSmartMix('focus', 'last.fm');
     expect(playlistDb.some(p => p.name === 'AI Smart Mix - focus')).toBe(true);
+
+    expect(invoke).toHaveBeenCalledWith('get_recommendations', { request: expect.objectContaining({ surface: 'mood', mood: 'focus' }) });
 
     // ListenBrainz trend source
     await generateSmartMix('focus', 'listenbrainz');

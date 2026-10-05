@@ -1,10 +1,15 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store';
 
 describe('Bit-Perfect Mode and DSP State Protection', () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.mocked(invoke).mockImplementation(async (command, args) => command === 'get_audio_devices' ? ['[System Default Device]'] : command.startsWith('toggle_') ? (args as Record<string, unknown>)?.enable : null);
     useStore.setState({
+      currentDevice: null,
+      devices: [],
+      audioDeviceSwitching: false,
       playback: {
         ...useStore.getState().playback,
         bit_perfect: false,

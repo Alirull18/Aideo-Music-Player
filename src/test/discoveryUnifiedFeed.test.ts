@@ -162,6 +162,28 @@ describe('discoveryFeed helpers', () => {
   });
 
   describe('getUnifiedTabTracks', () => {
+    it.each(['recs', 'recent', 'rotation', 'gems', 'tidal', 'charts'] as const)('deduplicates recordings inside the %s category', tab => {
+      const copies = [mockTrack('a', 'Song', 'Artist', 'x'), mockTrack('b', 'Song', 'Artist', 'y')];
+      const data = { ...emptyData(), recommendations: copies, recently_played: copies, heavy_rotation: copies,
+        forgotten_gems: copies, tidal_hifi: copies, global_charts: copies };
+      expect(getUnifiedTabTracks(data, tab)).toHaveLength(1);
+    });
+
+    it('keeps different recordings with the same displayed title and artist', () => {
+      const studio = mockTrack('studio', 'Song', 'Artist', 'x');
+      const alternate = { ...mockTrack('alternate', 'Song', 'Artist', 'x'), duration_raw: '4:20' };
+      const data = { ...emptyData(), recommendations: [studio, alternate] };
+      expect(getUnifiedTabTracks(data, 'all')).toHaveLength(2);
+    });
+
+    it('does not merge conflicting ISRCs or transitively merge duration differences', () => {
+      const first = { ...mockTrack('first', 'Song', 'Artist', 'x'), recording_evidence: { isrc: 'AA1234567890' } };
+      const alternate = { ...mockTrack('alternate', 'Song', 'Artist', 'x'), recording_evidence: { isrc: 'BB1234567890' } };
+      expect(dedupeTracks([first, alternate])).toHaveLength(2);
+      const copies = [180, 182, 184].map((duration, index) => ({ ...mockTrack(String(index), 'Song', 'Artist', 'x'), duration }));
+      expect(dedupeTracks(copies)).toHaveLength(2);
+    });
+
     it("returns the exact shelf content for a category tab so both layouts match", () => {
       const data = emptyData();
       data.recommendations = [mockTrack('rec1', 'Rec Song', 'E', "Similar to 'Loved Song'")];

@@ -2,6 +2,7 @@ import type { StoreApi } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor, type PlaybackSource, type PlayerState, type Track } from './types';
 import { setOnlineTrackCache, rememberResolvedPath } from '../utils';
+import { markListeningEnd, radioAllowsLocal } from '../utils/recommendations';
 import { applySourcePreference, bounded, isLocalUnifiedTrack, matchingSources, rankSources, resolveSource, searchSources, sourceKey, sourceMetadata, sourceName, sourceSearchQuery } from '../utils/unifiedSources';
 
 type SetState = StoreApi<PlayerState>['setState'];
@@ -91,14 +92,16 @@ export async function manageSourceQueue(set: SetState) {
 export async function playUnifiedTrack(set: SetState, get: () => PlayerState, original: Track, isHistory = false, resetAutoplay = true, startPos = 0, preservePlaybackSession = false) {
   const token = sequence;
   const current = () => token === sequence;
-  const overallDeadline = Date.now() + 15000;
+  let overallDeadline = Date.now() + 15000;
   if (get().playback.status === 'Playing') {
     invoke('pause_track').catch(() => {});
   }
   let track: Track = { ...applySourcePreference(original), active_source: undefined, active_quality: undefined };
   let context = track.source_context!;
   const quality = get().streamingQuality;
-  const enabled = (source: PlaybackSource) => source.provider === 'local' || (get().appMode !== 'local'
+  const enabled = (source: PlaybackSource) => (source.provider === 'local'
+    && (!track.is_autoplay || get().appMode === 'local' || radioAllowsLocal(get().autoplaySeedTrack || get().currentTrack))) || (source.provider !== 'local' && get().appMode !== 'local'
+    && (!(track.is_autoplay || track.is_generated_mix) || get().recommendationEngine === 'our' || source.provider === get().recommendationEngine)
     && (source.provider === 'youtube' || (source.provider === 'tidal' ? get().tidalConnected : get().qobuzConnected && get().qobuzExperimentalEnabled)));
   const ordered = rankSources(context.sources.filter(enabled), quality, get().preferredSource);
   if (context.selection.mode === 'explicit') {
@@ -147,6 +150,10 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
   let historyRecorded = false;
   let discovery: ReturnType<typeof boundedSearchSources> | undefined;
   let discoveryConsumed = false;
+  const refreshedSources = new Set<string>();
+  const permanentAuthFailure = (error: string) => /not authenticated|unauthorized|invalid[_ -]grant|rejected your session token|reconnect/i.test(error);
+  const preResolutionAuthErrors = new Map<string, string>();
+  const slowPreResolutions = new Set<string>();
   const discover = () => discovery ||= boundedSearchSources(sourceSearchQuery(track), {
     tidal: get().appMode !== 'local' && get().tidalConnected,
     qobuz: get().appMode !== 'local' && get().qobuzConnected && get().qobuzExperimentalEnabled,
@@ -157,7 +164,23 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
     const attemptId = `attempt_${Date.now()}_${token}_${attemptToken}`;
     const active = () => current() && attemptToken === attemptSequence;
     set({ currentAttemptId: attemptId });
-    if (failure) { lastError = failure; startPos = get().playback.position_secs; }
+    if (failure) {
+      lastError = failure;
+      startPos = get().playback.position_secs;
+      overallDeadline = Date.now() + 15000;
+      set({ playback: { ...get().playback, is_buffering: true } });
+      const failedSource = ordered[index - 1];
+      if (permanentAuthFailure(failure)) {
+        lastError = `${failure} Please reconnect the provider in Settings.`;
+        index = ordered.length;
+        discoveryConsumed = true;
+      } else if (failedSource && failedSource.provider !== 'local'
+        && /network|timed? ?out|timeout|connection|expired|\b403\b|\b410\b/i.test(failure)
+        && !refreshedSources.has(sourceKey(failedSource))) {
+        refreshedSources.add(sourceKey(failedSource));
+        index--;
+      }
+    }
     while (active() && index < ordered.length) {
       const remainingMs = Math.max(0, overallDeadline - Date.now());
       if (remainingMs <= 0) {
@@ -166,10 +189,13 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
       }
       const source: PlaybackSource = ordered[index++];
       try {
+        const authError = preResolutionAuthErrors.get(sourceKey(source));
+        if (authError) throw new Error(authError);
         if (!enabled(source)) throw new Error('Source is unavailable');
         if (source.provider === 'tidal' && !get().tidalConnected) throw new Error('Tidal is disconnected');
         if (source.provider === 'qobuz' && (!get().qobuzConnected || !get().qobuzExperimentalEnabled)) throw new Error('Qobuz is unavailable');
-        const result = await resolveSource(source, quality, Boolean(failure), remainingMs);
+        const resolution = resolveSource(source, quality, Boolean(failure), remainingMs);
+        const result = await bounded(resolution, slowPreResolutions.has(sourceKey(source)) && !failure ? Math.min(750, remainingMs) : remainingMs);
         if (!active()) return;
         const playingTrack = { ...track, ...(source.metadata ? sourceMetadata(source.metadata) : {}), active_source: source, active_quality: result.quality };
         setOnlineTrackCache(result.url, playingTrack);
@@ -214,7 +240,11 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
         } else if (get().upnp_connected) {
           await bounded(invoke('upnp_play', { path: result.url, title: playingTrack.title, artist: playingTrack.artist, album: playingTrack.album, coverUrl: playingTrack.cover_url }), playRemainingMs);
           if (startPos > 0) await invoke('upnp_control', { action: 'seek', value: startPos });
-        } else await bounded(invoke('play_track', { path: result.url, startPos, attemptId }), playRemainingMs);
+        } else {
+          if (get().stopBoundary?.kind === 'track') await invoke('set_stop_after_path', { path: result.url });
+          if (!active()) return;
+          await bounded(invoke('play_track', { path: result.url, startPos, attemptId }), playRemainingMs);
+        }
         if ((get().chromecast_connected || get().upnp_connected) && active()) {
           set({ playback: { ...get().playback, is_buffering: false } });
         }
@@ -231,17 +261,22 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
           historyRecorded = true;
           await get().recordPlaybackTransition(playingTrack, source.provider);
           if (!active()) return;
-          const counts = { ...get().playCounts, [context.recording_id]: (get().playCounts[context.recording_id] || 0) + 1 };
-          set({ playCounts: counts });
-          localStorage.setItem('aideo_play_counts', JSON.stringify(counts));
-          if (resetAutoplay) set({ autoplaySeedTrack: track, autoplaySessionHistory: [track] });
+          if (resetAutoplay) set({ autoplaySeedTrack: playingTrack, autoplaySessionHistory: [playingTrack] });
           void get().autoFetchLyricsOnline(playingTrack);
         }
         localStorage.setItem('aideo_current_track', JSON.stringify(playingTrack));
         get().updateDiscordPresence();
         if (get().autoplayEnabled && !preservePlaybackSession) void get().triggerAutoplayRadio(playingTrack, resetAutoplay);
         return;
-      } catch (error) { lastError = String(error); if (active()) retry = null; }
+      } catch (error) {
+        lastError = String(error);
+        if (active()) retry = null;
+        if (permanentAuthFailure(lastError)) {
+          lastError += ' Please reconnect the provider in Settings.';
+          discoveryConsumed = true;
+          break;
+        }
+      }
     }
     if (active() && !discoveryConsumed && track.title && track.artist) {
       discoveryConsumed = true;
@@ -260,14 +295,18 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
     if (active()) {
       retry = null;
       const message = `No source could play this recording. ${lastError}`;
+      if (historyRecorded || preservePlaybackSession) markListeningEnd('error');
+      await get().recordPlaybackTransition(null);
+      if (!active()) return;
       set({ playbackError: message, playback: { ...get().playback, status: 'Stopped', current_track: null, is_buffering: false } });
+      get().reportPlaybackFailure?.(message, track, get().playback.position_secs);
       window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message, type: 'error' } }));
     }
   };
   try {
     if (context.selection.mode === 'auto' && quality !== 'data_saver' && track.title && track.artist) void discover();
     const nextTrack = get().queue[0];
-    const isLocalSequence = isLocalUnifiedTrack(track) && (!nextTrack || isLocalUnifiedTrack(nextTrack));
+    const isLocalSequence = !get().albumSession && isLocalUnifiedTrack(track) && (!nextTrack || isLocalUnifiedTrack(nextTrack));
     if (isLocalSequence) {
       if (get().sourceQueueManaged) {
         await invoke('set_source_queue_mode', { enabled: false });
@@ -286,12 +325,16 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
     }
     if (current() && context.selection.mode === 'auto') {
       const resolved: PlaybackSource[] = [];
+      const preferred = ordered[0];
+      const settled = new Set<string>();
       const remainingPreResolveMs = Math.max(0, overallDeadline - Date.now());
       const resolving = Promise.all(ordered.map(async source => {
         try {
           const result = await resolveSource(source, quality, false, remainingPreResolveMs);
           resolved.push({ ...source, catalog_quality: result.quality });
-        } catch { /* An unavailable source remains a fallback candidate. */ }
+        } catch (error) {
+          if (permanentAuthFailure(String(error))) preResolutionAuthErrors.set(sourceKey(source), String(error));
+        } finally { settled.add(sourceKey(source)); }
       }));
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([resolving, new Promise<void>(resolve => { timer = setTimeout(resolve, Math.min(750, remainingPreResolveMs)); })]);
@@ -299,6 +342,11 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
       if (!current()) return;
       const ready = new Set(resolved.map(sourceKey));
       ordered.splice(0, ordered.length, ...rankSources(resolved, quality, get().preferredSource), ...ordered.filter(s => !ready.has(sourceKey(s))));
+      if (preferred && (!settled.has(sourceKey(preferred)) || preResolutionAuthErrors.has(sourceKey(preferred)))) {
+        if (!settled.has(sourceKey(preferred)) && ready.size > 0) slowPreResolutions.add(sourceKey(preferred));
+        const preferredIndex = ordered.findIndex(source => sourceKey(source) === sourceKey(preferred));
+        ordered.unshift(...ordered.splice(preferredIndex, 1));
+      }
     }
     if (current()) await attempt();
     if (current() && context.selection.mode === 'auto' && quality !== 'data_saver' && track.title && track.artist) {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { invoke } from '@tauri-apps/api/core';
 import { TheaterSignalPathModal } from '../components/theater/TheaterSignalPathModal';
 import { useStore } from '../store';
 import type { EffectiveAudioPath } from '../store/types';
@@ -152,5 +153,23 @@ describe('TheaterSignalPathModal', () => {
     fireEvent.click(closeBtn);
 
     expect(onCloseSpy).toHaveBeenCalled();
+  });
+
+  it('requests live measurements only while the signal inspector is open', async () => {
+    let measuring = false;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command !== 'get_audio_levels') return null;
+      measuring = (args as { enabled: boolean }).enabled;
+      return measuring ? { peak_dbfs: -12, headroom_db: 12, silent: false } : null;
+    });
+    const { rerender } = render(<TheaterSignalPathModal isOpen={false} onClose={vi.fn()} />);
+    expect(measuring).toBe(false);
+    rerender(<TheaterSignalPathModal isOpen={true} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('-12.0 dBFS')).toBeInTheDocument());
+    expect(screen.getByText('12.0 dB')).toBeInTheDocument();
+    expect(measuring).toBe(true);
+    rerender(<TheaterSignalPathModal isOpen={false} onClose={vi.fn()} />);
+    await waitFor(() => expect(measuring).toBe(false));
+    vi.mocked(invoke).mockResolvedValue(null);
   });
 });

@@ -527,6 +527,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_path ON playback_history(track_path)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position)", []);
 
+    crate::recommendations::init_schema(&conn)?;
     Ok(conn)
 }
 
@@ -555,6 +556,12 @@ pub fn get_library_directories(conn: &Connection) -> Result<Vec<String>> {
 
 pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
     let tx = conn.transaction()?;
+    save_tracks_in_transaction(&tx, tracks)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn save_tracks_in_transaction(tx: &Connection, tracks: &mut [Track]) -> Result<()> {
     for track in tracks {
         let hash = track.path_hash.clone().unwrap_or_else(|| format!("{:x}", md5::compute(track.path.as_bytes())));
         track.path_hash = Some(hash.clone());
@@ -591,7 +598,6 @@ pub fn save_tracks(conn: &mut Connection, tracks: &mut [Track]) -> Result<()> {
             },
         )?;
     }
-    tx.commit()?;
     Ok(())
 }
 
@@ -795,6 +801,32 @@ pub fn create_playlist(conn: &Connection, name: &str) -> Result<i32> {
     Ok(conn.last_insert_rowid() as i32)
 }
 
+pub fn save_generated_playlist(conn: &mut Connection, name: &str, paths: &[String]) -> Result<i32> {
+    let name = name.trim();
+    if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control)
+        || paths.is_empty() || paths.len() > 100 {
+        return Err(rusqlite::Error::InvalidParameterName("Invalid generated playlist".into()));
+    }
+    let tx = conn.transaction()?;
+    let mut seen = std::collections::HashSet::new();
+    for path in paths {
+        let track = get_track_by_path(&tx, path)?;
+        if !seen.insert(path) || !std::path::Path::new(path).is_absolute()
+            || !std::path::Path::new(path).is_file()
+            || !crate::recommendations::source_key(&track).starts_with("local:") {
+            return Err(rusqlite::Error::InvalidParameterName("Generated playlists require unique available local tracks".into()));
+        }
+    }
+    tx.execute("INSERT INTO playlists(name) VALUES (?1) ON CONFLICT(name) DO NOTHING", [name])?;
+    let id = tx.query_row("SELECT id FROM playlists WHERE name=?1", [name], |row| row.get::<_, i32>(0))?;
+    tx.execute("DELETE FROM playlist_tracks WHERE playlist_id=?1", [id])?;
+    for path in paths {
+        insert_playlist_entry(&tx, id, path, None, None)?;
+    }
+    tx.commit()?;
+    Ok(id)
+}
+
 pub fn delete_playlist(conn: &Connection, id: i32) -> Result<()> {
     conn.execute("DELETE FROM playlists WHERE id = ?1", params![id])?;
     Ok(())
@@ -961,6 +993,7 @@ pub fn toggle_love_track(
                 "lyric_offset": 0, "loved": 1
             })).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             insert_playlist_entry(&tx, playlist_id, path, Some(context), Some(&metadata))?;
+            crate::recommendations::set_interest(&tx, &metadata, true, Some(context))?;
         } else {
             tx.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?1
                 AND json_extract(source_context, '$.recording_id') = ?2",
@@ -1021,6 +1054,10 @@ pub fn toggle_love_track(
         )?;
     }
 
+    if loved {
+        let track = get_track_by_path(&tx, path)?;
+        crate::recommendations::set_interest(&tx, &track, true, None)?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -1068,6 +1105,8 @@ pub fn toggle_dislike_track(
         }
     }
 
+    let track = get_track_by_path(&tx, path)?;
+    crate::recommendations::set_interest(&tx, &track, !disliked, None)?;
     tx.commit()?;
     Ok(())
 }
@@ -1233,6 +1272,7 @@ pub fn execute_smart_rules(conn: &Connection, rules_json: &str) -> Result<Vec<Tr
 }
 
 pub fn reset_disliked_tracks(conn: &Connection) -> Result<()> {
+    conn.execute("UPDATE recommendation_interest SET interested = 1 WHERE interested = 0", [])?;
     conn.execute("UPDATE tracks SET disliked = 0", [])?;
     Ok(())
 }

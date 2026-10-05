@@ -1,5 +1,5 @@
 import { applySourcePreference, createQueueOccurrenceId, isLocalUnifiedTrack, streamCacheKey } from '../utils/unifiedSources';
-import { cancelSourcePlayback, manageSourceQueue } from './sourcePlayback';
+import { cancelSourcePlayback, manageSourceQueue, playbackRequest } from './sourcePlayback';
 import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, StreamingQuality, extractDominantColor } from './types';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,17 +7,33 @@ import { emit } from '@tauri-apps/api/event';
 import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines, isStreamTrack } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { toast } from '../utils/toast';
+import { readDeviceProfile, saveDeviceProfile, validateDeviceDsp, isAmbiguousDevice, type AutoEqIdentity } from '../utils/deviceProfiles';
 import { notifyTidalAuthFailure } from './tidalSlice';
 import { notifyQobuzAuthFailure } from './qobuzSlice';
+import { sampleListening, resetListeningBaseline, markListeningEnd } from '../utils/recommendations';
 
 let isPolling = false;
 let dspThrottleTimeout: any = null;
 let lastDspInvokeTime = 0;
 let pendingDspState: any = null;
+let activeDspInvoke: Promise<unknown> = Promise.resolve();
+let activeModeInvoke: Promise<unknown> = Promise.resolve();
 let chromecastTickCount = 0;
 let queueOperationPromise = Promise.resolve();
 let audioModesRestored = false;
 let radioAttemptSequence = 0;
+let deviceSwitchSequence = 0;
+let deviceSwitchPromise = Promise.resolve();
+
+function recordConfirmedListening(state: PlayerState, position: number, playing: boolean, set: (state: Partial<PlayerState>) => void): void {
+  const track = sampleListening(state.currentHistoryId, position, playing);
+  if (!track) return;
+  const counts = { ...state.playCounts, [track.path]: (state.playCounts[track.path] || 0) + 1 };
+  if (track.source_context && track.source_context.recording_id !== track.path) counts[track.source_context.recording_id] = counts[track.path];
+  set({ playCounts: counts });
+  safeSetStorage('aideo_play_counts', JSON.stringify(counts));
+  window.dispatchEvent(new Event('playback-history-updated'));
+}
 
 const EXCLUSIVE_MODE_STORAGE_KEY = 'aideo_exclusive_mode';
 const BIT_PERFECT_MODE_STORAGE_KEY = 'aideo_bit_perfect_mode';
@@ -45,7 +61,8 @@ const THROTTLE_MS = 50; // 20Hz update rate — imperceptibly fast for DSP but p
 
 const performDspInvoke = async (dsp: any) => {
   try {
-    await invoke('set_dsp_state', { dsp });
+    activeDspInvoke = invoke('set_dsp_state', { dsp });
+    await activeDspInvoke;
     lastDspInvokeTime = Date.now();
   } catch (e) {
     console.error('set_dsp_state error:', e);
@@ -56,6 +73,30 @@ const initialBitPerfectMode = safeGetStorage(BIT_PERFECT_MODE_STORAGE_KEY) === '
 const initialExclusiveMode = initialBitPerfectMode || safeGetStorage(EXCLUSIVE_MODE_STORAGE_KEY) === 'true';
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
+  reportPlaybackFailure: (error: string, track = get().currentTrack, position = get().playback.position_secs) => {
+    if (!track) return;
+    const action = /unauthorized|authentication|login|token|revoked|401|403/i.test(error) ? 'reconnect'
+      : /device|wasapi|asio|output|exclusive/i.test(error) ? 'output'
+      : /not found|no such file|missing file|cannot find/i.test(error) ? 'library' : 'retry';
+    set(s => ({ playbackError: error, playbackRecovery: { track, position, error, action, pending: false },
+      playback: { ...s.playback, status: 'Stopped', is_buffering: false } }));
+  },
+  dismissPlaybackRecovery: () => set({ playbackRecovery: null, playbackError: null }),
+  retryPlaybackRecovery: async () => {
+    const recovery = get().playbackRecovery;
+    if (!recovery || recovery.pending) return;
+    const pending = { ...recovery, pending: true };
+    set({ playbackRecovery: pending, playbackError: null });
+    try {
+      await get().playTrack(recovery.track, true, false, undefined, recovery.position, true);
+      if (get().playbackRecovery !== pending) return;
+      if (get().playback.status === 'Playing') set({ playbackRecovery: null, playbackError: null });
+      else set({ playbackRecovery: { ...pending, pending: false } });
+    } catch (error) {
+      if (get().playbackRecovery !== pending || get().currentTrack?.path !== recovery.track.path) return;
+      get().reportPlaybackFailure(String(error), recovery.track, recovery.position);
+    }
+  },
   sourceQueueManaged: false,
   preferredSource: (() => {
     const saved = safeGetStorage('aideo_preferred_source');
@@ -185,6 +226,13 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
   devices: [],
   currentDevice: null,
+  audioDeviceSwitching: false,
+  requestedAudioModes: { exclusive: initialExclusiveMode, bitPerfect: initialBitPerfectMode },
+  activeAutoEq: null,
+  setActiveAutoEq: (identity: AutoEqIdentity | null) => {
+    set({ activeAutoEq: identity });
+    saveDeviceProfile(get());
+  },
   showQueue: false,
   queue: [],
 
@@ -299,6 +347,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   pauseTrack: async () => {
+    resetListeningBaseline();
     try {
       const currentStatus = get().playback.status;
       if (currentStatus === 'Paused' || currentStatus === 'Stopped') return;
@@ -324,6 +373,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   resumeTrack: async () => {
+    resetListeningBaseline();
     try {
       const state = get();
       if (state.playback.status === 'Playing') return;
@@ -332,7 +382,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         return;
       }
       if (state.playback.status === 'Stopped' && state.currentTrack?.source_context) {
-        await get().playTrack(applySourcePreference(state.currentTrack));
+        await get().playTrack(applySourcePreference(state.currentTrack), undefined, !state.albumSession);
         return;
       }
       if (state.playback.status === 'Stopped') {
@@ -350,7 +400,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           }
 
           if (t) {
-            await get().playTrack(t);
+            await get().playTrack(t, undefined, !get().albumSession);
             return;
           } else if (targetPath.startsWith('http')) {
             const cachedMeta = onlineTrackCache.get(targetPath) || (resolvedPathMap.has(targetPath) ? onlineTrackCache.get(resolvedPathMap.get(targetPath)!) : null);
@@ -398,8 +448,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   stopTrack: async () => {
+    markListeningEnd('stopped');
     cancelSourcePlayback();
+    const request = playbackRequest();
     const stopTime = Date.now();
+    const stoppedTrack = get().currentTrack;
+    const isCurrentStop = () => request === playbackRequest() && get().currentTrack === stoppedTrack && !get().currentAttemptId && get().playback.last_stop_time === stopTime;
     set(s => ({
       currentAttemptId: undefined,
       playback: {
@@ -415,6 +469,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
     try {
       await get().recordPlaybackTransition(null);
+      if (!isCurrentStop()) return;
       const current = get().playback.current_track;
       if (get().chromecast_connected) {
         await invoke('chromecast_control', { action: 'stop' });
@@ -424,6 +479,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await invoke('stop_track');
       }
 
+      if (!isCurrentStop()) return;
       localStorage.removeItem('aideo_current_track');
       localStorage.removeItem('aideo_resume_position');
       set({
@@ -444,6 +500,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   setVolume: async (vol: number) => {
+    if (!Number.isFinite(vol) || get().audioDeviceSwitching) return;
+    const sequence = deviceSwitchSequence;
     const clampedVol = Math.max(0, Math.min(1, vol));
     if (get().chromecast_connected) {
       toast.warning('Cast receiver volume is unavailable in this app.', { title: 'Cast Volume', dedupKey: 'cast-volume-unavailable' });
@@ -461,12 +519,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       } else {
         await invoke('set_volume', { volume: clampedVol });
       }
+      if (sequence !== deviceSwitchSequence) return;
       if (clampedVol > 0) safeSetStorage('aideo_volume', String(clampedVol));
       set(s => ({
         playback: { ...s.playback, volume: clampedVol },
         isMuted: clampedVol === 0 ? true : false,
         mutedPrevVolume: clampedVol > 0 ? clampedVol : s.mutedPrevVolume
       }));
+      saveDeviceProfile(get());
     } catch (e) { console.error(e); }
   },
 
@@ -482,6 +542,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
 
   seek: async (secs: number) => {
+    resetListeningBaseline();
     const now = Date.now();
     set(s => ({ playback: { ...s.playback, position_secs: secs, last_seek_time: now } }));
     try {
@@ -534,12 +595,14 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         try {
           const status: any = await invoke('chromecast_get_status');
           if (status && get().chromecast_connected && get().chromecast_active_device === activeDevice) {
+            recordConfirmedListening(get(), status.position_secs, status.status === 'Playing' && !isTransitioning, set);
             set(s => {
               const nextStatus = status.status;
               const nextPos = isTransitioning ? s.playback.position_secs : status.position_secs;
 
               // If the song finished naturally, transition to next track
               if (nextStatus === 'Stopped' && status.idle_reason === 'Finished' && s.playback.status === 'Playing' && !isTransitioning) {
+                markListeningEnd('completed');
                 setTimeout(() => {
                   get().playNext();
                 }, 100);
@@ -573,6 +636,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       try {
         const status = await invoke<{ active_device_id: string | null; is_playing: boolean; position_secs: number }>('upnp_get_status');
         if (get().upnp_connected && status.active_device_id === get().upnp_active_device) {
+          recordConfirmedListening(get(), status.position_secs, status.is_playing, set);
           if (!status.is_playing && Date.now() - (get().playback.last_skip_time || 0) < 2500) return;
           if (get().playback.status === 'Stopped' && Date.now() - (get().playback.last_stop_time || 0) < 3000) return;
           set(s => ({ playback: {
@@ -615,6 +679,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
       const prevTrack = get().playback.current_track;
       const newTrack = status.current_track;
+      if (prevTrack && newTrack && pathsEqual(prevTrack, newTrack)) recordConfirmedListening(get(), status.position_secs, status.status === 'Playing' && !status.is_buffering, set);
 
       // Anti-Race Condition: If frontend eagerly set a track but backend is still booting it up,
       // the backend will temporarily return null/Stopped. Ignore it to prevent wiping the UI.
@@ -895,6 +960,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   setDSP: async (newDSP: Partial<DSPState>) => {
+    if (get().audioDeviceSwitching || !validateDeviceDsp({ ...get().dsp, ...newDSP }, get().dsp)) return;
     // 🛡️ Bit-Perfect vs. DSP Coexistence: If the user interacts with any Aideo Lab DSP/equalizer controls
     // while Bit-Perfect is active, automatically turn Bit-Perfect OFF so their audio adjustments take effect immediately.
     const dspKeys = [
@@ -1019,6 +1085,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
     // 1. Update React Zustand state instantly for fluid 60fps UI
     set({ dsp: full });
+    saveDeviceProfile(get());
 
     // 2. Manage throttled IPC dispatching to prevent channel flooding
     pendingDspState = full;
@@ -1093,9 +1160,13 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   toggleExclusive: async (enable?: boolean | unknown) => {
+    if (get().audioDeviceSwitching) return;
+    const sequence = deviceSwitchSequence;
     try {
       const target = typeof enable === 'boolean' ? enable : undefined;
-      const res = await invoke<boolean>('toggle_exclusive_mode', { enable: target });
+      activeModeInvoke = invoke<boolean>('toggle_exclusive_mode', { enable: target });
+      const res = await activeModeInvoke;
+      if (sequence !== deviceSwitchSequence) return;
       const nextMode = typeof res === 'boolean' ? res : (target !== undefined ? target : !get().playback.exclusive);
       set(s => ({
         playback: {
@@ -1105,9 +1176,11 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         }
       }));
       safeSetStorage(EXCLUSIVE_MODE_STORAGE_KEY, String(nextMode));
+      set({ requestedAudioModes: { exclusive: target ?? nextMode, bitPerfect: nextMode && get().requestedAudioModes.bitPerfect } });
       if (!nextMode) {
         safeSetStorage(BIT_PERFECT_MODE_STORAGE_KEY, 'false');
       }
+      saveDeviceProfile(get());
       if (nextMode) {
         toast.info('WASAPI Exclusive Mode requested. Output and sample integrity depend on the negotiated path.', { title: 'Exclusive Mode' });
       } else {
@@ -1120,31 +1193,52 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   toggleBitPerfect: async (enable?: boolean | unknown) => {
+    if (get().audioDeviceSwitching) return;
+    const sequence = deviceSwitchSequence;
     try {
-      const target = typeof enable === 'boolean' ? enable : undefined;
-      const res = await invoke<boolean>('toggle_bit_perfect_mode', { enable: target });
-      const nextMode = typeof res === 'boolean' ? res : (target !== undefined ? target : !get().playback.bit_perfect);
-      if (nextMode) {
-        await get().setDSP({ enabled: false, upsample_rate: 0 });
-        await get().setVolume(1.0);
-      }
-      set(s => ({
-        playbackRate: nextMode ? 1.0 : s.playbackRate,
-        playback: {
-          ...s.playback,
-          bit_perfect: nextMode,
-          exclusive: nextMode ? true : s.playback.exclusive,
+      activeModeInvoke = (async () => {
+        saveDeviceProfile(get());
+        const target = typeof enable === 'boolean' ? enable : undefined;
+        const res = await invoke<boolean>('toggle_bit_perfect_mode', { enable: target });
+        if (sequence !== deviceSwitchSequence) return;
+        const nextMode = typeof res === 'boolean' ? res : (target !== undefined ? target : !get().playback.bit_perfect);
+        if (nextMode) {
+          const bypassed = { ...get().dsp, enabled: false, upsample_rate: 0 };
+          await invoke('set_dsp_state', { dsp: bypassed });
+          if (sequence !== deviceSwitchSequence) return;
+          set({ dsp: bypassed });
+          await invoke('set_volume', { volume: 1 });
+          if (sequence !== deviceSwitchSequence) return;
+        } else {
+          const saved = readDeviceProfile(get().currentDevice, get().dsp);
+          if (saved) {
+            await invoke('set_dsp_state', { dsp: saved.dsp });
+            if (sequence !== deviceSwitchSequence) return;
+            set({ dsp: saved.dsp });
+          }
         }
-      }));
-      safeSetStorage(BIT_PERFECT_MODE_STORAGE_KEY, String(nextMode));
-      if (nextMode) {
-        safeSetStorage(EXCLUSIVE_MODE_STORAGE_KEY, 'true');
-      }
-      if (nextMode) {
-        toast.info('Bit-perfect output requested. Sample integrity is unverified until the effective path confirms it.', { title: 'Bit-Perfect Mode' });
-      } else {
-        toast.info('Bit-perfect output request disabled.', { title: 'Bit-Perfect Mode' });
-      }
+        set(s => ({
+          playbackRate: nextMode ? 1.0 : s.playbackRate,
+          playback: {
+            ...s.playback,
+            bit_perfect: nextMode,
+            volume: nextMode ? 1 : s.playback.volume,
+            exclusive: nextMode ? true : s.playback.exclusive,
+          }
+        }));
+        safeSetStorage(BIT_PERFECT_MODE_STORAGE_KEY, String(nextMode));
+        set({ requestedAudioModes: { exclusive: nextMode || get().requestedAudioModes.exclusive, bitPerfect: target ?? nextMode } });
+        if (nextMode) {
+          safeSetStorage(EXCLUSIVE_MODE_STORAGE_KEY, 'true');
+        }
+        saveDeviceProfile(get());
+        if (nextMode) {
+          toast.info('Bit-perfect output requested. Sample integrity is unverified until the effective path confirms it.', { title: 'Bit-Perfect Mode' });
+        } else {
+          toast.info('Bit-perfect output request disabled.', { title: 'Bit-Perfect Mode' });
+        }
+      })();
+      await activeModeInvoke;
     } catch (e) {
       console.error(e);
       toast.error(`Could not toggle bit-perfect mode: ${e}`, { title: 'Bit-Perfect' });
@@ -1153,59 +1247,9 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   restoreAudioModes: async () => {
     if (audioModesRestored) return;
-
-    const wantsBitPerfect = safeGetStorage(BIT_PERFECT_MODE_STORAGE_KEY) === 'true';
-    const wantsExclusive = wantsBitPerfect || safeGetStorage(EXCLUSIVE_MODE_STORAGE_KEY) === 'true';
-
-    if (!wantsExclusive) {
-      audioModesRestored = true;
-      return;
-    }
-
-    try {
-      let exclusiveEnabled = false;
-      let bitPerfectEnabled = false;
-
-      if (wantsBitPerfect) {
-        const bitPerfectResult = await invoke<boolean>('toggle_bit_perfect_mode', { enable: true });
-        bitPerfectEnabled = typeof bitPerfectResult === 'boolean' ? bitPerfectResult : true;
-        // The backend's bit-perfect command atomically enables Exclusive Mode.
-        exclusiveEnabled = bitPerfectEnabled;
-
-        if (bitPerfectEnabled) {
-          // Keep the same safety invariants as the interactive toggle: no DSP
-          // transforms and unity software volume while bit-perfect is requested.
-          await get().setDSP({ enabled: false, upsample_rate: 0 });
-          await get().setVolume(1.0);
-        }
-
-        set(s => ({
-          playbackRate: bitPerfectEnabled ? 1.0 : s.playbackRate,
-          playback: {
-            ...s.playback,
-            exclusive: exclusiveEnabled,
-            bit_perfect: bitPerfectEnabled,
-          }
-        }));
-      } else {
-        const exclusiveResult = await invoke<boolean>('toggle_exclusive_mode', { enable: true });
-        exclusiveEnabled = typeof exclusiveResult === 'boolean' ? exclusiveResult : true;
-
-        set(s => ({
-          playback: {
-            ...s.playback,
-            exclusive: exclusiveEnabled,
-            bit_perfect: false,
-          }
-        }));
-      }
-
-      audioModesRestored = true;
-    } catch (e) {
-      console.error('Failed to restore audio output modes:', e);
-    }
+    await get().fetchDevices();
+    audioModesRestored = get().currentDevice !== null;
   },
-
   keepAwake: localStorage.getItem('aideo_keep_awake') === 'true',
 
   toggleKeepAwake: async () => {
@@ -1247,56 +1291,92 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
   fetchDevices: async () => {
     try {
-      const ds: string[] = await invoke('get_audio_devices');
+      const result = await invoke<string[]>('get_audio_devices');
+      const ds = Array.isArray(result) ? result.filter(name => typeof name === 'string') : [];
       set({ devices: ds });
-      const savedDev = localStorage.getItem('aideo_target_device');
-      if (savedDev && ds.includes(savedDev) && !get().currentDevice) {
-        await invoke('set_audio_device', { name: savedDev });
-        const devName = (savedDev === '[System Default Device]' || savedDev === 'Default Device' || savedDev === 'System Default Device') ? '' : savedDev;
-        set({ currentDevice: devName });
-      }
+      if (get().currentDevice !== null || get().audioDeviceSwitching) return;
+      const saved = safeGetStorage('aideo_target_device');
+      await get().setAudioDevice(saved && ds.includes(saved) ? saved : '[System Default Device]', { fallback: !!saved && !ds.includes(saved) });
     } catch (e) { console.error(e); }
   },
 
-  setAudioDevice: async (name: string) => {
-    try {
-      const prevDeviceKey = get().currentDevice || 'Default';
-      const currentVol = get().playback.volume;
-      const currentDsp = get().dsp;
-
-      // Persist profile for current output device before switching
-      safeSetStorage(`aideo_dev_vol_${prevDeviceKey}`, String(currentVol));
-      safeSetStorage(`aideo_dev_dsp_${prevDeviceKey}`, JSON.stringify(currentDsp));
-
-      await invoke('set_audio_device', { name });
-      localStorage.setItem('aideo_target_device', name);
-      const devName = (name === '[System Default Device]' || name === 'Default Device' || name === 'System Default Device') ? '' : name;
-      const newDeviceKey = devName || 'Default';
-      set({ currentDevice: devName });
-
-      // Restore target device profile if previously saved
-      const savedVol = safeGetStorage(`aideo_dev_vol_${newDeviceKey}`);
-      if (savedVol !== null) {
-        const parsedVol = parseFloat(savedVol);
-        if (!isNaN(parsedVol)) {
-          get().setVolume(Math.max(0, Math.min(1, parsedVol)));
+  setAudioDevice: async (name: string, options: { backendSelected?: boolean; fallback?: boolean } = {}) => {
+    if (typeof name !== 'string' || !name.trim() || name.length > 4096) return;
+    if (isAmbiguousDevice(name, get().devices)) {
+      toast.error('This output name identifies multiple devices. Rename an output in Windows before selecting it.', { title: 'Ambiguous output' });
+      return;
+    }
+    saveDeviceProfile(get());
+    const sequence = ++deviceSwitchSequence;
+    set({ audioDeviceSwitching: true });
+    const devName = ['[System Default Device]', 'Default Device', 'System Default Device'].includes(name) ? '' : name;
+    const run = async () => {
+      if (sequence !== deviceSwitchSequence) return;
+      const state = get();
+      const profile = readDeviceProfile(devName, state.dsp);
+      const currentVolume = state.playback.volume;
+      const volume = options.fallback ? Math.min(currentVolume, profile?.volume ?? 1) : profile?.volume ?? currentVolume;
+      const startup = state.currentDevice === null;
+      const wantsBitPerfect = profile?.bitPerfect ?? (startup && !options.fallback && safeGetStorage(BIT_PERFECT_MODE_STORAGE_KEY) === 'true');
+      const wantsExclusive = wantsBitPerfect || (profile?.exclusive ?? (startup && !options.fallback && safeGetStorage(EXCLUSIVE_MODE_STORAGE_KEY) === 'true'));
+      const savedDsp = profile?.dsp ?? state.dsp;
+      let selected = !!options.backendSelected;
+      const stillCurrent = () => sequence === deviceSwitchSequence;
+      try {
+        if (dspThrottleTimeout) { clearTimeout(dspThrottleTimeout); dspThrottleTimeout = null; }
+        pendingDspState = null;
+        await activeDspInvoke.catch(() => {});
+        await activeModeInvoke.catch(() => {});
+        // Mute before changing the route; never let a previous DAC's unity gain leak to a fallback.
+        await invoke('set_volume', { volume: 0 });
+        if (!stillCurrent()) return;
+        if (!options.backendSelected) await invoke('set_audio_device', { name });
+        selected = true;
+        if (!stillCurrent()) return;
+        await invoke('toggle_bit_perfect_mode', { enable: false });
+        if (!stillCurrent()) return;
+        const exclusiveResult = await invoke<boolean>('toggle_exclusive_mode', { enable: wantsExclusive });
+        if (!stillCurrent()) return;
+        let exclusive = exclusiveResult === true;
+        let bitPerfect = false;
+        // An automatic fallback must retain attenuation, even if the saved profile requests unity gain.
+        if (wantsBitPerfect && (!options.fallback || volume === 1)) {
+          bitPerfect = (await invoke<boolean>('toggle_bit_perfect_mode', { enable: true })) === true;
+          exclusive = exclusive || bitPerfect;
+          if (!stillCurrent()) return;
         }
+        const dsp = bitPerfect ? { ...savedDsp, enabled: false, upsample_rate: 0 } : savedDsp;
+        await invoke('set_dsp_state', { dsp });
+        if (!stillCurrent()) return;
+        const appliedVolume = bitPerfect && volume > 0 ? 1 : volume;
+        await invoke('set_volume', { volume: appliedVolume });
+        if (!stillCurrent()) return;
+        set(s => ({ currentDevice: devName, dsp, activeAutoEq: profile?.autoEq ?? null,
+          requestedAudioModes: { exclusive: wantsExclusive, bitPerfect: wantsBitPerfect },
+          playback: { ...s.playback, volume: appliedVolume, exclusive, bit_perfect: bitPerfect },
+          isMuted: appliedVolume === 0, mutedPrevVolume: appliedVolume > 0 ? appliedVolume : s.mutedPrevVolume }));
+        safeSetStorage('aideo_target_device', name);
+        safeSetStorage('aideo_volume', String(appliedVolume));
+        safeSetStorage(EXCLUSIVE_MODE_STORAGE_KEY, String(exclusive));
+        safeSetStorage(BIT_PERFECT_MODE_STORAGE_KEY, String(bitPerfect));
+        set({ audioDeviceSwitching: false });
+        saveDeviceProfile(get());
+        if (wantsExclusive && !exclusive || wantsBitPerfect && !bitPerfect) {
+          toast.warning('Saved output mode could not be applied. Check the effective output path; software gain remains protected.', { title: 'Output mode' });
+        }
+      } catch (error) {
+        if (!stillCurrent()) return;
+        // Route changes are not transactional. A partial failure stays muted and reports the selected path.
+        await invoke('set_volume', { volume: 0 }).catch(() => {});
+        set(s => ({ currentDevice: selected ? devName : s.currentDevice, playback: { ...s.playback, volume: 0, exclusive: selected ? false : s.playback.exclusive, bit_perfect: selected ? false : s.playback.bit_perfect }, isMuted: true }));
+        toast.error(`Could not apply output settings: ${error}`, { title: 'Output Device' });
+      } finally {
+        if (stillCurrent()) set({ audioDeviceSwitching: false });
       }
-
-      const savedDsp = safeGetStorage(`aideo_dev_dsp_${newDeviceKey}`);
-      if (savedDsp !== null) {
-        try {
-          const parsedDsp = JSON.parse(savedDsp);
-          get().setDSP(parsedDsp);
-        } catch (_) {}
-      }
-      toast.success(`Audio output routed to: ${devName || 'System Default Device'}`, {
-        title: 'Output Device',
-        dedupKey: `audio-device:${name}`,
-      });
-    } catch (e) { console.error(e); }
+    };
+    deviceSwitchPromise = deviceSwitchPromise.then(run, run);
+    await deviceSwitchPromise;
   },
-
   playbackRate: 1.0,
   setPlaybackRate: async (rate: number) => {
     if (!Number.isFinite(rate)) return;
@@ -1657,6 +1737,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   playFromQueue: async (index: number) => {
+    if (get().albumSession) await get().cancelAlbumSession();
+    else if (get().stopBoundary) await get().cancelStopAfter();
+    if (get().albumSession) await get().cancelAlbumSession();
+    else if (get().stopBoundary) await get().cancelStopAfter();
     const { queue } = get();
     if (index < 0 || index >= queue.length) return;
 
@@ -1748,6 +1832,12 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   initializeQueue: async () => {
+    if (get().albumSession) {
+      const saved = JSON.parse(localStorage.getItem('aideo_queue') || '[]');
+      if (Array.isArray(saved)) set({ queue: saved });
+      await manageSourceQueue(set);
+      return;
+    }
     const requestedQuality = get().streamingQuality;
     try {
       const saved = localStorage.getItem('aideo_queue');

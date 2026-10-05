@@ -277,8 +277,10 @@ export function FullscreenView() {
   // Keyboard navigation & ambient hotkeys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const targetTag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (targetTag === 'input' || targetTag === 'textarea') return;
+      if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
+      const target = e.target instanceof HTMLElement ? e.target : document.activeElement;
+      if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      if (e.repeat && !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
 
       const state = useStore.getState();
       const key = e.key.toLowerCase();

@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useStore } from '../store';
+import { isAmbiguousDevice } from '../utils/deviceProfiles';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -55,6 +56,7 @@ export function AudioControlCenter() {
     toggleControlCenter,
     fetchDevices,
     networkTelemetry,
+    stopBoundary, albumSession, armStopAfter, cancelStopAfter, remoteOutput, hasTrack,
     sleepTimer,
     startSleepTimer,
     stopSleepTimer,
@@ -86,6 +88,8 @@ export function AudioControlCenter() {
       toggleControlCenter: s.toggleControlCenter,
       fetchDevices: s.fetchDevices,
       networkTelemetry: s.networkTelemetry,
+      stopBoundary: s.stopBoundary, albumSession: s.albumSession, armStopAfter: s.armStopAfter, cancelStopAfter: s.cancelStopAfter,
+      remoteOutput: s.chromecast_connected || s.upnp_connected, hasTrack: !!s.currentTrack,
       sleepTimer: s.sleepTimer,
       startSleepTimer: s.startSleepTimer,
       stopSleepTimer: s.stopSleepTimer,
@@ -131,20 +135,6 @@ export function AudioControlCenter() {
       fetchDevices();
     }
   }, [showControlCenter, devices, fetchDevices]);
-
-  // Handle keyboard shortcut 'B' while control center is open
-  useEffect(() => {
-    if (!showControlCenter) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 'b' || e.key === 'B') {
-        e.preventDefault();
-        toggleDspAB();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showControlCenter, toggleDspAB]);
 
   // Dynamic Frequency Transfer Curve Calculation
   const eqGains = useMemo(() => {
@@ -1091,11 +1081,15 @@ export function AudioControlCenter() {
                               No output audio devices found
                             </div>
                           )}
-                          {devices.map(d => {
+                          {devices.map((d, deviceIndex) => {
                             const isSelected = (!currentDevice && d === '[System Default Device]') || currentDevice === d;
+                            const ambiguous = isAmbiguousDevice(d, devices);
                             return (
-                              <div
-                                key={d}
+                              <button
+                                type="button"
+                                disabled={ambiguous}
+                                aria-pressed={isSelected}
+                                key={`${d}:${deviceIndex}`}
                                 onClick={() => {
                                   setAudioDevice(d);
                                   setDevOpen(false);
@@ -1110,6 +1104,9 @@ export function AudioControlCenter() {
                                   display: 'flex',
                                   alignItems: 'center',
                                   gap: 8,
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  border: 0,
                                 }}
                               >
                                 {d === '[System Default Device]' && (
@@ -1129,8 +1126,9 @@ export function AudioControlCenter() {
                                 )}
                                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {d === '[System Default Device]' ? 'System Default Device' : d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
+                                  {ambiguous ? ' — ambiguous name; rename in Windows' : ''}
                                 </span>
-                              </div>
+                              </button>
                             );
                           })}
                         </motion.div>
@@ -1533,6 +1531,12 @@ export function AudioControlCenter() {
                   />
                 </div>
 
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button disabled={remoteOutput || !hasTrack} onClick={() => void armStopAfter('track').catch(e => useStore.getState().setPlaybackError(String(e)))}>Stop after this track</button>
+                  <button disabled={remoteOutput || !albumSession} onClick={() => void armStopAfter('album').catch(e => useStore.getState().setPlaybackError(String(e)))}>Stop after album</button>
+                  {remoteOutput && <span>End stopping is unavailable on remote output.</span>}
+                  {stopBoundary && <span role="status">Stopping after {stopBoundary.kind} <button onClick={() => void cancelStopAfter()}>Cancel</button></span>}
+                </div>
                 {/* Sleep Timer */}
                 <div
                   style={{

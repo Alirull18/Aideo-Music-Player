@@ -22,6 +22,9 @@ import { Track, CloudTrack, Playlist } from '../store/types';
 import { pathsEqual, cloudTrackToVirtualTrack, getMenuPosition, startSonicMix } from '../utils';
 import { discoveryTrack } from '../utils/discoveryFeed';
 import { SourceMenu } from './SourceMenu';
+import { useDownloadStore } from '../store/downloadStore';
+import { sameRecommendationRecording } from '../utils/recommendations';
+import { showToast } from '../utils/toast';
 
 export interface TrackContextMenuProps {
   track: any;
@@ -29,7 +32,6 @@ export interface TrackContextMenuProps {
   onClose: () => void;
   index?: number;
   isCloud?: boolean;
-  onDownload?: (track: any) => void;
   currentPlaylist?: Playlist | null;
   reorderPlaylistTracks?: (playlistId: number, fromIndex: number, toIndex: number) => Promise<void> | void;
   removeFromPlaylist?: (playlistId: number, track: string | Track) => Promise<void> | void;
@@ -42,13 +44,13 @@ export const TrackContextMenu = memo(function TrackContextMenu({
   onClose,
   index = 0,
   isCloud: _isCloud = false,
-  onDownload,
   currentPlaylist = null,
   reorderPlaylistTracks,
   removeFromPlaylist,
 }: TrackContextMenuProps) {
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [isMatching, setIsMatching] = useState(false);
+  const [savingInterest, setSavingInterest] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -96,6 +98,8 @@ export const TrackContextMenu = memo(function TrackContextMenu({
   const isLocal = Boolean(localMatch) || (!isOnlineUrl && Boolean(effectiveTrack.path) && /^(?:[A-Za-z]:[\\/]|\/|\\\\)/.test(effectiveTrack.path));
 
   const isLoved = effectiveTrack.loved === 1;
+  const feedbackTrack = allTracks.find(t => sameRecommendationRecording(t, vt)) || vt;
+  const isNotInterested = feedbackTrack.disliked === 1;
   const menuStyle = getMenuPosition(anchor);
 
   if (sourceModalOpen) {
@@ -132,9 +136,10 @@ export const TrackContextMenu = memo(function TrackContextMenu({
           onClose();
         }}
       />
-      <div className="track-action-menu" style={menuStyle} onClick={(e) => e.stopPropagation()}>
+      <div className="track-action-menu" role="dialog" aria-label="Track actions" style={menuStyle} onClick={(e) => e.stopPropagation()}>
         {/* Play Next */}
         <button
+          autoFocus
           type="button"
           className="track-action-menu-item"
           onClick={() => {
@@ -164,6 +169,37 @@ export const TrackContextMenu = memo(function TrackContextMenu({
         </button>
 
         {/* Local Track Actions */}
+        <button
+          type="button"
+          className="track-action-menu-item"
+          disabled={savingInterest}
+          onClick={async () => {
+            setSavingInterest(true);
+            const wasLoved = feedbackTrack.loved === 1;
+            try {
+              await useStore.getState().setRecommendationInterest(vt, isNotInterested);
+              const savedFeedback = useStore.getState().tracks.find(t => sameRecommendationRecording(t, vt));
+              onClose();
+              showToast({
+                message: isNotInterested ? 'Recommendations allowed again' : 'Removed from your recommendations',
+                type: 'info',
+                action: isNotInterested ? undefined : { label: 'Undo', onClick: () => {
+                  const current = useStore.getState().tracks.find(t => sameRecommendationRecording(t, vt));
+                  if (current?.disliked !== 1 || current !== savedFeedback) return;
+                  void useStore.getState().setRecommendationInterest(vt, true).then(async () => {
+                    if (wasLoved) await useStore.getState().toggleLoveTrack(vt.path, { ...vt, loved: 0 });
+                  }).catch(e => showToast({ message: `Could not undo: ${String(e)}`, type: 'error' }));
+                } },
+              });
+            } catch (e) {
+              showToast({ message: `Could not save preference: ${String(e)}`, type: 'error' });
+            } finally { setSavingInterest(false); }
+          }}
+        >
+          <span className="menu-item-icon"><MinusCircle size={15} /></span>
+          <span>{isNotInterested ? 'Allow recommendations again' : 'Not interested'}</span>
+        </button>
+
         {isLocal && (
           <>
             <button
@@ -255,6 +291,14 @@ export const TrackContextMenu = memo(function TrackContextMenu({
             </button>
           </>
         )}
+
+        <button type="button" className="track-action-menu-item" onClick={() => {
+          onClose();
+          useDownloadStore.getState().open(vt);
+        }}>
+          <span className="menu-item-icon"><Download size={15} /></span>
+          <span>Download Song</span>
+        </button>
 
         {/* Other Audio Sources */}
         <button
@@ -368,21 +412,6 @@ export const TrackContextMenu = memo(function TrackContextMenu({
               <span>{isLoved ? 'Unsave Song' : 'Save Song'}</span>
             </button>
 
-            {onDownload && (
-              <button
-                type="button"
-                className="track-action-menu-item"
-                onClick={() => {
-                  onClose();
-                  onDownload(track);
-                }}
-              >
-                <span className="menu-item-icon">
-                  <Download size={15} />
-                </span>
-                <span>Download Song</span>
-              </button>
-            )}
           </>
         )}
 

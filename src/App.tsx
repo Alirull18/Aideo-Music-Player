@@ -1,3 +1,4 @@
+import { markListeningEnd } from './utils/recommendations';
 import { handleSourceFailure } from './store/sourcePlayback';
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { useStore } from './store';
@@ -27,14 +28,16 @@ const AlbumsView = lazy(() => import('./components/AlbumsView').then(m => ({ def
 const ChartsView = lazy(() => import('./components/ChartsView').then(m => ({ default: m.ChartsView })));
 const DownloadedView = lazy(() => import('./components/DownloadedView').then(m => ({ default: m.DownloadedView })));
 
+import { PlaybackRecovery } from './components/PlaybackRecovery';
 import { PlayerBar } from './components/PlayerBar';
 import { ScrollToTopButton } from './components/ScrollToTopButton';
 import { AudioControlCenter } from './components/AudioControlCenter';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
+import { DownloadManager } from './components/DownloadManager';
 import { QueueView } from './components/QueueView';
 import { OnboardingWizard } from './components/OnboardingWizard';
-import { toggleOsFullscreen } from './utils/windowFullscreen';
+import { handlePlayerShortcut } from './utils/playerShortcuts';
 import { isStreamTrack, trackIdToStreamUrl } from './utils';
 import { CoverArtModal } from './components/CoverArtModal';
 import { TagEditorModal } from './components/TagEditorModal';
@@ -71,10 +74,8 @@ function AideoApp() {
     loadLibrary, 
     lastScrobble, 
     fetchPlaylists, 
-    playbackError, 
     customPrompt, 
     setCustomPrompt, 
-    setPlaybackError, 
     lowSpecMode,
     onboardingCompleted,
     showOnboarding,
@@ -94,10 +95,8 @@ function AideoApp() {
     loadLibrary: s.loadLibrary,
     lastScrobble: s.lastScrobble,
     fetchPlaylists: s.fetchPlaylists,
-    playbackError: s.playbackError,
     customPrompt: s.customPrompt,
     setCustomPrompt: s.setCustomPrompt,
-    setPlaybackError: s.setPlaybackError,
     lowSpecMode: s.lowSpecMode,
     onboardingCompleted: s.onboardingCompleted,
     showOnboarding: s.showOnboarding,
@@ -133,6 +132,7 @@ function AideoApp() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || e.isComposing) return;
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
         e.preventDefault();
         setShowDebugLogs(prev => !prev);
@@ -218,22 +218,8 @@ function AideoApp() {
       invoke('toggle_keep_awake', { enable: true }).catch(e => console.error("toggle_keep_awake error:", e));
     }
 
-    // Synchronize initial volume with backend on startup
-    const initialVolume = useStore.getState().playback.volume;
-    if (typeof initialVolume === 'number') {
-      invoke('set_volume', { volume: initialVolume }).catch(e => console.error("set_volume on startup error:", e));
-    }
-
-    // Synchronize persisted DSP/Aideo Lab state with backend on startup so
-    // EQ, spatial, crossfeed, etc. survive app restarts
-    invoke('set_dsp_state', { dsp: useStore.getState().dsp })
-      .catch(e => console.error("set_dsp_state on startup error:", e));
-
-    // Restore the user's selected output path after the backend's process-local
-    // Exclusive/Bit-Perfect flags have been initialized.
     useStore.getState().restoreAudioModes()
-      .catch(e => console.error("restoreAudioModes error:", e));
-
+      .catch(e => console.error('restoreAudioModes error:', e));
     // Synchronize close to tray setting with backend on startup
     const initialCloseToTray = localStorage.getItem('aideo_close_to_tray') === 'true';
     if (initialCloseToTray) {
@@ -345,12 +331,6 @@ function AideoApp() {
     };
   }, [loadLibrary, fetchPlaylists]);
 
-  useEffect(() => {
-    if (playbackError) {
-      const t = setTimeout(() => setPlaybackError(null), 5000);
-      return () => clearTimeout(t);
-    }
-  }, [playbackError, setPlaybackError]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -438,7 +418,9 @@ function AideoApp() {
           handleSourceFailure(event.payload.path, event.payload.error, event.payload.attempt_id);
         } else {
           trackIdToStreamUrl.clear();
-          state.playNext();
+          markListeningEnd('error');
+          if (state.albumSession) state.reportPlaybackFailure(event.payload.error);
+          else state.playNext();
         }
       });
       if (isCancelled) { uSourceError(); return; }
@@ -449,18 +431,7 @@ function AideoApp() {
         const incomingAttemptId = event.payload?.attempt_id;
         if (!state.currentTrack || !state.currentAttemptId || incomingAttemptId !== state.currentAttemptId
           || (event.payload?.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && event.payload.path !== state.playback.current_track)) return;
-        const recId = state.currentTrack?.source_context?.recording_id;
-        useStore.setState(s => {
-          const updates: any = {
-            playback: { ...s.playback, is_buffering: false }
-          };
-          if (recId && !s.playCounts[recId]) {
-            const nextCounts = { ...s.playCounts, [recId]: 1 };
-            updates.playCounts = nextCounts;
-            try { localStorage.setItem('aideo_play_counts', JSON.stringify(nextCounts)); } catch {}
-          }
-          return updates as any;
-        });
+        useStore.setState(s => ({ playback: { ...s.playback, is_buffering: false } }));
       });
       if (isCancelled) { uPlaybackReady(); return; }
       cleanups.push(uPlaybackReady);
@@ -473,6 +444,7 @@ function AideoApp() {
           || payload.previous_attempt_id !== state.currentAttemptId
           || (payload.previous_path && payload.previous_path !== state.playback.current_track)) return;
         console.log('[App] Received track-transitioned event from native backend:', payload);
+        markListeningEnd('completed');
         await state.handleNativeTrackTransition(payload.path, payload.attempt_id);
       });
       if (isCancelled) { uTransitioned(); return; }
@@ -496,8 +468,9 @@ function AideoApp() {
         }
         if (state.currentTrack?.source_context && state.playback.is_buffering) return;
         lastHandledAttemptId = currentAttempt;
-        console.log('[App] Received track-ended event from backend. Calling playNext()...');
-        state.playNext();
+        markListeningEnd('completed');
+        console.log('[App] Received track-ended event from backend. Applying end policy.');
+        void state.handleNaturalTrackEnd();
       });
       if (isCancelled) { uEnded(); return; }
       cleanups.push(uEnded);
@@ -510,9 +483,7 @@ function AideoApp() {
         const incomingAttemptId = payload.attempt_id;
         if (!state.currentTrack || !state.currentAttemptId || incomingAttemptId !== state.currentAttemptId
           || (payload.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && payload.path !== state.playback.current_track)) return;
-        void state.stopTrack();
-        useStore.setState(s => ({ playbackError: error, playback: { ...s.playback, is_buffering: false } }));
-        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: error, type: 'error' } }));
+        state.reportPlaybackFailure(error);
         window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
       });
       if (isCancelled) { uPlaybackError(); return; }
@@ -688,20 +659,16 @@ function AideoApp() {
       const uDeviceChanged = await listen('audio-device-changed', (event: any) => {
         if (isCancelled) return;
         const { device, is_default } = event.payload || {};
-        const devName = is_default ? '' : (device || '');
-        useStore.setState({ currentDevice: devName });
-        if (is_default) {
-          localStorage.setItem('aideo_target_device', '[System Default Device]');
-        } else if (device) {
-          localStorage.setItem('aideo_target_device', device);
-        }
-      });
+        if (is_default || device) {
+          void useStore.getState().setAudioDevice(is_default ? '[System Default Device]' : device,
+            { backendSelected: true, fallback: !!is_default });
+        }      });
       if (isCancelled) { uDeviceChanged(); return; }
       cleanups.push(uDeviceChanged);
 
       const uDeviceFallback = await listen('audio-device-fallback', () => {
         if (isCancelled) return;
-        useStore.setState({ currentDevice: '' });
+        void useStore.getState().setAudioDevice('[System Default Device]', { backendSelected: true, fallback: true });
       });
       if (isCancelled) { uDeviceFallback(); return; }
       cleanups.push(uDeviceFallback);
@@ -786,54 +753,13 @@ function AideoApp() {
     };
     setupListeners();
 
-    // Global Keyboard Shortcuts
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.ctrlKey || e.altKey || e.metaKey) return;
-
-      const state = useStore.getState();
-      if (state.view === 'fullscreen') return;
-
-      const userShortcuts = state.shortcuts || {};
-      const keyName = e.key === ' ' ? 'Space' : e.key;
-
-      if (keyName === (userShortcuts.playPause ?? 'Space')) {
-        e.preventDefault();
-        if (state.playback.status === 'Playing') state.pauseTrack();
-        else state.resumeTrack();
-      } else if (keyName === (userShortcuts.next ?? 'ArrowRight')) {
-        e.preventDefault();
-        state.playNext();
-      } else if (keyName === (userShortcuts.prev ?? 'ArrowLeft')) {
-        e.preventDefault();
-        state.playPrev();
-      } else if (keyName === (userShortcuts.volumeUp ?? 'ArrowUp')) {
-        e.preventDefault();
-        const currentVol = state.playback.volume;
-        state.setVolume(Math.min(currentVol + 0.05, 1));
-      } else if (keyName === (userShortcuts.volumeDown ?? 'ArrowDown')) {
-        e.preventDefault();
-        const currentVol = state.playback.volume;
-        state.setVolume(Math.max(currentVol - 0.05, 0));
-      } else if (keyName === (userShortcuts.dspBypass ?? 'b')) {
-        e.preventDefault();
-        state.toggleDspAB();
-      } else if (keyName === (userShortcuts.mute ?? 'm')) {
-        e.preventDefault();
-        state.toggleMute();
-      } else if (keyName === (userShortcuts.fullscreenToggle ?? 'F11')) {
-        e.preventDefault();
-        toggleOsFullscreen();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handlePlayerShortcut);
 
     return () => {
       isCancelled = true;
       if (intervalId) clearInterval(intervalId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handlePlayerShortcut);
       cleanups.forEach(f => f());
     };
   }, []);
@@ -910,6 +836,7 @@ function AideoApp() {
         <div className={`mini-player-outer-wrapper ${isLightTheme ? 'light-theme' : ''}`}>
           <MiniPlayer />
           <ToastContainer />
+          <DownloadManager />
         </div>
       </MotionConfig>
     );
@@ -1042,9 +969,11 @@ function AideoApp() {
           )}
         </AnimatePresence>
       </main>
+      <PlaybackRecovery />
       {view !== 'fullscreen' && <PlayerBar />}
       <ScrollToTopButton />
       <ToastContainer />
+      <DownloadManager />
       <AnimatePresence>
         <QueueView key="queue" />
         <AudioControlCenter key="audio-cc" />

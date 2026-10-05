@@ -1016,7 +1016,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         expect(useStore.getState().currentTrack?.path).toBe('C:/song2.flac');
       });
 
-      it('F24.3: play history records unique attempts accurately', async () => {
+      it('F24.3: a successful start is not a qualified listen', async () => {
         const track = createTrack();
         const row = groupRecordings([track], '')[0];
         vi.mocked(invoke).mockImplementation(async cmd => {
@@ -1024,10 +1024,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
           return null;
         });
         await playUnifiedTrack(useStore.setState, useStore.getState, row);
-        expect(useStore.getState().playCounts[row.source_context!.recording_id]).toBe(1);
+        expect(useStore.getState().playCounts[row.source_context!.recording_id]).toBeUndefined();
       });
 
-      it('F24.4: repeat plays increment play count for the recording context', async () => {
+      it('F24.4: repeated starts do not increment qualified listening counts', async () => {
         const track = createTrack();
         const row = groupRecordings([track], '')[0];
         vi.mocked(invoke).mockImplementation(async cmd => {
@@ -1036,7 +1036,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         });
         await playUnifiedTrack(useStore.setState, useStore.getState, row);
         await playUnifiedTrack(useStore.setState, useStore.getState, row);
-        expect(useStore.getState().playCounts[row.source_context!.recording_id]).toBe(2);
+        expect(useStore.getState().playCounts[row.source_context!.recording_id]).toBeUndefined();
       });
 
       it('F24.5: cancelSourcePlayback resets in-flight retry handles', () => {
@@ -1182,7 +1182,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         expect(useStore.getState().playback.status).toBe('Playing');
       });
 
-      it('F27.2: playCounts is updated only on successful playback attempt', async () => {
+      it('F27.2: playback readiness alone does not reward taste', async () => {
         const track = createTrack();
         const row = groupRecordings([track], '')[0];
         vi.mocked(invoke).mockImplementation(async cmd => {
@@ -1190,7 +1190,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
           return null;
         });
         await playUnifiedTrack(useStore.setState, useStore.getState, row);
-        expect(useStore.getState().playCounts[row.source_context!.recording_id]).toBe(1);
+        expect(useStore.getState().playCounts[row.source_context!.recording_id]).toBeUndefined();
       });
 
       it('F27.3: playHistory records track when playback starts successfully', async () => {
