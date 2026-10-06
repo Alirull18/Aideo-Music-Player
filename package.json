@@ -51,7 +51,7 @@
     "lucide-react": "^1.14.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react-dom": "^19.3.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
@@ -60,7 +60,7 @@
     "@testing-library/react": "^16.1.8",
     "@types/node": "^26.2.0",
     "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.6.0",
     "jsdom": "^26.0.0",
     "typescript": "~5.8.3",
