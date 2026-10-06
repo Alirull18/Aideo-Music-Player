@@ -357,7 +357,7 @@ async fn get_unison_ttml(
         );
         if let Ok(resp) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.12")
             .send()
             .await
         {
@@ -411,7 +411,7 @@ async fn get_unison_ttml(
             if let Ok(resp) = client
                 .get(&url)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.12")
                 .send()
                 .await
             {
@@ -528,7 +528,7 @@ async fn search_lyrics_online(
         );
         if let Ok(res) = client
             .get(&bini_url)
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.12")
             .send()
             .await
         {
@@ -611,7 +611,7 @@ async fn search_lyrics_online(
         for u in urls {
             if let Ok(res) = client.get(&u)
                 .header("Accept", "application/json, text/xml, */*")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.11")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Aideo/0.9.12")
                 .send()
                 .await
             {

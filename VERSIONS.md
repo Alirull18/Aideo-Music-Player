@@ -1,9 +1,15 @@
 # 💎 Aideo Music Player — Complete Version History & Release Dossier
 
 > **Comprehensive release archive and technical evolution log of Aideo Music Player across all GitHub releases.**
-> Documents every milestone, audio DSP pipeline evolution, user interface iteration, cloud/streaming integration, bug fix, and architectural hardening from `v0.1.0` through `v0.9.8` and current development `HEAD`.
+> Documents every milestone, audio DSP pipeline evolution, user interface iteration, cloud/streaming integration, bug fix, and architectural hardening from `v0.1.0` through current development `v0.9.12`.
 
 ---
+## v0.9.12 (Prepared)
+
+Prepared on 6 October 2026 from checkpoint `be3a72e`. Adaptive recommendations, stable Discovery, playback recovery, local backup/restore, library health and relocation, output profiles, download recovery, stop-after/album sessions, Insights fixes and inspector meters are implemented locally. Publication and external acceptance remain pending.
+
+See [v0.9.12 release notes](docs/RELEASE_NOTES_v0.9.12.md) and [validation evidence](docs/reliability-validation.md).
+
 ## Unreleased
 
 - AutoEQ selection and persistence now identify the exact profile URL, so same-name headphones from different authors or measurement sources select independently.
@@ -71,6 +77,7 @@
 
 | Version | Release Date | Codename / Focus | Primary Capabilities Added |
 |:---|:---:|:---|:---|
+| **v0.9.12** | Pending | Adaptive Recommendations & Reliability | Shared recommendation ranking, bounded playback recovery, backup/restore, library health/relocation, output profiles, durable downloads and listening controls. Prepared locally on 2026-10-06; external acceptance remains open. |
 | **v0.9.11** | 2026-09-30 | WASAPI Clocks & Infinite Radio | Hardware WASAPI Exclusive clock diagnostics (`IAudioClock`), multi-tier Infinite Autoplay Radio overhaul, automatic Tidal session bootstrap, atomic playback stop race guard, native UPnP/DLNA casting bridge, and automated WinGet distribution. |
 | **v0.9.10** | 2026-09-20 | Album Architectures & Library Designs | 3 distinct album layout architectures (Classic Wall, Compact Table with Inline Accordion, Editorial Magazine), 6 signature Library designs, universal right-click TrackContextMenu, AddToPlaylistModal, zero audio bleed transitions, and Listening Insights V2. |
 | **v0.9.9** | 2026-09-18 | Reliable Unified Sources & Motion Canvas | Reliable Unified Music Sources architecture with conservative recording identity, direct Webstream Opus audio pipeline, Motion Canvas video artwork loops, 6 signature home screen layouts, interactive Source Switcher, Settings overhaul, GPL-3.0 licensing, 1,107 frontend + 315 backend tests. |

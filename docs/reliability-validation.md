@@ -1,5 +1,23 @@
 # Reliability validation
 
+## Verification refresh — 5 October 2026
+
+Checked checkpoint `be3a72eceb3f4cd43048cc8895afcedf95fad9d4` (0.9.11). The working tree was clean before verification; this record is the only source change from this run.
+
+| Check | Result |
+| --- | --- |
+| `npx.cmd tsc --noEmit` | Passed, exit 0 |
+| `npx.cmd vitest run src/test` | 135 files, 1,372 tests passed, exit 0 |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | Passed, exit 0 |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | 436 passed, 0 failed, 5 ignored, exit 0 |
+| `npm.cmd run build` | Passed, exit 0; large-chunk and mixed static/dynamic import warnings remain |
+
+The initial frontend invocation could not read the parent directory while esbuild loaded the config. The initial Rust suite passed 433 tests but three M3U fixture writes failed with Windows permission errors. Full reruns outside the sandbox passed without source changes. Frontend failure-path mocks, React act and jsdom canvas diagnostics still appear in successful test output.
+
+Hosted CI was inspected through the public GitHub Actions API. The [latest successful CI Check run](https://github.com/Alirull18/Aideo-Music-Player/actions/runs/37251612136), created on 5 October at 09:29 MYT, tested `6bac9a53859e9d4954b5791ab35887eadd08a02d`: Windows Cargo check/test and Ubuntu frontend typecheck passed. Its frontend job did **not** run frontend tests. The current local workflow contains `npm test`, but no Actions run was found for the checked local SHA. Hosted execution of that step and the disposable failing-assertion demonstration remain pending; the remote success does not certify this checkpoint.
+
+The user deferred live checks for now. Provider authentication/network recovery, physical DAC unplug/replug, Windows sleep/resume, extended listening/recommendation sessions, installed-app crash recovery and native UI acceptance remain unverified. No app was launched, no real library maintenance was performed, and no commit, push or publication was made.
+
 ## Baseline — 2 October 2026
 
 Baseline HEAD: `3555d3ad514f5aa15f664c001d45f5743d7a4f03` (0.9.11), with existing uncommitted download, recommendation, playback, and audio-inspector work preserved. The checkout is active; refresh status and check affected diffs before each change.

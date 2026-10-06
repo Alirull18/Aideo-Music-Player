@@ -104,6 +104,7 @@ const PACK_DEFINITIONS = [
       'docs/RELEASE_NOTES_v0.9.9.md',
       'docs/RELEASE_NOTES_v0.9.10.md',
       'docs/RELEASE_NOTES_v0.9.11.md',
+      'docs/RELEASE_NOTES_v0.9.12.md',
       'src-tauri/capabilities/default.json',
       'src-tauri/tauri.conf.json',
       'src-tauri/src/lib.rs'

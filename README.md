@@ -1,4 +1,4 @@
-# 💎 Aideo Music Player — Modern Windows Music Player (v0.9.11)
+# 💎 Aideo Music Player — Modern Windows Music Player (v0.9.12)
 
 **A fast, lightweight, open-source desktop music player for Windows 10 and Windows 11. Built with Rust and Tauri for bit-perfect WASAPI Exclusive sound, real-time synchronized karaoke lyrics, and a gorgeous glassmorphism interface.**
 
@@ -16,7 +16,7 @@
   <p>
     <a href="https://alirull18.github.io/Aideo-Music-Player/"><strong>🌐 Official Website</strong></a> &nbsp;•&nbsp;
     <a href="https://github.com/Alirull18/Aideo-Music-Player/releases/latest"><strong>📥 Download for Windows (.exe / .msi)</strong></a> &nbsp;•&nbsp;
-    <a href="docs/RELEASE_NOTES_v0.9.11.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
+    <a href="docs/RELEASE_NOTES_v0.9.12.md"><strong>📖 Release Notes</strong></a> &nbsp;•&nbsp;
     <a href="https://www.producthunt.com/products/aideo-music-player"><strong>🚀 Product Hunt</strong></a>
   </p>
   <br/>
@@ -78,7 +78,20 @@
 
 ---
 
-## ✨ What's New in v0.9.11
+## ✨ What's New in v0.9.12
+
+Version **0.9.12** collects the adaptive recommendation, playback recovery and library management work. It is prepared locally; publication and live acceptance checks remain pending.
+
+* **Adaptive recommendations** share recording identity and qualified listening across Home, radio and mixes, with searchable exclusions and selective taste reset.
+* **Stable Discovery** deduplicates recordings, preserves distinct versions and keeps the visible feed during playback. Online radio includes local tracks only when enabled.
+* **Playback and output recovery** add bounded retry, actionable recovery controls and per-device volume, DSP and AutoEQ profiles.
+* **Library maintenance** adds local backup/restore, cancellable health scans and previewed moved-folder repair.
+* **Downloads** add source selection, progress/cancellation, explicit completion and durable recovery with supported direct-transfer resume.
+* **Listening controls and diagnostics** add stop-after/album sessions, corrected Insights recording and visibility-gated inspector Peak/Headroom readings.
+
+Read the [v0.9.12 release notes](docs/RELEASE_NOTES_v0.9.12.md) and [validation record](docs/reliability-validation.md) for completed work and remaining acceptance checks.
+
+## Previous release: v0.9.11
 
 Version **0.9.11** delivers critical reliability upgrades across the audio playback core, an intelligent overhaul of our Infinite Autoplay Radio recommendation engine, seamless background Tidal session auto-restoration, hardware-measured WASAPI Exclusive diagnostics, UPnP/DLNA casting protocol support, and automated WinGet distribution workflows:
 
