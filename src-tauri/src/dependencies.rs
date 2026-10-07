@@ -367,6 +367,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ffmpeg_zip_reads_deflated_payload_and_rejects_traversal_paths() {
+        use std::io::{Cursor, Read, Write};
+
+        let payload = b"MZ fixture";
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        writer.start_file("../ffmpeg.exe", options).unwrap();
+        writer.write_all(payload).unwrap();
+        writer.start_file("bundle/bin/ffmpeg.exe", options).unwrap();
+        writer.write_all(payload).unwrap();
+
+        let mut archive = zip::ZipArchive::new(writer.finish().unwrap()).unwrap();
+        assert!(archive.by_index(0).unwrap().enclosed_name().is_none());
+        let mut file = archive.by_index(1).unwrap();
+        assert_eq!(file.enclosed_name().unwrap().file_name().unwrap(), "ffmpeg.exe");
+        let mut extracted = Vec::new();
+        file.read_to_end(&mut extracted).unwrap();
+        assert_eq!(extracted, payload);
+    }
+
+    #[test]
     fn test_parse_sha256sums_for_binary_exact() {
         let sums = "\
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  yt-dlp

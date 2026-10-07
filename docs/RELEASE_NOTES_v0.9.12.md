@@ -39,3 +39,9 @@ Version consistency assertions passed for npm/Cargo/Tauri metadata, both root lo
 - CI and release workflows now select Node 22 to meet Supabase's runtime requirement. Unrelated major package upgrades remain deferred.
 
 Verification passed on Node 24.15.0 and Node 22.23.3: TypeScript, 135 frontend test files / 1,372 tests, and production frontend build. Locked Cargo check and tests passed with 436 tests, zero failures and five ignored tests. The scoped whitespace check passed. Existing build chunk-size/import warnings and jsdom canvas diagnostics remain. Hosted CI, installed-app plugin behavior and physical audio acceptance were not exercised; no commit or publication was made for this refresh.
+
+## Upstream merge verification: 7 October 2026
+
+Merged upstream dependency and workflow updates while retaining v0.9.12, the dependency refresh and Node 22 workflow settings. Resolved the Cargo lockfile conflict for zip 4.6.1 and added a regression test for deflated ZIP extraction and traversal-path rejection. Updater tests now wait for pending imports during teardown.
+
+Node 22 TypeScript checks, 135 frontend test files / 1,372 tests and the production build passed. Locked Cargo check and tests passed with 437 tests, zero failures and five ignored tests. The merged npm audit reports zero vulnerabilities. Existing build warnings and jsdom canvas diagnostics remain; hosted CI and installed-app/audio acceptance are separate checks.

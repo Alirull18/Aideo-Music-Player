@@ -45,8 +45,9 @@ describe('official tauri updater', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    await vi.dynamicImportSettled();
     vi.restoreAllMocks();
   });
 
