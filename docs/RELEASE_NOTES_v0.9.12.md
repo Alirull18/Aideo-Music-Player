@@ -45,3 +45,9 @@ Verification passed on Node 24.15.0 and Node 22.23.3: TypeScript, 135 frontend t
 Merged upstream dependency and workflow updates while retaining v0.9.12, the dependency refresh and Node 22 workflow settings. Resolved the Cargo lockfile conflict for zip 4.6.1 and added a regression test for deflated ZIP extraction and traversal-path rejection. Updater tests now wait for pending imports during teardown.
 
 Node 22 TypeScript checks, 135 frontend test files / 1,372 tests and the production build passed. Locked Cargo check and tests passed with 437 tests, zero failures and five ignored tests. The merged npm audit reports zero vulnerabilities. Existing build warnings and jsdom canvas diagnostics remain; hosted CI and installed-app/audio acceptance are separate checks.
+
+## Pre-publication security refresh: 7 October 2026
+
+Updated Rustls to 0.23.45, serde_with to 3.21.0 and OpenSSL to 0.10.80 for the corresponding Dependabot advisories, with their required transitive dependencies. The remaining GLib advisory concerns a dependency absent from the Windows target dependency tree. The release is still v0.9.12; its draft installers will be rebuilt from this refreshed lockfile before publication.
+
+Locked Cargo check passed. All 437 native tests passed with five ignored tests after clearing Aideo's generated debug artifacts and running with `CARGO_INCREMENTAL=0` and `--config 'profile.test.package.aideo.debug=0'` to recover from a local disk-space failure. Frontend source and npm dependencies are unchanged from the successful Node 22 typecheck, 1,372-test run and production build.
