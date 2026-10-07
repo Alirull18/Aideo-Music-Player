@@ -80,7 +80,7 @@
 
 ## ✨ What's New in v0.9.12
 
-Version **0.9.12** collects the adaptive recommendation, playback recovery and library management work. It is prepared locally; publication and live acceptance checks remain pending.
+Version **0.9.12** collects the adaptive recommendation, playback recovery and library management work. Released on 7 October 2026 with Windows EXE/MSI installers and in-app updater metadata.
 
 * **Adaptive recommendations** share recording identity and qualified listening across Home, radio and mixes, with searchable exclusions and selective taste reset.
 * **Stable Discovery** deduplicates recordings, preserves distinct versions and keeps the visible feed during playback. Online radio includes local tracks only when enabled.

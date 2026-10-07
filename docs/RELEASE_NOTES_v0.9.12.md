@@ -1,6 +1,6 @@
 # Aideo Music Player v0.9.12
 
-Prepared on 6 October 2026. This version collects the adaptive recommendation and reliability work saved in checkpoint `be3a72e`. Publication and live acceptance remain pending.
+Released on 7 October 2026. This version collects the adaptive recommendation and reliability work saved in checkpoint `be3a72e`, with dependency security patches. The publication record is below.
 
 ## Changes
 
@@ -13,11 +13,13 @@ Prepared on 6 October 2026. This version collects the adaptive recommendation an
 - Listening Insights records the native bit-perfect contract correctly and refreshes after playback events. Inspector Peak/Headroom readings poll only while visible; they measure sample peak.
 - Playback restart diagnostics retain the recovery reason. Shared DSP shortcuts prevent duplicate handling. Frontend tests are included in the local CI workflow.
 
+Further audio, state, AutoEQ and interface corrections included since v0.9.11 are recorded in the [version history](../VERSIONS.md).
+
 ## Where work stands
 
 Implementation and local validation were completed before this version bump. The 5 October verification record reports 1,372 frontend tests and 436 native tests passing, with five native tests ignored, plus successful typecheck, Cargo check and frontend build. See [the validation record](reliability-validation.md) for the checkpoint and evidence boundaries.
 
-Hosted CI for this checkpoint, provider authentication/network recovery, physical DAC reconnect, Windows sleep/resume, long listening sessions, recommendation quality, installed-app crash recovery and native UI acceptance remain open. Changing the version does not publish an installer or certify these cases.
+Hosted CI and publication for the release tag are recorded below. Provider authentication/network recovery, physical DAC reconnect, Windows sleep/resume, long listening sessions, recommendation quality, installed-app crash recovery and native UI acceptance remain open.
 
 ## Version-update verification: 6 October 2026
 
@@ -51,3 +53,9 @@ Node 22 TypeScript checks, 135 frontend test files / 1,372 tests and the product
 Updated Rustls to 0.23.45, serde_with to 3.21.0 and OpenSSL to 0.10.80 for the corresponding Dependabot advisories, with their required transitive dependencies. The remaining GLib advisory concerns a dependency absent from the Windows target dependency tree. The release is still v0.9.12; its draft installers will be rebuilt from this refreshed lockfile before publication.
 
 Locked Cargo check passed. All 437 native tests passed with five ignored tests after clearing Aideo's generated debug artifacts and running with `CARGO_INCREMENTAL=0` and `--config 'profile.test.package.aideo.debug=0'` to recover from a local disk-space failure. Frontend source and npm dependencies are unchanged from the successful Node 22 typecheck, 1,372-test run and production build.
+
+## Publication: 7 October 2026
+
+[v0.9.12](https://github.com/Alirull18/Aideo-Music-Player/releases/tag/v0.9.12) is public and marked as the latest release, built from commit `87b51a6`. [Hosted CI](https://github.com/Alirull18/Aideo-Music-Player/actions/runs/37560430786) and the [installer build](https://github.com/Alirull18/Aideo-Music-Player/actions/runs/37560433453) passed.
+
+Both Windows installers passed SHA-256 checksum and cryptographic updater-signature verification against the public key retained from v0.9.11; altered payloads were rejected. The uploaded `latest.json` uses public installer download URLs and the release notes. Its version, platform entries and signature bindings passed verification through the public updater endpoint, and both public installer URLs returned HTTP 200. GitHub closed the Rustls, serde_with and OpenSSL advisories; the remaining medium GLib alert is absent from the Windows dependency tree.
