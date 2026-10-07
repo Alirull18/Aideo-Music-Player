@@ -28,6 +28,7 @@ describe('Discovery Hub Local Track Playback & Tag Resolution', () => {
   };
 
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
     useStore.setState({
       tracks: [sampleLocalTrack, sampleMp3Track],

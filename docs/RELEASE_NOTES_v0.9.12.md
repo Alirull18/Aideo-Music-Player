@@ -30,3 +30,12 @@ Hosted CI for this checkpoint, provider authentication/network recovery, physica
 | `npm.cmd run build` | Passed for v0.9.12, exit 0; existing chunk-size and mixed-import warnings |
 
 Version consistency assertions passed for npm/Cargo/Tauri metadata, both root lockfile entries, request headers, website structured data and release-note references. The NotebookLM export script syntax check and scoped whitespace check passed. Historical release notes and the existing 5 October validation edit were preserved. No commit, push or publication was made.
+
+## Dependency refresh: 7 October 2026
+
+- Updated Vitest from 2.1.9 to 4.1.11 and Vite from 7.3.3 to 7.3.7, with compatible npm updates for Supabase, Tauri, motion, icons, state and test tooling. The refreshed npm audit reports zero vulnerabilities, down from 12 affected packages.
+- Updated native notification, opener, process and updater plugins to match their frontend companions; the dialog requirement is now 2.8.1. Audio-engine and SQLite crate versions are unchanged.
+- Vitest uses its typed configuration API. Discovery playback tests clear spy history between cases so Vitest 4 assertions remain isolated.
+- CI and release workflows now select Node 22 to meet Supabase's runtime requirement. Unrelated major package upgrades remain deferred.
+
+Verification passed on Node 24.15.0 and Node 22.23.3: TypeScript, 135 frontend test files / 1,372 tests, and production frontend build. Locked Cargo check and tests passed with 436 tests, zero failures and five ignored tests. The scoped whitespace check passed. Existing build chunk-size/import warnings and jsdom canvas diagnostics remain. Hosted CI, installed-app plugin behavior and physical audio acceptance were not exercised; no commit or publication was made for this refresh.
