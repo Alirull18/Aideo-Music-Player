@@ -25,6 +25,8 @@ import { getAudioPathPresentation } from '../utils/audioPath';
 import { LocalBackupControls } from './LocalBackupControls';
 import { RecommendationPreferences } from './RecommendationPreferences';
 import { filterAutomaticQueue, invalidateRecommendationPreferences } from '../utils/recommendations';
+import { parseWindowsAudioDevice } from '../utils/audioDeviceParser';
+import { AudioOutputPathSelector } from './AudioOutputPathSelector';
 
 interface PresetTheme {
   name: string;
@@ -848,6 +850,17 @@ export function SettingsView() {
   const [closeToTray, setCloseToTray] = useState(() => {
     return localStorage.getItem('aideo_close_to_tray') === 'true';
   });
+
+  useEffect(() => {
+    invoke<boolean>('get_close_to_tray')
+      .then((val) => {
+        if (typeof val === 'boolean') {
+          setCloseToTray(val);
+          localStorage.setItem('aideo_close_to_tray', String(val));
+        }
+      })
+      .catch((err) => console.error('Failed to get close_to_tray:', err));
+  }, []);
 
   // Tab-specific reset handlers
   const resetAppearance = () => {
@@ -3957,37 +3970,49 @@ export function SettingsView() {
               </div>
 
               <div className="device-selector" style={{ position: 'relative', marginBottom: 20 }}>
-                <div className="current-device" onClick={() => setDevOpen(o => !o)} style={{ padding: '12px 16px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentDevice || 'System Default Device'}</span>
-                  <span style={{ color: 'var(--text-dim)' }}>▾</span>
-                </div>
-                <AnimatePresence>
-                  {devOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                      style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1200, background: '#101018', border: '1px solid var(--glass-border)', borderRadius: 8, marginTop: 4, overflow: 'hidden', maxHeight: 200, overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.8)' }}>
-                      {devices.length === 0 && <div style={{ padding: 12, fontSize: 11, color: 'var(--text-dim)' }}>No device drivers identified</div>}
-                      {devices.map(d => {
-                        const isSelected = (!currentDevice && d === '[System Default Device]') || currentDevice === d;
-                        return (
-                          <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
-                            style={{
-                              padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
-                              color: isSelected ? 'var(--accent)' : 'var(--text)', background: isSelected ? 'rgba(var(--accent-rgb),0.1)' : '',
-                              display: 'flex', alignItems: 'center', gap: 8
-                            }}>
-                            {d === '[System Default Device]' && <span style={{ fontSize: 8, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '2px 6px', borderRadius: 4, fontWeight: 900, flexShrink: 0, border: '1px solid rgba(34, 197, 94, 0.3)' }}>DEFAULT</span>}
-                            {d.startsWith('[ASIO]') && <span style={{ fontSize: 8, background: '#ef4444', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>ASIO</span>}
-                            {d.startsWith('[WASAPI]') && <span style={{ fontSize: 8, background: '#3b82f6', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>WASAPI</span>}
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {d === '[System Default Device]' ? 'System Default Device' : d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {(() => {
+                  const defaultDevice = devices.find(d => d !== '[System Default Device]');
+                  const defaultDeviceDisplayName = defaultDevice ? parseWindowsAudioDevice(defaultDevice).displayName : '';
+                  const currentParsed = parseWindowsAudioDevice(currentDevice || '[System Default Device]', !currentDevice || currentDevice === '[System Default Device]', defaultDeviceDisplayName);
+
+                  return (
+                    <>
+                      <div className="current-device" onClick={() => setDevOpen(o => !o)} style={{ padding: '12px 16px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 8, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentParsed.formattedLabel}</span>
+                        <span style={{ color: 'var(--text-dim)' }}>▾</span>
+                      </div>
+                      <AnimatePresence>
+                        {devOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+                            style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1200, background: '#101018', border: '1px solid var(--glass-border)', borderRadius: 8, marginTop: 4, overflow: 'hidden', maxHeight: 220, overflowY: 'auto', boxShadow: '0 10px 30px rgba(0,0,0,0.8)' }}>
+                            {devices.length === 0 && <div style={{ padding: 12, fontSize: 11, color: 'var(--text-dim)' }}>No device drivers identified</div>}
+                            {devices.map(d => {
+                              const isSelected = (!currentDevice && d === '[System Default Device]') || currentDevice === d;
+                              const parsed = parseWindowsAudioDevice(d, d === '[System Default Device]', defaultDeviceDisplayName);
+                              return (
+                                <div key={d} onClick={() => { setAudioDevice(d); setDevOpen(false); }}
+                                  style={{
+                                    padding: '12px 16px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--glass-border)',
+                                    color: isSelected ? 'var(--accent)' : 'var(--text)', background: isSelected ? 'rgba(var(--accent-rgb),0.1)' : '',
+                                    display: 'flex', alignItems: 'center', gap: 8
+                                  }}>
+                                  {d === '[System Default Device]' && <span style={{ fontSize: 8, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '2px 6px', borderRadius: 4, fontWeight: 900, flexShrink: 0, border: '1px solid rgba(34, 197, 94, 0.3)' }}>DEFAULT</span>}
+                                  {parsed.driverType === 'ASIO' && <span style={{ fontSize: 8, background: '#ef4444', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>ASIO</span>}
+                                  {parsed.driverType === 'WASAPI' && <span style={{ fontSize: 8, background: '#3b82f6', color: 'white', padding: '2px 4px', borderRadius: 4, fontWeight: 900, flexShrink: 0 }}>WASAPI</span>}
+                                  <span style={{ fontSize: 9, color: 'var(--text-dim)', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: 3, flexShrink: 0 }}>{parsed.endpointLabel}</span>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {parsed.formattedLabel}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Spatial Widener crossfeed */}
@@ -4011,44 +4036,15 @@ export function SettingsView() {
             {/* Exclusive Mode settings */}
             <div style={{ flex: 1, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <div className="settings-ctrl-title">Bit-Perfect Request</div>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+                <div className="settings-ctrl-title">Audio Output Path</div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
                   Effective output: {getAudioPathPresentation(playback).hudLabel}
                 </div>
-                <div className={`exclusive-toggle ${playbackBitPerfect ? 'active' : ''}`}
-                  onClick={() => useStore.getState().toggleBitPerfect()}
-                  style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playbackBitPerfect ? 'rgba(6, 182, 212, 0.08)' : 'rgba(0,0,0,0.2)', borderColor: playbackBitPerfect ? '#06b6d4' : '', cursor: 'pointer', transition: 'all 0.2s' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Request Bit-Perfect Bypass</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackBitPerfect ? '#06b6d4' : 'var(--glass-h)', color: playbackBitPerfect ? '#fff' : 'var(--text-dim)' }}>
-                      {playbackBitPerfect ? 'REQUESTED' : 'OFF'}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                    Requests bypass of mixer resampling, volume gain, and DSP. Check the active signal path for the effective result.
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="settings-ctrl-title">Exclusive Mode</div>
-                <div className={`exclusive-toggle ${playbackExclusive ? 'active' : ''}`} 
-                  onClick={toggleExclusive} 
-                  style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid var(--glass-border)', background: playbackExclusive ? 'rgba(var(--accent-rgb), 0.08)' : 'rgba(0,0,0,0.2)', cursor: 'pointer', transition: 'all 0.2s' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Exclusive Access</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: playbackExclusive ? 'var(--accent)' : 'var(--glass-h)', color: playbackExclusive ? '#fff' : 'var(--text-dim)' }}>
-                      {playbackExclusive ? 'ON' : 'OFF'}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                    Requests exclusive access; the active route determines whether the driver is exclusive.
-                  </div>
-                </div>
+                <AudioOutputPathSelector compact />
               </div>
 
               <AnimatePresence>
-                {playbackExclusive && (
+                {(playbackExclusive || playbackBitPerfect) && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
@@ -4464,6 +4460,11 @@ export function SettingsView() {
                       </div>
                     );
                   })()}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+                    <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
+                    <span>PWA Ready: Scan QR code on your mobile browser & select "Add to Home Screen" for fullscreen live karaoke lyrics.</span>
+                  </div>
                 </div>
               ) : (
                 <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>
@@ -4868,6 +4869,29 @@ export function SettingsView() {
                 }}
               >
                 Clear Cache
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const removed = await invoke<number>('clean_missing_tracks');
+                    await useStore.getState().loadLibrary();
+                    window.dispatchEvent(new CustomEvent('ui-toast', {
+                      detail: { message: `Cleaned ${removed} missing file(s) from library`, type: 'success' }
+                    }));
+                  } catch (err) {
+                    console.error('Failed to clean missing tracks:', err);
+                    window.dispatchEvent(new CustomEvent('ui-toast', {
+                      detail: { message: `Failed to clean missing tracks: ${err}`, type: 'error' }
+                    }));
+                  }
+                }}
+                className="btn btn-secondary"
+                style={{
+                  fontSize: 11,
+                  padding: '8px 16px',
+                }}
+              >
+                Clean Missing Files
               </button>
             </div>
           </div>

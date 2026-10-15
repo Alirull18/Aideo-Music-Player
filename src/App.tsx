@@ -1,7 +1,7 @@
 import { markListeningEnd } from './utils/recommendations';
 import { handleSourceFailure } from './store/sourcePlayback';
 import { useEffect, useState, lazy, Suspense } from 'react';
-import { useStore } from './store';
+import { useStore, Track } from './store';
 import { useUpdaterStore } from './store/updaterStore';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
@@ -66,6 +66,79 @@ if (typeof window !== 'undefined') {
     logger.error('PROMISE', `[Unhandled Promise Rejection] ${msg}`, reason).catch(() => {});
   };
 }
+
+const handleDeepLink = (rawUrl: string) => {
+  if (!rawUrl || typeof rawUrl !== 'string') return;
+  const cleanUrl = rawUrl.trim();
+  if (!cleanUrl.startsWith('aideo://')) return;
+
+  try {
+    const withoutScheme = cleanUrl.slice('aideo://'.length);
+    const [pathPart, queryPart] = withoutScheme.split('?');
+    const action = (pathPart.split('/')[0] || '').toLowerCase();
+    const subRoute = pathPart.split('/').slice(1).join('/');
+    const params = new URLSearchParams(queryPart || '');
+
+    if (action === 'play') {
+      const pathParam = params.get('path');
+      if (pathParam) {
+        const decodedPath = decodeURIComponent(pathParam);
+        const state = useStore.getState();
+        const existing = state.tracks.find(t => t.path === decodedPath);
+        if (existing) {
+          void state.playTrack(existing);
+        } else {
+          invoke('play_track', { path: decodedPath, startPos: 0.0, attemptId: null })
+            .catch(err => console.error('[DeepLink] Play error:', err));
+        }
+      }
+    } else if (action === 'queue') {
+      const pathParam = params.get('path');
+      if (pathParam) {
+        const decodedPath = decodeURIComponent(pathParam);
+        const state = useStore.getState();
+        const existing = state.tracks.find(t => t.path === decodedPath);
+        const trackToQueue: Track = existing || {
+          id: 0,
+          path: decodedPath,
+          title: decodedPath.split(/[\/\\]/).pop()?.replace(/\.[^/.]+$/, '') || 'Unknown Track',
+          artist: 'Unknown Artist',
+          album: 'Unknown Album',
+          duration: 0,
+          format: decodedPath.split('.').pop() || 'Unknown',
+          cover_url: null,
+          lyric_offset: 0,
+        };
+        void state.addToQueue(trackToQueue);
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: `Added to queue: ${trackToQueue.title || decodedPath}`, type: 'info' }
+        }));
+      }
+    } else if (action === 'search') {
+      const q = params.get('q');
+      if (q) {
+        const decodedQ = decodeURIComponent(q);
+        const state = useStore.getState();
+        if (state.setSearch) {
+          state.setSearch(decodedQ);
+        } else {
+          state.setLibrarySearchQuery(decodedQ);
+        }
+        state.setView('library');
+      }
+    } else if (action === 'auth') {
+      const provider = subRoute || 'service';
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `Received authentication callback for ${provider}`, type: 'info' }
+      }));
+      window.dispatchEvent(new CustomEvent('oauth-callback-url', {
+        detail: cleanUrl
+      }));
+    }
+  } catch (err) {
+    console.error('[DeepLink] Error handling deep link:', cleanUrl, err);
+  }
+};
 
 function AideoApp() {
   const { 
@@ -489,6 +562,27 @@ function AideoApp() {
       if (isCancelled) { uPlaybackError(); return; }
       cleanups.push(uPlaybackError);
 
+      const uPlaybackCancelled = await listen<{ attempt_id?: string; path?: string }>('playback-cancelled', (event) => {
+        if (isCancelled) return;
+        const state = useStore.getState();
+        const incomingAttemptId = event.payload?.attempt_id;
+        if (!incomingAttemptId || !state.currentAttemptId || incomingAttemptId === state.currentAttemptId) {
+          useStore.setState((prev) => ({
+            playback: { ...prev.playback, is_buffering: false }
+          }));
+          window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
+        }
+      });
+      if (isCancelled) { uPlaybackCancelled(); return; }
+      cleanups.push(uPlaybackCancelled);
+
+      const uPlaybackSuccess = await listen<string>('playback-success', (event) => {
+        if (isCancelled) return;
+        console.log('[App] Playback success:', event.payload);
+      });
+      if (isCancelled) { uPlaybackSuccess(); return; }
+      cleanups.push(uPlaybackSuccess);
+
       const uLib = await listen('library-updated', () => {
         if (isCancelled) return;
         useStore.getState().loadLibrary();
@@ -672,6 +766,19 @@ function AideoApp() {
       });
       if (isCancelled) { uDeviceFallback(); return; }
       cleanups.push(uDeviceFallback);
+
+      const uDeepLink = await listen<string | string[]>('deep-link', (event) => {
+        if (isCancelled) return;
+        const payload = event.payload;
+        const urls = Array.isArray(payload) ? payload : [payload];
+        for (const rawUrl of urls) {
+          if (typeof rawUrl === 'string' && rawUrl.startsWith('aideo://')) {
+            handleDeepLink(rawUrl);
+          }
+        }
+      });
+      if (isCancelled) { uDeepLink(); return; }
+      cleanups.push(uDeepLink);
 
       // Window Size, Position & State Restoration and Tracking
       if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {

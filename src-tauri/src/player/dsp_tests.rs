@@ -1957,4 +1957,78 @@ mod dsp_tests {
         assert_eq!(n, 16);
         assert!(received.iter().all(|&s| s == 0.9f32), "Post-seek audio must not be discarded");
     }
+
+    #[test]
+    fn test_crossfeed_modes_bs2b_and_meier() {
+        use crate::player::{AudioNode, DSPState, CrossfeedNode};
+
+        // 1. BS2B Mode verification
+        let mut node_bs2b = CrossfeedNode::new();
+        let dsp_bs2b = DSPState {
+            enabled: true,
+            crossfeed_enabled: true,
+            crossfeed_mode: "bs2b".to_string(),
+            ..DSPState::default()
+        };
+        node_bs2b.update_params(&dsp_bs2b, 48000.0);
+        assert_eq!(node_bs2b.crossfeed_mode, "bs2b");
+        assert_eq!(node_bs2b.crossfeed_level, -6.0);
+        assert_eq!(node_bs2b.crossfeed_corner, 700.0);
+
+        let mut samples_bs2b = vec![vec![0.0f32; 64], vec![0.0f32; 64]];
+        samples_bs2b[0][0] = 1.0;
+        node_bs2b.process(&mut samples_bs2b, 48000.0);
+
+        // At 48kHz, BS2B delay is round(0.000300 * 48000) = 14 samples
+        assert_eq!(samples_bs2b[1][0], 0.0, "Right channel should be silent prior to delay");
+        assert!(samples_bs2b[1][14] > 0.0, "Right channel must receive delayed crossfeed at sample 14 in BS2B mode");
+        let peak_bs2b = samples_bs2b[1].iter().copied().fold(0.0f32, f32::max);
+        assert!(peak_bs2b > 0.0);
+
+        // 2. Meier Mode verification
+        let mut node_meier = CrossfeedNode::new();
+        let dsp_meier = DSPState {
+            enabled: true,
+            crossfeed_enabled: true,
+            crossfeed_mode: "meier".to_string(),
+            ..DSPState::default()
+        };
+        node_meier.update_params(&dsp_meier, 48000.0);
+        assert_eq!(node_meier.crossfeed_mode, "meier");
+        assert_eq!(node_meier.crossfeed_level, -7.5);
+        assert_eq!(node_meier.crossfeed_corner, 650.0);
+
+        let mut samples_meier = vec![vec![0.0f32; 64], vec![0.0f32; 64]];
+        samples_meier[0][0] = 1.0;
+        node_meier.process(&mut samples_meier, 48000.0);
+
+        // At 48kHz, Meier delay is round(0.000250 * 48000) = 12 samples
+        assert_eq!(samples_meier[1][0], 0.0, "Right channel should be silent prior to delay");
+        assert!(samples_meier[1][12] > 0.0, "Right channel must receive delayed crossfeed at sample 12 in Meier mode");
+        let peak_meier = samples_meier[1].iter().copied().fold(0.0f32, f32::max);
+        assert!(peak_meier > 0.0);
+
+        // Meier has lower gain (-7.5dB vs -6.0dB) so peak crossfeed level must be lower
+        assert!(
+            peak_meier < peak_bs2b,
+            "Meier crossfeed peak ({}) must be quieter than BS2B ({})",
+            peak_meier,
+            peak_bs2b
+        );
+
+        // 3. Custom mode verification
+        let mut node_custom = CrossfeedNode::new();
+        let dsp_custom = DSPState {
+            enabled: true,
+            crossfeed_enabled: true,
+            crossfeed_mode: "custom".to_string(),
+            crossfeed_level: -12.0,
+            crossfeed_corner: 550.0,
+            ..DSPState::default()
+        };
+        node_custom.update_params(&dsp_custom, 48000.0);
+        assert_eq!(node_custom.crossfeed_mode, "custom");
+        assert_eq!(node_custom.crossfeed_level, -12.0);
+        assert_eq!(node_custom.crossfeed_corner, 550.0);
+    }
 }

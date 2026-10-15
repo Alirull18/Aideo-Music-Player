@@ -81,21 +81,8 @@ fn debouncer_loop(
                         p.extension()
                             .and_then(|e| e.to_str())
                             .map(|ext| {
-                                matches!(
-                                    ext.to_lowercase().as_str(),
-                                    "flac"
-                                        | "wav"
-                                        | "m4a"
-                                        | "mp3"
-                                        | "ogg"
-                                        | "opus"
-                                        | "aac"
-                                        | "aiff"
-                                        | "ape"
-                                        | "wma"
-                                        | "dsf"
-                                        | "dff"
-                                )
+                                let ext_lower = ext.to_lowercase();
+                                crate::scanner::SUPPORTED_AUDIO_EXTENSIONS.contains(&ext_lower.as_str())
                             })
                             .unwrap_or(false)
                     });
@@ -161,25 +148,31 @@ mod tests {
 
     #[test]
     fn test_audio_extension_filter() {
-        let audio_extensions = vec![
-            "flac", "wav", "m4a", "mp3", "ogg", "opus", "aac", "aiff", "ape", "wma", "dsf", "dff",
-        ];
-        for ext in audio_extensions {
+        for ext in crate::scanner::SUPPORTED_AUDIO_EXTENSIONS {
             let path = PathBuf::from(format!("song.{}", ext));
             let is_audio = path
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| matches!(e.to_lowercase().as_str(), "flac" | "wav" | "m4a" | "mp3" | "ogg" | "opus" | "aac" | "aiff" | "ape" | "wma" | "dsf" | "dff"))
+                .map(|e| {
+                    let ext_lower = e.to_lowercase();
+                    crate::scanner::SUPPORTED_AUDIO_EXTENSIONS.contains(&ext_lower.as_str())
+                })
                 .unwrap_or(false);
             assert!(is_audio, "Extension {} should be identified as audio", ext);
         }
 
-        let non_audio = PathBuf::from("cover.jpg");
-        let is_audio = non_audio
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| matches!(e.to_lowercase().as_str(), "flac" | "wav" | "m4a" | "mp3" | "ogg" | "opus" | "aac" | "aiff" | "ape" | "wma" | "dsf" | "dff"))
-            .unwrap_or(false);
-        assert!(!is_audio, "JPG should not be identified as audio");
+        let non_audio_extensions = &["jpg", "png", "txt", "exe", "pdf"];
+        for ext in non_audio_extensions {
+            let non_audio = PathBuf::from(format!("file.{}", ext));
+            let is_audio = non_audio
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| {
+                    let ext_lower = e.to_lowercase();
+                    crate::scanner::SUPPORTED_AUDIO_EXTENSIONS.contains(&ext_lower.as_str())
+                })
+                .unwrap_or(false);
+            assert!(!is_audio, "Extension {} should not be identified as audio", ext);
+        }
     }
 }

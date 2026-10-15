@@ -324,6 +324,19 @@ mod playback_lifecycle_tests {
     }
 
     #[test]
+    fn crossfade_scales_with_perceived_loudness() {
+        use crate::player::mix_crossfade_frames_scaled;
+        use std::collections::VecDeque;
+
+        let mut current = vec![vec![1.0; 6]];
+        let mut next = vec![VecDeque::from(vec![1.0; 6])];
+        let mixed = mix_crossfade_frames_scaled(&mut current, &mut next, 0, 6, 1.0, 0.5);
+        assert_eq!(mixed, 6);
+        assert!((current[0][0] - 1.0).abs() < 1e-6);
+        assert!((current[0][5] - (1.0 / 6.0 + (5.0 / 6.0) * 0.5)).abs() < 1e-6);
+    }
+
+    #[test]
     fn complete_ram_seek_can_land_exactly_at_eof() {
         use crate::player::ram_seek_cursor;
         assert_eq!(ram_seek_cursor(1.0, 48000, 48000, true), 48000);

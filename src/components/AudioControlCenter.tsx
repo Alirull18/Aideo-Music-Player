@@ -1,4 +1,6 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../store';
 import { isAmbiguousDevice } from '../utils/deviceProfiles';
 import { useShallow } from 'zustand/react/shallow';
@@ -20,6 +22,10 @@ import {
   RotateCcw,
   SlidersHorizontal,
   Disc,
+  Headphones,
+  FileAudio,
+  FolderOpen,
+  Radio,
 } from 'lucide-react';
 import {
   GRAPHIC_EQ_FREQUENCIES,
@@ -31,6 +37,10 @@ import {
   formatFrequency,
 } from '../utils/audioMath';
 import { getAudioPathPresentation } from '../utils/audioPath';
+import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
+import { parseWindowsAudioDevice } from '../utils/audioDeviceParser';
+import { findAutoEqPreset } from '../utils/autoEqCatalog';
+import { AudioOutputPathSelector } from './AudioOutputPathSelector';
 
 type TabType = 'dsp_eq' | 'hardware_signal' | 'telemetry_utils';
 
@@ -48,7 +58,6 @@ export function AudioControlCenter() {
     setDSP,
     toggleDspAB,
     resetProMode,
-    toggleExclusive,
     devices,
     currentDevice,
     setAudioDevice,
@@ -65,9 +74,14 @@ export function AudioControlCenter() {
     playbackFileRate,
     playbackFileCh,
     playbackFileFormat,
-    playbackExclusive,
     playbackDevRate,
     playbackPath,
+    activeAutoEq,
+    autoEqStrength,
+    setAutoEqStrength,
+    applyAutoEqPreset,
+    disableAutoEq,
+    setAudioOutputPath,
   } = useStore(
     useShallow(s => ({
       dsp: s.dsp,
@@ -77,10 +91,8 @@ export function AudioControlCenter() {
       playbackFileRate: s.playback.file_rate,
       playbackFileCh: s.playback.file_ch,
       playbackFileFormat: s.playback.file_format,
-      playbackExclusive: s.playback.exclusive,
       playbackDevRate: s.playback.dev_rate,
       playbackPath: s.playback,
-      toggleExclusive: s.toggleExclusive,
       devices: s.devices,
       currentDevice: s.currentDevice,
       setAudioDevice: s.setAudioDevice,
@@ -95,12 +107,52 @@ export function AudioControlCenter() {
       stopSleepTimer: s.stopSleepTimer,
       playbackRate: s.playbackRate,
       setPlaybackRate: s.setPlaybackRate,
+      activeAutoEq: s.activeAutoEq,
+      autoEqStrength: s.autoEqStrength,
+      setAutoEqStrength: s.setAutoEqStrength,
+      applyAutoEqPreset: s.applyAutoEqPreset,
+      disableAutoEq: s.disableAutoEq,
+      setAudioOutputPath: s.setAudioOutputPath,
     }))
   );
 
   const [activeTab, setActiveTab] = useState<TabType>('dsp_eq');
   const [devOpen, setDevOpen] = useState(false);
   const [hoveredBand, setHoveredBand] = useState<number | null>(null);
+  const [showSignalPathModal, setShowSignalPathModal] = useState(false);
+  const irFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLoadImpulseResponse = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'Impulse Response', extensions: ['wav', 'flac'] }],
+      });
+      if (selected && typeof selected === 'string') {
+        try {
+          await invoke('load_impulse_response', { path: selected });
+        } catch (e) {
+          console.warn('load_impulse_response invocation warning:', e);
+        }
+        setDSP({ convolution_ir_path: selected, convolution_enabled: true });
+      }
+    } catch {
+      irFileInputRef.current?.click();
+    }
+  };
+
+  const handleFallbackIrChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const path = (file as any).path || file.name;
+      try {
+        await invoke('load_impulse_response', { path });
+      } catch (err) {
+        console.warn('Fallback load_impulse_response warning:', err);
+      }
+      setDSP({ convolution_ir_path: path, convolution_enabled: true });
+    }
+  };
 
   const fileRate = playbackFileRate || 0;
   const fileCh = playbackFileCh || 0;
@@ -122,6 +174,34 @@ export function AudioControlCenter() {
   const audioPath = getAudioPathPresentation(playbackPath);
   const outputMode = audioPath.hudLabel;
   const outputRate = audioPath.outputRate;
+
+  const defaultDevice = devices.find(d => d !== '[System Default Device]');
+  const defaultDeviceDisplayName = defaultDevice
+    ? parseWindowsAudioDevice(defaultDevice).displayName
+    : '';
+
+  const currentParsed = useMemo(() => {
+    return parseWindowsAudioDevice(
+      currentDevice || '[System Default Device]',
+      !currentDevice || currentDevice === '[System Default Device]',
+      defaultDeviceDisplayName
+    );
+  }, [currentDevice, defaultDeviceDisplayName]);
+
+  const matchedPreset = useMemo(() => {
+    const query =
+      currentParsed.category === 'default' && defaultDeviceDisplayName
+        ? defaultDeviceDisplayName
+        : currentParsed.displayName;
+    return findAutoEqPreset(query);
+  }, [currentParsed.displayName, currentParsed.category, defaultDeviceDisplayName]);
+
+  const isAutoEqActiveForPreset = Boolean(
+    matchedPreset &&
+      activeAutoEq &&
+      (activeAutoEq.name === matchedPreset.name || activeAutoEq.url === matchedPreset.url) &&
+      dsp.eq_enabled
+  );
 
   const formatHz = (hz: number) => {
     if (hz >= 1000) {
@@ -305,6 +385,30 @@ export function AudioControlCenter() {
               </div>
             )}
 
+            {/* Signal Path Inspector Toggle Button */}
+            <button
+              className="btn"
+              onClick={() => setShowSignalPathModal(true)}
+              title="Inspect Complete Audio Signal Path"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 12px',
+                borderRadius: 12,
+                border: '1px solid rgba(6, 182, 212, 0.35)',
+                background: 'rgba(6, 182, 212, 0.12)',
+                color: '#22d3ee',
+                fontWeight: 700,
+                fontSize: 11,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Activity size={13} style={{ color: '#22d3ee' }} />
+              <span>Signal Path</span>
+            </button>
+
             {/* Master Instant A/B Compare Toggle */}
             <button
               className="btn"
@@ -437,6 +541,70 @@ export function AudioControlCenter() {
           {/* TAB 1: DSP & 10-Band EQ Stage */}
           {activeTab === 'dsp_eq' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Bit-Perfect Bypass Alert Badge */}
+              {playbackPath.bit_perfect && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 16,
+                    padding: '14px 18px',
+                    borderRadius: 12,
+                    background: 'rgba(6, 182, 212, 0.12)',
+                    border: '1.5px solid rgba(6, 182, 212, 0.4)',
+                    boxShadow: '0 4px 20px rgba(6, 182, 212, 0.12)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 8,
+                        background: 'rgba(6, 182, 212, 0.2)',
+                        color: '#06b6d4',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Sparkles size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#e0f2fe' }}>
+                        Pure Bit-Perfect Passthrough is Active
+                      </div>
+                      <div style={{ fontSize: 11, color: '#93c5fd', marginTop: 2, lineHeight: 1.4 }}>
+                        Aideo 10-Band EQ, AutoEQ Headphone Calibration, and digital DSP are bypassed to deliver 1:1 untouched audio straight to your DAC.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAudioOutputPath('exclusive')}
+                    style={{
+                      background: '#06b6d4',
+                      color: '#000',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '8px 16px',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      boxShadow: '0 2px 10px rgba(6, 182, 212, 0.3)',
+                    }}
+                  >
+                    <Zap size={13} fill="#000" /> Switch to Direct Hardware Exclusive (DSP Enabled)
+                  </button>
+                </div>
+              )}
+
               {/* Dynamic Transfer Curve Visualizer */}
               <div
                 style={{
@@ -996,6 +1164,270 @@ export function AudioControlCenter() {
                   </div>
                 </div>
               </div>
+
+              {/* Headphone Crossfeed (BS2B/Meier) & Room Impulse Convolver */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                {/* Headphone Crossfeed */}
+                <div
+                  style={{
+                    background: 'rgba(0, 0, 0, 0.2)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: 12,
+                    padding: '14px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Headphones size={14} color="var(--accent)" /> Headphone Crossfeed
+                      </span>
+                      <button
+                        onClick={() => setDSP({ crossfeed_enabled: !dsp.crossfeed_enabled })}
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          borderRadius: 10,
+                          border: 'none',
+                          background: dsp.crossfeed_enabled ? 'var(--accent)' : 'rgba(255, 255, 255, 0.1)',
+                          color: dsp.crossfeed_enabled ? '#fff' : 'var(--text-dim)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {dsp.crossfeed_enabled ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+
+                    {/* Mode Pill Buttons */}
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                      {[
+                        { id: 'bs2b' as const, label: 'BS2B', sub: '700Hz, -6dB', level: -6.0, corner: 700.0 },
+                        { id: 'meier' as const, label: 'Meier', sub: '650Hz, -7.5dB', level: -7.5, corner: 650.0 },
+                        { id: 'custom' as const, label: 'Custom', sub: 'Custom', level: dsp.crossfeed_level ?? -6.0, corner: dsp.crossfeed_corner ?? 700.0 },
+                      ].map(mode => {
+                        const activeMode = dsp.crossfeed_mode || 'bs2b';
+                        const isSelected = activeMode === mode.id;
+                        return (
+                          <button
+                            key={mode.id}
+                            onClick={() => {
+                              if (mode.id === 'bs2b' || mode.id === 'meier') {
+                                setDSP({
+                                  crossfeed_mode: mode.id,
+                                  crossfeed_level: mode.level,
+                                  crossfeed_corner: mode.corner,
+                                });
+                              } else {
+                                setDSP({ crossfeed_mode: 'custom' });
+                              }
+                            }}
+                            title={mode.sub}
+                            style={{
+                              flex: 1,
+                              fontSize: 10,
+                              padding: '5px 4px',
+                              borderRadius: 6,
+                              border: isSelected
+                                ? '1px solid rgba(var(--accent-rgb), 0.5)'
+                                : '1px solid rgba(255, 255, 255, 0.08)',
+                              background: isSelected
+                                ? 'rgba(var(--accent-rgb), 0.2)'
+                                : 'rgba(255, 255, 255, 0.03)',
+                              color: isSelected ? 'var(--accent)' : 'var(--text-dim)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: 2,
+                            }}
+                          >
+                            <span style={{ fontWeight: 700 }}>{mode.label}</span>
+                            <span style={{ fontSize: 8, opacity: 0.75 }}>{mode.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Sliders: Level and Corner frequency */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+                          <span>Crossfeed Level</span>
+                          <span style={{ fontFamily: 'monospace' }}>
+                            {((dsp.crossfeed_mode || 'bs2b') === 'bs2b' ? -6.0 : (dsp.crossfeed_mode === 'meier' ? -7.5 : (dsp.crossfeed_level ?? -6.0))).toFixed(1)} dB
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={-24}
+                          max={0}
+                          step={0.5}
+                          value={(dsp.crossfeed_mode || 'bs2b') === 'bs2b' ? -6.0 : (dsp.crossfeed_mode === 'meier' ? -7.5 : (dsp.crossfeed_level ?? -6.0))}
+                          disabled={!dsp.crossfeed_enabled || (dsp.crossfeed_mode || 'bs2b') !== 'custom'}
+                          onChange={e => setDSP({ crossfeed_level: parseFloat(e.target.value) })}
+                          style={{
+                            width: '100%',
+                            accentColor: 'var(--accent)',
+                            cursor: dsp.crossfeed_enabled && (dsp.crossfeed_mode || 'bs2b') === 'custom' ? 'pointer' : 'default',
+                            opacity: dsp.crossfeed_enabled && (dsp.crossfeed_mode || 'bs2b') === 'custom' ? 1 : 0.4,
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+                          <span>Corner Frequency</span>
+                          <span style={{ fontFamily: 'monospace' }}>
+                            {Math.round((dsp.crossfeed_mode || 'bs2b') === 'bs2b' ? 700.0 : (dsp.crossfeed_mode === 'meier' ? 650.0 : (dsp.crossfeed_corner ?? 700.0)))} Hz
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={200}
+                          max={2000}
+                          step={25}
+                          value={(dsp.crossfeed_mode || 'bs2b') === 'bs2b' ? 700.0 : (dsp.crossfeed_mode === 'meier' ? 650.0 : (dsp.crossfeed_corner ?? 700.0))}
+                          disabled={!dsp.crossfeed_enabled || (dsp.crossfeed_mode || 'bs2b') !== 'custom'}
+                          onChange={e => setDSP({ crossfeed_corner: parseFloat(e.target.value) })}
+                          style={{
+                            width: '100%',
+                            accentColor: 'var(--accent)',
+                            cursor: dsp.crossfeed_enabled && (dsp.crossfeed_mode || 'bs2b') === 'custom' ? 'pointer' : 'default',
+                            opacity: dsp.crossfeed_enabled && (dsp.crossfeed_mode || 'bs2b') === 'custom' ? 1 : 0.4,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Room Impulse Convolver */}
+                <div
+                  style={{
+                    background: 'rgba(0, 0, 0, 0.2)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: 12,
+                    padding: '14px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <FileAudio size={14} color="var(--accent)" /> Room Impulse Convolver
+                      </span>
+                      <button
+                        onClick={() => setDSP({ convolution_enabled: !dsp.convolution_enabled })}
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '3px 8px',
+                          borderRadius: 10,
+                          border: 'none',
+                          background: dsp.convolution_enabled ? 'var(--accent)' : 'rgba(255, 255, 255, 0.1)',
+                          color: dsp.convolution_enabled ? '#fff' : 'var(--text-dim)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {dsp.convolution_enabled ? 'ACTIVE' : 'BYPASS'}
+                      </button>
+                    </div>
+
+                    {/* Loaded IR file display & Load button */}
+                    <div
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        background: 'rgba(0, 0, 0, 0.25)',
+                        border: '1px solid rgba(255, 255, 255, 0.06)',
+                        marginBottom: 12,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>Impulse Response</div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            marginTop: 2,
+                            color: dsp.convolution_ir_path ? 'var(--text)' : 'var(--text-dim)',
+                          }}
+                          title={dsp.convolution_ir_path || 'No Impulse Response Loaded'}
+                        >
+                          {dsp.convolution_ir_path
+                            ? dsp.convolution_ir_path.split(/[/\\]/).pop() || 'No Impulse Response Loaded'
+                            : 'No Impulse Response Loaded'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                        <button
+                          onClick={handleLoadImpulseResponse}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            color: 'var(--text)',
+                            fontSize: 10,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          <FolderOpen size={12} />
+                          <span>Load Impulse Response (.wav / .flac)</span>
+                        </button>
+                      </div>
+                      <input
+                        ref={irFileInputRef}
+                        type="file"
+                        accept=".wav,.flac"
+                        style={{ display: 'none' }}
+                        onChange={handleFallbackIrChange}
+                      />
+                    </div>
+
+                    {/* Wet / Dry Mix range slider (0% to 100%) mapped to dsp.convolution_wet */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginBottom: 4 }}>
+                        <span>Wet / Dry Mix</span>
+                        <span style={{ fontFamily: 'monospace', color: 'var(--accent)' }}>
+                          {Math.round((dsp.convolution_wet ?? 0.5) * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={dsp.convolution_wet ?? 0.5}
+                        disabled={!dsp.convolution_enabled}
+                        onChange={e => setDSP({ convolution_wet: parseFloat(e.target.value) })}
+                        style={{
+                          width: '100%',
+                          accentColor: 'var(--accent)',
+                          cursor: dsp.convolution_enabled ? 'pointer' : 'default',
+                          opacity: dsp.convolution_enabled ? 1 : 0.4,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1051,7 +1483,27 @@ export function AudioControlCenter() {
                         fontWeight: 500,
                       }}
                     >
-                      <span>{currentDevice || 'System Default Device'}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        {currentParsed.category === 'headphones' ? (
+                          <Headphones size={15} color="var(--accent)" />
+                        ) : currentParsed.category === 'dac' ? (
+                          <Zap size={15} color="#06b6d4" />
+                        ) : currentParsed.category === 'digital' ? (
+                          <Radio size={15} color="#3b82f6" />
+                        ) : currentParsed.category === 'handsfree' ? (
+                          <Headphones size={15} color="#f87171" />
+                        ) : (
+                          <Volume2 size={15} color="var(--text-dim)" />
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {currentParsed.formattedLabel}
+                        </span>
+                        {currentParsed.isTelephonyHandsFree && (
+                          <span style={{ fontSize: 9, background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                            HANDS-FREE
+                          </span>
+                        )}
+                      </div>
                       <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>▾</span>
                     </div>
 
@@ -1071,7 +1523,7 @@ export function AudioControlCenter() {
                             border: '1px solid rgba(255, 255, 255, 0.12)',
                             borderRadius: 8,
                             marginTop: 4,
-                            maxHeight: 220,
+                            maxHeight: 240,
                             overflowY: 'auto',
                             boxShadow: '0 12px 32px rgba(0, 0, 0, 0.6)',
                           }}
@@ -1084,6 +1536,8 @@ export function AudioControlCenter() {
                           {devices.map((d, deviceIndex) => {
                             const isSelected = (!currentDevice && d === '[System Default Device]') || currentDevice === d;
                             const ambiguous = isAmbiguousDevice(d, devices);
+                            const parsed = parseWindowsAudioDevice(d, d === '[System Default Device]', defaultDeviceDisplayName);
+
                             return (
                               <button
                                 type="button"
@@ -1110,24 +1564,32 @@ export function AudioControlCenter() {
                                 }}
                               >
                                 {d === '[System Default Device]' && (
-                                  <span style={{ fontSize: 8, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '2px 5px', borderRadius: 3, fontWeight: 900 }}>
+                                  <span style={{ fontSize: 8, background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', padding: '2px 5px', borderRadius: 3, fontWeight: 900, flexShrink: 0 }}>
                                     DEFAULT
                                   </span>
                                 )}
-                                {d.startsWith('[ASIO]') && (
-                                  <span style={{ fontSize: 8, background: '#ef4444', color: '#fff', padding: '2px 5px', borderRadius: 3, fontWeight: 900 }}>
+                                {parsed.driverType === 'ASIO' && (
+                                  <span style={{ fontSize: 8, background: '#ef4444', color: '#fff', padding: '2px 5px', borderRadius: 3, fontWeight: 900, flexShrink: 0 }}>
                                     ASIO
                                   </span>
                                 )}
-                                {d.startsWith('[WASAPI]') && (
-                                  <span style={{ fontSize: 8, background: '#3b82f6', color: '#fff', padding: '2px 5px', borderRadius: 3, fontWeight: 900 }}>
+                                {parsed.driverType === 'WASAPI' && (
+                                  <span style={{ fontSize: 8, background: '#3b82f6', color: '#fff', padding: '2px 5px', borderRadius: 3, fontWeight: 900, flexShrink: 0 }}>
                                     WASAPI
                                   </span>
                                 )}
-                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {d === '[System Default Device]' ? 'System Default Device' : d.replace('[ASIO] ', '').replace('[WASAPI] ', '')}
+                                <span style={{ fontSize: 10, color: 'var(--text-dim)', padding: '1px 5px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: 3, flexShrink: 0 }}>
+                                  {parsed.endpointLabel}
+                                </span>
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                  {parsed.formattedLabel}
                                   {ambiguous ? ' — ambiguous name; rename in Windows' : ''}
                                 </span>
+                                {parsed.isTelephonyHandsFree && (
+                                  <span style={{ fontSize: 8, background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', padding: '2px 4px', borderRadius: 3, fontWeight: 700, flexShrink: 0 }}>
+                                    HANDS-FREE
+                                  </span>
+                                )}
                               </button>
                             );
                           })}
@@ -1135,74 +1597,173 @@ export function AudioControlCenter() {
                       )}
                     </AnimatePresence>
                   </div>
-                </div>
 
-                {/* Exclusive & Bit-Perfect Modes */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div
-                    className={`exclusive-toggle ${playbackExclusive ? 'active' : ''}`}
-                    onClick={toggleExclusive}
-                    style={{
-                      padding: '14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      background: playbackExclusive ? 'rgba(var(--accent-rgb), 0.1)' : 'rgba(0, 0, 0, 0.2)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>Request Exclusive Mode</span>
-                      <span
+                  {/* Auto-Detected Headphone Optimization ("Spotify Optimize" Style) */}
+                  {matchedPreset && (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        padding: '14px 16px',
+                        borderRadius: 12,
+                        background: isAutoEqActiveForPreset
+                          ? 'linear-gradient(135deg, rgba(var(--accent-rgb, 168, 85, 247), 0.16) 0%, rgba(6, 182, 212, 0.12) 100%)'
+                          : 'rgba(255, 255, 255, 0.03)',
+                        border: isAutoEqActiveForPreset
+                          ? '1px solid rgba(var(--accent-rgb, 168, 85, 247), 0.4)'
+                          : '1px solid rgba(255, 255, 255, 0.08)',
+                        boxShadow: isAutoEqActiveForPreset
+                          ? '0 4px 20px rgba(var(--accent-rgb, 168, 85, 247), 0.15)'
+                          : 'none',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <div
                         style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          borderRadius: 8,
-                          background: playbackExclusive ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
-                          color: playbackExclusive ? '#fff' : 'var(--text-dim)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
                         }}
                       >
-                        {playbackExclusive ? 'REQUESTED' : 'OFF'}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                      Requests exclusive hardware access; effective output is shown above.
-                    </div>
-                  </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 8,
+                              background: isAutoEqActiveForPreset
+                                ? 'rgba(var(--accent-rgb, 168, 85, 247), 0.25)'
+                                : 'rgba(255, 255, 255, 0.06)',
+                              color: isAutoEqActiveForPreset
+                                ? 'var(--accent)'
+                                : 'var(--text-dim)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Headphones size={18} />
+                          </div>
+                          <div>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: isAutoEqActiveForPreset ? 'var(--text)' : 'var(--text-dim)',
+                              }}
+                            >
+                              Detected {matchedPreset.name} — Enable Headphone Sound Optimization
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                              {isAutoEqActiveForPreset
+                                ? `Harman target calibration active (${matchedPreset.fullSource}).`
+                                : `AutoEQ calibration profile available to correct frequency response for ${matchedPreset.name}.`}
+                            </div>
+                          </div>
+                        </div>
 
-                  <div
-                    className={`exclusive-toggle ${playbackPath.bit_perfect ? 'active' : ''}`}
-                    onClick={() => useStore.getState().toggleBitPerfect()}
-                    style={{
-                      padding: '14px',
-                      borderRadius: 10,
-                      border: playbackPath.bit_perfect
-                        ? '1px solid rgba(6, 182, 212, 0.4)'
-                        : '1px solid rgba(255, 255, 255, 0.08)',
-                      background: playbackPath.bit_perfect ? 'rgba(6, 182, 212, 0.1)' : 'rgba(0, 0, 0, 0.2)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>Request bit-perfect bypass</span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          borderRadius: 8,
-                          background: playbackPath.bit_perfect ? '#06b6d4' : 'rgba(255, 255, 255, 0.08)',
-                          color: playbackPath.bit_perfect ? '#fff' : 'var(--text-dim)',
-                        }}
-                      >
-                        {playbackPath.bit_perfect ? 'REQUESTED' : 'OFF'}
-                      </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isAutoEqActiveForPreset) {
+                              disableAutoEq();
+                            } else {
+                              applyAutoEqPreset(matchedPreset, autoEqStrength);
+                            }
+                          }}
+                          style={{
+                            width: 44,
+                            height: 24,
+                            borderRadius: 12,
+                            border: 'none',
+                            background: isAutoEqActiveForPreset
+                              ? 'var(--accent)'
+                              : 'rgba(255, 255, 255, 0.16)',
+                            position: 'relative',
+                            cursor: 'pointer',
+                            padding: 2,
+                            transition: 'background 0.2s',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: '50%',
+                              background: '#fff',
+                              transform: isAutoEqActiveForPreset ? 'translateX(20px)' : 'translateX(0)',
+                              transition: 'transform 0.2s',
+                            }}
+                          />
+                        </button>
+                      </div>
+
+                      {isAutoEqActiveForPreset && (
+                        <div
+                          style={{
+                            marginTop: 14,
+                            paddingTop: 12,
+                            borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 8,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)' }}>
+                              Correction Intensity (Strength)
+                            </span>
+                            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)' }}>
+                              {autoEqStrength}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={autoEqStrength}
+                            onChange={e => setAutoEqStrength(Number(e.target.value))}
+                            style={{
+                              width: '100%',
+                              height: 4,
+                              accentColor: 'var(--accent)',
+                              cursor: 'pointer',
+                            }}
+                          />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                            <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                              0% (Dry / Flat) to 100% (Full Harman Match)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('dsp_eq')}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: 'var(--accent)',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: 0,
+                              }}
+                            >
+                              View / Edit Biquad Curve in EQ Tab →
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.3 }}>
-                      Requests bypass of volume, DSP, and resampler. Effective path shown above.
-                    </div>
-                  </div>
+                  )}
                 </div>
+
+                {/* Audio Output Path Selector (3 Segmented Cards) */}
+                <AudioOutputPathSelector />
 
                 {/* Hi-Res Upsampling Chips */}
                 <div
@@ -1709,6 +2270,11 @@ export function AudioControlCenter() {
           )}
         </div>
       </motion.div>
+
+      <TheaterSignalPathModal
+        isOpen={showSignalPathModal}
+        onClose={() => setShowSignalPathModal(false)}
+      />
     </div>
   );
 }

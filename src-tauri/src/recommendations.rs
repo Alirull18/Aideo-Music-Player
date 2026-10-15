@@ -1213,6 +1213,256 @@ fn empty_track() -> Track {
         genre: None,
     }
 }
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct SonicFlowPoint {
+    pub bpm: f64,
+    pub energy: f64,
+}
+
+pub fn generate_sonic_flow_queue(
+    conn: &Connection,
+    seed_path: Option<&str>,
+    trajectory: Option<Vec<SonicFlowPoint>>,
+    limit: usize,
+) -> Result<Vec<Track>, String> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    if !crate::db::column_exists(conn, "tracks", "sonic_profile") {
+        let _ = conn.execute("ALTER TABLE tracks ADD COLUMN sonic_profile TEXT", []);
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SonicProfileExtract {
+        bpm: Option<f64>,
+        energy: Option<f64>,
+    }
+
+    #[derive(Clone)]
+    struct CandidateTrack {
+        track: Track,
+        bpm: f64,
+        energy: f64,
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, path, title, artist, album, duration, format, sonic_profile FROM tracks WHERE sonic_profile IS NOT NULL AND sonic_profile != ''",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut candidates: Vec<CandidateTrack> = Vec::new();
+    let rows = stmt
+        .query_map([], |row| {
+            let id: i32 = row.get(0)?;
+            let path: String = row.get(1)?;
+            let title: Option<String> = row.get(2)?;
+            let artist: Option<String> = row.get(3)?;
+            let album: Option<String> = row.get(4)?;
+            let duration: Option<f64> = row.get(5)?;
+            let format: Option<String> = row.get(6)?;
+            let sonic_profile: Option<String> = row.get(7)?;
+            Ok((id, path, title, artist, album, duration, format, sonic_profile))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for row_res in rows {
+        if let Ok((id, path, title, artist, album, duration, format, sonic_profile)) = row_res {
+            let mut bpm = 120.0;
+            let mut energy = 0.5;
+            if let Some(json_str) = sonic_profile {
+                if let Ok(extracted) = serde_json::from_str::<SonicProfileExtract>(&json_str) {
+                    if let Some(b) = extracted.bpm {
+                        bpm = b;
+                    }
+                    if let Some(e) = extracted.energy {
+                        energy = e;
+                    }
+                }
+            }
+            candidates.push(CandidateTrack {
+                track: Track {
+                    id,
+                    path,
+                    title,
+                    artist,
+                    album,
+                    duration,
+                    format,
+                    lyric_offset: 0,
+                    loved: Some(0),
+                    disliked: Some(0),
+                    cover_url: None,
+                    path_hash: None,
+                    bpm: Some(bpm),
+                    energy: Some(energy),
+                    bass_ratio: None,
+                    treble_ratio: None,
+                    replaygain_gain: None,
+                    track_number: None,
+                    disc_number: None,
+                    genre: None,
+                },
+                bpm,
+                energy,
+            });
+        }
+    }
+
+    // If less than 5 tracks have sonic profiles, fall back to querying all tracks from `tracks`.
+    if candidates.len() < 5 {
+        candidates.clear();
+        let mut fallback_stmt = conn
+            .prepare(
+                "SELECT id, path, title, artist, album, duration, format, bpm, energy, sonic_profile FROM tracks",
+            )
+            .map_err(|e| e.to_string())?;
+        let fallback_rows = fallback_stmt
+            .query_map([], |row| {
+                let id: i32 = row.get(0)?;
+                let path: String = row.get(1)?;
+                let title: Option<String> = row.get(2)?;
+                let artist: Option<String> = row.get(3)?;
+                let album: Option<String> = row.get(4)?;
+                let duration: Option<f64> = row.get(5)?;
+                let format: Option<String> = row.get(6)?;
+                let col_bpm: Option<f64> = row.get(7).ok();
+                let col_energy: Option<f64> = row.get(8).ok();
+                let sp_str: Option<String> = row.get(9).ok();
+                Ok((id, path, title, artist, album, duration, format, col_bpm, col_energy, sp_str))
+            })
+            .map_err(|e| e.to_string())?;
+
+        for r in fallback_rows {
+            if let Ok((id, path, title, artist, album, duration, format, col_bpm, col_energy, sp_str)) = r {
+                let mut bpm = col_bpm.unwrap_or(120.0);
+                let mut energy = col_energy.unwrap_or(0.5);
+                if let Some(json_str) = sp_str {
+                    if let Ok(extracted) = serde_json::from_str::<SonicProfileExtract>(&json_str) {
+                        if let Some(b) = extracted.bpm {
+                            bpm = b;
+                        }
+                        if let Some(e) = extracted.energy {
+                            energy = e;
+                        }
+                    }
+                }
+                candidates.push(CandidateTrack {
+                    track: Track {
+                        id,
+                        path,
+                        title,
+                        artist,
+                        album,
+                        duration,
+                        format,
+                        lyric_offset: 0,
+                        loved: Some(0),
+                        disliked: Some(0),
+                        cover_url: None,
+                        path_hash: None,
+                        bpm: Some(bpm),
+                        energy: Some(energy),
+                        bass_ratio: None,
+                        treble_ratio: None,
+                        replaygain_gain: None,
+                        track_number: None,
+                        disc_number: None,
+                        genre: None,
+                    },
+                    bpm,
+                    energy,
+                });
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Trajectory matching
+    if let Some(traj) = trajectory.filter(|t| !t.is_empty()) {
+        let sample_points: Vec<SonicFlowPoint> = if traj.len() == 1 || limit == 1 {
+            vec![traj[0].clone()]
+        } else if traj.len() >= limit {
+            (0..limit)
+                .map(|i| {
+                    let idx = (i * (traj.len() - 1)) / (limit - 1);
+                    traj[idx].clone()
+                })
+                .collect()
+        } else {
+            (0..limit)
+                .map(|i| {
+                    let t = i as f64 / (limit - 1) as f64;
+                    let seg_count = traj.len() - 1;
+                    let seg_float = t * seg_count as f64;
+                    let seg_idx = (seg_float.floor() as usize).min(seg_count - 1);
+                    let seg_t = seg_float - seg_idx as f64;
+                    let p0 = &traj[seg_idx];
+                    let p1 = &traj[seg_idx + 1];
+                    SonicFlowPoint {
+                        bpm: p0.bpm + (p1.bpm - p0.bpm) * seg_t,
+                        energy: p0.energy + (p1.energy - p0.energy) * seg_t,
+                    }
+                })
+                .collect()
+        };
+
+        let mut selected_indices = HashSet::new();
+        let mut result = Vec::new();
+
+        for pt in sample_points {
+            let mut best_idx = None;
+            let mut best_dist = f64::MAX;
+
+            for (idx, candidate) in candidates.iter().enumerate() {
+                if selected_indices.contains(&idx) {
+                    continue;
+                }
+                let dist = ((candidate.bpm - pt.bpm) / 60.0).powi(2)
+                    + (candidate.energy - pt.energy).powi(2);
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = Some(idx);
+                }
+            }
+
+            if let Some(idx) = best_idx {
+                selected_indices.insert(idx);
+                result.push(candidates[idx].track.clone());
+            } else {
+                break;
+            }
+        }
+
+        return Ok(result);
+    }
+
+    // Seed matching
+    if let Some(seed) = seed_path {
+        let seed_pt = if let Some(found) = candidates.iter().find(|c| c.track.path == seed) {
+            (found.bpm, found.energy)
+        } else {
+            (120.0, 0.5)
+        };
+
+        candidates.sort_by(|a, b| {
+            let da = ((a.bpm - seed_pt.0) / 60.0).powi(2) + (a.energy - seed_pt.1).powi(2);
+            let db = ((b.bpm - seed_pt.0) / 60.0).powi(2) + (b.energy - seed_pt.1).powi(2);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let result = candidates.into_iter().take(limit).map(|c| c.track).collect();
+        return Ok(result);
+    }
+
+    let result = candidates.into_iter().take(limit).map(|c| c.track).collect();
+    Ok(result)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1940,5 +2190,54 @@ mod tests {
         let mut mood = request("mood", candidates);
         mood.mood = Some("happy".into());
         assert!(rank(&conn, mood, 1_000_000).unwrap().tracks.is_empty());
+    }
+    #[test]
+    fn test_generate_sonic_flow_queue() {
+        let conn = db::init_db(":memory:").unwrap();
+        let profiles = [
+            ("track_1", "Song 1", 80.0, 0.2),
+            ("track_2", "Song 2", 100.0, 0.4),
+            ("track_3", "Song 3", 120.0, 0.6),
+            ("track_4", "Song 4", 140.0, 0.75),
+            ("track_5", "Song 5", 160.0, 0.9),
+            ("track_6", "Song 6", 180.0, 0.98),
+        ];
+
+        for (path, title, bpm, energy) in profiles {
+            let profile_json = serde_json::json!({
+                "bpm": bpm,
+                "energy": energy,
+                "bass_ratio": 0.3,
+                "treble_ratio": 0.3
+            }).to_string();
+
+            conn.execute(
+                "INSERT INTO tracks (path, title, artist, duration, format, sonic_profile) VALUES (?1, ?2, 'Test Artist', 200.0, 'flac', ?3)",
+                params![path, title, profile_json],
+            ).unwrap();
+        }
+
+        // Test trajectory: from 75 BPM/0.2 to 175 BPM/0.95
+        let trajectory = vec![
+            SonicFlowPoint { bpm: 75.0, energy: 0.2 },
+            SonicFlowPoint { bpm: 175.0, energy: 0.95 },
+        ];
+        let queue = generate_sonic_flow_queue(&conn, None, Some(trajectory), 3).unwrap();
+        assert_eq!(queue.len(), 3);
+        assert_eq!(queue[0].path, "track_1");
+        assert!(queue[1].path == "track_3" || queue[1].path == "track_4");
+        assert!(queue[2].path == "track_5" || queue[2].path == "track_6");
+        let mut paths = std::collections::HashSet::new();
+        for t in &queue {
+            assert!(paths.insert(&t.path));
+        }
+
+        // Test seed matching: seed with track_3 (120 BPM, 0.6)
+        let seed_queue = generate_sonic_flow_queue(&conn, Some("track_3"), None, 4).unwrap();
+        assert_eq!(seed_queue.len(), 4);
+        assert_eq!(seed_queue[0].path, "track_3");
+        let neighbor_paths: Vec<&str> = seed_queue.iter().map(|t| t.path.as_str()).collect();
+        assert!(neighbor_paths.contains(&"track_2"));
+        assert!(neighbor_paths.contains(&"track_4"));
     }
 }

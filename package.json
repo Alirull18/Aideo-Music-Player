@@ -34,7 +34,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "lint": "tsc --noEmit",
     "test": "vitest run src/test",
+    "test:unit": "vitest run src/test",
     "pack:notebooklm": "node scripts/export-notebooklm-pack.mjs",
     "auth:notebooklm": "node scripts/auth-notebooklm.mjs"
   },
@@ -50,7 +52,7 @@
     "hls.js": "^1.7.3",
     "lucide-react": "^1.14.0",
     "qrcode.react": "^4.2.0",
-    "react": "^19.1.0",
+    "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zustand": "^5.0.15"
   },

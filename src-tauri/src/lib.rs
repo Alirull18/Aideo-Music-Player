@@ -94,6 +94,31 @@ impl AppState {
             .get()
             .map_err(|e| format!("Failed to acquire database connection: {}", e))
     }
+
+    pub fn get_dsp_state(&self) -> player::DSPState {
+        let player = safe_lock(&self.player);
+        let dsp = safe_lock(&player.dsp_state).clone();
+        dsp
+    }
+
+    pub fn set_dsp_state(&self, dsp: player::DSPState) -> Result<(), String> {
+        let player = safe_lock(&self.player);
+        let mut current = safe_lock(&player.dsp_state);
+        apply_client_dsp(&mut current, dsp);
+        Ok(())
+    }
+}
+
+fn with_db_reader<F, R>(state: &State<'_, AppState>, f: F) -> Result<R, String>
+where
+    F: FnOnce(&rusqlite::Connection) -> Result<R, String>,
+{
+    if let Ok(conn) = state.get_reader_conn() {
+        f(&conn)
+    } else {
+        let conn = safe_lock(&state.db);
+        f(&conn)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1062,6 +1087,24 @@ fn get_dsp_state(state: State<'_, AppState>) -> Result<player::DSPState, String>
     Ok(current.clone())
 }
 
+#[tauri::command]
+fn load_impulse_response(path: String, state: State<'_, AppState>) -> Result<String, String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err("Impulse response file does not exist".to_string());
+    }
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if ext != "wav" && ext != "flac" {
+        return Err("Only .wav and .flac impulse response files are supported".to_string());
+    }
+    let mut dsp = state.get_dsp_state();
+    dsp.convolution_ir_path = path.clone();
+    dsp.convolution_enabled = true;
+    state.set_dsp_state(dsp)?;
+    let file_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("IR File").to_string();
+    Ok(file_name)
+}
+
 // ── Bulk Queue & ListenBrainz Commands ───────────────────────────────────────────
 #[tauri::command]
 fn add_to_queue_bulk(paths: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
@@ -1510,9 +1553,13 @@ fn delete_cached_track(stream_url: String, state: State<'_, AppState>) -> Result
 }
 
 #[tauri::command]
+fn get_library_directories(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    with_db_reader(&state, |conn| db::get_library_directories(conn).map_err(|e| e.to_string()))
+}
+
+#[tauri::command]
 fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::Playlist>, String> {
-    let conn = safe_lock(&state.db);
-    db::get_playlists(&conn).map_err(|e| e.to_string())
+    with_db_reader(&state, |conn| db::get_playlists(conn).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -1552,8 +1599,7 @@ fn reorder_playlist(playlist_id: i32, track_paths: Vec<String>, entry_ids: Optio
 
 #[tauri::command]
 fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
-    let conn = safe_lock(&state.db);
-    db::get_playlist_entries(&conn, playlist_id).map_err(|e| e.to_string())
+    with_db_reader(&state, |conn| db::get_playlist_entries(conn, playlist_id).map_err(|e| e.to_string()))
 }
 
 
@@ -1573,23 +1619,19 @@ fn update_playlist_source(entry_id: i64, source_context: db::RecordingSources, m
 
 #[tauri::command]
 fn get_unified_favorites(state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
-    let conn = safe_lock(&state.db);
-    let id = conn.query_row("SELECT id FROM playlists WHERE name = 'Favorite Songs'", [], |r| r.get::<_, i32>(0));
-    match id {
-        Ok(id) => db::get_playlist_entries(&conn, id).map(|entries| entries.into_iter().filter(|e| e.source_context.is_some()).collect()).map_err(|e| e.to_string()),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Vec::new()),
-        Err(e) => Err(e.to_string()),
-    }
+    with_db_reader(&state, |conn| {
+        let id = conn.query_row("SELECT id FROM playlists WHERE name = 'Favorite Songs'", [], |r| r.get::<_, i32>(0));
+        match id {
+            Ok(id) => db::get_playlist_entries(conn, id).map(|entries| entries.into_iter().filter(|e| e.source_context.is_some()).collect()).map_err(|e| e.to_string()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Vec::new()),
+            Err(e) => Err(e.to_string()),
+        }
+    })
 }
 
 #[tauri::command]
 fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    if let Ok(conn) = state.get_reader_conn() {
-        db::get_all_tracks(&conn).map_err(|e| e.to_string())
-    } else {
-        let conn = safe_lock(&state.db);
-        db::get_all_tracks(&conn).map_err(|e| e.to_string())
-    }
+    with_db_reader(&state, |conn| db::get_all_tracks(conn).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -1600,14 +1642,10 @@ fn get_library_page(
     search: Option<String>,
     sort_by: Option<String>,
 ) -> Result<db::PaginatedTracks, String> {
-    if let Ok(conn) = state.get_reader_conn() {
-        db::get_tracks_paginated(&conn, offset, limit, search.as_deref(), sort_by.as_deref())
+    with_db_reader(&state, |conn| {
+        db::get_tracks_paginated(conn, offset, limit, search.as_deref(), sort_by.as_deref())
             .map_err(|e| e.to_string())
-    } else {
-        let conn = safe_lock(&state.db);
-        db::get_tracks_paginated(&conn, offset, limit, search.as_deref(), sort_by.as_deref())
-            .map_err(|e| e.to_string())
-    }
+    })
 }
 
 #[tauri::command]
@@ -1615,12 +1653,9 @@ fn get_library_count(
     state: State<'_, AppState>,
     search: Option<String>,
 ) -> Result<usize, String> {
-    if let Ok(conn) = state.get_reader_conn() {
-        db::get_tracks_count(&conn, search.as_deref()).map_err(|e| e.to_string())
-    } else {
-        let conn = safe_lock(&state.db);
-        db::get_tracks_count(&conn, search.as_deref()).map_err(|e| e.to_string())
-    }
+    with_db_reader(&state, |conn| {
+        db::get_tracks_count(conn, search.as_deref()).map_err(|e| e.to_string())
+    })
 }
 
 pub fn verify_authorized_library_track(conn: &rusqlite::Connection, path: &str) -> Result<std::path::PathBuf, String> {
@@ -2150,6 +2185,12 @@ fn get_network_telemetry() -> player::NetworkTelemetry {
     player::get_network_telemetry()
 }
 
+#[tauri::command]
+fn get_signal_path_report(state: State<'_, AppState>) -> Result<crate::player::telemetry::SignalPathReport, String> {
+    let player = safe_lock(&state.player);
+    Ok(player.get_signal_path_report())
+}
+
 // ── Playback commands ─────────────────────────────────────────────────────────
 #[tauri::command]
 fn update_media_metadata(
@@ -2303,7 +2344,7 @@ pub struct PlaybackHistoryRow {
 
 #[tauri::command]
 fn get_unsynced_history(state: State<'_, AppState>) -> Result<Vec<PlaybackHistoryRow>, String> {
-    let conn = safe_lock(&state.db);
+    with_db_reader(&state, |conn| {
     let mut stmt = conn.prepare(
         "SELECT id, track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, genre, playback_source 
          FROM playback_history 
@@ -2336,6 +2377,7 @@ fn get_unsynced_history(state: State<'_, AppState>) -> Result<Vec<PlaybackHistor
         }
     }
     Ok(results)
+    })
 }
 
 #[tauri::command]
@@ -2422,7 +2464,7 @@ pub struct ListeningInsightsPayload {
 
 #[tauri::command]
 fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<ListeningInsightsPayload, String> {
-    let conn = safe_lock(&state.db);
+    with_db_reader(&state, |conn| {
     
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2696,6 +2738,25 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
         audiophile_stats,
         source_distribution,
     })
+    })
+}
+
+#[tauri::command]
+fn generate_sonic_flow(
+    seed_path: Option<String>,
+    trajectory: Option<Vec<crate::recommendations::SonicFlowPoint>>,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::db::Track>, String> {
+    let limit = limit.unwrap_or(20);
+    with_db_reader(&state, |conn| {
+        crate::recommendations::generate_sonic_flow_queue(
+            conn,
+            seed_path.as_deref(),
+            trajectory,
+            limit,
+        )
+    })
 }
 
 #[tauri::command]
@@ -2874,8 +2935,7 @@ fn create_smart_playlist(name: String, rules_json: String, state: State<'_, AppS
 
 #[tauri::command]
 fn get_smart_playlists(state: State<'_, AppState>) -> Result<Vec<db::SmartPlaylist>, String> {
-    let conn = safe_lock(&state.db);
-    db::get_smart_playlists(&conn).map_err(|e| e.to_string())
+    with_db_reader(&state, |conn| db::get_smart_playlists(conn).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -2886,8 +2946,7 @@ fn delete_smart_playlist(id: i32, state: State<'_, AppState>) -> Result<(), Stri
 
 #[tauri::command]
 fn execute_smart_playlist(rules_json: String, state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    let conn = safe_lock(&state.db);
-    db::execute_smart_rules(&conn, &rules_json).map_err(|e| e.to_string())
+    with_db_reader(&state, |conn| db::execute_smart_rules(conn, &rules_json).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -3035,6 +3094,7 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "volume": volume_val,
         "exclusive": requested_exclusive,
         "bit_perfect": requested_bit_perfect,
+        "bit_perfect_verified": player.is_bit_perfect_verified(),
         "dev_rate": player.current_dev_rate.load(Ordering::Relaxed),
         "dsp": dsp,
         "driver_type": if is_asio { "ASIO" } else { "WASAPI" },
@@ -3042,6 +3102,7 @@ fn get_playback_status(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "file_ch": player.file_ch.load(Ordering::Relaxed),
         "file_format": *safe_lock(&player.file_format),
         "effective_audio_path": effective_audio_path,
+        "signal_path": player.get_signal_path_report(),
         "network_telemetry": telemetry,
     }))
 }
@@ -3390,8 +3451,7 @@ fn rank_similar_tracks(all_tracks: Vec<crate::db::Track>, path: &str, excluded_p
 
 #[tauri::command]
 async fn get_similar_tracks(state: State<'_, AppState>, path: String, excluded_paths: Option<Vec<String>>) -> Result<Vec<crate::db::Track>, String> {
-    let conn = safe_lock(&state.db);
-    let all_tracks = crate::db::get_all_tracks(&conn).map_err(|e| e.to_string())?;
+    let all_tracks = with_db_reader(&state, |conn| crate::db::get_all_tracks(conn).map_err(|e| e.to_string()))?;
     rank_similar_tracks(all_tracks, &path, excluded_paths.as_deref().unwrap_or(&[]))
 }
 
@@ -3614,8 +3674,7 @@ fn toggle_keep_awake(enable: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn get_track_by_path(path: String, state: State<'_, AppState>) -> Result<db::Track, String> {
-    let conn = safe_lock(&state.db);
-    db::get_track_by_path(&conn, &path).map_err(|e| e.to_string())
+    with_db_reader(&state, |conn| db::get_track_by_path(conn, &path).map_err(|e| e.to_string()))
 }
 
 // ── Tag Editor Commands ───────────────────────────────────────────────────
@@ -3934,6 +3993,7 @@ pub fn run() {
             set_mini_player_mode,
             scan_and_save,
             clean_missing_tracks,
+            get_library_directories,
             get_library,
             get_unified_favorites,
             get_library_page,
@@ -3969,6 +4029,7 @@ pub fn run() {
             toggle_bit_perfect_mode,
             get_bit_perfect_mode,
             get_network_telemetry,
+            get_signal_path_report,
             search_lyrics_online,
             get_unison_ttml,
             get_kugou_krc,
@@ -3978,6 +4039,7 @@ pub fn run() {
             get_qqmusic_lrc,
             set_dsp_state,
             get_dsp_state,
+            load_impulse_response,
             get_audio_devices,
             set_audio_device,
             apply_online_cover,
@@ -4031,6 +4093,7 @@ pub fn run() {
             get_unsynced_history,
             mark_history_synced,
             get_listening_insights,
+            generate_sonic_flow,
             youtube::search_youtube,
             youtube::get_artist_discography,
             youtube::get_search_suggestions,
@@ -4398,6 +4461,18 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             if let Some(hwnd_raw) = hwnd {
                 taskbar::initialize_taskbar_buttons(hwnd_raw, app.handle().clone());
+            }
+
+            let args: Vec<String> = std::env::args().collect();
+            for arg in args {
+                if arg.starts_with("aideo://") {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                        let _ = handle.emit("deep-link", vec![arg]);
+                    });
+                    break;
+                }
             }
 
             app.listen_any("deep-link", move |event| {

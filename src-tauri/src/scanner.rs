@@ -14,6 +14,10 @@ use tauri::{AppHandle, Emitter};
 
 pub const SCAN_CHUNK_SIZE: usize = 500;
 
+pub const SUPPORTED_AUDIO_EXTENSIONS: &[&str] = &[
+    "flac", "wav", "m4a", "mp3", "ogg", "opus", "aac", "alac", "aiff", "ape", "wma", "dsf", "dff",
+];
+
 pub fn scan_directory_chunked<F>(
     dir: &str,
     app_handle: &AppHandle,
@@ -40,10 +44,7 @@ where
         let path = entry.path();
         if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
-            if matches!(
-                ext_str.as_str(),
-                "flac" | "wav" | "m4a" | "mp3" | "ogg" | "opus" | "aac" | "aiff" | "ape" | "wma" | "dsf" | "dff"
-            ) {
+            if SUPPORTED_AUDIO_EXTENSIONS.contains(&ext_str.as_str()) {
                 current_chunk.push(path.to_path_buf());
                 if current_chunk.len() >= SCAN_CHUNK_SIZE {
                     let tracks = process_chunk(&current_chunk, app_handle);

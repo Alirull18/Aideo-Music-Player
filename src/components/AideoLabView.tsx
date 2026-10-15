@@ -4,6 +4,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
+import { Track } from '../store/types';
 import {
   Sliders,
   Activity,
@@ -23,6 +25,9 @@ import {
   SlidersHorizontal,
   ChevronDown,
   ChevronUp,
+  Compass,
+  Play,
+  ListPlus,
 } from 'lucide-react';
 import {
   GRAPHIC_EQ_FREQUENCIES,
@@ -36,7 +41,7 @@ import {
   parseAutoEqProfileText,
 } from '../utils/audioMath';
 
-type MainLabTab = 'studio_eq' | 'spatial_acoustics';
+type MainLabTab = 'studio_eq' | 'spatial_acoustics' | 'sonic_flow';
 type EqViewMode = 'graph' | 'faders';
 
 const BRAND_FILTERS = [
@@ -84,6 +89,10 @@ export function AideoLabView() {
     playbackFileRate,
     activeAutoEq,
     setActiveAutoEq,
+    tracks,
+    currentTrack,
+    playTrack,
+    addToQueue,
   } = useStore(
     useShallow(s => ({
       dsp: s.dsp,
@@ -96,6 +105,10 @@ export function AideoLabView() {
       playbackFileRate: s.playback.file_rate,
       activeAutoEq: s.activeAutoEq,
       setActiveAutoEq: s.setActiveAutoEq,
+      tracks: s.tracks,
+      currentTrack: s.currentTrack,
+      playTrack: s.playTrack,
+      addToQueue: s.addToQueue,
     }))
   );
 
@@ -308,12 +321,15 @@ export function AideoLabView() {
       if (bands.length === 0) throw new Error('No parametric biquad bands detected in profile.');
 
       const currentBands = [...(dsp.eq_parametric_bands || [])];
+      const strength = useStore.getState().autoEqStrength ?? 100;
+      const factor = strength / 100;
+      const scaledPreamp = Number((preamp * factor).toFixed(2));
       const newBands = [];
       for (let i = 0; i < 10; i++) {
         if (bands[i]) {
           newBands.push({
             freq: bands[i].freq,
-            gain: bands[i].gain,
+            gain: Number((bands[i].gain * factor).toFixed(2)),
             q: bands[i].q,
             band_type: bands[i].band_type,
           });
@@ -329,7 +345,7 @@ export function AideoLabView() {
         eq_enabled: true,
         eq_parametric: true,
         eq_parametric_bands: newBands,
-        preamp_gain: preamp,
+        preamp_gain: scaledPreamp,
       });
 
       setActiveAutoEq(headphone);
@@ -522,6 +538,334 @@ export function AideoLabView() {
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Loaded preset "${preset.name}"`, type: 'info' } }));
   };
 
+  // ── Sonic Flow 2D Acoustic Map State ──────────────────────────────
+  const [localTracks, setLocalTracks] = useState<Track[]>([]);
+  const [trajectory, setTrajectory] = useState<{ bpm: number; energy: number }[]>([]);
+  const [isDrawingFlow, setIsDrawingFlow] = useState(false);
+  const [hoveredTrack, setHoveredTrack] = useState<{ track: Track; x: number; y: number } | null>(null);
+  const [isGeneratingFlow, setIsGeneratingFlow] = useState(false);
+  const flowCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const flowContainerRef = useRef<HTMLDivElement | null>(null);
+  const [flowCanvasWidth, setFlowCanvasWidth] = useState(1000);
+
+  useEffect(() => {
+    if (tracks && tracks.length > 0) {
+      setLocalTracks(tracks);
+    } else {
+      invoke<Track[]>('get_all_tracks')
+        .then(t => {
+          if (t && t.length > 0) setLocalTracks(t);
+        })
+        .catch(() => {});
+    }
+  }, [tracks]);
+
+  useEffect(() => {
+    if (!flowContainerRef.current) return;
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 50) {
+          setFlowCanvasWidth(Math.floor(entry.contentRect.width));
+        }
+      }
+    });
+    observer.observe(flowContainerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const plotPadding = useMemo(() => ({ top: 35, right: 35, bottom: 45, left: 60 }), []);
+  const plotW = Math.max(100, flowCanvasWidth - plotPadding.left - plotPadding.right);
+  const plotH = 420 - plotPadding.top - plotPadding.bottom;
+
+  const bpmToX = useCallback((bpm: number) => {
+    const clamped = Math.max(60, Math.min(180, bpm));
+    return plotPadding.left + ((clamped - 60) / 120) * plotW;
+  }, [plotPadding, plotW]);
+
+  const xToBpm = useCallback((x: number) => {
+    const clampedX = Math.max(plotPadding.left, Math.min(plotPadding.left + plotW, x));
+    return 60 + ((clampedX - plotPadding.left) / plotW) * 120;
+  }, [plotPadding, plotW]);
+
+  const energyToY = useCallback((energy: number) => {
+    const clamped = Math.max(0, Math.min(1, energy));
+    return plotPadding.top + (1 - clamped) * plotH;
+  }, [plotPadding, plotH]);
+
+  const yToEnergy = useCallback((y: number) => {
+    const clampedY = Math.max(plotPadding.top, Math.min(plotPadding.top + plotH, y));
+    return 1 - ((clampedY - plotPadding.top) / plotH);
+  }, [plotPadding, plotH]);
+
+  const allPlottedTracks = useMemo(() => {
+    return localTracks.length > 0 ? localTracks : (tracks || []);
+  }, [localTracks, tracks]);
+
+  useEffect(() => {
+    if (activeTab !== 'sonic_flow') return;
+    const canvas = flowCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = flowCanvasWidth * dpr;
+    canvas.height = 420 * dpr;
+    ctx.scale(dpr, dpr);
+
+    // Background
+    ctx.fillStyle = '#0b0c14';
+    ctx.fillRect(0, 0, flowCanvasWidth, 420);
+
+    // Plot area background
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+    ctx.fillRect(plotPadding.left, plotPadding.top, plotW, plotH);
+
+    // Grid lines for BPM
+    const bpmGrid = [80, 100, 120, 140, 160];
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.font = '11px Inter, system-ui, sans-serif';
+
+    bpmGrid.forEach(bpm => {
+      const x = bpmToX(bpm);
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(x, plotPadding.top);
+      ctx.lineTo(x, plotPadding.top + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText(`${bpm} BPM`, x, plotPadding.top + plotH + 8);
+    });
+
+    // Grid lines for Energy
+    const energyGrid = [
+      { val: 0.25, label: 'Low Energy' },
+      { val: 0.50, label: 'Mid Energy' },
+      { val: 0.75, label: 'High Energy' },
+    ];
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+
+    energyGrid.forEach(e => {
+      const y = energyToY(e.val);
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(plotPadding.left, y);
+      ctx.lineTo(plotPadding.left + plotW, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText(e.label, plotPadding.left - 8, y);
+    });
+
+    // Border around plot area
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(plotPadding.left, plotPadding.top, plotW, plotH);
+
+    // Axis Labels
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.font = '10px Inter, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('TEMPO (BPM) →', plotPadding.left + plotW / 2, 420 - 14);
+
+    ctx.save();
+    ctx.translate(14, plotPadding.top + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('ACOUSTIC ENERGY →', 0, 0);
+    ctx.restore();
+
+    // Plot library tracks as glowing dots
+    const candidateTracks = allPlottedTracks.slice(0, 500);
+    for (const t of candidateTracks) {
+      const tBpm = t.bpm || 120.0;
+      const tEnergy = t.energy !== null && t.energy !== undefined ? t.energy : 0.5;
+      const x = bpmToX(tBpm);
+      const y = energyToY(tEnergy);
+
+      const r = Math.round(56 + tEnergy * (236 - 56));
+      const g = Math.round(189 - tEnergy * (189 - 72));
+      const b = Math.round(248 - tEnergy * (248 - 153));
+      const dotColor = `rgb(${r}, ${g}, ${b})`;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = dotColor;
+      ctx.shadowColor = dotColor;
+      ctx.shadowBlur = 6;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Plot user trajectory curve
+    if (trajectory.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = 3.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = 'rgba(34, 197, 94, 0.7)';
+      ctx.shadowBlur = 10;
+
+      trajectory.forEach((pt, idx) => {
+        const x = bpmToX(pt.bpm);
+        const y = energyToY(pt.energy);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      const startPt = trajectory[0];
+      const endPt = trajectory[trajectory.length - 1];
+
+      const sx = bpmToX(startPt.bpm);
+      const sy = energyToY(startPt.energy);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#22c55e';
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = '#22c55e';
+      ctx.fill();
+
+      const ex = bpmToX(endPt.bpm);
+      const ey = energyToY(endPt.energy);
+      ctx.beginPath();
+      ctx.arc(ex, ey, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#ec4899';
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = '#ec4899';
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }, [activeTab, flowCanvasWidth, allPlottedTracks, trajectory, bpmToX, energyToY, plotPadding, plotW, plotH]);
+
+  const handleFlowMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = flowCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (x < plotPadding.left || x > plotPadding.left + plotW || y < plotPadding.top || y > plotPadding.top + plotH) {
+      return;
+    }
+
+    setIsDrawingFlow(true);
+    const bpm = Math.round(xToBpm(x) * 10) / 10;
+    const energy = Math.round(yToEnergy(y) * 100) / 100;
+    setTrajectory([{ bpm, energy }]);
+  };
+
+  const handleFlowMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = flowCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (isDrawingFlow) {
+      const bpm = Math.round(xToBpm(x) * 10) / 10;
+      const energy = Math.round(yToEnergy(y) * 100) / 100;
+      setTrajectory(prev => {
+        const last = prev[prev.length - 1];
+        if (last && Math.hypot(bpm - last.bpm, (energy - last.energy) * 60) < 1.0) {
+          return prev;
+        }
+        return [...prev, { bpm, energy }];
+      });
+    } else {
+      const candidateTracks = allPlottedTracks.slice(0, 500);
+      let found: { track: Track; x: number; y: number } | null = null;
+      let minDistance = 14;
+
+      for (const t of candidateTracks) {
+        const tx = bpmToX(t.bpm || 120);
+        const ty = energyToY(t.energy !== null && t.energy !== undefined ? t.energy : 0.5);
+        const d = Math.hypot(x - tx, y - ty);
+        if (d < minDistance) {
+          minDistance = d;
+          found = { track: t, x: tx, y: ty };
+        }
+      }
+      setHoveredTrack(found);
+    }
+  };
+
+  const handleFlowMouseUp = () => {
+    setIsDrawingFlow(false);
+  };
+
+  const handleGenerateFlowQueue = async (startPlayback = false) => {
+    setIsGeneratingFlow(true);
+    try {
+      const flowPoints = trajectory.length > 0 ? trajectory : null;
+      const seed = currentTrack?.path || null;
+      const result = await invoke<Track[]>('generate_sonic_flow', {
+        seedPath: seed,
+        trajectory: flowPoints,
+        limit: 20,
+      });
+
+      if (!result || result.length === 0) {
+        window.dispatchEvent(
+          new CustomEvent('ui-toast', {
+            detail: { message: 'No candidate tracks found for Sonic Flow.', type: 'info' },
+          })
+        );
+        return;
+      }
+
+      if (startPlayback) {
+        await playTrack(result[0]);
+        for (let i = 1; i < result.length; i++) {
+          await addToQueue(result[i]);
+        }
+        window.dispatchEvent(
+          new CustomEvent('ui-toast', {
+            detail: {
+              message: `Playing Sonic Flow with ${result.length} tracks`,
+              type: 'success',
+            },
+          })
+        );
+      } else {
+        for (const t of result) {
+          await addToQueue(t);
+        }
+        window.dispatchEvent(
+          new CustomEvent('ui-toast', {
+            detail: {
+              message: `Generated Sonic Flow queue with ${result.length} tracks`,
+              type: 'success',
+            },
+          })
+        );
+      }
+    } catch (err: any) {
+      window.dispatchEvent(
+        new CustomEvent('ui-toast', {
+          detail: {
+            message: `Sonic Flow error: ${err.message || String(err)}`,
+            type: 'error',
+          },
+        })
+      );
+    } finally {
+      setIsGeneratingFlow(false);
+    }
+  };
+
   return (
     <div
       className="aideo-lab-wrap"
@@ -699,6 +1043,7 @@ export function AideoLabView() {
         {[
           { id: 'studio_eq' as MainLabTab, label: 'EQ & AutoEQ', icon: Sliders, badge: '10 Bands' },
           { id: 'spatial_acoustics' as MainLabTab, label: 'Spatial Audio & Effects', icon: Waves, badge: 'IR & Crossfeed' },
+          { id: 'sonic_flow' as MainLabTab, label: 'Sonic Flow & Automix', icon: Compass, badge: '2D Map' },
         ].map(tab => {
           const Icon = tab.icon;
           const isSelected = activeTab === tab.id;
@@ -2234,6 +2579,257 @@ export function AideoLabView() {
               >
                 18Hz Subsonic {dsp.subsonic_enabled ? 'ON' : 'OFF'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'sonic_flow' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Header Panel */}
+          <div
+            style={{
+              padding: '16px 20px',
+              borderRadius: 12,
+              background: 'linear-gradient(135deg, rgba(20, 22, 35, 0.7), rgba(12, 13, 20, 0.9))',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <Compass size={20} color="var(--accent)" />
+                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>2D Acoustic Map &amp; Automix Flow</h2>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 12,
+                    background: 'rgba(var(--accent-rgb), 0.15)',
+                    color: 'var(--accent)',
+                    border: '1px solid rgba(var(--accent-rgb), 0.3)',
+                  }}
+                >
+                  BPM × Energy Space
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-dim)', maxWidth: 680 }}>
+                Click &amp; drag across the acoustic map to sketch a trajectory from start to finish. Sonic Flow samples your curve to synthesize a smooth DJ transition queue.
+              </p>
+            </div>
+
+            {/* Actions Toolbar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setTrajectory([])}
+                disabled={trajectory.length === 0}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 14px',
+                  fontSize: 12,
+                  borderRadius: 8,
+                  opacity: trajectory.length === 0 ? 0.5 : 1,
+                  cursor: trajectory.length === 0 ? 'not-allowed' : 'pointer',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: 'var(--text)',
+                }}
+              >
+                <Trash2 size={14} />
+                <span>Clear Curve</span>
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleGenerateFlowQueue(false)}
+                disabled={isGeneratingFlow}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 16px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: 'var(--text)',
+                  cursor: isGeneratingFlow ? 'wait' : 'pointer',
+                }}
+              >
+                <ListPlus size={14} />
+                <span>{isGeneratingFlow ? 'Generating...' : 'Generate Flow Queue'}</span>
+              </button>
+
+              <button
+                className="btn"
+                onClick={() => handleGenerateFlowQueue(true)}
+                disabled={isGeneratingFlow}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 18px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  borderRadius: 8,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: isGeneratingFlow ? 'wait' : 'pointer',
+                  boxShadow: '0 4px 14px rgba(var(--accent-rgb), 0.35)',
+                }}
+              >
+                <Play size={14} fill="currentColor" />
+                <span>Play Sonic Flow</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 2D Canvas Acoustic Map Container */}
+          <div
+            ref={flowContainerRef}
+            style={{
+              position: 'relative',
+              width: '100%',
+              height: 420,
+              borderRadius: 14,
+              overflow: 'hidden',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              background: '#090a10',
+              boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.6), 0 8px 30px rgba(0, 0, 0, 0.4)',
+              userSelect: 'none',
+            }}
+          >
+            <canvas
+              ref={flowCanvasRef}
+              onMouseDown={handleFlowMouseDown}
+              onMouseMove={handleFlowMouseMove}
+              onMouseUp={handleFlowMouseUp}
+              onMouseLeave={() => {
+                setIsDrawingFlow(false);
+                setHoveredTrack(null);
+              }}
+              style={{
+                width: '100%',
+                height: 420,
+                display: 'block',
+                cursor: isDrawingFlow ? 'crosshair' : 'default',
+              }}
+            />
+
+            {/* Empty state hint overlay */}
+            {trajectory.length === 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 8,
+                  color: 'rgba(255, 255, 255, 0.35)',
+                  textAlign: 'center',
+                }}
+              >
+                <Compass size={32} strokeWidth={1.5} />
+                <span style={{ fontSize: 13, fontWeight: 500 }}>
+                  Click &amp; drag anywhere to sketch a flow trajectory
+                </span>
+                <span style={{ fontSize: 11, opacity: 0.7 }}>
+                  From slow &amp; chill (60 BPM) to peak energy (180 BPM)
+                </span>
+              </div>
+            )}
+
+            {/* Hover Tooltip Overlay */}
+            {hoveredTrack && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: Math.min(Math.max(10, hoveredTrack.x - 90), flowCanvasWidth - 210),
+                  top: Math.max(10, hoveredTrack.y - 75),
+                  pointerEvents: 'none',
+                  background: 'rgba(15, 17, 28, 0.94)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  borderRadius: 10,
+                  padding: '8px 12px',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                  minWidth: 170,
+                  maxWidth: 240,
+                  zIndex: 30,
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {hoveredTrack.track.title || hoveredTrack.track.path.split(/[/\\]/).pop()}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {hoveredTrack.track.artist || 'Unknown Artist'}
+                </div>
+                <div style={{ display: 'flex', gap: 10, fontSize: 11, borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: 4 }}>
+                  <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                    {(hoveredTrack.track.bpm || 120).toFixed(1)} BPM
+                  </span>
+                  <span style={{ color: '#ec4899', fontWeight: 600 }}>
+                    Energy: {((hoveredTrack.track.energy !== null && hoveredTrack.track.energy !== undefined ? hoveredTrack.track.energy : 0.5) * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Corner Legend & Stats */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 12,
+                right: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '6px 12px',
+                borderRadius: 8,
+                background: 'rgba(0, 0, 0, 0.55)',
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                fontSize: 11,
+                color: 'var(--text-dim)',
+                pointerEvents: 'none',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#38bdf8' }} />
+                <span>Low</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#a855f7' }} />
+                <span>Mid</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ec4899' }} />
+                <span>High</span>
+              </div>
+              <span style={{ width: 1, height: 12, background: 'rgba(255, 255, 255, 0.15)' }} />
+              <span>{allPlottedTracks.length} Library Tracks</span>
+              {trajectory.length > 0 && (
+                <>
+                  <span style={{ width: 1, height: 12, background: 'rgba(255, 255, 255, 0.15)' }} />
+                  <span style={{ color: '#22c55e', fontWeight: 600 }}>
+                    Path: {trajectory.length} pts
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>

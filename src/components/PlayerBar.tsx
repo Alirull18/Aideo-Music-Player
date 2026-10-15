@@ -14,6 +14,7 @@ import { fmt, parseDuration, baseName, getStreamName, isRadioStream } from '../u
 import { generateWaveformPeaks } from '../utils/waveform';
 import { getAudioPathPresentation } from '../utils/audioPath';
 import type { LyricLine } from '../store/types';
+import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 
 function PlayerBarLyricPreview({
   lyrics,
@@ -374,6 +375,8 @@ export function PlayerBar() {
     playbackEffectiveAudioPath: s.playback.effective_audio_path,
   })));
 
+  const [showSignalPathModal, setShowSignalPathModal] = useState(false);
+
   const audioPathPresentation = getAudioPathPresentation({
     effective_audio_path: playbackEffectiveAudioPath,
     status: playbackStatus,
@@ -513,24 +516,40 @@ export function PlayerBar() {
   // Render Audio Badges Helper
   const renderAudioBadges = () => {
     const { badge } = audioPathPresentation;
+    const hasBadge = Boolean(badge || (playbackEffectiveAudioPath?.active && playbackEffectiveAudioPath.resampling && dsp.upsample_rate > 0));
+    if (!hasBadge) return null;
     return (
-      <>
+      <button
+        type="button"
+        onClick={() => setShowSignalPathModal(true)}
+        title="Inspect Audio Signal Path"
+        style={{
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          margin: 0,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6
+        }}
+      >
         {badge && (
           <span
             className="bit-badge"
             style={badge.kind === 'bit-perfect'
-              ? { transform: 'none', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)' }
-              : { transform: 'none' }}
+              ? { transform: 'none', background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', cursor: 'pointer' }
+              : { transform: 'none', cursor: 'pointer' }}
           >
             {badge.label}
           </span>
         )}
         {!badge && playbackEffectiveAudioPath?.active && playbackEffectiveAudioPath.resampling && dsp.upsample_rate > 0 && (
-          <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #a855f7, #6366f1)' }}>
+          <span className="bit-badge" style={{ transform: 'none', background: 'linear-gradient(135deg, #a855f7, #6366f1)', cursor: 'pointer' }}>
             HI-RES · {audioPathPresentation.outputRate / 1000}kHz
           </span>
         )}
-      </>
+      </button>
     );
   };
 
@@ -586,11 +605,13 @@ export function PlayerBar() {
     );
   };
 
+  let content: React.ReactNode = null;
+
   // -------------------------------------------------------------
   // VARIANT 1: CLASSIC STUDIO (Default 3-Column Desktop Layout)
   // -------------------------------------------------------------
   if (playerBarDesign === 'classic' || !playerBarDesign) {
-    return (
+    content = (
       <div className="player-bar design-classic">
         {/* LEFT */}
         <div className="pb-left">
@@ -675,13 +696,8 @@ export function PlayerBar() {
         </div>
       </div>
     );
-  }
-
-  // -------------------------------------------------------------
-  // VARIANT 2: FLOATING DYNAMIC ISLAND (Apple Music / macOS Capsule)
-  // -------------------------------------------------------------
-  if (playerBarDesign === 'floating') {
-    return (
+  } else if (playerBarDesign === 'floating') {
+    content = (
       <div className="player-bar design-floating">
         <div className="floating-island-capsule">
           {/* LEFT: Mini Circular Artwork & Track Info */}
@@ -750,13 +766,8 @@ export function PlayerBar() {
         </div>
       </div>
     );
-  }
-
-  // -------------------------------------------------------------
-  // VARIANT 3: AUDIOPHILE WAVEFORM DECK (SoundCloud / Tidal / DAW Pro)
-  // -------------------------------------------------------------
-  if (playerBarDesign === 'waveform') {
-    return (
+  } else if (playerBarDesign === 'waveform') {
+    content = (
       <div className="player-bar design-waveform">
         {/* UPPER DECK: Full-Width Audio Waveform Scrubber */}
         <WaveformDeckTopScrubber duration={duration} waveformPeaks={waveformPeaks} onSeek={seek} />
@@ -819,13 +830,8 @@ export function PlayerBar() {
         </div>
       </div>
     );
-  }
-
-  // -------------------------------------------------------------
-  // VARIANT 4: MINIMALIST COMPACT (TIDAL Clean / Roon Zen)
-  // -------------------------------------------------------------
-  if (playerBarDesign === 'minimal') {
-    return (
+  } else if (playerBarDesign === 'minimal') {
+    content = (
       <div className="player-bar design-minimal">
         {/* Hairline Progress Scrubber on Top Border */}
         <MinimalHairlineScrubber duration={duration} onSeek={seek} />
@@ -884,13 +890,8 @@ export function PlayerBar() {
         </div>
       </div>
     );
-  }
-
-  // -------------------------------------------------------------
-  // VARIANT 5: RETRO VINYL DECK (Turntable Console & Spinning Record)
-  // -------------------------------------------------------------
-  if (playerBarDesign === 'vinyl') {
-    return (
+  } else if (playerBarDesign === 'vinyl') {
+    content = (
       <div className="player-bar design-vinyl">
         {/* LEFT: Spinning Vinyl Record & Analog Typography */}
         <div className="vinyl-deck-left">
@@ -985,5 +986,13 @@ export function PlayerBar() {
     );
   }
 
-  return null;
+  return (
+    <>
+      {content}
+      <TheaterSignalPathModal
+        isOpen={showSignalPathModal}
+        onClose={() => setShowSignalPathModal(false)}
+      />
+    </>
+  );
 }

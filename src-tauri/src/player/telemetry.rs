@@ -1,4 +1,6 @@
-﻿use std::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
+#![allow(dead_code)]
+
+use std::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
 
 pub static SESSION_DOWNLOADED_BYTES: AtomicU64 = AtomicU64::new(0);
 pub static CURRENT_DOWNLOAD_SPEED_BPS: AtomicU32 = AtomicU32::new(0);
@@ -29,3 +31,20 @@ pub fn get_network_telemetry() -> NetworkTelemetry {
         active_stream_total_bytes: ACTIVE_STREAM_TOTAL_BYTES.load(Ordering::Relaxed),
     }
 }
+
+#[derive(serde::Serialize, Clone, Debug, PartialEq)]
+pub struct SignalPathStage {
+    pub stage_id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub status: String, // "bit-perfect", "lossless", "enhanced", "resampled", "bypassed"
+    pub details: Vec<(String, String)>,
+}
+
+#[derive(serde::Serialize, Clone, Debug, PartialEq)]
+pub struct SignalPathReport {
+    pub overall_fidelity: String, // "Bit-Perfect", "Lossless", "Enhanced", "Downsampled"
+    pub color_tone: String,       // "cyan", "green", "purple", "amber"
+    pub stages: Vec<SignalPathStage>,
+}
+

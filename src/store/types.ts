@@ -258,6 +258,7 @@ export interface DSPState {
   crossfeed_enabled: boolean;
   crossfeed_level: number;
   crossfeed_corner: number;
+  crossfeed_mode?: 'bs2b' | 'meier' | 'custom';
 
   // Soundstage
   spatial_enabled: boolean;
@@ -318,6 +319,20 @@ export interface EffectiveAudioPath {
   fallback_reason?: string | null;
 }
 
+export interface SignalPathStage {
+  stage_id: string;
+  title: string;
+  subtitle: string;
+  status: 'bit-perfect' | 'lossless' | 'enhanced' | 'resampled' | 'bypassed' | string;
+  details: [string, string][];
+}
+
+export interface SignalPathReport {
+  overall_fidelity: 'Bit-Perfect' | 'Lossless' | 'Enhanced' | 'Resampled' | 'Downsampled' | string;
+  color_tone: 'cyan' | 'green' | 'purple' | 'amber' | string;
+  stages: SignalPathStage[];
+}
+
 export interface PlaybackState {
   status: 'Playing' | 'Paused' | 'Stopped';
   current_track: string | null;
@@ -325,6 +340,7 @@ export interface PlaybackState {
   volume: number;
   exclusive: boolean;
   bit_perfect: boolean;
+  bit_perfect_verified?: boolean;
   dev_rate: number;
   driver_type: 'WASAPI' | 'ASIO';
   last_skip_time?: number;
@@ -339,6 +355,7 @@ export interface PlaybackState {
   is_buffering?: boolean;
   backend_position_secs?: number;
   effective_audio_path?: EffectiveAudioPath | null;
+  signal_path?: SignalPathReport | any;
   attempt_id?: string;
 }
 
@@ -391,6 +408,11 @@ export interface PlaybackRecovery {
   action: 'retry' | 'reconnect' | 'output' | 'library';
   pending: boolean;
 }
+export interface LibraryActions {
+  fetchLibraryPage: (offset: number, limit: number, search?: string, sortBy?: string) => Promise<{ tracks: Track[]; total: number; offset: number; limit: number }>;
+  fetchLibraryCount: (search?: string) => Promise<number>;
+}
+
 export interface PlayerState {
   view: ViewMode;
   networkTelemetry: NetworkTelemetry | null;
@@ -436,10 +458,20 @@ export interface PlayerState {
   requestedAudioModes: { exclusive: boolean; bitPerfect: boolean };
   activeAutoEq: import('../utils/deviceProfiles').AutoEqIdentity | null;
   setActiveAutoEq: (identity: import('../utils/deviceProfiles').AutoEqIdentity | null) => void;
+  autoEqStrength: number;
+  setAutoEqStrength: (strength: number) => void;
+  applyAutoEqPreset: (preset: import('../utils/autoEqCatalog').AutoEqPreset, strength?: number) => Promise<void>;
+  disableAutoEq: () => Promise<void>;
+  setAudioOutputPath: (mode: 'shared' | 'exclusive' | 'bitperfect') => Promise<void>;
+  exclusiveMode: boolean;
+  bitPerfectMode: boolean;
   scanDirs: string[];
   scanStatus: string;
   librarySearchQuery: string;
   setLibrarySearchQuery: (query: string) => void;
+  setSearch?: (query: string) => void;
+  fetchLibraryPage: (offset: number, limit: number, search?: string, sortBy?: string) => Promise<{ tracks: Track[]; total: number; offset: number; limit: number }>;
+  fetchLibraryCount: (search?: string) => Promise<number>;
   isTranslating: boolean;
   showRomaji: boolean;
   showTranslation: boolean;

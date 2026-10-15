@@ -79,6 +79,7 @@ export function TagEditorModal() {
 
   // Auto-Tagger State
   const [autoTagging, setAutoTagging] = useState(false);
+  const [fingerprinting, setFingerprinting] = useState(false);
 
   // Load existing tags when opened
   useEffect(() => {
@@ -310,6 +311,55 @@ export function TagEditorModal() {
     }
   };
 
+  // AcoustID Fingerprint Auto-Identifier
+  const handleAcoustID = async () => {
+    if (!activeTrack?.path) return;
+    setFingerprinting(true);
+    try {
+      const res: any = await invoke('acoustid_identify_track', { path: activeTrack.path });
+      const results = res?.acoustid?.results;
+      const rec = results?.[0]?.recordings?.[0];
+      if (rec) {
+        let updated = false;
+        if (rec.title) {
+          setTitle(rec.title);
+          updated = true;
+        }
+        const artistName = rec.artists?.map((a: any) => a.name).filter(Boolean).join(', ');
+        if (artistName) {
+          setArtist(artistName);
+          updated = true;
+        }
+        const albumName = rec.releasegroups?.[0]?.title;
+        if (albumName) {
+          setAlbum(albumName);
+          updated = true;
+        }
+
+        if (updated) {
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: { message: `AcoustID matched: "${rec.title || ''}" by ${artistName || ''}`, type: 'success' }
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('ui-toast', {
+            detail: { message: 'AcoustID found fingerprint but no metadata details.', type: 'info' }
+          }));
+        }
+      } else {
+        window.dispatchEvent(new CustomEvent('ui-toast', {
+          detail: { message: 'No AcoustID match found for this track.', type: 'info' }
+        }));
+      }
+    } catch (err) {
+      console.error('AcoustID identification error:', err);
+      window.dispatchEvent(new CustomEvent('ui-toast', {
+        detail: { message: `AcoustID failed: ${err}`, type: 'error' }
+      }));
+    } finally {
+      setFingerprinting(false);
+    }
+  };
+
   // Drag & drop cover art handler
   const handleFileDrop = (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -493,27 +543,48 @@ export function TagEditorModal() {
           )}
 
           {!isBatchMode && (
-            <button
-              onClick={handleAutoTag}
-              disabled={autoTagging}
-              style={{
-                marginLeft: 'auto',
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: '1px solid rgba(139, 92, 246, 0.3)',
-                background: 'rgba(139, 92, 246, 0.1)',
-                color: 'var(--accent)',
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              {autoTagging ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
-              Auto-Match (MusicBrainz)
-            </button>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                onClick={handleAcoustID}
+                disabled={fingerprinting}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                  background: 'rgba(59, 130, 246, 0.1)',
+                  color: '#60a5fa',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {fingerprinting ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+                Acoustic Fingerprint
+              </button>
+              <button
+                onClick={handleAutoTag}
+                disabled={autoTagging}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(139, 92, 246, 0.3)',
+                  background: 'rgba(139, 92, 246, 0.1)',
+                  color: 'var(--accent)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {autoTagging ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+                Auto-Match (MusicBrainz)
+              </button>
+            </div>
           )}
         </div>
 

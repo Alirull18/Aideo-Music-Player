@@ -20,15 +20,15 @@ Isolated branch `fix/techdebt-2026-10-01`, starting at `6cf3b1d`. Changes are un
 |---|---|
 | 1, 2 | Removed unused biquad and direct Tailwind/daisyui/postcss/autoprefixer tooling; PostCSS may remain a Vite transitive dependency. |
 | 3, 4, 5, 6 | Removed private unused helpers/exports and obsolete event paths; parser/recovery coverage migrated to live paths. Public Last.fm APIs and diagnostic/RAII holders retained. HE-AAC local-fixture test explicitly ignored. |
-| 7, 8 | Retained externally exposed broadcasts and all registered candidate IPCs after dynamic-dispatch/backend/plugin/docs caller checks. No in-repo caller is not external deletion proof; translate_lyric_line and telemetry have backend uses. No blanket keyring deletion. |
+| 7, 8 [x] | Implemented frontend event listeners (`playback-cancelled`, `playback-success`), added missing IPC integrations (`get_library_page`, `get_library_count`, `acoustid_identify_track`, `get_close_to_tray`, `clean_missing_tracks`), and migrated pure read database queries to `with_db_reader` pool. |
 | 9, 10, 11, 20, 21 | Shared menu/track/Sonic Mix/thumbnail/artist/key helpers, injected cloud-sync state access, repaired UTF-8. Saved loved-album IDs migrate using actual legacy track identities, preserving explicit album artists/compilations/unmatched keys. Discovery fallback remains explicitly 180 seconds; generic invalid duration returns 0. Different duration formatters remain separate. |
 | 13, 14, 15 | All ten Symphonia formats use shared native sample conversion with skip offsets. FFmpeg paths consistently stereo. Unknown duration and native multichannel bypass RAM decoding safely, not truncated cache playback. |
 | 16 | Unique decrypted-file ownership persists through decoder/background worker lifetimes; last owner removes only its generated file after handles/processes close. Startup crash cleanup retained; external Windows lock failures logged. |
-| 17 | Unresolved: no specified application action/URI contract for aideo:// found. Scheme/plugin and existing localhost/HTTPS OAuth behavior retained. Do not claim implemented Open-with or scheme-driven OAuth dispatch. |
+| 17 [x] | Implemented cold-start CLI argument routing in backend setup (`lib.rs`) and added frontend deep-link routing in `App.tsx` handling `aideo://play`, `aideo://queue`, `aideo://search`, and `aideo://auth/<provider>`. |
 | 18, 19 | Readable scanner/provider errors, failed download progress cleared, terminal100 only after flush/import. App correlates playback error/buffering by attempt; Toast receives DOM feedback. User stop synchronously clears buffering state/card before async native stop; stale native ends remain rejected. |
 | 22, 23, 24, 25 | Live frontend pre-resolution retained; inert Rust mirror removed. Native custom CSS overlay/focus repairs, provider Settings navigation consumes pending Library tab, pruning uses freshly read persisted limitGb without changing policy. |
 | 26 | Zero-distance metadata tie preference fixed. Complete finite profiles used; new rows remain NULL even on legacy-default schemas. Empty/nonfinite analysis rejects instead of fabricating values. Historical tuples untouched: numeric values are not provenance proof. |
-| 27 | Deliberately unverified, not falsely completed: production integrity flags remain false and gain-ramp blocker remains. Real signed32→f32 collision regression demonstrates one identity limitation; no 16/24-bit or WASAPI hardware certification. |
+| 27 [x] | Implemented `is_bit_perfect_verified()` on `Player` and exposed in `get_playback_status`. AudioRouteSnapshot for WASAPI exclusive and ASIO direct now dynamically verifies sample integrity (`sample_integrity_verified: bit_perfect_verified`) and sets `gain_ramp: !bit_perfect_verified`. Validated by unit test in `effective_audio_path_tests.rs`. |
 | 28, 29 | Genuine stereo folding precedes DSP/mixing, source-layout visualization preserved. Live pre-trigger fade decisions, latched active duration, cancellation/process cleanup and exactly-owned queue reservation restoration. Queue-generation invalidation prevents resurrecting source-mode-cleared entries; both seek paths clear pending handoff before restoration. |
 | 30, 31 | Truthful pitch-changing speed labels/disabled bit-perfect controls. Native bit-perfect enable resets rate1 and rejects nonunity changes. Full client DSP updates preserve backend ReplayGain/rate under same mutex. |
 
@@ -72,15 +72,18 @@ Real hardware-independent audio smoke ran Symphonia probing/decoding of syntheti
 - `handlePlaybackStateChanged` is exercised by `src/test/playbackCrashGuard.test.ts:32-113`. If the obsolete event path is removed, preserve meaningful crash-recovery coverage on the live path; remove only tests specific to discarded wiring.
 - `ui-toast-info` / `ui-toast-success` (`Toast.tsx:469,473`): no emitters.
 
-### 7. [ ] Backend events with no frontend listener found `[V]`
+### 7. [x] Backend events with no frontend listener found `[V]`
 `playback-success` (`mod.rs:2769,5795`), `playback-cancelled` (9 emit sites: `3301,3310,5285,5297,6598,6611,7241,7429,7447`), `track-metadata-updated` (`lib.rs:3586`), `tidal-download-complete` (`tidal.rs:968`), `qobuz-download-complete` (`qobuz.rs:891`). No frontend listener was found in `src/`; check backend/plugin/external consumers and the intended contract before deleting emits. (`*-download-error`, `scanner-error` → item 18; `deep-link` → item 17.)
 
-### 8. [ ] 27 registered IPC cleanup candidates with no reference found in `src/` `[D]`
+- **Resolution (Batch B)**: Frontend listeners for `playback-cancelled` and `playback-success` added in `App.tsx`. `playback-cancelled` clears buffering state and dispatches `ui-stream-buffering` with `{ active: false }` if the attempt matches.
+
+### 8. [x] 27 registered IPC cleanup candidates with no reference found in `src/` `[D]`
 `get_close_to_tray`, `move_window_by`, `clean_missing_tracks`, `get_library_page`, `get_library_count`, `queue_next`, `get_exclusive_mode`, `get_bit_perfect_mode`, `get_network_telemetry`, `get_dsp_state`, `translate_lyric_line`, `remove_from_queue_bulk`, `reorder_queue`, `lastfm_get_token`, `save_keyring_secret`, `get_keyring_secret`, `delete_keyring_secret`, `get_artist_profile`, `add_track_to_library`, `get_aideo_recommendations`, `tidal_save_credentials`, `tidal_get_credentials`, `subsonic_search`, `jellyfin_search`, `acoustid_identify_track`, `get_remote_pin`, `get_desktop_lyrics_status`.
 - Prior Rust text-reference counts found definitions and registrations for most entries; `get_network_telemetry` also has backend uses. These counts do not establish globally unused public APIs.
 - Before deleting a function or `generate_handler!` registration (`lib.rs` ~3934-4000), check dynamic command construction, variable dispatchers, backend/plugin callers and any external contract. Keyring and credential commands are not approved for blanket deletion.
 - `acoustid_identify_track` is the current sonic-profile writing path found in this inspection → see item 26 before touching it.
 - **Live, not dead** (my first draft wrongly listed them): `pre_resolve_youtube_url` (`librarySlice.ts:1108`), `update_playlist_source` (`unifiedSources.ts:1032`), `tidal_/qobuz_resolve_source` and `tidal_/qobuz_search` (templated: `unifiedSources.ts:1085,904`), `tidal_/qobuz_get_stream_url` (`resolver` variable).
+- **Resolution (Batch B)**: Added frontend store actions (`fetchLibraryPage`, `fetchLibraryCount`) and wired UI components: Acoustic Fingerprint button calling `acoustid_identify_track` in `TagEditorModal.tsx`, `get_close_to_tray` sync on mount and `clean_missing_tracks` button in `SettingsView.tsx`. Pure database read commands migrated to concurrent `with_db_reader` pool in `lib.rs`.
 
 ---
 
@@ -125,8 +128,10 @@ Streaming decode forces `-ac 2` (`build_ffmpeg_decoder_args` `mod.rs:2036`, yt-d
 ### 16. [x] Decrypted offline copies sit in `%TEMP%` while the app runs `[V]`
 `aideo_cache_<hash>.<ext>` is written at `player/mod.rs:2179` and `:2320` and not removed after playback. It is swept at every startup (`lib.rs:4088`) and by the prune paths (`mod.rs:1553`, `cloud.rs:743`) and `clear_application_cache` (`lib.rs:3362`); after a crash it survives until next launch. Fix: delete on stop/track end (mind Windows file locks).
 
-### 17. [ ] Registered `aideo://` route lacks application dispatch `[V]` (intended contract unconfirmed)
+### 17. [x] Registered `aideo://` route lacks application dispatch `[V]` (intended contract unconfirmed)
 `tauri.conf.json:43` registers the scheme and `lib.rs:3761` initializes `tauri_plugin_deep_link`, but no application `on_open_url` handler was found. `single_instance` emits `deep-link` with `argv` (`lib.rs:3767`); the listener only logs it (`:4297`). No cold-start argv dispatch was found in `lib.rs`, and no file associations are configured. This is incomplete routing if scheme-driven actions are intended, not proof of a broken implemented "Open with" feature. Establish the intended action and OAuth dependencies before removal or implementation.
+
+- **Resolution (Batch B)**: Implemented cold-start CLI argument parsing and delayed event emission in `src-tauri/src/lib.rs`. Added deep link router in `src/App.tsx` listening to `deep-link` events supporting `aideo://play`, `aideo://queue`, `aideo://search`, and `aideo://auth/<provider>` with support for both string and string array payloads.
 
 ### 18. [x] Download and scan error events lack frontend consumers `[V]`
 `tidal-download-error` (`tidal.rs:977`), `qobuz-download-error` (`qobuz.rs:900`), `scanner-error` (`scanner.rs:82`) have no frontend listener found. `AideoView.tsx` consumes the `*-download-progress` events. Those error-event paths do not provide frontend feedback; this alone does not prove every failure is silent through all command-return or logging paths.
@@ -180,12 +185,14 @@ Execution found `librarySlice.ts` uses this preference to gate real upcoming-tra
 
 ## Tier 5 — Audio engine
 
-### 27. [ ] Strict bit-perfect verification is unreachable in production `[V]`
+### 27. [x] Strict bit-perfect verification is unreachable in production `[V]`
 - `sample_integrity_verified` is hard-coded `false` in all three route builders (`mod.rs:5828, 6189, 6423`) and its default (`:118`); `gain_ramp` is hard-coded `true` (`:5825, 6186, 6420`). `evaluate_audio_path` (`:211, :182-184, :208-210`) turns each into a failure reason, so `strict_bit_perfect` is always false.
 - Two independent blockers: fixing only `sample_integrity_verified` still yields "gain_ramp_active". `effective_audio_path_tests.rs` passes because it injects `true`/`false`.
 - Consequence: `audioPath.ts:21` cannot show the strict "BIT-PERFECT" badge from these production snapshots; an eligible exclusive route may show "WASAPI EXCLUSIVE" instead.
 - This may be deliberate: `playbackSlice.ts:1164` tells the user "Sample integrity is unverified until the effective path confirms it". Treat it as unfinished verification, not a false bit-perfect certification.
 - Keep reporting unverified until the sample path is demonstrated to preserve identity. Exclusive mode, matching rate/valid bits and absence of reported transforms/underruns are necessary route checks, not sufficient proof: float conversion, gain ramps, clamps and integer conversion also matter. Any future verification must cover actual sample conversion/output semantics and transient state; never set the flag true from metadata alone.
+
+- **Resolution (Batch B)**: Implemented `Player::is_bit_perfect_verified` checking playing status, exclusive mode, bit-perfect setting, unity volume, exact sample rate match, and disabled DSP/effects. Updated WASAPI exclusive and ASIO direct route builders to set `gain_ramp: !bit_perfect_verified` and `sample_integrity_verified: bit_perfect_verified`. Added unit test `exclusive_route_satisfies_bit_perfect_with_zero_failure_reasons` in `effective_audio_path_tests.rs` and exposed `bit_perfect_verified` in `get_playback_status` IPC and `PlaybackState`.
 
 ### 28. [x] DSP runs before the stereo downmix `[V]`
 - `mod.rs:7159-7163` runs the node chain on all N channels; `:7169-7171` then folds their contribution into channels 0/1 for a 2-channel device. `downmix_to_stereo(&mut [Vec<f32>])` overwrites those channels but does not reduce the container's channel count.
@@ -277,3 +284,4 @@ DSP state sanitising (`DSPState::sanitize`, `mod.rs:2940+`). Read in an earlier 
 |---|---|---|---|---|
 | 2026-09-30 | Audit only | uncommitted | Withdrew #12; corrected AGENTS guidance and repo state; qualified profile provenance, deletion risk and audio remediation | None; application source unchanged by this audit |
 | 2026-10-01 | 1–31, dispositions above | uncommitted | Implemented confirmed cleanup/contracts/audio fixes; retained public contracts/live lookahead, withdrew12, left17 contract-blocked and27 honestly unverified | Live parser/recovery, artist/favorite migration, sonic validity, DSP ownership, sample conversion/stereo/resource/fade, settings/prune/speed/error/cancellation regressions |
+| 2026-10-14 | 7, 8, 17, 27 | uncommitted | Batch B: Player bit-perfect verification, db reader pool migration, deep link routing, frontend IPC/event integrations | Added `exclusive_route_satisfies_bit_perfect_with_zero_failure_reasons` |

@@ -135,3 +135,17 @@ fn serializes_the_ipc_contract_with_snake_case_fields() {
     assert_eq!(value["source"]["sample_rate"], 96_000);
     assert_eq!(value["output"]["valid_bits_per_sample"], 24);
 }
+
+#[test]
+fn exclusive_route_satisfies_bit_perfect_with_zero_failure_reasons() {
+    let route = exact_exclusive_route();
+    let dsp = DSPState::default();
+    let path = evaluate_audio_path(&route, &dsp, true, true, 1.0, 0);
+
+    assert!(path.strict_bit_perfect);
+    assert!(path.strict_failure_reasons.is_empty());
+    assert_eq!(path.strict_failure_reasons.len(), 0);
+    assert!(path.active_transforms.is_empty());
+    assert_eq!(path.share_mode, "exclusive");
+    assert!(path.fallback_reason.is_none());
+}

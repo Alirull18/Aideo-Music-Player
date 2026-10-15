@@ -260,6 +260,9 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     if !column_exists(&conn, "tracks", "genre") {
         conn.execute("ALTER TABLE tracks ADD COLUMN genre TEXT", [])?;
     }
+    if !column_exists(&conn, "tracks", "sonic_profile") {
+        conn.execute("ALTER TABLE tracks ADD COLUMN sonic_profile TEXT", [])?;
+    }
 
     // Create playlist tables
     conn.execute(

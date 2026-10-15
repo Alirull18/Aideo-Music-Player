@@ -1,13 +1,14 @@
 import { applySourcePreference, createQueueOccurrenceId, isLocalUnifiedTrack, streamCacheKey } from '../utils/unifiedSources';
 import { cancelSourcePlayback, manageSourceQueue, playbackRequest } from './sourcePlayback';
 import { StateCreator } from 'zustand';
-import { PlayerState, DSPState, Track, StreamingQuality, extractDominantColor } from './types';
+import { PlayerState, DSPState, Track, StreamingQuality, extractDominantColor, EQBand } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines, isStreamTrack } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { toast } from '../utils/toast';
 import { readDeviceProfile, saveDeviceProfile, validateDeviceDsp, isAmbiguousDevice, type AutoEqIdentity } from '../utils/deviceProfiles';
+import { AUTO_EQ_PRESET_CATALOG, type AutoEqPreset } from '../utils/autoEqCatalog';
 import { notifyTidalAuthFailure } from './tidalSlice';
 import { notifyQobuzAuthFailure } from './qobuzSlice';
 import { sampleListening, resetListeningBaseline, markListeningEnd } from '../utils/recommendations';
@@ -24,6 +25,8 @@ let audioModesRestored = false;
 let radioAttemptSequence = 0;
 let deviceSwitchSequence = 0;
 let deviceSwitchPromise = Promise.resolve();
+let rawActiveAutoEqBands: EQBand[] | null = null;
+let rawActiveAutoEqPreamp: number | null = null;
 
 function recordConfirmedListening(state: PlayerState, position: number, playing: boolean, set: (state: Partial<PlayerState>) => void): void {
   const track = sampleListening(state.currentHistoryId, position, playing);
@@ -71,6 +74,7 @@ const performDspInvoke = async (dsp: any) => {
 
 const initialBitPerfectMode = safeGetStorage(BIT_PERFECT_MODE_STORAGE_KEY) === 'true';
 const initialExclusiveMode = initialBitPerfectMode || safeGetStorage(EXCLUSIVE_MODE_STORAGE_KEY) === 'true';
+const initialAutoEqStrength = Number(safeGetStorage('aideo_autoeq_strength') || 100);
 
 export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   reportPlaybackFailure: (error: string, track = get().currentTrack, position = get().playback.position_secs) => {
@@ -201,6 +205,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     crossfeed_enabled: localStorage.getItem('aideo_crossfeed_enabled') === 'true',
     crossfeed_level: Number(localStorage.getItem('aideo_crossfeed_level') || -6.0),
     crossfeed_corner: Number(localStorage.getItem('aideo_crossfeed_corner') || 700.0),
+    crossfeed_mode: (localStorage.getItem('aideo_crossfeed_mode') as 'bs2b' | 'meier' | 'custom') || 'bs2b',
     spatial_enabled: localStorage.getItem('aideo_spatial_enabled') === 'true',
     spatial_haas_delay: Number(localStorage.getItem('aideo_spatial_haas_delay') || 7.5),
     spatial_wet: Number(localStorage.getItem('aideo_spatial_wet') || 0.15),
@@ -228,10 +233,157 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   currentDevice: null,
   audioDeviceSwitching: false,
   requestedAudioModes: { exclusive: initialExclusiveMode, bitPerfect: initialBitPerfectMode },
+  exclusiveMode: initialExclusiveMode,
+  bitPerfectMode: initialBitPerfectMode,
+  autoEqStrength: Number.isFinite(initialAutoEqStrength) && initialAutoEqStrength >= 0 ? initialAutoEqStrength : 100,
   activeAutoEq: null,
   setActiveAutoEq: (identity: AutoEqIdentity | null) => {
     set({ activeAutoEq: identity });
     saveDeviceProfile(get());
+  },
+  setAutoEqStrength: (strength: number) => {
+    const clamped = Math.max(0, Math.min(150, Math.round(strength)));
+    set({ autoEqStrength: clamped });
+    safeSetStorage('aideo_autoeq_strength', String(clamped));
+
+    const active = get().activeAutoEq;
+    if (!active) return;
+
+    if (!rawActiveAutoEqBands) {
+      const matched = AUTO_EQ_PRESET_CATALOG.find(p => p.url === active.url || p.name === active.name);
+      if (matched) {
+        rawActiveAutoEqBands = matched.bands;
+        rawActiveAutoEqPreamp = matched.preamp;
+      }
+    }
+
+    if (rawActiveAutoEqBands && rawActiveAutoEqPreamp !== null) {
+      const factor = clamped / 100;
+      const scaledPreamp = Number((rawActiveAutoEqPreamp * factor).toFixed(2));
+      const currentBands = get().dsp.eq_parametric_bands || [];
+      const newBands = currentBands.map((band, idx) => {
+        const raw = rawActiveAutoEqBands?.[idx];
+        if (raw) {
+          return {
+            ...band,
+            freq: raw.freq,
+            gain: Number((raw.gain * factor).toFixed(2)),
+            q: raw.q,
+            band_type: raw.band_type,
+          };
+        }
+        return band;
+      });
+
+      const fullDsp = {
+        ...get().dsp,
+        preamp_gain: scaledPreamp,
+        eq_parametric_bands: newBands,
+      };
+
+      set({ dsp: fullDsp });
+      saveDeviceProfile(get());
+
+      pendingDspState = fullDsp;
+      const now = Date.now();
+      const timeSinceLast = now - lastDspInvokeTime;
+      if (timeSinceLast >= THROTTLE_MS) {
+        if (dspThrottleTimeout) {
+          clearTimeout(dspThrottleTimeout);
+          dspThrottleTimeout = null;
+        }
+        performDspInvoke(fullDsp);
+      } else {
+        if (!dspThrottleTimeout) {
+          dspThrottleTimeout = setTimeout(() => {
+            dspThrottleTimeout = null;
+            if (pendingDspState) {
+              performDspInvoke(pendingDspState);
+            }
+          }, THROTTLE_MS - timeSinceLast);
+        }
+      }
+    }
+  },
+  applyAutoEqPreset: async (preset: AutoEqPreset, strength?: number) => {
+    const effStrength = typeof strength === 'number' ? strength : get().autoEqStrength;
+    rawActiveAutoEqBands = preset.bands;
+    rawActiveAutoEqPreamp = preset.preamp;
+
+    const factor = effStrength / 100;
+    const scaledPreamp = Number((preset.preamp * factor).toFixed(2));
+    const currentBands = [...(get().dsp.eq_parametric_bands || [])];
+    const newBands: EQBand[] = [];
+
+    for (let i = 0; i < 10; i++) {
+      if (preset.bands[i]) {
+        newBands.push({
+          freq: preset.bands[i].freq,
+          gain: Number((preset.bands[i].gain * factor).toFixed(2)),
+          q: preset.bands[i].q,
+          band_type: preset.bands[i].band_type,
+        });
+      } else if (currentBands[i]) {
+        newBands.push({ ...currentBands[i], gain: 0 });
+      } else {
+        newBands.push({ freq: 1000, gain: 0, q: 1.0, band_type: 'peaking' });
+      }
+    }
+
+    await get().setDSP({
+      enabled: true,
+      eq_enabled: true,
+      eq_parametric: true,
+      eq_parametric_bands: newBands,
+      preamp_gain: scaledPreamp,
+    });
+
+    get().setActiveAutoEq({
+      name: preset.name,
+      url: preset.url,
+      fullSource: preset.fullSource,
+    });
+
+    toast.info(`Applied AutoEQ for ${preset.name} (${preset.brand}) at ${effStrength}% strength`, {
+      title: 'AutoEQ Optimized',
+    });
+  },
+  disableAutoEq: async () => {
+    const currentBands = (get().dsp.eq_parametric_bands || []).map(b => ({ ...b, gain: 0 }));
+    await get().setDSP({
+      eq_parametric_bands: currentBands,
+      preamp_gain: 0,
+    });
+    get().setActiveAutoEq(null);
+    rawActiveAutoEqBands = null;
+    rawActiveAutoEqPreamp = null;
+    toast.info('AutoEQ Headphone Sound Optimization disabled', { title: 'AutoEQ' });
+  },
+  setAudioOutputPath: async (mode: 'shared' | 'exclusive' | 'bitperfect') => {
+    if (get().audioDeviceSwitching) return;
+    if (mode === 'bitperfect') {
+      if (!get().playback.bit_perfect) {
+        await get().toggleBitPerfect(true);
+      }
+    } else if (mode === 'exclusive') {
+      if (get().playback.bit_perfect) {
+        await get().toggleBitPerfect(false);
+      }
+      if (!get().playback.exclusive) {
+        await get().toggleExclusive(true);
+      }
+    } else {
+      if (get().playback.bit_perfect) {
+        await get().toggleBitPerfect(false);
+      }
+      if (get().playback.exclusive) {
+        await get().toggleExclusive(false);
+      }
+    }
+    set(s => ({
+      exclusiveMode: s.playback.exclusive,
+      bitPerfectMode: s.playback.bit_perfect,
+    }));
   },
   showQueue: false,
   queue: [],
@@ -966,7 +1118,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     const dspKeys = [
       'enabled', 'eq_enabled', 'eq_parametric', 'eq_graphic_gains',
       'eq_parametric_bands', 'crossfeed_enabled', 'crossfeed_level',
-      'crossfeed_corner', 'spatial_enabled', 'spatial_haas_delay',
+      'crossfeed_corner', 'crossfeed_mode', 'spatial_enabled', 'spatial_haas_delay',
       'spatial_wet', 'convolution_enabled', 'convolution_ir_path', 'convolution_wet',
       'subsonic_enabled', 'night_mode_enabled',
       'r128_enabled', 'width', 'upsample_rate', 'dither',
@@ -1055,6 +1207,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     localStorage.setItem('aideo_crossfeed_enabled', String(full.crossfeed_enabled));
     localStorage.setItem('aideo_crossfeed_level', String(full.crossfeed_level));
     localStorage.setItem('aideo_crossfeed_corner', String(full.crossfeed_corner));
+    if (full.crossfeed_mode) localStorage.setItem('aideo_crossfeed_mode', full.crossfeed_mode);
     localStorage.setItem('aideo_spatial_enabled', String(full.spatial_enabled));
     localStorage.setItem('aideo_spatial_haas_delay', String(full.spatial_haas_delay));
     localStorage.setItem('aideo_spatial_wet', String(full.spatial_wet));
@@ -1169,6 +1322,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (sequence !== deviceSwitchSequence) return;
       const nextMode = typeof res === 'boolean' ? res : (target !== undefined ? target : !get().playback.exclusive);
       set(s => ({
+        exclusiveMode: nextMode,
+        bitPerfectMode: nextMode ? s.playback.bit_perfect : false,
         playback: {
           ...s.playback,
           exclusive: nextMode,
@@ -1218,6 +1373,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           }
         }
         set(s => ({
+          exclusiveMode: nextMode ? true : s.playback.exclusive,
+          bitPerfectMode: nextMode,
           playbackRate: nextMode ? 1.0 : s.playbackRate,
           playback: {
             ...s.playback,
@@ -1352,6 +1509,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         await invoke('set_volume', { volume: appliedVolume });
         if (!stillCurrent()) return;
         set(s => ({ currentDevice: devName, dsp, activeAutoEq: profile?.autoEq ?? null,
+          exclusiveMode: exclusive, bitPerfectMode: bitPerfect,
           requestedAudioModes: { exclusive: wantsExclusive, bitPerfect: wantsBitPerfect },
           playback: { ...s.playback, volume: appliedVolume, exclusive, bit_perfect: bitPerfect },
           isMuted: appliedVolume === 0, mutedPrevVolume: appliedVolume > 0 ? appliedVolume : s.mutedPrevVolume }));

@@ -1,10 +1,11 @@
-﻿use std::sync::Arc;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use symphonia::core::units::TimeBase;
 use symphonia::core::formats::FormatReader;
 use symphonia::core::codecs::Decoder;
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct CachedTrack {
     pub path: String,
@@ -16,6 +17,7 @@ pub struct CachedTrack {
 }
 
 /// 📦 Grouped decoder state to simplify passing multiple arguments
+#[allow(dead_code)]
 pub struct DecoderInfo {
     pub format: Box<dyn FormatReader>,
     pub decoder: Box<dyn Decoder>,

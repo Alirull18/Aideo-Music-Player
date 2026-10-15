@@ -265,6 +265,20 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   scanStatus: '',
   librarySearchQuery: '',
   setLibrarySearchQuery: (query: string) => set({ librarySearchQuery: query }),
+  setSearch: (query: string) => set({ librarySearchQuery: query }),
+  fetchLibraryPage: async (offset: number, limit: number, search?: string, sortBy?: string) => {
+    return await invoke<{ tracks: Track[]; total: number; offset: number; limit: number }>('get_library_page', {
+      offset,
+      limit,
+      search: search || null,
+      sortBy: sortBy || null,
+    });
+  },
+  fetchLibraryCount: async (search?: string) => {
+    return await invoke<number>('get_library_count', {
+      search: search || null,
+    });
+  },
   playlists: [],
   currentPlaylist: null,
   cachedCloudHashes: [],

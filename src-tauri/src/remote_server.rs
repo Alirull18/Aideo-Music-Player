@@ -245,6 +245,48 @@ async fn handle_http(mut stream: TcpStream, request_str: &str, state: Arc<crate:
         None => (path_and_query, ""),
     };
 
+    // Route: /manifest.json (PWA Web App Manifest)
+    if path == "/manifest.json" {
+        let manifest = get_manifest_json();
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/manifest+json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            manifest.len(),
+            manifest
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.flush().await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+
+    // Route: /icon.svg (PWA Vector App Icon)
+    if path == "/icon.svg" {
+        let icon = get_icon_svg();
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: image/svg+xml; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            icon.len(),
+            icon
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.flush().await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+
+    // Route: /sw.js (PWA Service Worker)
+    if path == "/sw.js" {
+        let sw = get_sw_js();
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/javascript; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            sw.len(),
+            sw
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.flush().await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+
     // 1. Check Authorization header
     let pin_from_header = extract_auth_header_from_raw_http(request_str)
         .and_then(extract_pin_from_auth_header);
@@ -639,13 +681,96 @@ async fn handle_websocket(
     let _ = tx_close.send(());
 }
 
+pub fn get_manifest_json() -> &'static str {
+    r###"{
+  "name": "Aideo Connect Remote",
+  "short_name": "Aideo Remote",
+  "description": "Hi-Fi Remote Controller & Live Karaoke Lyrics for Aideo Music Player",
+  "start_url": "/?pwa=1",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#09090e",
+  "theme_color": "#09090e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}"###
+}
+
+pub fn get_icon_svg() -> &'static str {
+    r###"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#12121e"/>
+      <stop offset="100%" stop-color="#09090e"/>
+    </linearGradient>
+    <linearGradient id="purpleGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#9333ea"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="504" height="504" x="4" y="4" rx="108" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="8"/>
+  <g filter="url(#glow)">
+    <circle cx="256" cy="256" r="140" fill="none" stroke="url(#purpleGlow)" stroke-width="12" opacity="0.6"/>
+    <circle cx="256" cy="256" r="90" fill="none" stroke="rgba(168,85,247,0.3)" stroke-width="6"/>
+    <path d="M216 176 L344 256 L216 336 Z" fill="url(#purpleGlow)"/>
+  </g>
+</svg>"###
+}
+
+pub fn get_sw_js() -> &'static str {
+    r###"const CACHE_NAME = 'aideo-remote-v1';
+const PRECACHE_URLS = ['/manifest.json', '/icon.svg'];
+
+self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+    );
+    self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(
+        caches.keys().then((keys) =>
+            Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+        ).then(() => self.clients.claim())
+    );
+});
+
+self.addEventListener('fetch', (event) => {
+    const url = new URL(event.request.url);
+    if (url.pathname === '/manifest.json' || url.pathname === '/icon.svg') {
+        event.respondWith(
+            caches.match(event.request).then((res) => res || fetch(event.request))
+        );
+    }
+});
+"###
+}
+
 fn get_pin_entry_html() -> String {
     r###"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Aideo Connect">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#09090e">
     <title>Aideo Connect — Pairing</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -872,7 +997,12 @@ fn get_remote_html() -> String {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Aideo Connect">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#09090e">
     <title>Aideo Connect Remote</title>
@@ -1310,6 +1440,23 @@ fn get_remote_html() -> String {
             text-shadow: 0 0 20px var(--accent-glow);
         }
 
+        .lyric-word {
+            display: inline-block;
+            transition: color 0.12s ease, transform 0.12s ease, text-shadow 0.12s ease, opacity 0.12s ease;
+            opacity: 0.75;
+        }
+        .lyric-line.active .lyric-word.word-active {
+            color: #ffffff;
+            opacity: 1;
+            transform: scale(1.08);
+            text-shadow: 0 0 16px var(--accent-glow), 0 0 24px rgba(168, 85, 247, 0.6);
+        }
+        .lyric-line.active .lyric-word.word-past {
+            color: #f3e8ff;
+            opacity: 0.95;
+            text-shadow: 0 0 8px rgba(168, 85, 247, 0.3);
+        }
+
         .resume-sync-pill {
             position: absolute;
             bottom: 20px;
@@ -1468,6 +1615,12 @@ fn get_remote_html() -> String {
     </div>
 
     <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch(() => {});
+            });
+        }
+
         const statusBadge = document.getElementById('status');
         const titleEl = document.getElementById('title');
         const artistEl = document.getElementById('artist');
@@ -1546,7 +1699,13 @@ fn get_remote_html() -> String {
                 lineDiv.className = 'lyric-line';
                 lineDiv.dataset.idx = i;
                 lineDiv.dataset.time = line.time_secs;
-                lineDiv.textContent = line.text || '♪';
+                if (line.words && line.words.length > 0) {
+                    line.words.forEach(w => {
+                        lineDiv.insertAdjacentHTML('beforeend', `<span class="lyric-word" data-time="${w.time_secs}" data-dur="${w.duration_secs || 0}">${w.text}</span> `);
+                    });
+                } else {
+                    lineDiv.textContent = line.text || '♪';
+                }
                 lineDiv.onclick = () => {
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({ action: 'seek', value: line.time_secs }));
@@ -1580,6 +1739,29 @@ fn get_remote_html() -> String {
 
                 if (idx >= 0 && activeTabName === 'lyrics' && !userIsScrollingLyrics) {
                     scrollToActiveLyric(idx);
+                }
+            }
+
+            if (idx >= 0) {
+                const activeLine = lyricsScrollBox.querySelector(`.lyric-line[data-idx="${idx}"]`);
+                if (activeLine) {
+                    const words = activeLine.querySelectorAll('.lyric-word');
+                    if (words.length > 0) {
+                        words.forEach(w => {
+                            const wTime = parseFloat(w.dataset.time);
+                            const wDur = parseFloat(w.dataset.dur) || 0.35;
+                            if (position >= wTime && position < wTime + wDur) {
+                                w.classList.add('word-active');
+                                w.classList.remove('word-past');
+                            } else if (position >= wTime + wDur) {
+                                w.classList.remove('word-active');
+                                w.classList.add('word-past');
+                            } else {
+                                w.classList.remove('word-active');
+                                w.classList.remove('word-past');
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -1931,4 +2113,65 @@ mod tests {
         assert!(html.contains("if (typeof data.duration === 'number') duration = data.duration;"));
         assert!(!html.contains("if (data.duration) duration = data.duration;"));
     }
+
+    #[test]
+    fn test_manifest_json_validity() {
+        let manifest_str = get_manifest_json();
+        let val: serde_json::Value = serde_json::from_str(manifest_str).expect("Valid JSON");
+        assert_eq!(val["name"], "Aideo Connect Remote");
+        assert_eq!(val["short_name"], "Aideo Remote");
+        assert_eq!(val["start_url"], "/?pwa=1");
+        assert_eq!(val["display"], "standalone");
+        assert_eq!(val["orientation"], "portrait");
+        assert_eq!(val["background_color"], "#09090e");
+        assert_eq!(val["theme_color"], "#09090e");
+        let icons = val["icons"].as_array().expect("icons array");
+        assert_eq!(icons.len(), 1);
+        assert_eq!(icons[0]["src"], "/icon.svg");
+    }
+
+    #[test]
+    fn test_icon_svg_content() {
+        let svg = get_icon_svg();
+        assert!(svg.starts_with("<svg"));
+        assert!(svg.contains("viewBox=\"0 0 512 512\""));
+        assert!(svg.contains("purpleGlow"));
+        assert!(svg.ends_with("</svg>"));
+    }
+
+    #[test]
+    fn test_sw_js_content() {
+        let sw = get_sw_js();
+        assert!(sw.contains("skipWaiting"));
+        assert!(sw.contains("clients.claim"));
+        assert!(sw.contains("/manifest.json"));
+        assert!(sw.contains("/icon.svg"));
+    }
+
+    #[test]
+    fn test_pwa_head_tags_in_templates() {
+        for html in [get_pin_entry_html(), get_remote_html()] {
+            assert!(html.contains("<link rel=\"manifest\" href=\"/manifest.json\">"));
+            assert!(html.contains("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/icon.svg\">"));
+            assert!(html.contains("<link rel=\"apple-touch-icon\" href=\"/icon.svg\">"));
+            assert!(html.contains("<meta name=\"mobile-web-app-capable\" content=\"yes\">"));
+            assert!(html.contains("<meta name=\"apple-mobile-web-app-capable\" content=\"yes\">"));
+            assert!(html.contains("<meta name=\"apple-mobile-web-app-title\" content=\"Aideo Connect\">"));
+            assert!(html.contains("<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\">"));
+        }
+    }
+
+    #[test]
+    fn test_karaoke_lyrics_and_sw_in_remote_html() {
+        let html = get_remote_html();
+        assert!(html.contains("navigator.serviceWorker.register('/sw.js')"));
+        assert!(html.contains(".lyric-word"));
+        assert!(html.contains(".lyric-line.active .lyric-word.word-active"));
+        assert!(html.contains(".lyric-line.active .lyric-word.word-past"));
+        assert!(html.contains("line.words && line.words.length > 0"));
+        assert!(html.contains("<span class=\"lyric-word\" data-time=\"${w.time_secs}\" data-dur=\"${w.duration_secs || 0}\">${w.text}</span>"));
+        assert!(html.contains("wDur = parseFloat(w.dataset.dur) || 0.35"));
+        assert!(html.contains("position >= wTime && position < wTime + wDur"));
+    }
 }
+

@@ -21,7 +21,7 @@ export const DEVICE_DSP_DEFAULTS: DSPState = {
   upsample_rate: 0, dither: false, exclusive_mode_timing: 'event', preamp_gain: 0, limiter_threshold: -0.1,
   resampler_phase_mode: 'linear', eq_enabled: false, eq_parametric: false, eq_graphic_gains: Array(10).fill(0),
   eq_parametric_bands: [80, 120, 240, 400, 750, 1500, 2200, 4000, 6000, 10000].map(freq => ({ freq, gain: 0, q: 0.7, band_type: 'peaking' })),
-  crossfeed_enabled: false, crossfeed_level: -6, crossfeed_corner: 700, spatial_enabled: false,
+  crossfeed_enabled: false, crossfeed_level: -6, crossfeed_corner: 700, crossfeed_mode: 'bs2b', spatial_enabled: false,
   spatial_haas_delay: 7.5, spatial_wet: 0.15, convolution_enabled: false, convolution_ir_path: '', convolution_wet: 0.5,
   subsonic_enabled: false, night_mode_enabled: false, r128_enabled: false, aideo_filter_enabled: false,
   aideo_filter_room_size: 0.85, aideo_filter_bass_thump: 6, aideo_filter_dampening: 0.5, auto_headroom: false,
@@ -38,6 +38,7 @@ export function validateDeviceDsp(value: unknown, defaults: DSPState = DEVICE_DS
     resampler_sinc_len: [64, 128, 256], resampler_oversampling: [128, 256, 512],
     ffmpeg_transcode_quality: ['standard', 'studio', 'hires', 'native'], exclusive_mode_timing: ['event', 'polling'],
     resampler_phase_mode: ['linear', 'minimum', 'intermediate'], stream_engine: ['yt-dlp', 'reqwest'],
+    crossfeed_mode: ['bs2b', 'meier', 'custom'],
   };
   for (const [key, entry] of Object.entries(value)) {
     if (!Object.prototype.hasOwnProperty.call(DEVICE_DSP_DEFAULTS, key)) { if (strict) return null; else continue; }
