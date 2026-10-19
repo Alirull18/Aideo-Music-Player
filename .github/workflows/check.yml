@@ -29,7 +29,9 @@ jobs:
       - name: TypeScript Compilation Check
         run: npx tsc --noEmit
       - name: Frontend tests
-        run: npm test
+        run: npx vitest run src/test
+      - name: Frontend Production Build (No .env)
+        run: npm run build
 
   check-backend:
     runs-on: windows-latest
