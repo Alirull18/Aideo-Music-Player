@@ -271,7 +271,7 @@ function AideoApp() {
   } = useUpdaterStore();
 
   useEffect(() => {
-    const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession, checkTidalStatus } = useStore.getState();
+    const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession, checkTidalStatus, loadAddons } = useStore.getState();
     loadLibrary();
     fetchPlaylists();
     fetchDevices();
@@ -281,6 +281,7 @@ function AideoApp() {
     // Restore Tidal session flag from backend keyring so tidalConnected is
     // correct immediately after a webview reload, without visiting Settings.
     checkTidalStatus();
+    void loadAddons();
 
     // Synchronize Windows Keep Awake status with backend on startup
     const initialKeepAwake = localStorage.getItem('aideo_keep_awake') === 'true';

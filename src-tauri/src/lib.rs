@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State, Listener, Window};
 use base64::Engine;
 
+mod addons;
 mod artwork;
 mod db;
 pub mod sources;
@@ -115,6 +116,9 @@ pub mod recommendations {
     pub fn source_key(track: &Track) -> String {
         let path = track.path.trim();
         let format = track.format.as_deref().unwrap_or("").to_ascii_lowercase();
+        if format == "addon" && crate::addons::valid_source_id(path) {
+            return format!("addon:{path}");
+        }
         for provider in ["tidal", "qobuz", "youtube"] {
             if let Some(id) = path.strip_prefix(&format!("{provider}:")) {
                 return format!("{provider}:{}", id.trim_start_matches('/'));
@@ -249,6 +253,7 @@ pub mod recommendations {
                         db::SourceProvider::Tidal => format!("tidal:{}", source.id),
                         db::SourceProvider::Qobuz => format!("qobuz:{}", source.id),
                         db::SourceProvider::Youtube => format!("youtube:{}", source.id),
+                        db::SourceProvider::Addon => format!("addon:{}", source.id),
                     },
                     title: metadata.title.clone(),
                     artist: metadata.artist.clone(),
@@ -4307,6 +4312,11 @@ pub fn run() {
             tidal::tidal_get_stream_url,
             tidal::tidal_resolve_source,
             qobuz::qobuz_resolve_source,
+            addons::addon_list,
+            addons::addon_install,
+            addons::addon_remove,
+            addons::addon_search,
+            addons::addon_resolve_source,
             sources::search_local_sources,
             set_source_queue_mode,
             update_playlist_source,

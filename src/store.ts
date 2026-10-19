@@ -10,6 +10,7 @@ import { createCloudSlice } from './store/cloudSlice';
 import { createTidalSlice } from './store/tidalSlice';
 import { createQobuzSlice } from './store/qobuzSlice';
 import { createAuthSlice } from './store/authSlice';
+import { createAddonSlice } from './store/addonSlice';
 
 // Export types for convenience so other files can still import from './store'
 export * from './store/types';
@@ -25,5 +26,6 @@ export const useStore = create<PlayerState>()((...a) => ({
   ...createTidalSlice(...a),
   ...createQobuzSlice(...a),
   ...createAuthSlice(...a),
+  ...createAddonSlice(...a),
 }));
 

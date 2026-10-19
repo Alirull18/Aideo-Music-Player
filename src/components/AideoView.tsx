@@ -410,6 +410,7 @@ export function AideoView() {
     discoveryViewMode,
     setDiscoveryViewMode,
     tidalConnected,
+    addons,
     tidalSearching,
     tidalSearchResults,
     playTidalResult,
@@ -456,6 +457,7 @@ export function AideoView() {
     discoveryViewMode: s.discoveryViewMode,
     setDiscoveryViewMode: s.setDiscoveryViewMode,
     tidalConnected: s.tidalConnected,
+    addons: s.addons,
     tidalSearching: s.tidalSearching,
     tidalSearchResults: s.tidalSearchResults,
     playTidalResult: s.playTidalResult,
@@ -675,7 +677,7 @@ export function AideoView() {
     }, 250);
 
     return () => { cancelled = true; clearTimeout(delayDebounceFn); };
-  }, [searchQuery, musicSource, tracks, appMode, tidalConnected, qobuzConnected, qobuzExperimentalEnabled]);
+  }, [searchQuery, musicSource, tracks, appMode, tidalConnected, qobuzConnected, qobuzExperimentalEnabled, addons]);
 
   const triggerSearch = async (rawQuery: string) => {
     const request = ++unifiedSearchRequest.current;
@@ -715,6 +717,7 @@ export function AideoView() {
         tidal: appMode !== 'local' && tidalConnected,
         qobuz: appMode !== 'local' && qobuzConnected && qobuzExperimentalEnabled,
         youtube: appMode !== 'local',
+        addons: appMode !== 'local' ? addons.map(a => a.id) : [],
       }, result => {
         if (request === unifiedSearchRequest.current) setUnifiedResult(result);
       });

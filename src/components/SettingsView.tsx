@@ -16,6 +16,7 @@ import {
   Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen,
   Tv2, Sliders, Type, Sun, Moon, Check, HardDrive, Globe
 } from 'lucide-react';
+import AddonsCard from './AddonsCard';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
 import { DebugLogsModal } from './DebugLogsModal';
@@ -3242,6 +3243,18 @@ export function SettingsView() {
           qobuzExperimentalEnabled={qobuzExperimentalEnabled}
         />
       ),
+    },
+    {
+      id: 'addons',
+      title: 'Source Addons',
+      description: 'Paste an Eclipse-compatible addon manifest URL to add a music source at runtime.',
+      keywords: 'addon plugin eclipse source manifest url extension stream provider',
+      tab: 'plugins',
+      element: (
+        <div className="settings-ctrl-card">
+          <AddonsCard />
+        </div>
+      )
     },
     {
       id: 'tidal-connect',

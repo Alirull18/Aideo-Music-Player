@@ -88,6 +88,8 @@ pub enum SourceProvider {
     Tidal,
     Qobuz,
     Youtube,
+    /// Runtime-installed Eclipse addon; id is `<addonId>:<trackId>`.
+    Addon,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -153,6 +155,7 @@ impl RecordingSources {
                     && match source.provider {
                         SourceProvider::Local => std::path::Path::new(&source.id).is_absolute(),
                         SourceProvider::Tidal | SourceProvider::Qobuz => source.id.bytes().all(|b| b.is_ascii_digit()),
+                        SourceProvider::Addon => crate::addons::valid_source_id(&source.id),
                         SourceProvider::Youtube => source.id.len() == 11
                             && source.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
                     }
@@ -263,6 +266,17 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     if !column_exists(&conn, "tracks", "sonic_profile") {
         conn.execute("ALTER TABLE tracks ADD COLUMN sonic_profile TEXT", [])?;
     }
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS addons (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            installed_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
 
     // Create playlist tables
     conn.execute(

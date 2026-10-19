@@ -102,7 +102,7 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
   const enabled = (source: PlaybackSource) => (source.provider === 'local'
     && (!track.is_autoplay || get().appMode === 'local' || radioAllowsLocal(get().autoplaySeedTrack || get().currentTrack))) || (source.provider !== 'local' && get().appMode !== 'local'
     && (!(track.is_autoplay || track.is_generated_mix) || get().recommendationEngine === 'our' || source.provider === get().recommendationEngine)
-    && (source.provider === 'youtube' || (source.provider === 'tidal' ? get().tidalConnected : get().qobuzConnected && get().qobuzExperimentalEnabled)));
+    && (source.provider === 'youtube' || source.provider === 'addon' || (source.provider === 'tidal' ? get().tidalConnected : get().qobuzConnected && get().qobuzExperimentalEnabled)));
   const ordered = rankSources(context.sources.filter(enabled), quality, get().preferredSource);
   if (context.selection.mode === 'explicit') {
     const selected = context.selection.source;

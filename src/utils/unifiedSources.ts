@@ -12,6 +12,8 @@ export async function bounded<T>(promise: Promise<T>, timeoutMs = 15000): Promis
   } finally { clearTimeout(timer); }
 }
 
+// `<addonId>:<trackId>`; addon ids need a dot so this can never match a Windows path.
+const ADDON_SOURCE_ID = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+:[^\x00-\x1f]{1,512}$/;
 export const sourceKey = (source: PlaybackSource) => `${source.provider}:${source.id}`;
 
 export function normalizeText(s?: string | null): string {
@@ -501,7 +503,7 @@ export const sourceSearchQuery = (track: Track) => {
   }
   return `${normalizeArtist(artist)} ${matchingTitle(track)}`.trim();
 };
-export const sourceName = (source: PlaybackSource) => ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'Webstream' })[source.provider];
+export const sourceName = (source: PlaybackSource) => ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'Webstream', addon: 'Addon' })[source.provider];
 
 export const sourceMetadata = (track: SourceMetadata): SourceMetadata => ({
   title: track.title, artist: track.artist, album: track.album ?? null, duration: track.duration,
@@ -510,6 +512,7 @@ export const sourceMetadata = (track: SourceMetadata): SourceMetadata => ({
 });
 
 export function sourceFor(track: Track): PlaybackSource | null {
+  if (track.format === 'Addon') return ADDON_SOURCE_ID.test(track.path) ? { provider: 'addon', id: track.path, catalog_quality: track.catalog_quality, recording_evidence: track.recording_evidence } : null;
   if (track.format === 'Tidal FLAC') return /^\d+$/.test(track.path) ? { provider: 'tidal', id: track.path, catalog_quality: track.catalog_quality, recording_evidence: track.recording_evidence } : null;
   if (track.format === 'Qobuz FLAC') return /^\d+$/.test(track.path) ? { provider: 'qobuz', id: track.path, catalog_quality: track.catalog_quality, recording_evidence: track.recording_evidence } : null;
   try {
@@ -841,10 +844,10 @@ export function groupRecordings(tracks: Track[], query: string, existingGroups?:
   return groups.map(g => applySourcePreference(g.row)).sort((a, b) => relevance(b) - relevance(a));
 }
 
-export function catalogTrack(raw: any, provider: 'tidal' | 'qobuz' | 'youtube'): Track {
+export function catalogTrack(raw: any, provider: 'tidal' | 'qobuz' | 'youtube' | 'addon'): Track {
   const label = String(raw.quality || '');
   const quality: SourceQuality = { ...raw.catalog_quality };
-  if (provider !== 'youtube' && quality.lossless == null && /^(LOSSLESS|HI_RES_LOSSLESS|HI_RES_192)$/.test(label)) quality.lossless = true;
+  if (provider !== 'youtube' && provider !== 'addon' && quality.lossless == null && /^(LOSSLESS|HI_RES_LOSSLESS|HI_RES_192)$/.test(label)) quality.lossless = true;
   if (provider === 'youtube') quality.lossless = false;
   const durationText = typeof raw.duration_raw === 'string' ? raw.duration_raw.trim() : '';
   const parsedDuration = /^(?:\d+:)?\d+:[0-5]\d$/.test(durationText)
@@ -856,7 +859,7 @@ export function catalogTrack(raw: any, provider: 'tidal' | 'qobuz' | 'youtube'):
     path: provider === 'youtube' ? raw.url || `https://www.youtube.com/watch?v=${raw.id}` : String(raw.id),
     title: raw.title ?? null, artist: raw.artist ?? null, album: raw.album ?? null,
     duration: Number.isFinite(duration) && duration > 0 ? duration : null,
-    duration_raw: raw.duration_raw, format: provider === 'tidal' ? 'Tidal FLAC' : provider === 'qobuz' ? 'Qobuz FLAC' : 'YouTube Direct',
+    duration_raw: raw.duration_raw, format: provider === 'tidal' ? 'Tidal FLAC' : provider === 'qobuz' ? 'Qobuz FLAC' : provider === 'addon' ? 'Addon' : 'YouTube Direct',
     lyric_offset: 0, cover_url: raw.cover_url || null,
     track_number: raw.track_number ?? null, disc_number: raw.disc_number ?? null,
     recording_evidence: raw.recording_evidence, catalog_quality: quality,
@@ -869,10 +872,10 @@ export interface SourceSearch {
   errors: Record<string, string>;
 }
 
-export async function searchSources(query: string, enabled: { tidal: boolean; qobuz: boolean; youtube?: boolean }, update: (result: SourceSearch) => void): Promise<SourceSearch> {
+export async function searchSources(query: string, enabled: { tidal: boolean; qobuz: boolean; youtube?: boolean; addons?: string[] }, update: (result: SourceSearch) => void): Promise<SourceSearch> {
   const parsed = parseMusicSearchQuery(query);
   const cleanQuery = parsed.cleanQuery;
-  const providers = ['local', ...(enabled.youtube !== false ? ['youtube'] : []), ...(enabled.tidal ? ['tidal'] : []), ...(enabled.qobuz ? ['qobuz'] : [])];
+  const providers = ['local', ...(enabled.youtube !== false ? ['youtube'] : []), ...(enabled.tidal ? ['tidal'] : []), ...(enabled.qobuz ? ['qobuz'] : []), ...(enabled.addons || []).map(id => `addon:${id}`)];
   const found: Track[] = [];
   const pending = new Set(providers);
   const errors: Record<string, string> = {};
@@ -900,6 +903,10 @@ export async function searchSources(query: string, enabled: { tidal: boolean; qo
       } else if (provider === 'youtube') {
         const youtube = await bounded(invoke<any[]>('search_youtube', { query: cleanQuery }));
         register('youtube', (youtube || []).map(t => catalogTrack(t, 'youtube')));
+      } else if (provider.startsWith('addon:')) {
+        const addonId = provider.slice('addon:'.length);
+        const found = await bounded(invoke<any[]>('addon_search', { addonId, query: cleanQuery }));
+        register(provider, (found || []).map(t => catalogTrack(t, 'addon')));
       } else {
         const catalog = await bounded(invoke<any[]>(`${provider}_search`, { query: cleanQuery }));
         register(provider, (catalog || []).map(t => catalogTrack(t, provider as 'tidal' | 'qobuz')));
@@ -920,7 +927,7 @@ function validMetadata(value: any): boolean {
 function validCandidateSource(s: any): boolean {
   return s && typeof s.id === 'string' && s.id.length > 0 && s.id.length <= 32768
     && !/[\x00-\x1f]/.test(s.id)
-    && ['local', 'tidal', 'qobuz', 'youtube'].includes(s.provider);
+    && ['local', 'tidal', 'qobuz', 'youtube', 'addon'].includes(s.provider);
 }
 
 function validContext(value: any): value is RecordingSources {
@@ -928,7 +935,8 @@ function validContext(value: any): value is RecordingSources {
     && value.recording_id.length <= 512 && Array.isArray(value.sources) && value.sources.length > 0 && value.sources.length <= 32
     && value.sources.every((s: any) => s && validMetadata(s.metadata) && typeof s.id === 'string' && s.id.length > 0 && s.id.length <= 32768
       && !/[\x00-\x1f]/.test(s.id) && (s.provider === 'local' ? /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(s.id)
-        : s.provider === 'youtube' ? /^[\w-]{11}$/.test(s.id) : ['tidal', 'qobuz'].includes(s.provider) && /^\d{1,32}$/.test(s.id)))
+        : s.provider === 'youtube' ? /^[\w-]{11}$/.test(s.id) : s.provider === 'addon' ? ADDON_SOURCE_ID.test(s.id)
+        : ['tidal', 'qobuz'].includes(s.provider) && /^\d{1,32}$/.test(s.id)))
     && new Set(value.sources.map(sourceKey)).size === value.sources.length
     && (value.display_candidates == null || (Array.isArray(value.display_candidates) && value.display_candidates.every(validCandidateSource)))
     && (value.selection?.mode === 'auto' || (value.selection?.mode === 'explicit' && value.selection.source

@@ -99,6 +99,8 @@ lazy_static::lazy_static! {
     pub static ref ACTIVE_STREAM_DOWNLOADS: std::sync::Mutex<std::collections::HashMap<String, Arc<ActiveStreamDownload>>> = std::sync::Mutex::new(std::collections::HashMap::new());
 }
 
+/// Hard ceiling for one progressive stream download (addon URLs are untrusted). ponytail: 2 GiB covers hi-res albums-as-one-file; make configurable if needed.
+const MAX_STREAM_DOWNLOAD_BYTES: u64 = 2 << 30;
 static YTDLP_UPDATING: AtomicBool = AtomicBool::new(false);
 
 pub(crate) const BUFFER_GATE_BYTES: u64 = 192 * 1024;
@@ -413,6 +415,10 @@ pub fn run_stream_downloader(
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .tcp_keepalive(std::time::Duration::from_secs(15))
+            // Stream URLs can come from user-installed addons: never follow redirects into the LAN.
+            .redirect(reqwest::redirect::Policy::custom(|a| {
+                if a.previous().len() < 10 && crate::addons::eclipse::redirect_target_allowed(a.url()) { a.follow() } else { a.stop() }
+            }))
             .build()
             .unwrap_or_else(|_| reqwest::blocking::Client::new());
 
@@ -485,6 +491,12 @@ pub fn run_stream_downloader(
                                 }
                                 let _ = file.flush();
                                 bytes_downloaded += n as u64;
+                                if bytes_downloaded > MAX_STREAM_DOWNLOAD_BYTES {
+                                    eprintln!("[player-stream] Stream exceeded {} bytes; aborting", MAX_STREAM_DOWNLOAD_BYTES);
+                                    read_error = true;
+                                    abort.store(true, Ordering::SeqCst); // fatal: retrying would re-download the same body
+                                    break;
+                                }
                                 downloaded_bytes.store(bytes_downloaded, Ordering::Relaxed);
                                 SESSION_DOWNLOADED_BYTES.fetch_add(n as u64, Ordering::Relaxed);
                                 ACTIVE_STREAM_BUFFERED_BYTES.store(bytes_downloaded, Ordering::Relaxed);

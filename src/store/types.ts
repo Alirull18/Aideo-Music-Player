@@ -3,7 +3,7 @@ export type StreamingQuality = 'best_available' | 'standard_lossless' | 'data_sa
 export type MatchAssessment = 'equivalent' | 'candidate' | 'uncertain' | 'rejected';
 
 export interface PlaybackSource {
-  provider: 'local' | 'tidal' | 'qobuz' | 'youtube';
+  provider: 'local' | 'tidal' | 'qobuz' | 'youtube' | 'addon';
   // A local absolute path or a provider ID; never a resolved streaming URL.
   id: string;
   catalog_quality?: SourceQuality | null;
@@ -414,6 +414,13 @@ export interface LibraryActions {
 }
 
 export interface PlayerState {
+  // Eclipse addons
+  addons: import('./addonSlice').AddonInfo[];
+  addonBusy: boolean;
+  loadAddons: () => Promise<void>;
+  installAddon: (manifestUrl: string) => Promise<void>;
+  removeAddon: (addonId: string) => Promise<void>;
+
   view: ViewMode;
   networkTelemetry: NetworkTelemetry | null;
   tracks: Track[];
