@@ -45,12 +45,8 @@ import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 import { getAudioPathPresentation } from '../utils/audioPath';
 
 const THEATER_NAMES: Record<TheaterModeDesign, string> = {
-  stage: 'Stage View',
-  zen: 'Zen Mode',
   studio: 'Studio Deck',
-  vinyl: 'Vinyl Turntable',
-  poster: 'Poster',
-  scope: 'Scope',
+  zen: 'Zen Mode',
 };
 
 export const THEATER_HUD_NAMES: Record<TheaterHudStyle, string> = {
@@ -318,7 +314,7 @@ export function FullscreenView() {
         }
       } else if (key === 'l') {
         e.preventDefault();
-        const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+        const order: TheaterModeDesign[] = ['studio', 'zen'];
         const cur = useStore.getState().theaterModeDesign;
         const next = order[(order.indexOf(cur) + 1) % order.length];
         useStore.getState().setTheaterModeDesign(next);
@@ -515,16 +511,14 @@ export function FullscreenView() {
   return (
     <div className={`fullscreen-overlay ${isHUDHidden ? 'hud-hidden' : ''}`}>
       {/* Immersive backdrop visualizer or Motion Video Canvas */}
-      {theaterModeDesign !== 'scope' && (
-        canvasEnabled && !dsp.low_spec_mode && currentCanvas && (canvasMode === 'backdrop' || canvasMode === 'both') ? (
-          <CanvasVideoPlayer
-            canvas={currentCanvas}
-            isPlaying={playbackStatus === 'Playing'}
-            variant="backdrop"
-          />
-        ) : (
-          <LiquidBackground />
-        )
+      {canvasEnabled && !dsp.low_spec_mode && currentCanvas && (canvasMode === 'backdrop' || canvasMode === 'both') ? (
+        <CanvasVideoPlayer
+          canvas={currentCanvas}
+          isPlaying={playbackStatus === 'Playing'}
+          variant="backdrop"
+        />
+      ) : (
+        <LiquidBackground />
       )}
 
       {/* Floating Top Actions Bar */}
@@ -574,7 +568,7 @@ export function FullscreenView() {
         <button
           className="fullscreen-layout-toggle"
           onClick={() => {
-            const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+            const order: TheaterModeDesign[] = ['studio', 'zen'];
             const next = order[(order.indexOf(theaterModeDesign) + 1) % order.length];
             setTheaterModeDesign(next);
           }}
@@ -621,7 +615,7 @@ export function FullscreenView() {
       />
 
       {/* Sharp Glowing Neon Visualizer Baseline / Wave */}
-      {vizMode !== 'circle' && theaterModeDesign !== 'scope' && (
+      {vizMode !== 'circle' && (
         <div className="fullscreen-visualizer-container">
           <Visualizer mode={vizMode} />
         </div>

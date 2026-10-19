@@ -65,7 +65,7 @@ describe('Theater Mode Fullscreen Playback HUD (Anti-UI Slop Controls)', () => {
       shuffle: false,
       repeat: 'none',
       autoplayEnabled: false,
-      theaterModeDesign: 'stage',
+      theaterModeDesign: 'studio',
       view: 'fullscreen',
     });
   });

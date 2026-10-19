@@ -4,16 +4,10 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Waves, Headphones, Activity, BookOpen, ChevronDown, MoreVertical } from 'lucide-react';
+import { Sparkles, History, Compass, Play, Pause, Music, Star, Moon, Download, Check, Loader2, RefreshCw, LayoutGrid, List, Search, X, ArrowLeft, Layers, Flame, Disc, RotateCcw, Zap, Clock, ListMusic, CloudRain, Target, Waves, MoreVertical } from 'lucide-react';
 import { YoutubeMix } from '../store/types';
 import './aideo/home.css';
 
-import { EditorialHome } from './aideo/EditorialHome';
-import { CommandDeckHome } from './aideo/CommandDeckHome';
-import { StageHome } from './aideo/StageHome';
-import { HorizonHome } from './aideo/HorizonHome';
-import { SpatialGlassHome } from './aideo/SpatialGlassHome';
-import { AideoHomeProps, SearchBarProps, HomeResumeInfo } from './aideo/HomeParts';
 import { classifyDiscoveryPlayback, pathsEqual, baseName, parseDuration } from '../utils';
 import { foldSearchText, simplifyPunctuation } from '../utils/searchParser';
 import { UnifiedSearchResults } from './UnifiedSearchResults';
@@ -267,30 +261,7 @@ const coverArtCache = new SimpleLRU<string, string | null>(300);
 const pendingArtRequests = new SimpleLRU<string, Promise<any>>(300);
 
 
-// Colored source-type indicator: one color per music source / quality tier
-function getSourceType(track: any): { color: string; label: string } {
-  const allTracks = useStore.getState().tracks || [];
-  const localMatch = allTracks.find(t =>
-    (track?.path && pathsEqual(t.path, track.path)) ||
-    (track?.url && pathsEqual(t.path, track.url)) ||
-    (Boolean(track?.title && track?.artist) &&
-     Boolean(t.title && t.artist) &&
-     (t.title ?? '').trim().toLowerCase() === String(track.title).trim().toLowerCase() &&
-     (t.artist ?? '').trim().toLowerCase() === String(track.artist).trim().toLowerCase())
-  );
-  const p = String(localMatch?.path || track?.path || track?.url || '').toLowerCase();
-  const fmt = String(localMatch?.format || track?.format || '').toLowerCase();
-  if (fmt === 'tidal flac') return { color: '#22d3ee', label: 'Tidal HiFi · Lossless' };
-  if (fmt === 'qobuz flac') {
-    const q = String(track?.quality || '').toUpperCase();
-    if (q === 'HI_RES_192') return { color: '#a78bfa', label: 'Qobuz Studio · Hi-Res 192k' };
-    if (q === 'HI_RES') return { color: '#c4b5fd', label: 'Qobuz Studio · Hi-Res' };
-    return { color: '#7fb8e6', label: 'Qobuz Studio · Lossless' };
-  }
-  if (!localMatch && (p.startsWith('http://') || p.startsWith('https://'))) return { color: '#f87171', label: 'Webstream' };
-  if (fmt === 'flac' || fmt === 'wav' || /\.(flac|wav|alac|aiff|dsd)$/.test(p)) return { color: '#c084fc', label: 'Local lossless' };
-  return { color: '#34d399', label: 'Local File' };
-}
+
 
 // Small colored outline rendered around each artwork showing its source/quality tier.
 // (Replaces the old inline SourceSquare text-adjacent tag; color meaning is
@@ -438,8 +409,6 @@ export function AideoView() {
     setDiscoveryCardSize,
     discoveryViewMode,
     setDiscoveryViewMode,
-    aideoPageDesign,
-    setAideoPageDesign,
     tidalConnected,
     tidalSearching,
     tidalSearchResults,
@@ -486,8 +455,6 @@ export function AideoView() {
     setDiscoveryCardSize: s.setDiscoveryCardSize,
     discoveryViewMode: s.discoveryViewMode,
     setDiscoveryViewMode: s.setDiscoveryViewMode,
-    aideoPageDesign: s.aideoPageDesign,
-    setAideoPageDesign: s.setAideoPageDesign,
     tidalConnected: s.tidalConnected,
     tidalSearching: s.tidalSearching,
     tidalSearchResults: s.tidalSearchResults,
@@ -2499,142 +2466,13 @@ export function AideoView() {
     );
   };
 
-  const aideoSearchProps: SearchBarProps = {
-    appMode,
-    query: searchQuery,
-    onQueryChange: setSearchQuery,
-    focused: searchFocused,
-    onFocusChange: setSearchFocused,
-    suggestions,
-    quickResults,
-    history: searchHistory,
-    source: musicSource,
-    onSourceChange: setMusicSource,
-    tidalConnected,
-    qobuzEnabled: qobuzExperimentalEnabled,
-    qobuzConnected,
-    onSubmit: () => { if (searchQuery.trim()) triggerSearch(searchQuery.trim()); },
-    onPickQuery: triggerSearch,
-    onDeleteHistory: handleDeleteHistory,
-    onPlayQuickTrack: handlePlayQuickTrack,
-    isSearching,
-    onTrackContextMenu: (track, anchor) => setContextMenuAnchor({ track, anchor }),
-  };
-
-  const aideoResumeInfo: HomeResumeInfo | null = (resumePosition > 0 && currentTrack) ? {
-    title: currentTrack.title || baseName(currentTrack.path),
-    artist: currentTrack.artist || 'Unknown Artist',
-    positionLabel: `paused at ${fmt(resumePosition)}`,
-    coverUrl: (currentTrack as any).cover_url ?? null,
-    coverPath: (currentTrack as any).path ?? null,
-    accent: getSourceType(currentTrack).color,
-    onResume: () => { resumeLastSession(); setView('nowplaying'); },
-    onDismiss: dismissResumePrompt,
-  } : null;
-
-  const renderDownloadAction = (track: any) => {
-    if (track.format === 'Tidal FLAC') return renderStreamDownloadCell(track, handleDownloadTidalTrack, tidalDownloads);
-    if (track.format === 'Qobuz FLAC') return renderStreamDownloadCell(track, handleDownloadQobuzTrack, qobuzDownloads);
-    const isOnline = track.url && (track.url.startsWith('http://') || track.url.startsWith('https://'));
-    if (!isOnline) return null;
-    if (downloadedIds.has(track.id)) {
-      return <div className="discovery-download-btn downloaded" title="Added to Offline Library"><Check size={12} /></div>;
-    }
-    if (downloadingIds.has(track.id)) {
-      return <div className="discovery-download-btn downloading"><Loader2 className="spin" size={12} /></div>;
-    }
-    return (
-      <button onClick={() => handleDownloadTrack(track)} className="discovery-download-btn" title="Download offline">
-        <Download size={12} />
-      </button>
-    );
-  };
-
-  const renderLayoutFilter = () => {
-    const layoutItems = [
-      { id: 'classic' as const, label: 'Classic', icon: Layers, accent: '#3b82f6' },
-      { id: 'spotify' as const, label: 'Grid', icon: Headphones, accent: 'var(--accent, #1db954)' },
-      { id: 'apple' as const, label: 'Carousel', icon: Disc, accent: 'var(--accent, #fa243c)' },
-      { id: 'editorial' as const, label: 'Featured', icon: BookOpen, accent: '#a855f7' },
-      { id: 'command' as const, label: 'Table', icon: Activity, accent: '#06b6d4' },
-      { id: 'stage' as const, label: 'Stage', icon: Sparkles, accent: '#f59e0b' },
-    ];
-
-    const currentLayout = layoutItems.find(item => item.id === aideoPageDesign) || layoutItems[0];
-    const CurrentIcon = currentLayout.icon;
-
-    return (
-      <details className="unified-layout-filter">
-        <summary>
-          <span className="layout-trigger-badge" aria-hidden="true" style={{ color: currentLayout.accent }}>
-            <CurrentIcon size={13} />
-          </span>
-          <span className="layout-trigger-text">Layout: {currentLayout.label}</span>
-          <ChevronDown size={12} className="layout-chevron" aria-hidden="true" />
-        </summary>
-        <div className="layout-filter-options">
-          {layoutItems.map(item => {
-            const ItemIcon = item.icon;
-            const isActive = aideoPageDesign === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`aideo-layout-pill pill-${item.id} ${isActive ? 'active' : ''}`}
-                onClick={(e) => {
-                  setAideoPageDesign(item.id);
-                  window.dispatchEvent(new CustomEvent('ui-toast', {
-                    detail: { message: `Switched layout to ${item.label}`, type: 'info' }
-                  }));
-                  const details = e.currentTarget.closest('details');
-                  if (details) details.open = false;
-                }}
-                aria-pressed={isActive}
-              >
-                <span className="layout-pill-icon" aria-hidden="true" style={{ color: isActive ? item.accent : 'currentColor' }}>
-                  <ItemIcon size={13} />
-                </span>
-                <span className="layout-pill-label">{item.label}</span>
-                {isActive && <span className="layout-active-dot" aria-hidden="true" style={{ background: item.accent }} />}
-              </button>
-            );
-          })}
-        </div>
-      </details>
-    );
-  };
-
-  const aideoHomeProps: AideoHomeProps = {
-    greeting,
-    trackCount: tracks.length,
-    totalPlays,
-    discoveryData,
-    isLoadingRecs,
-    isRefreshingRecs,
-    onRefreshRecs: () => fetchRecommendations(true),
-    onPlayTrack: handleTogglePreview,
-    renderDownloadAction,
-    resume: aideoResumeInfo,
-    search: aideoSearchProps,
-    layoutFilter: renderLayoutFilter(),
-    onContextMenu: (track, anchor) => setContextMenuAnchor({ track, anchor }),
-  };
-
   return (
-    <div className={`aideo-home-wrap layout-${aideoPageDesign} ${searchActive ? 'has-search-active' : ''}`} data-scroll-container="true">
+    <div className={`aideo-home-wrap layout-classic ${searchActive ? 'has-search-active' : ''}`} data-scroll-container="true">
       {/* Background tint overlay */}
-      {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
-        <div className="aideo-bg-tint"></div>
-      )}
+      <div className="aideo-bg-tint"></div>
 
       <div className="aideo-home-content-container">
-        {/* Collapsible Layout Filter (rendered here for classic and active search; modern layouts embed it directly in their top bar) */}
-        {(searchActive || aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
-          renderLayoutFilter()
-        )}
-
-        {/* Premium Web Search Bar (classic design only; the other designs embed their own) */}
-      {(searchActive || aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
+        {/* Premium Web Search Bar */}
       <div style={{ marginBottom: 36, maxWidth: 640, position: 'relative' }} ref={dropdownRef}>
         {appMode !== 'local' && (
           <details className="unified-source-filter">
@@ -2946,7 +2784,6 @@ export function AideoView() {
           </div>
         )}
       </div>
-      )}
 
       {searchActive ? (
         <div className="aideo-search-results-view">
@@ -3561,50 +3398,36 @@ export function AideoView() {
         </div>
       ) : (
         <>
-          {aideoPageDesign === 'editorial' && <EditorialHome {...aideoHomeProps} />}
-
-          {aideoPageDesign === 'command' && <CommandDeckHome {...aideoHomeProps} />}
-
-          {aideoPageDesign === 'stage' && <StageHome {...aideoHomeProps} />}
-
-          {aideoPageDesign === 'spotify' && <HorizonHome {...aideoHomeProps} />}
-
-          {aideoPageDesign === 'apple' && <SpatialGlassHome {...aideoHomeProps} />}
-
-          {(aideoPageDesign === 'classic' || !['editorial', 'command', 'stage', 'spotify', 'apple'].includes(aideoPageDesign)) && (
-            <>
-              {/* Greeting Header */}
-              <div className="aideo-greeting-header">
-                <div className="aideo-header-info">
-                  <motion.h1
-                    initial={{ opacity: 0, y: -15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5 }}
-                    className="aideo-title"
-                  >
-                    {greeting}
-                  </motion.h1>
-                  <p className="aideo-subtitle">Your library, listening history, and recommendations.</p>
-                </div>
-                <div className="aideo-header-stats">
-                  <div className="aideo-stat-box">
-                    <span className="aideo-stat-num">{tracks.length}</span>
-                    <span className="aideo-stat-label">Tracks</span>
-                  </div>
-                  <div className="aideo-stat-box">
-                    <span className="aideo-stat-num">{totalPlays}</span>
-                    <span className="aideo-stat-label">Total Plays</span>
-                  </div>
-                </div>
+          {/* Greeting Header */}
+          <div className="aideo-greeting-header">
+            <div className="aideo-header-info">
+              <motion.h1
+                initial={{ opacity: 0, y: -15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="aideo-title"
+              >
+                {greeting}
+              </motion.h1>
+              <p className="aideo-subtitle">Your library, listening history, and recommendations.</p>
+            </div>
+            <div className="aideo-header-stats">
+              <div className="aideo-stat-box">
+                <span className="aideo-stat-num">{tracks.length}</span>
+                <span className="aideo-stat-label">Tracks</span>
               </div>
+              <div className="aideo-stat-box">
+                <span className="aideo-stat-num">{totalPlays}</span>
+                <span className="aideo-stat-label">Total Plays</span>
+              </div>
+            </div>
+          </div>
 
-              {renderResumePrompt()}
-              {renderDiscoveryHubSection()}
-              {renderQuickRecapSection()}
-              {renderRecentlyPlayedSection()}
-              {showSmartMixWidget && renderSmartMixBuilderSection()}
-            </>
-          )}
+          {renderResumePrompt()}
+          {renderDiscoveryHubSection()}
+          {renderQuickRecapSection()}
+          {renderRecentlyPlayedSection()}
+          {showSmartMixWidget && renderSmartMixBuilderSection()}
         </>
       )}
       </div>

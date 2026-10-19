@@ -3554,16 +3554,10 @@ fn play_file(
     // Create persistent DSP filter and delay line instances
     let mut nodes: Vec<Box<dyn AudioNode + Send>> = vec![
         Box::new(PreampNode::new()),
-        Box::new(SaturationNode::new()),
-        Box::new(PhaseResponseNode::new()),
         Box::new(EqNode::new()),
-        Box::new(AideoFilterNode::new()),
         Box::new(SubsonicNode::new()),
         Box::new(CrossfeedNode::new()),
-        Box::new(SpatializerNode::new()),
         Box::new(ConvolutionNode::new()),
-        Box::new(WidthNode::new()),
-        Box::new(CompressorNode::new()),
         Box::new(NormalizerNode::new()),
         Box::new(LimiterNode::new(use_ch, 2.0, dev_rate as f32)),
     ];

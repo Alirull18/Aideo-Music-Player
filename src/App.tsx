@@ -23,15 +23,12 @@ const ListenbrainzView = lazy(() => import('./components/ListenbrainzView').then
 const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
 const AideoLabView = lazy(() => import('./components/AideoLabView').then(m => ({ default: m.AideoLabView })));
 const FullscreenView = lazy(() => import('./components/FullscreenView').then(m => ({ default: m.FullscreenView })));
-const ListeningInsightsView = lazy(() => import('./components/ListeningInsightsView').then(m => ({ default: m.ListeningInsightsView })));
 const AlbumsView = lazy(() => import('./components/AlbumsView').then(m => ({ default: m.AlbumsView })));
-const ChartsView = lazy(() => import('./components/ChartsView').then(m => ({ default: m.ChartsView })));
 const DownloadedView = lazy(() => import('./components/DownloadedView').then(m => ({ default: m.DownloadedView })));
 
 import { PlaybackRecovery } from './components/PlaybackRecovery';
 import { PlayerBar } from './components/PlayerBar';
 import { ScrollToTopButton } from './components/ScrollToTopButton';
-import { AudioControlCenter } from './components/AudioControlCenter';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
 import { DownloadManager } from './components/DownloadManager';
@@ -878,8 +875,6 @@ function AideoApp() {
     const prefetch = () => {
       import('./components/AlbumsView');
       import('./components/SettingsView');
-      import('./components/ChartsView');
-      import('./components/ListeningInsightsView');
       import('./components/LastfmView');
       import('./components/ListenbrainzView');
       import('./components/AideoLabView');
@@ -1017,34 +1012,12 @@ function AideoApp() {
             </motion.div>
           )}
 
-          {view === 'aideo_lab' && (
+          {(view === 'aideo_lab' || view === 'aideolab') && (
             <motion.div key="aideo_lab" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <Suspense fallback={<ViewSkeleton type="generic" />}>
                 <ErrorBoundary name="Aideo Lab">
                   <AideoLabView />
-                </ErrorBoundary>
-              </Suspense>
-            </motion.div>
-          )}
-
-          {view === 'insights' && (
-            <motion.div key="insights" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Suspense fallback={<ViewSkeleton type="generic" />}>
-                <ErrorBoundary name="Insights">
-                  <ListeningInsightsView />
-                </ErrorBoundary>
-              </Suspense>
-            </motion.div>
-          )}
-
-          {view === 'charts' && (
-            <motion.div key="charts" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Suspense fallback={<ViewSkeleton type="charts" />}>
-                <ErrorBoundary name="Charts">
-                  <ChartsView />
                 </ErrorBoundary>
               </Suspense>
             </motion.div>
@@ -1083,7 +1056,6 @@ function AideoApp() {
       <DownloadManager />
       <AnimatePresence>
         <QueueView key="queue" />
-        <AudioControlCenter key="audio-cc" />
         {lastScrobble && (
           <motion.div
             key="scrobble-toast"

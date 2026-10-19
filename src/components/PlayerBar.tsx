@@ -6,10 +6,9 @@ import {
   SkipBack, SkipForward, Play, Pause, Square, Shuffle, Repeat, Repeat1, 
   Volume2, Volume1, VolumeX, SlidersHorizontal, X, ListMusic, Activity, 
   Infinity as InfinityIcon, Maximize2, Minimize2, Heart, ThumbsDown, Tv2,
-  Disc, Sparkles, Loader2
+  Loader2
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
-import { CastSelector } from './CastSelector';
 import { fmt, parseDuration, baseName, getStreamName, isRadioStream } from '../utils';
 import { generateWaveformPeaks } from '../utils/waveform';
 import { getAudioPathPresentation } from '../utils/audioPath';
@@ -115,220 +114,15 @@ function ClassicProgressRow({
   );
 }
 
-function FloatingSeekRow({
-  duration,
-  isLive,
-  onSeek,
-}: {
-  duration: number;
-  isLive: boolean;
-  onSeek: (pct: number) => void;
-}) {
-  const positionSecs = useStore((s) => s.playback.position_secs);
-  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
-  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    onSeek(clickPct * duration);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setHoverSeekPct(p);
-  };
-
-  return (
-    <div className="floating-seek-row">
-      <span className="floating-time-num" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(positionSecs)}</span>
-      <div 
-        className="floating-progress-track"
-        onClick={handleSeek}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverSeekPct(null)}
-      >
-        <div className="floating-progress-fill" style={{ width: `${pct}%` }} />
-        {hoverSeekPct !== null && (
-          <div className="floating-hover-indicator" style={{ left: `${hoverSeekPct * 100}%` }} />
-        )}
-      </div>
-      <span className="floating-time-num" style={{ fontVariantNumeric: 'tabular-nums' }}>{isLive ? 'LIVE' : fmt(duration)}</span>
-    </div>
-  );
-}
-
-function WaveformStudioTimeDisplay({ duration, isLive }: { duration: number; isLive: boolean }) {
-  const positionSecs = useStore((s) => s.playback.position_secs);
-  return (
-    <div className="studio-time-display">
-      <span className="studio-time-current" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(positionSecs)}</span>
-      <span className="studio-time-sep">/</span>
-      <span className="studio-time-total" style={{ fontVariantNumeric: 'tabular-nums' }}>{isLive ? 'LIVE' : fmt(duration)}</span>
-    </div>
-  );
-}
-
-function WaveformDeckTopScrubber({
-  duration,
-  waveformPeaks,
-  onSeek,
-}: {
-  duration: number;
-  waveformPeaks: number[];
-  onSeek: (pct: number) => void;
-}) {
-  const positionSecs = useStore((s) => s.playback.position_secs);
-  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
-  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    onSeek(clickPct * duration);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setHoverSeekPct(p);
-  };
-
-  return (
-    <div 
-      className="waveform-deck-top"
-      onClick={handleSeek}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={() => setHoverSeekPct(null)}
-      title="Seek in waveform"
-    >
-      {waveformPeaks.length > 0 ? (
-        <div className="waveform-full-bars">
-          {waveformPeaks.map((peak, idx) => {
-            const barPct = (idx / waveformPeaks.length) * 100;
-            const isPlayed = barPct <= pct;
-            const isHovered = hoverSeekPct !== null && barPct <= hoverSeekPct * 100;
-            return (
-              <div
-                key={idx}
-                className="waveform-peak-bar"
-                style={{
-                  height: `${Math.max(18, peak * 100)}%`,
-                  background: isPlayed 
-                    ? 'linear-gradient(180deg, var(--accent, #8b5cf6), rgba(var(--accent-rgb), 0.7))' 
-                    : isHovered 
-                    ? 'var(--wave-hover)' 
-                    : 'var(--wave-idle)',
-                  boxShadow: isPlayed ? '0 0 6px rgba(var(--accent-rgb), 0.35)' : 'none'
-                }}
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <div className="waveform-flat-line" />
-      )}
-      <div className="waveform-cursor-line" style={{ left: `${pct}%` }} />
-      {hoverSeekPct !== null && (
-        <div className="waveform-hover-tag" style={{ left: `${hoverSeekPct * 100}%` }}>
-          {fmt(hoverSeekPct * duration)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MinimalHairlineScrubber({ duration, onSeek }: { duration: number; onSeek: (pct: number) => void }) {
-  const positionSecs = useStore((s) => s.playback.position_secs);
-  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
-  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    onSeek(clickPct * duration);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setHoverSeekPct(p);
-  };
-
-  return (
-    <div 
-      className="minimal-hairline-scrubber"
-      onClick={handleSeek}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={() => setHoverSeekPct(null)}
-      title="Scrub Track"
-    >
-      <div className="minimal-hairline-fill" style={{ width: `${pct}%` }} />
-      {hoverSeekPct !== null && (
-        <div className="minimal-hairline-hover" style={{ left: `${hoverSeekPct * 100}%` }} />
-      )}
-    </div>
-  );
-}
-
-function MinimalTimeReadout({ duration, isLive }: { duration: number; isLive: boolean }) {
-  const positionSecs = useStore((s) => s.playback.position_secs);
-  return (
-    <div className="minimal-time-readout" style={{ fontVariantNumeric: 'tabular-nums' }}>
-      <span>{fmt(positionSecs)}</span>
-      <span style={{ opacity: 0.4 }}>/</span>
-      <span>{isLive ? 'LIVE' : fmt(duration)}</span>
-    </div>
-  );
-}
-
-function VinylProgressRow({ duration, isLive, onSeek }: { duration: number; isLive: boolean; onSeek: (pct: number) => void }) {
-  const positionSecs = useStore((s) => s.playback.position_secs);
-  const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
-  const [hoverSeekPct, setHoverSeekPct] = useState<number | null>(null);
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    onSeek(clickPct * duration);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setHoverSeekPct(p);
-  };
-
-  return (
-    <div className="vinyl-progress-row">
-      <span className="vinyl-amber-time" style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(positionSecs)}</span>
-      <div className="vinyl-prog-track" onClick={handleSeek} onMouseMove={handleMouseMove} onMouseLeave={() => setHoverSeekPct(null)} title="Scrub Track">
-        <div className="vinyl-prog-grooves">
-          {Array.from({ length: 32 }).map((_, i) => (
-            <div key={i} className="vinyl-tick" style={{ opacity: (i / 32) * 100 <= pct ? 0.9 : 0.25 }} />
-          ))}
-        </div>
-        <div className="vinyl-prog-fill" style={{ width: `${pct}%` }} />
-        {hoverSeekPct !== null && (
-          <div className="vinyl-prog-hover" style={{ left: `${hoverSeekPct * 100}%` }} />
-        )}
-      </div>
-      <span className="vinyl-amber-time" style={{ fontVariantNumeric: 'tabular-nums' }}>{isLive ? 'LIVE' : fmt(duration)}</span>
-    </div>
-  );
-}
-
 export function PlayerBar() {
   const {
     view, isMuted, toggleMute, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
-    dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
+    dsp, currentTrack, showQueue, toggleQueue,
     autoplayEnabled, toggleAutoplay, toggleLoveTrack, toggleDislikeTrack,
     setMiniPlayerMode, desktopLyricsOpen, toggleDesktopLyrics,
     desktopLyricsLocked, toggleDesktopLyricsLocked,
-    playerBarDesign,
     playbackStatus,
     playbackCurrentTrack,
     playbackIsBuffering,
@@ -357,7 +151,6 @@ export function PlayerBar() {
     currentTrack: s.currentTrack,
     showQueue: s.showQueue,
     toggleQueue: s.toggleQueue,
-    toggleControlCenter: s.toggleControlCenter,
     autoplayEnabled: s.autoplayEnabled,
     toggleAutoplay: s.toggleAutoplay,
     toggleLoveTrack: s.toggleLoveTrack,
@@ -367,7 +160,6 @@ export function PlayerBar() {
     toggleDesktopLyrics: s.toggleDesktopLyrics,
     desktopLyricsLocked: s.desktopLyricsLocked,
     toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
-    playerBarDesign: s.playerBarDesign,
     playbackStatus: s.playback.status,
     playbackCurrentTrack: s.playback.current_track,
     playbackIsBuffering: s.playback.is_buffering,
@@ -389,15 +181,13 @@ export function PlayerBar() {
   const effectiveCover = coverArt || current?.cover_url || defaultCover;
 
   const waveformPeaks = useMemo(() => {
-    const barCount = playerBarDesign === 'waveform' ? 64 : 48;
-    return generateWaveformPeaks(current?.path || current?.title || 'aideo', barCount);
-  }, [current?.path, current?.title, playerBarDesign]);
+    return generateWaveformPeaks(current?.path || current?.title || 'aideo', 48);
+  }, [current?.path, current?.title]);
 
   const trackTitle = current?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack)) || 'No Media Loaded';
   const trackArtist = current?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : '—');
   const isLive = isRadioStream(current, playbackCurrentTrack, duration);
 
-  // Render Quality Tag Helper
   const renderQualityTag = () => {
     if (!current?.format) return null;
     const fmtLower = current.format.toLowerCase();
@@ -430,7 +220,6 @@ export function PlayerBar() {
     );
   };
 
-  // Render Love & Dislike Buttons Helper
   const renderLoveDislike = () => {
     if (!current || isRadioStream(current)) return null;
     return (
@@ -481,8 +270,7 @@ export function PlayerBar() {
     );
   };
 
-  // Render Volume Control Helper
-  const renderVolume = (compact: boolean = false) => {
+  const renderVolume = () => {
     return (
       <div className="pb-vol-group" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <button
@@ -505,7 +293,7 @@ export function PlayerBar() {
           min={0} 
           max={1} 
           step={0.01} 
-          style={{ width: compact ? 65 : 85 }}
+          style={{ width: 85 }}
           value={playbackVolume} 
           onChange={e => setVolume(+e.target.value)} 
         />
@@ -513,7 +301,6 @@ export function PlayerBar() {
     );
   };
 
-  // Render Audio Badges Helper
   const renderAudioBadges = () => {
     const { badge } = audioPathPresentation;
     const hasBadge = Boolean(badge || (playbackEffectiveAudioPath?.active && playbackEffectiveAudioPath.resampling && dsp.upsample_rate > 0));
@@ -553,18 +340,15 @@ export function PlayerBar() {
     );
   };
 
-  // Render Utility Quick-Tools Helper
-  const renderQuickTools = (compact: boolean = false) => {
+  const renderQuickTools = () => {
     return (
-      <div className="pb-tools-group" style={{ display: 'flex', alignItems: 'center', gap: compact ? 8 : 12 }}>
+      <div className="pb-tools-group" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <button className={`pb-btn ${showQueue ? 'active' : ''}`} onClick={toggleQueue} title="Up Next (Queue)">
           <ListMusic size={17} />
         </button>
-        {!compact && (
-          <button className={`pb-btn ${view === 'aideo_lab' ? 'active' : ''}`} onClick={() => setView(view === 'aideo_lab' ? 'nowplaying' : 'aideo_lab')} title="Equalizer and DSP">
-            <Activity size={17} />
-          </button>
-        )}
+        <button className={`pb-btn ${view === 'aideo_lab' || (view as string) === 'aideolab' ? 'active' : ''}`} onClick={() => setView(view === 'aideo_lab' || (view as string) === 'aideolab' ? 'nowplaying' : 'aideo_lab')} title="Equalizer and DSP">
+          <Activity size={17} />
+        </button>
         <button
           className={`pb-btn ${desktopLyricsOpen ? 'active' : ''}`}
           onClick={toggleDesktopLyrics}
@@ -591,8 +375,7 @@ export function PlayerBar() {
             />
           )}
         </button>
-        <CastSelector />
-        <button className="pb-btn" onClick={toggleControlCenter} title="Audio Engine Settings">
+        <button className="pb-btn" onClick={() => setView('aideolab' as any)} title="Audio Engine Settings">
           <SlidersHorizontal size={17} />
         </button>
         <button className="pb-btn" onClick={() => setMiniPlayerMode(true)} title="Mini Player">
@@ -605,13 +388,8 @@ export function PlayerBar() {
     );
   };
 
-  let content: React.ReactNode = null;
-
-  // -------------------------------------------------------------
-  // VARIANT 1: CLASSIC STUDIO (Default 3-Column Desktop Layout)
-  // -------------------------------------------------------------
-  if (playerBarDesign === 'classic' || !playerBarDesign) {
-    content = (
+  return (
+    <>
       <div className="player-bar design-classic">
         {/* LEFT */}
         <div className="pb-left">
@@ -695,300 +473,6 @@ export function PlayerBar() {
           {renderQuickTools()}
         </div>
       </div>
-    );
-  } else if (playerBarDesign === 'floating') {
-    content = (
-      <div className="player-bar design-floating">
-        <div className="floating-island-capsule">
-          {/* LEFT: Mini Circular Artwork & Track Info */}
-          <div className="floating-island-left" onClick={() => setView('nowplaying')}>
-            <div className="floating-thumb-circle">
-              <img src={effectiveCover} alt="" />
-              {isLive && <div className="floating-live-dot" />}
-            </div>
-            <div className="floating-info">
-              <div className="floating-title-row">
-                <span className="floating-title">{trackTitle}</span>
-                {renderQualityTag()}
-              </div>
-              <div className="floating-artist">{trackArtist}</div>
-            </div>
-            {renderLoveDislike()}
-          </div>
-
-          {/* CENTER: Main Floating Controls & Progress */}
-          <div className="floating-island-center">
-            {view !== 'nowplaying' && (
-              <PlayerBarLyricPreview
-                lyrics={lyrics}
-                lyricOffset={lyricOffset}
-                className="floating-mini-lyric"
-                onClick={() => setView('nowplaying')}
-                icon={<Sparkles size={11} color="var(--accent)" />}
-              />
-            )}
-            <div className="floating-ctrl-row">
-              <button className={`pb-btn mini ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
-                <Shuffle size={14} />
-              </button>
-              <button className="pb-btn" onClick={playPrev} title="Previous">
-                <SkipBack size={17} fill="currentColor" />
-              </button>
-              <button 
-                className="floating-play-btn" 
-                onClick={isPlaying ? pauseTrack : resumeTrack}
-                title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}
-              >
-                {isBuffering ? <Loader2 size={18} className="animate-spin" /> : isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" style={{ marginLeft: 2 }} />}
-              </button>
-              <button className="pb-btn" onClick={playNext} title="Next">
-                <SkipForward size={17} fill="currentColor" />
-              </button>
-              <button className="pb-btn mini" onClick={stopTrack} title="Stop">
-                <Square size={12} fill="currentColor" />
-              </button>
-              <button className={`pb-btn mini ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title="Repeat">
-                {repeat === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />}
-              </button>
-              <button className={`pb-btn mini ${autoplayEnabled ? 'active autoplay-active' : ''}`} onClick={toggleAutoplay} title={`Endless Autoplay (Radio): ${autoplayEnabled ? 'On' : 'Off'}`}>
-                <InfinityIcon size={15} />
-              </button>
-            </div>
-            <FloatingSeekRow duration={duration} isLive={isLive} onSeek={seek} />
-          </div>
-
-          {/* RIGHT: Volume & Floating Tools */}
-          <div className="floating-island-right">
-            {renderAudioBadges()}
-            {renderVolume(true)}
-            {renderQuickTools(true)}
-          </div>
-        </div>
-      </div>
-    );
-  } else if (playerBarDesign === 'waveform') {
-    content = (
-      <div className="player-bar design-waveform">
-        {/* UPPER DECK: Full-Width Audio Waveform Scrubber */}
-        <WaveformDeckTopScrubber duration={duration} waveformPeaks={waveformPeaks} onSeek={seek} />
-
-        {/* LOWER DECK: 3-Column Studio Console */}
-        <div className="waveform-deck-bottom">
-          {/* Left Console */}
-          <div className="waveform-deck-left" onClick={() => setView('nowplaying')}>
-            <div className="pb-thumb-studio">
-              <img src={effectiveCover} alt="" />
-            </div>
-            <div className="waveform-track-info">
-              <div className="waveform-title-row">
-                <span className="waveform-title">{trackTitle}</span>
-                {renderQualityTag()}
-              </div>
-              <div className="waveform-artist">{trackArtist}</div>
-            </div>
-            {renderLoveDislike()}
-          </div>
-
-          {/* Center Transport & Studio Clocks */}
-          <div className="waveform-deck-center">
-            <WaveformStudioTimeDisplay duration={duration} isLive={isLive} />
-            <div className="studio-transport-buttons">
-              <button className={`pb-btn ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
-                <Shuffle size={15} />
-              </button>
-              <button className="pb-btn" onClick={playPrev} title="Previous">
-                <SkipBack size={19} fill="currentColor" />
-              </button>
-              <button className="pb-btn studio-play" onClick={isPlaying ? pauseTrack : resumeTrack} title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}>
-                {isBuffering ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 2 }} />}
-              </button>
-              <button className="pb-btn" onClick={playNext} title="Next">
-                <SkipForward size={19} fill="currentColor" />
-              </button>
-              <button className="pb-btn" onClick={stopTrack} title="Stop">
-                <Square size={13} fill="currentColor" />
-              </button>
-              <button className={`pb-btn ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title="Repeat">
-                {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
-              </button>
-              <button className={`pb-btn ${autoplayEnabled ? 'active' : ''}`} onClick={toggleAutoplay} title="Autoplay">
-                <InfinityIcon size={16} />
-              </button>
-            </div>
-          </div>
-
-          {/* Right Audiophile HUD & Master Volume */}
-          <div className="waveform-deck-right">
-            <div className="audiophile-hud-chip" title="Audio path details">
-              <Activity size={12} color="var(--accent)" />
-              <span>{audioPathPresentation.hudLabel}</span>
-              {audioPathPresentation.outputRate > 0 && <span>· {audioPathPresentation.outputRate / 1000}kHz</span>}
-            </div>
-            {renderVolume()}
-            {renderQuickTools()}
-          </div>
-        </div>
-      </div>
-    );
-  } else if (playerBarDesign === 'minimal') {
-    content = (
-      <div className="player-bar design-minimal">
-        {/* Hairline Progress Scrubber on Top Border */}
-        <MinimalHairlineScrubber duration={duration} onSeek={seek} />
-
-        {/* Single Row Minimalist Bar */}
-        <div className="minimal-bar-row">
-          {/* Left: Mini Cover + Single-line Info */}
-          <div className="minimal-left" onClick={() => setView('nowplaying')}>
-            <div className="minimal-thumb">
-              <img src={effectiveCover} alt="" />
-            </div>
-            <div className="minimal-meta">
-              <span className="minimal-title">{trackTitle}</span>
-              <span className="minimal-sep">·</span>
-              <span className="minimal-artist">{trackArtist}</span>
-              {renderQualityTag()}
-            </div>
-          </div>
-
-          {/* Center: Clean Transport Controls */}
-          <div className="minimal-center">
-            <button className={`pb-btn mini ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
-              <Shuffle size={14} />
-            </button>
-            <button className="pb-btn mini" onClick={playPrev} title="Previous">
-              <SkipBack size={16} fill="currentColor" />
-            </button>
-            <button className="minimal-play-btn" onClick={isPlaying ? pauseTrack : resumeTrack} title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}>
-              {isBuffering ? <Loader2 size={15} className="animate-spin" /> : isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" style={{ marginLeft: 2 }} />}
-            </button>
-            <button className="pb-btn mini" onClick={playNext} title="Next">
-              <SkipForward size={16} fill="currentColor" />
-            </button>
-            <button className="pb-btn mini" onClick={stopTrack} title="Stop">
-              <Square size={11} fill="currentColor" />
-            </button>
-            <button className={`pb-btn mini ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title="Repeat">
-              {repeat === 'one' ? <Repeat1 size={14} /> : <Repeat size={14} />}
-            </button>
-          </div>
-
-          {/* Right: Tabular Time & Compact Actions */}
-          <div className="minimal-right">
-            <MinimalTimeReadout duration={duration} isLive={isLive} />
-            {renderVolume(true)}
-            <button className={`pb-btn mini ${showQueue ? 'active' : ''}`} onClick={toggleQueue} title="Queue">
-              <ListMusic size={16} />
-            </button>
-            <button className="pb-btn mini" onClick={() => setMiniPlayerMode(true)} title="Mini Player">
-              <Minimize2 size={16} />
-            </button>
-            <button className="pb-btn mini" onClick={() => setView('fullscreen')} title="Fullscreen">
-              <Maximize2 size={16} />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  } else if (playerBarDesign === 'vinyl') {
-    content = (
-      <div className="player-bar design-vinyl">
-        {/* LEFT: Spinning Vinyl Record & Analog Typography */}
-        <div className="vinyl-deck-left">
-          <div 
-            className={`vinyl-disc-container ${isPlaying ? 'spinning-vinyl' : 'paused-vinyl'}`} 
-            onClick={() => setView('nowplaying')}
-            title="Vinyl Turntable Deck (Click to open Now Playing)"
-          >
-            <div className="vinyl-disc-body">
-              <div className="vinyl-groove-ring ring-1" />
-              <div className="vinyl-groove-ring ring-2" />
-              <div className="vinyl-groove-ring ring-3" />
-              <div className="vinyl-center-art">
-                <img src={effectiveCover} alt="" />
-                <div className="vinyl-spindle-hole" />
-              </div>
-            </div>
-          </div>
-
-          <div className="vinyl-info" onClick={() => setView('nowplaying')}>
-            <div className="vinyl-title-row">
-              <span className="vinyl-title">{trackTitle}</span>
-              {renderQualityTag()}
-            </div>
-            <div className="vinyl-artist">{trackArtist}</div>
-          </div>
-          {renderLoveDislike()}
-        </div>
-
-        {/* CENTER: Vintage Mechanical Buttons & Analog Progress */}
-        <div className="vinyl-deck-center">
-          <div className="vinyl-status-strip">
-            <span className="vinyl-needle-indicator">
-              <Disc size={12} color="var(--accent)" className={isPlaying ? 'icon-spin-slow' : ''} />
-              <span>{isPlaying ? 'TURNTABLE ROTATING' : 'DECK STANDBY'}</span>
-            </span>
-            <PlayerBarLyricPreview
-              lyrics={lyrics}
-              lyricOffset={lyricOffset}
-              className="vinyl-lyric-glow"
-              onClick={() => setView('nowplaying')}
-            />
-          </div>
-
-          <div className="vinyl-buttons-row">
-            <button className={`vinyl-btn ${shuffle ? 'active' : ''}`} onClick={toggleShuffle} title="Shuffle">
-              <Shuffle size={15} />
-            </button>
-            <button className="vinyl-btn" onClick={playPrev} title="Previous">
-              <SkipBack size={18} fill="currentColor" />
-            </button>
-            <button className="vinyl-btn play-major" onClick={isPlaying ? pauseTrack : resumeTrack} title={isBuffering ? "Buffering stream..." : isPlaying ? "Pause" : "Play"}>
-              {isBuffering ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" style={{ marginLeft: 2 }} />}
-            </button>
-            <button className="vinyl-btn" onClick={playNext} title="Next">
-              <SkipForward size={18} fill="currentColor" />
-            </button>
-            <button className="vinyl-btn" onClick={stopTrack} title="Stop">
-              <Square size={13} fill="currentColor" />
-            </button>
-            <button className={`vinyl-btn ${repeat !== 'none' ? 'active' : ''}`} onClick={toggleRepeat} title="Repeat">
-              {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
-            </button>
-            <button className={`vinyl-btn ${autoplayEnabled ? 'active autoplay-active' : ''}`} onClick={toggleAutoplay} title="Autoplay">
-              <InfinityIcon size={16} />
-            </button>
-          </div>
-
-          <VinylProgressRow duration={duration} isLive={isLive} onSeek={seek} />
-        </div>
-
-        {/* RIGHT: Warm Analog LED Badges & Vintage Master Dial */}
-        <div className="vinyl-deck-right">
-          <div className="vinyl-led-bank">
-            <div className={`vinyl-led-item ${audioPathPresentation.isBitPerfect ? 'lit-cyan' : ''}`}>
-              <div className="led-dot" />
-              <span>BIT-PERFECT</span>
-            </div>
-            <div className={`vinyl-led-item ${dsp.upsample_rate > 0 || current?.format?.toLowerCase().includes('flac') ? 'lit-gold' : ''}`}>
-              <div className="led-dot" />
-              <span>HI-RES</span>
-            </div>
-            <div className={`vinyl-led-item ${audioPathPresentation.isExclusive ? 'lit-emerald' : ''}`}>
-              <div className="led-dot" />
-              <span>EXCLUSIVE</span>
-            </div>
-          </div>
-          {renderVolume(true)}
-          {renderQuickTools(true)}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {content}
       <TheaterSignalPathModal
         isOpen={showSignalPathModal}
         onClose={() => setShowSignalPathModal(false)}

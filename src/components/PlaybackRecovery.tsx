@@ -13,7 +13,7 @@ export function PlaybackRecovery() {
   if (!recovery) return null;
   const openRecovery = () => {
     if (recovery.action === 'reconnect') useStore.setState({ showSettings: true, pendingSettingsTab: 'plugins' });
-    if (recovery.action === 'output') useStore.setState({ showControlCenter: true });
+    if (recovery.action === 'output') useStore.getState().setView('aideolab');
     if (recovery.action === 'library') {
       useStore.getState().setView('library');
       window.dispatchEvent(new Event('open-library-health'));

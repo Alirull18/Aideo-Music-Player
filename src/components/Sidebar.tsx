@@ -1,7 +1,7 @@
 import { useEffect, useState, startTransition } from 'react';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, BarChart3, TrendingUp, Download, DownloadCloud, Upload, Wand2 } from 'lucide-react';
+import { Library, Headphones, Radio, Plus, ListMusic, Trash2, Settings, Sparkles, Activity, Heart, ChevronLeft, ChevronRight, Download, DownloadCloud, Upload, Wand2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { SmartPlaylistBuilderModal } from './SmartPlaylistBuilderModal';
@@ -48,7 +48,7 @@ export function Sidebar() {
   })));
 
   useEffect(() => {
-    if (appMode === 'local' && (view === 'loved_streams' || view === 'charts')) {
+    if (appMode === 'local' && view === 'loved_streams') {
       setView('library');
     }
   }, [appMode, view, setView]);
@@ -136,8 +136,8 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="app-sidebar">
-      <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'space-between', padding: sidebarCollapsed ? '0' : '0 10px', marginBottom: 36, width: '100%' }}>
+    <aside className="app-sidebar v2-liquid-glass">
+      <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'space-between', padding: sidebarCollapsed ? '0' : '0 6px', marginBottom: 24, width: '100%' }}>
         {!sidebarCollapsed && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span className="sidebar-logo-name">Aideo</span>
@@ -160,6 +160,7 @@ export function Sidebar() {
       {/* Dynamic Navigation */}
       {sidebarNavItems.map((item) => {
         if (!item.visible) return null;
+        if (item.id === 'charts' || item.id === 'insights') return null;
         if (item.requiresHybrid && appMode === 'local') return null;
         if (item.id === 'lastfm' && !lastfmSessionKey) return null;
         if (item.id === 'listenbrainz' && !listenbrainzToken) return null;
@@ -173,11 +174,6 @@ export function Sidebar() {
             icon = <Sparkles size={18} />;
             isActive = view === 'aideo';
             onClick = () => startTransition(() => setView('aideo'));
-            break;
-          case 'charts':
-            icon = <TrendingUp size={18} />;
-            isActive = view === 'charts';
-            onClick = () => startTransition(() => setView('charts'));
             break;
           case 'library':
             icon = <Library size={18} />;
@@ -207,13 +203,8 @@ export function Sidebar() {
             break;
           case 'aideo_lab':
             icon = <Activity size={18} />;
-            isActive = view === 'aideo_lab';
+            isActive = view === 'aideo_lab' || (view as string) === 'aideolab';
             onClick = () => startTransition(() => setView('aideo_lab'));
-            break;
-          case 'insights':
-            icon = <BarChart3 size={18} />;
-            isActive = view === 'insights';
-            onClick = () => startTransition(() => setView('insights'));
             break;
           case 'lastfm':
             icon = <Radio size={18} />;

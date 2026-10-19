@@ -14,7 +14,7 @@ import {
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
   Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3, TrendingUp,
   Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen,
-  Tv2, Sliders, FileText, Type, Sun, Moon, Check, HardDrive, Globe
+  Tv2, Sliders, Type, Sun, Moon, Check, HardDrive, Globe
 } from 'lucide-react';
 import TidalConnectCard from './TidalConnectCard';
 import QobuzConnectCard from './QobuzConnectCard';
@@ -23,7 +23,6 @@ import { LocalQRCode } from './LocalQRCode';
 import { logger } from '../utils/logger';
 import { getAudioPathPresentation } from '../utils/audioPath';
 import { LocalBackupControls } from './LocalBackupControls';
-import { RecommendationPreferences } from './RecommendationPreferences';
 import { filterAutomaticQueue, invalidateRecommendationPreferences } from '../utils/recommendations';
 import { parseWindowsAudioDevice } from '../utils/audioDeviceParser';
 import { AudioOutputPathSelector } from './AudioOutputPathSelector';
@@ -868,7 +867,7 @@ export function SettingsView() {
     setSelectedFont('Outfit');
     setFontScale(100);
     setPlayerBarDesign('classic');
-    setTheaterModeDesign('stage');
+    setTheaterModeDesign('studio');
     setPlayerBarTransparent(false);
     if (!liquidBackgroundEnabled) toggleLiquidBackground();
     if (!sidebarLastfmVisible) toggleSidebarLastfmVisible();
@@ -1701,12 +1700,12 @@ export function SettingsView() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
             {[
               {
-                id: 'stage' as TheaterModeDesign,
-                name: 'Stage View',
-                badge: 'MODERN',
-                badgeColor: '#8b5cf6',
-                icon: <Tv2 size={18} color="#a78bfa" />,
-                desc: 'Album artwork beside synchronized lyrics.',
+                id: 'studio' as TheaterModeDesign,
+                name: 'Studio Deck',
+                badge: 'METERS',
+                badgeColor: '#f59e0b',
+                icon: <Sliders size={18} color="#fbbf24" />,
+                desc: 'Liquid glass capsule, synchronized lyrics, needle-style level meters, and an oscilloscope.',
               },
               {
                 id: 'zen' as TheaterModeDesign,
@@ -1715,38 +1714,6 @@ export function SettingsView() {
                 badgeColor: '#10b981',
                 icon: <Type size={18} color="#34d399" />,
                 desc: 'Centered lyrics with compact album artwork.',
-              },
-              {
-                id: 'studio' as TheaterModeDesign,
-                name: 'Studio Deck',
-                badge: 'METERS',
-                badgeColor: '#f59e0b',
-                icon: <Sliders size={18} color="#fbbf24" />,
-                desc: 'Needle-style level meters, audio path details, and an oscilloscope.',
-              },
-              {
-                id: 'vinyl' as TheaterModeDesign,
-                name: 'Vinyl Turntable',
-                badge: 'ROTATING ARTWORK',
-                badgeColor: '#ec4899',
-                icon: <Disc size={18} color="#f472b6" />,
-                desc: 'Rotating album artwork with a turntable-style progress indicator.',
-              },
-              {
-                id: 'poster' as TheaterModeDesign,
-                name: 'Poster',
-                badge: 'LARGE TEXT',
-                badgeColor: '#06b6d4',
-                icon: <FileText size={18} color="#22d3ee" />,
-                desc: 'Poster layout with large text, album artwork, and lyrics.',
-              },
-              {
-                id: 'scope' as TheaterModeDesign,
-                name: 'Scope',
-                badge: 'VISUALIZER',
-                badgeColor: '#a855f7',
-                icon: <Activity size={18} color="#c084fc" />,
-                desc: 'Full-screen audio visualizer with lyrics overlaid.',
               },
             ].map((d) => {
               const isSelected = theaterModeDesign === d.id;
@@ -3018,14 +2985,6 @@ export function SettingsView() {
     },
 
     { id: 'local-backup', title: 'Local backup and restore', description: 'Portable playlists, favorites, preferences and listening history.', keywords: 'backup restore offline portable rollback', tab: 'library', element: <LocalBackupControls /> },
-    { id: 'recommendation-preferences', title: 'Recommendation preferences', description: 'Manage excluded recordings and learned taste.', keywords: 'recommendations exclusion taste reset learning', tab: 'library', element: <RecommendationPreferences onAllow={track => useStore.getState().setRecommendationInterest(track, true)} onChanged={async () => {
-      const state = useStore.getState();
-      await state.loadLibrary();
-      const queue = state.queue.filter(t => !t.is_autoplay && !t.is_generated_mix);
-      useStore.setState({ queue, autoplaySessionHistory: [] });
-      localStorage.setItem('aideo_queue', JSON.stringify(queue));
-      await state.syncBackendQueue();
-    }} /> },
 
     {
       id: 'cloud-connections',

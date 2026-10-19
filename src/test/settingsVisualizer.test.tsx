@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { useStore } from '../store';
 import { SettingsView } from '../components/SettingsView';
-import { AudioControlCenter } from '../components/AudioControlCenter';
 
 beforeEach(() => {
   global.ResizeObserver = class ResizeObserver {
@@ -84,7 +83,7 @@ describe('SettingsView Audio Spectrum Visualizer Card', () => {
   });
 });
 
-describe('Settings navigation and playback speed', () => {
+describe('Settings navigation', () => {
   it('consumes the pending Library request and permits subsequent tab selection', () => {
     useStore.setState({ pendingSettingsTab: 'library' });
     const settings = render(<SettingsView />);
@@ -93,22 +92,5 @@ describe('Settings navigation and playback speed', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
     settings.rerender(<SettingsView />);
     expect(screen.getByRole('button', { name: 'Appearance' })).toHaveClass('active');
-  });
-
-  it('disables speed controls in Bit-Perfect mode and enables them when it is off', () => {
-    const original = useStore.getState();
-    useStore.setState({ showControlCenter: true, playback: { ...original.playback, bit_perfect: true } });
-    try {
-      render(<AudioControlCenter />);
-      fireEvent.click(screen.getByRole('button', { name: 'Telemetry & Utilities' }));
-      expect(screen.getByRole('slider', { name: 'Playback speed' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: '1.25x' })).toBeDisabled();
-
-      act(() => useStore.setState({ playback: { ...useStore.getState().playback, bit_perfect: false } }));
-      expect(screen.getByRole('slider', { name: 'Playback speed' })).toBeEnabled();
-      expect(screen.getByRole('button', { name: '1.25x' })).toBeEnabled();
-    } finally {
-      useStore.setState({ showControlCenter: original.showControlCenter, playback: original.playback });
-    }
   });
 });

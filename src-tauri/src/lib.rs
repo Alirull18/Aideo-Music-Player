@@ -18,7 +18,6 @@ use base64::Engine;
 
 mod artwork;
 mod db;
-mod recommendations;
 pub mod sources;
 mod downloads;
 mod backup;
@@ -42,16 +41,280 @@ pub mod qobuz;
 pub mod cloud;
 pub mod link_resolver;
 pub mod dependencies;
-pub mod chromecast;
 pub mod sonic_analyzer;
-pub mod remote_server;
 mod hotkeys;
 mod m3u;
 pub mod watcher;
 pub mod tag_editor;
-pub mod upnp;
 pub mod logger;
 pub mod canvas;
+
+pub mod chromecast {
+    pub fn analysis_playback_active() -> bool {
+        false
+    }
+}
+
+pub mod upnp {
+    pub fn analysis_playback_active() -> bool {
+        false
+    }
+}
+
+pub mod recommendations {
+    use crate::db::{self, Track};
+    use crate::sources::RecordingEvidence;
+    use rusqlite::{params, Connection, OptionalExtension};
+
+    pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS recommendation_aliases (
+            source_key TEXT PRIMARY KEY, recording_id TEXT NOT NULL, title TEXT, artist TEXT, duration REAL);
+            CREATE INDEX IF NOT EXISTS idx_recommendation_recording ON recommendation_aliases(recording_id);
+            CREATE INDEX IF NOT EXISTS idx_recommendation_metadata ON recommendation_aliases(title,artist,duration);
+            CREATE TABLE IF NOT EXISTS recommendation_interest (recording_id TEXT PRIMARY KEY, interested INTEGER NOT NULL CHECK(interested IN (0,1)));
+            CREATE TABLE IF NOT EXISTS recommendation_training_ignored(history_id INTEGER PRIMARY KEY REFERENCES playback_history(id) ON DELETE CASCADE);",
+        )?;
+        for (column, declaration) in [
+            ("recording_id", "TEXT"),
+            ("source_key", "TEXT"),
+            ("listened_seconds", "REAL NOT NULL DEFAULT 0"),
+            ("signal_quality", "TEXT NOT NULL DEFAULT 'legacy'"),
+            ("end_reason", "TEXT"),
+            ("origin", "TEXT"),
+        ] {
+            if !db::column_exists(conn, "playback_history", column) {
+                conn.execute(
+                    &format!("ALTER TABLE playback_history ADD COLUMN {column} {declaration}"),
+                    [],
+                )?;
+            }
+        }
+        for (column, kind) in [
+            ("isrc", "TEXT"),
+            ("version", "TEXT"),
+            ("explicit", "INTEGER"),
+        ] {
+            if !db::column_exists(conn, "recommendation_aliases", column) {
+                conn.execute(
+                    &format!("ALTER TABLE recommendation_aliases ADD COLUMN {column} {kind}"),
+                    [],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn normalized(value: &Option<String>) -> Option<String> {
+        value
+            .as_ref()
+            .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase())
+            .filter(|s| !s.is_empty())
+    }
+
+    pub fn source_key(track: &Track) -> String {
+        let path = track.path.trim();
+        let format = track.format.as_deref().unwrap_or("").to_ascii_lowercase();
+        for provider in ["tidal", "qobuz", "youtube"] {
+            if let Some(id) = path.strip_prefix(&format!("{provider}:")) {
+                return format!("{provider}:{}", id.trim_start_matches('/'));
+            }
+            if format.contains(provider)
+                && !path.contains(['/', '\\'])
+                && !path.is_empty()
+                && (provider == "youtube" || path.bytes().all(|b| b.is_ascii_digit()))
+            {
+                return format!("{provider}:{path}");
+            }
+        }
+        if let Ok(url) = reqwest::Url::parse(path) {
+            let id = match url.host_str() {
+                Some("youtu.be") => Some(url.path().trim_start_matches('/').to_owned()),
+                Some("youtube.com" | "www.youtube.com" | "music.youtube.com") => url
+                    .query_pairs()
+                    .find(|(k, _)| k == "v")
+                    .map(|(_, v)| v.into_owned()),
+                _ => None,
+            };
+            if let Some(id) = id.filter(|id| {
+                id.len() == 11
+                    && id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            }) {
+                return format!("youtube:{id}");
+            }
+        }
+        if path.starts_with("http://") || path.starts_with("https://") {
+            return format!("remote:{path}");
+        }
+        format!("local:{}", path.replace('/', "\\").to_lowercase())
+    }
+
+    pub fn recording_id(conn: &Connection, track: &Track) -> rusqlite::Result<String> {
+        canonical_id_with_evidence(conn, track, None)
+    }
+
+    pub fn canonical_id_with_evidence(
+        conn: &Connection,
+        track: &Track,
+        evidence: Option<&RecordingEvidence>,
+    ) -> rusqlite::Result<String> {
+        let key = source_key(track);
+        let isrc = evidence
+            .and_then(|e| normalized(&e.isrc))
+            .map(|s| s.replace('-', ""));
+        let version = evidence.and_then(|e| normalized(&e.version));
+        let explicit = evidence.and_then(|e| e.explicit);
+        if let Some(mut id) = conn
+            .query_row(
+                "SELECT recording_id FROM recommendation_aliases WHERE source_key=?1",
+                [&key],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            let conflicting: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM recommendation_aliases WHERE recording_id=?1 AND ((?2 IS NOT NULL AND isrc IS NOT ?2 AND (isrc IS NOT NULL OR source_key!=?5)) OR (?3 IS NOT NULL AND version IS NOT ?3 AND (version IS NOT NULL OR source_key!=?5)) OR (?4 IS NOT NULL AND explicit IS NOT ?4 AND (explicit IS NOT NULL OR source_key!=?5))))",
+                params![id, isrc, version, explicit, key],
+                |r| r.get(0),
+            )?;
+            if conflicting {
+                let original_id = id.clone();
+                id = format!(
+                    "recording:{:x}",
+                    md5::compute(format!("{key}|{isrc:?}|{version:?}|{explicit:?}").as_bytes())
+                );
+                conn.execute(
+                    "UPDATE recommendation_aliases SET recording_id=?1,isrc=COALESCE(?2,isrc),version=COALESCE(?3,version),explicit=COALESCE(?4,explicit) WHERE source_key=?5",
+                    params![id, isrc, version, explicit, key],
+                )?;
+                conn.execute(
+                    "INSERT INTO recommendation_interest(recording_id,interested) SELECT ?1,interested FROM recommendation_interest WHERE recording_id=?2 ON CONFLICT(recording_id) DO NOTHING",
+                    params![id, original_id],
+                )?;
+            }
+            conn.execute(
+                "UPDATE recommendation_aliases SET isrc=COALESCE(isrc,?1),version=COALESCE(version,?2),explicit=COALESCE(explicit,?3),title=COALESCE(title,?4),artist=COALESCE(artist,?5),duration=COALESCE(duration,?6) WHERE source_key=?7",
+                params![
+                    isrc,
+                    version,
+                    explicit,
+                    normalized(&track.title),
+                    normalized(&track.artist),
+                    track.duration.filter(|d| d.is_finite() && *d > 0.0),
+                    key
+                ],
+            )?;
+            return Ok(id);
+        }
+        let title = normalized(&track.title);
+        let artist = normalized(&track.artist);
+        let duration = track.duration.filter(|d| d.is_finite() && *d > 0.0);
+        let matched = if title.is_some() && artist.is_some() && duration.is_some() {
+            conn.query_row(
+                "SELECT a.recording_id FROM recommendation_aliases a WHERE a.title=?1 AND a.artist=?2 AND a.duration>0 AND ABS(a.duration-?3)<=3 AND a.isrc IS ?4 AND a.version IS ?5 AND a.explicit IS ?6 AND NOT EXISTS(SELECT 1 FROM recommendation_aliases b WHERE b.recording_id=a.recording_id AND ((b.duration>0 AND ABS(b.duration-?3)>3) OR b.isrc IS NOT ?4 OR b.version IS NOT ?5 OR b.explicit IS NOT ?6)) ORDER BY a.source_key LIMIT 1",
+                params![title, artist, duration, isrc, version, explicit],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        } else {
+            None
+        };
+        let id = matched.unwrap_or_else(|| format!("recording:{:x}", md5::compute(key.as_bytes())));
+        conn.execute(
+            "INSERT OR IGNORE INTO recommendation_aliases(source_key,recording_id,title,artist,duration,isrc,version,explicit) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![key, id, title, artist, duration, isrc, version, explicit],
+        )?;
+        Ok(id)
+    }
+
+    pub fn set_interest(
+        conn: &Connection,
+        track: &Track,
+        interested: bool,
+        context: Option<&db::RecordingSources>,
+    ) -> rusqlite::Result<()> {
+        let id = recording_id(conn, track)?;
+        if let Some(context) = context {
+            context.to_json()?;
+            for source in &context.sources {
+                let Some(metadata) = &source.metadata else {
+                    continue;
+                };
+                let alias = Track {
+                    id: 0,
+                    path: match source.provider {
+                        db::SourceProvider::Local => source.id.clone(),
+                        db::SourceProvider::Tidal => format!("tidal:{}", source.id),
+                        db::SourceProvider::Qobuz => format!("qobuz:{}", source.id),
+                        db::SourceProvider::Youtube => format!("youtube:{}", source.id),
+                    },
+                    title: metadata.title.clone(),
+                    artist: metadata.artist.clone(),
+                    album: None,
+                    duration: metadata.duration,
+                    format: None,
+                    lyric_offset: 0,
+                    loved: None,
+                    disliked: None,
+                    cover_url: None,
+                    path_hash: None,
+                    bpm: None,
+                    energy: None,
+                    bass_ratio: None,
+                    treble_ratio: None,
+                    replaygain_gain: None,
+                    track_number: None,
+                    disc_number: None,
+                    genre: None,
+                };
+                if normalized(&alias.title).is_some()
+                    && normalized(&alias.title) == normalized(&track.title)
+                    && normalized(&alias.artist).is_some()
+                    && normalized(&alias.artist) == normalized(&track.artist)
+                    && alias.duration.zip(track.duration).is_some_and(|(a, b)| {
+                        a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0 && (a - b).abs() <= 3.0
+                    })
+                {
+                    recording_id(conn, &alias)?;
+                }
+            }
+        }
+        conn.execute(
+            "INSERT INTO recommendation_interest(recording_id,interested) VALUES (?1,?2) ON CONFLICT(recording_id) DO UPDATE SET interested=excluded.interested",
+            params![id, interested],
+        )?;
+        for local in db::get_all_tracks(conn)? {
+            if recording_id(conn, &local)? == id {
+                conn.execute(
+                    "UPDATE tracks SET disliked=?1,loved=CASE WHEN ?1=1 THEN 0 ELSE loved END WHERE path=?2",
+                    params![!interested, local.path],
+                )?;
+            }
+        }
+        if !interested {
+            if let Some(playlist) = conn
+                .query_row(
+                    "SELECT id FROM playlists WHERE name='Favorite Songs'",
+                    [],
+                    |r| r.get::<_, i32>(0),
+                )
+                .optional()?
+            {
+                for entry in db::get_playlist_entries(conn, playlist)? {
+                    if recording_id(conn, &entry.track)? == id {
+                        conn.execute(
+                            "DELETE FROM playlist_tracks WHERE entry_id=?1",
+                            [entry.playlist_entry_id],
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 // ── Shared application state ──────────────────────────────────────────────────
 // ── Safe Lock Utility ────────────────────────────────────────────────────────
@@ -2201,7 +2464,6 @@ fn update_media_metadata(
     duration: f64,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    crate::remote_server::set_active_metadata(&title, &artist, album.as_deref(), duration, cover_url.as_deref());
     if let Some(controls) = safe_lock(&state.media_controls).as_mut() {
         controls
             .set_metadata(MediaMetadata {
@@ -2738,24 +3000,6 @@ fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<L
         audiophile_stats,
         source_distribution,
     })
-    })
-}
-
-#[tauri::command]
-fn generate_sonic_flow(
-    seed_path: Option<String>,
-    trajectory: Option<Vec<crate::recommendations::SonicFlowPoint>>,
-    limit: Option<usize>,
-    state: State<'_, AppState>,
-) -> Result<Vec<crate::db::Track>, String> {
-    let limit = limit.unwrap_or(20);
-    with_db_reader(&state, |conn| {
-        crate::recommendations::generate_sonic_flow_queue(
-            conn,
-            seed_path.as_deref(),
-            trajectory,
-            limit,
-        )
     })
 }
 
@@ -3456,19 +3700,6 @@ async fn get_similar_tracks(state: State<'_, AppState>, path: String, excluded_p
 }
 
 #[tauri::command]
-fn get_remote_connection_url() -> Result<String, String> {
-    let port = crate::remote_server::ACTIVE_PORT.get().copied().ok_or_else(|| "Remote server not active".to_string())?;
-    let ip = crate::remote_server::get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-    let pin = crate::remote_server::get_or_init_pin();
-    Ok(format!("http://{}:{}/?pin={}", ip, port, pin))
-}
-
-#[tauri::command]
-fn get_remote_pin() -> Result<String, String> {
-    Ok(crate::remote_server::get_or_init_pin().to_string())
-}
-
-#[tauri::command]
 fn clear_application_cache() -> Result<(), String> {
     // 1. Delete Cloud Stream Cache
     if let Some(data_dir) = dirs::data_dir() {
@@ -3805,63 +4036,6 @@ fn get_desktop_lyrics_status(app_handle: AppHandle) -> Result<bool, String> {
     }
 }
 
-// ── UPnP / DLNA Commands ──────────────────────────────────────────────────
-#[tauri::command]
-async fn upnp_discover() -> Result<Vec<upnp::UpnpDevice>, String> {
-    upnp::discover_upnp_devices().await
-}
-
-#[tauri::command]
-fn upnp_connect(device_id: String) -> Result<(), String> {
-    upnp::connect_upnp_device(&device_id)
-}
-
-#[tauri::command]
-async fn upnp_disconnect() -> Result<(), String> {
-    upnp::disconnect_upnp_device().await
-}
-
-#[tauri::command]
-async fn upnp_play(
-    path: String,
-    title: String,
-    artist: String,
-    album: String,
-    cover_url: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let ext = std::path::Path::new(&path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("flac")
-        .to_lowercase();
-
-    let mime = match ext.as_str() {
-        "flac" => "audio/flac",
-        "wav" => "audio/wav",
-        "mp3" => "audio/mpeg",
-        "m4a" | "aac" => "audio/mp4",
-        "ogg" | "opus" => "audio/ogg",
-        _ => "audio/flac",
-    };
-
-    let local_port = chromecast::ensure_local_stream_server(&state).await.unwrap_or(8080);
-    let local_ip = chromecast::get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
-    let stream_url = format!("http://{}:{}/stream?path={}", local_ip, local_port, urlencoding::encode(&path));
-
-    upnp::upnp_play_stream(&stream_url, &title, &artist, &album, cover_url.as_deref(), mime).await
-}
-
-#[tauri::command]
-async fn upnp_control(action: String, value: Option<f64>) -> Result<(), String> {
-    upnp::upnp_control_action(&action, value).await
-}
-
-#[tauri::command]
-async fn upnp_get_status() -> Result<upnp::UpnpStatus, String> {
-    upnp::upnp_query_status().await
-}
-
 pub fn run() {
     dotenvy::dotenv().ok();
 
@@ -3969,10 +4143,6 @@ pub fn run() {
             backup::local_backup_ack_settings,
             backup::local_backup_reconciliation_pending,
             backup::local_backup_clear_reconciliation,
-            recommendations::get_recommendation_exclusions,
-            recommendations::get_recommendation_recordings,
-            recommendations::preview_recommendation_reset,
-            recommendations::apply_recommendation_reset,
             center_window,
             set_window_always_on_top,
             enter_borderless_fullscreen,
@@ -4088,12 +4258,9 @@ pub fn run() {
             log_playback_start,
             log_playback_end,
             checkpoint_listening,
-            recommendations::get_recommendations,
-            recommendations::set_recommendation_interest,
             get_unsynced_history,
             mark_history_synced,
             get_listening_insights,
-            generate_sonic_flow,
             youtube::search_youtube,
             youtube::get_artist_discography,
             youtube::get_search_suggestions,
@@ -4154,16 +4321,8 @@ pub fn run() {
             get_cache_size_info,
             acoustid_identify_track,
             get_similar_tracks,
-            get_remote_connection_url,
-            get_remote_pin,
             open_cache_folder,
             check_files_exist,
-            chromecast::chromecast_discover,
-            chromecast::chromecast_connect,
-            chromecast::chromecast_disconnect,
-            chromecast::chromecast_play,
-            chromecast::chromecast_control,
-            chromecast::chromecast_get_status,
             get_track_by_path,
             read_audio_tags,
             write_audio_tags,
@@ -4171,12 +4330,6 @@ pub fn run() {
             toggle_desktop_lyrics,
             set_desktop_lyrics_ignore_cursor,
             get_desktop_lyrics_status,
-            upnp_discover,
-            upnp_connect,
-            upnp_disconnect,
-            upnp_play,
-            upnp_control,
-            upnp_get_status,
         ])
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {
@@ -4382,11 +4535,7 @@ pub fn run() {
                 cached_devices: cached_devices_arc.clone(),
             });
 
-            let app_handle_for_server = app.handle().clone();
             sonic_analyzer::start_idle_analysis((*app_state_clone).clone());
-            tauri::async_runtime::spawn(async move {
-                crate::remote_server::start_remote_server(app_handle_for_server, app_state_clone).await;
-            });
 
             start_audio_device_watcher(app.handle().clone(), player_arc.clone(), cached_devices_arc.clone());
 

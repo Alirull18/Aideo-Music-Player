@@ -3,6 +3,9 @@ import { motion } from 'framer-motion';
 import { Sliders, Cpu, Activity } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { TheaterLayoutProps } from './types';
+import { Visualizer } from '../Visualizer';
+import { KaraokeActiveLine } from '../KaraokeActiveLine';
+import { CanvasVideoPlayer } from '../CanvasVideoPlayer';
 import { baseName, getStreamName } from '../../utils';
 
 export function StudioDeckLayout({
@@ -10,17 +13,33 @@ export function StudioDeckLayout({
   effectiveCover,
   playbackCurrentTrack,
   lyrics,
+  lyricStatus,
+  lyricsDisplayMode,
   activeIdx,
+  playbackPositionSecs,
   playbackStatus,
+  lyricOffset,
+  showRomaji,
+  showTranslation,
   accentColor,
   telemetryText,
+  albumArtFit,
+  vizMode,
+  seek,
+  scrollRef,
+  canvas,
+  canvasMode,
   spectrumBands = [],
   lowSpecMode = false,
 }: TheaterLayoutProps) {
+  const isPlaying = playbackStatus === 'Playing';
   const leftCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rightCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const oscCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const spectrumRef = useRef<number[]>(spectrumBands);
+
+  const title = currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''));
+  const artist = currentTrack?.artist || (playbackCurrentTrack?.startsWith('http') ? 'Online Stream' : 'Unknown Artist');
 
   useEffect(() => {
     if (spectrumBands && spectrumBands.length > 0) {
@@ -43,6 +62,18 @@ export function StudioDeckLayout({
     };
   }, []);
 
+  // Auto-scroll active lyric into view smoothly
+  useEffect(() => {
+    if (activeIdx < 0 || !scrollRef.current) return;
+    const activeEl = scrollRef.current.querySelector(`[data-idx="${activeIdx}"]`) as HTMLElement | null;
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+      activeEl.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }
+  }, [activeIdx, scrollRef]);
+
   // Ballistic needle state
   const physicsRef = useRef({
     leftAngle: -45,
@@ -57,15 +88,12 @@ export function StudioDeckLayout({
     let animId: number;
 
     const renderMeters = () => {
-      const isPlaying = playbackStatus === 'Playing';
       const bands = spectrumRef.current;
 
-      // Compute channel levels from spectrum bands
       let leftLevel = 0;
       let rightLevel = 0;
 
       if (isPlaying && bands && bands.length > 0) {
-        // Lower half for left, upper half for right, with some bass sharing
         const half = Math.floor(bands.length / 2);
         for (let i = 0; i < half; i++) {
           leftLevel += bands[i] || 0;
@@ -73,16 +101,14 @@ export function StudioDeckLayout({
         for (let i = half; i < bands.length; i++) {
           rightLevel += bands[i] || 0;
         }
-        leftLevel = Math.min(1.2, (leftLevel / (half * 0.45)));
-        rightLevel = Math.min(1.2, (rightLevel / (half * 0.45)));
+        leftLevel = Math.min(1.2, leftLevel / (half * 0.45));
+        rightLevel = Math.min(1.2, rightLevel / (half * 0.45));
       }
 
-      // Ballistic physics: target angle maps level (0..1.2) to -45deg .. +45deg
       const targetLeft = -45 + leftLevel * 75;
       const targetRight = -45 + rightLevel * 75;
 
       const p = physicsRef.current;
-      // Spring acceleration and damping
       const spring = 0.18;
       const damping = 0.72;
 
@@ -95,11 +121,8 @@ export function StudioDeckLayout({
       p.leftPeak = p.leftAngle > 20;
       p.rightPeak = p.rightAngle > 20;
 
-      // Draw Left Meter
       drawVUMeter(leftCanvasRef.current, p.leftAngle, p.leftPeak, 'CH 1 · LEFT');
-      // Draw Right Meter
       drawVUMeter(rightCanvasRef.current, p.rightAngle, p.rightPeak, 'CH 2 · RIGHT');
-      // Draw Oscilloscope (skip in low spec mode)
       if (!lowSpecMode) {
         drawOscilloscope(oscCanvasRef.current, bands, isPlaying, accentColor);
       }
@@ -109,7 +132,7 @@ export function StudioDeckLayout({
 
     animId = requestAnimationFrame(renderMeters);
     return () => cancelAnimationFrame(animId);
-  }, [playbackStatus, accentColor, lowSpecMode]);
+  }, [isPlaying, accentColor, lowSpecMode]);
 
   const drawVUMeter = (
     canvas: HTMLCanvasElement | null,
@@ -125,11 +148,9 @@ export function StudioDeckLayout({
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Warm vintage parchment / brushed titanium dial background
     ctx.fillStyle = '#141419';
     ctx.fillRect(0, 0, w, h);
 
-    // Subtle inner bevel
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, w - 2, h - 2);
@@ -138,25 +159,21 @@ export function StudioDeckLayout({
     const pivotY = h * 1.15;
     const radius = h * 0.95;
 
-    // Draw VU scale arc
     ctx.save();
     ctx.translate(pivotX, pivotY);
 
-    // Main arc background
     ctx.beginPath();
     ctx.arc(0, 0, radius, (-135 * Math.PI) / 180, (-45 * Math.PI) / 180);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Redline arc zone (> 0dB is from -65deg to -45deg)
     ctx.beginPath();
     ctx.arc(0, 0, radius, (-68 * Math.PI) / 180, (-45 * Math.PI) / 180);
     ctx.strokeStyle = '#ef4444';
     ctx.lineWidth = 4;
     ctx.stroke();
 
-    // Draw Ticks & Numbers (-20, -10, -7, -5, -3, -1, 0, +1, +2, +3)
     const ticks = [
       { deg: -135, val: '-20' },
       { deg: -115, val: '-10' },
@@ -191,12 +208,10 @@ export function StudioDeckLayout({
       ctx.fillText(t.val, xText, yText);
     });
 
-    // VU Label
     ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
     ctx.font = '700 11px sans-serif';
     ctx.fillText('VU', 0, -radius * 0.48);
 
-    // Needle shadow
     const needleRad = ((angleDeg - 90) * Math.PI) / 180;
     ctx.beginPath();
     ctx.moveTo(2, 2);
@@ -205,7 +220,6 @@ export function StudioDeckLayout({
     ctx.lineWidth = 1.8;
     ctx.stroke();
 
-    // Ballistic needle
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(Math.cos(needleRad) * radius, Math.sin(needleRad) * radius);
@@ -213,7 +227,6 @@ export function StudioDeckLayout({
     ctx.lineWidth = 1.6;
     ctx.stroke();
 
-    // Pivot cap
     ctx.beginPath();
     ctx.arc(0, 0, 10, 0, Math.PI * 2);
     ctx.fillStyle = '#27272a';
@@ -224,13 +237,11 @@ export function StudioDeckLayout({
 
     ctx.restore();
 
-    // Channel label & Peak LED
     ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
     ctx.font = '600 11px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(label, 14, 22);
 
-    // Peak LED dot
     ctx.beginPath();
     ctx.arc(w - 20, 18, 5, 0, Math.PI * 2);
     ctx.fillStyle = isPeak ? '#ef4444' : '#3f3f46';
@@ -246,7 +257,7 @@ export function StudioDeckLayout({
   const drawOscilloscope = (
     canvas: HTMLCanvasElement | null,
     bands: number[],
-    isPlaying: boolean,
+    playing: boolean,
     color: string
   ) => {
     if (!canvas) return;
@@ -258,7 +269,6 @@ export function StudioDeckLayout({
     ctx.fillStyle = '#0a0a0d';
     ctx.fillRect(0, 0, w, h);
 
-    // CRT grid lines
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
     ctx.lineWidth = 1;
     for (let x = 20; x < w; x += 25) {
@@ -274,12 +284,11 @@ export function StudioDeckLayout({
       ctx.stroke();
     }
 
-    // Phosphor vector trace
     ctx.beginPath();
     const midY = h / 2;
     ctx.moveTo(0, midY);
 
-    if (isPlaying && bands && bands.length > 0) {
+    if (playing && bands && bands.length > 0) {
       const step = w / bands.length;
       for (let i = 0; i < bands.length; i++) {
         const val = (bands[i] || 0) * (h * 0.42);
@@ -287,7 +296,6 @@ export function StudioDeckLayout({
         ctx.lineTo(i * step, waveY);
       }
     } else {
-      // Flat idle line with slight noise
       ctx.lineTo(w, midY);
     }
 
@@ -299,148 +307,393 @@ export function StudioDeckLayout({
     ctx.shadowBlur = 0;
   };
 
-  const currentLyric = lyrics[activeIdx]?.text || '♪';
-  const nextLyric = lyrics[activeIdx + 1]?.text || '';
-
   return (
     <motion.div
       key="studio"
-      className="fullscreen-content-stage studio-deck-container"
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.35 }}
+      className="fullscreen-content-stage studio-deck-container liquid-theater-layout"
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -15 }}
+      transition={{ duration: 0.35, ease: [0.2, 0, 0, 1] }}
       style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 24,
-        padding: '60px 8%',
-        maxWidth: 1200,
+        display: 'grid',
+        gridTemplateColumns: '44% 56%',
+        gap: 48,
+        height: '100%',
+        width: '100%',
+        maxWidth: 1440,
         margin: '0 auto',
+        padding: '32px 32px 100px',
+        alignItems: 'center',
+        boxSizing: 'border-box',
       }}
     >
-      {/* Studio Mastering Rack */}
+      {/* ── LEFT COLUMN: Liquid Glass Cover Art + Studio Telemetry Deck ── */}
       <div
-        className="studio-deck-rack"
+        className="liquid-theater-left"
         style={{
-          width: '100%',
-          background: 'linear-gradient(180deg, #18181f 0%, #101015 100%)',
-          borderRadius: 14,
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
-          padding: 24,
           display: 'flex',
           flexDirection: 'column',
-          gap: 20,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 18,
+          width: '100%',
         }}
       >
-        {/* Rack Header Bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', paddingBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Sliders size={18} style={{ color: accentColor }} />
-            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '1.5px', color: 'var(--text-dim)' }}>
-              Audio meters
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-              AUDIO VISUALIZER
-            </span>
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-dim)' }}>
-              CH 1 · LEFT
-            </span>
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-dim)' }}>
-              CH 2 · RIGHT
-            </span>
-          </div>
-        </div>
-
-        {/* Center Gauges Section: Dual VU Meters + Oscilloscope */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: 16, alignItems: 'center' }}>
-          {/* Left VU Meter */}
-          <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <canvas ref={leftCanvasRef} width={280} height={170} style={{ width: '100%', height: 'auto', display: 'block' }} />
-          </div>
-
-          {/* Right VU Meter */}
-          <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <canvas ref={rightCanvasRef} width={280} height={170} style={{ width: '100%', height: 'auto', display: 'block' }} />
-          </div>
-
-          {/* Vector Scope Display */}
-          <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <canvas ref={oscCanvasRef} width={340} height={170} style={{ width: '100%', height: 'auto', display: 'block' }} />
-            <div style={{ position: 'absolute', top: 8, right: 10, display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-dim)' }}>
-              <Activity size={12} style={{ color: accentColor }} /> REALTIME SCOPE
-            </div>
-          </div>
-        </div>
-
-        {/* Signal Path & Metadata Telemetry Strip */}
+        {/* Artwork + Metadata Row */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'rgba(0, 0, 0, 0.4)',
-            padding: '14px 20px',
-            borderRadius: 8,
-            border: '1px solid rgba(255, 255, 255, 0.05)',
-            flexWrap: 'wrap',
-            gap: 16,
+            gap: 20,
+            width: '100%',
           }}
         >
-          {/* Track Info */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <img
-              src={effectiveCover}
-              alt="Track Cover"
-              style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', border: '1px solid rgba(255, 255, 255, 0.1)' }}
+          <div
+            style={{
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 170,
+              height: 170,
+              flexShrink: 0,
+            }}
+          >
+            <div
+              className="fullscreen-cover-glow-aura"
+              style={{
+                position: 'absolute',
+                inset: -16,
+                background: `radial-gradient(circle, ${accentColor || 'var(--dynamic-accent, #8b5cf6)'} 0%, rgba(var(--accent-rgb, 139, 92, 246), 0.3) 45%, transparent 70%)`,
+                filter: 'blur(28px)',
+                pointerEvents: 'none',
+                zIndex: 0,
+              }}
             />
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 2 }}>
-                {currentTrack?.title || (playbackCurrentTrack?.startsWith('http') ? getStreamName(playbackCurrentTrack) : baseName(playbackCurrentTrack || ''))}
+
+            {vizMode === 'circle' && (
+              <div style={{ position: 'absolute', width: 220, height: 220, zIndex: 1, pointerEvents: 'none' }}>
+                <Visualizer mode="circle" />
               </div>
-              <div style={{ fontSize: 13, color: 'var(--text-dim)' }}>
-                {currentTrack?.artist || 'Unknown Artist'} {currentTrack?.album ? `— ${currentTrack.album}` : ''}
-              </div>
+            )}
+
+            <div
+              className={`fullscreen-cover-art-wrap ${albumArtFit === 'contain' ? 'contain-mode' : ''}`}
+              style={{
+                width: 160,
+                height: 160,
+                borderRadius: 20,
+                overflow: 'hidden',
+                boxShadow: 'inset 0 1px 0.5px rgba(255, 255, 255, 0.25), 0 18px 42px -10px rgba(0, 0, 0, 0.75)',
+                position: 'relative',
+                zIndex: 2,
+                margin: 0,
+              }}
+            >
+              {albumArtFit === 'contain' && (
+                <div
+                  className="fullscreen-cover-ambient-bg"
+                  style={{ backgroundImage: `url(${effectiveCover})` }}
+                />
+              )}
+              <img
+                src={effectiveCover}
+                alt="Album Artwork"
+                className={`fullscreen-cover-art ${albumArtFit === 'contain' ? 'contain-art' : ''}`}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+              {!lowSpecMode && canvas && (canvasMode === 'artwork' || canvasMode === 'both') && (
+                <div style={{ position: 'absolute', inset: 0, zIndex: 3, borderRadius: 'inherit', overflow: 'hidden' }}>
+                  <CanvasVideoPlayer
+                    canvas={canvas}
+                    isPlaying={isPlaying}
+                    variant="artwork"
+                  />
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Hardware Telemetry Indicators */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255, 255, 255, 0.04)', padding: '6px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600 }}>
-              <Cpu size={13} style={{ color: accentColor }} />
-              <span>{telemetryText}</span>
-            </div>
-            {currentTrack?.format && (
-              <div style={{ background: 'rgba(255, 255, 255, 0.04)', padding: '6px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
-                {currentTrack.format.toUpperCase()}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1
+              style={{
+                fontFamily: "'Bricolage Grotesque', var(--font-display, sans-serif)",
+                fontSize: 'clamp(1.25rem, 1.9vw, 1.75rem)',
+                fontWeight: 800,
+                letterSpacing: '-0.025em',
+                lineHeight: 1.2,
+                color: '#ffffff',
+                margin: '0 0 6px 0',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={title}
+            >
+              {title}
+            </h1>
+            <p
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: 'var(--text-dim, rgba(255, 255, 255, 0.7))',
+                margin: '0 0 12px 0',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={artist}
+            >
+              {artist} {currentTrack?.album ? `— ${currentTrack.album}` : ''}
+            </p>
+
+            {/* Telemetry / Signal-Path Badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div
+                style={{
+                  fontFamily: "var(--ah-mono, 'JetBrains Mono', monospace)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: 0.5,
+                  padding: '4px 10px',
+                  borderRadius: 8,
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.14)',
+                  color: 'var(--cyan-ink, #22d3ee)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Cpu size={13} style={{ color: accentColor }} />
+                <span>{telemetryText || 'BIT-PERFECT DIRECT'}</span>
               </div>
-            )}
+              {currentTrack?.format && (
+                <div style={{ background: 'rgba(255, 255, 255, 0.06)', padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>
+                  {currentTrack.format.toUpperCase()}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Compact Lyrics Ticker */}
+        {/* Studio Mastering Telemetry Rack */}
         <div
+          className="studio-deck-rack v2-liquid-glass"
           style={{
-            textAlign: 'center',
-            padding: '12px 24px',
-            background: 'rgba(255, 255, 255, 0.02)',
-            borderRadius: 8,
-            border: '1px solid rgba(255, 255, 255, 0.04)',
+            width: '100%',
+            background: 'color-mix(in srgb, var(--art-surface-tint, #14161f) 38%, rgba(16, 18, 24, 0.78))',
+            backdropFilter: 'blur(24px) saturate(150%)',
+            borderRadius: 16,
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            boxShadow: '0 20px 50px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.14)',
+            padding: 18,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
           }}
         >
-          <div style={{ fontSize: 18, fontWeight: 600, color: '#fff', letterSpacing: '-0.2px', marginBottom: 4 }}>
-            {currentLyric}
-          </div>
-          {nextLyric && (
-            <div style={{ fontSize: 13, color: 'var(--text-dim)', opacity: 0.6 }}>
-              {nextLyric}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', paddingBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Sliders size={15} style={{ color: accentColor }} />
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '1.4px', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+                Audio meters
+              </span>
             </div>
-          )}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                AUDIO VISUALIZER
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-dim)' }}>
+                CH 1 · LEFT
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-dim)' }}>
+                CH 2 · RIGHT
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.15fr', gap: 12, alignItems: 'center' }}>
+            <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <canvas ref={leftCanvasRef} width={240} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
+            </div>
+
+            <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <canvas ref={rightCanvasRef} width={240} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
+            </div>
+
+            <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <canvas ref={oscCanvasRef} width={280} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
+              <div style={{ position: 'absolute', top: 6, right: 8, display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--text-dim)' }}>
+                <Activity size={11} style={{ color: accentColor }} /> REALTIME SCOPE
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── RIGHT COLUMN: Liquid Theater Synced Lyrics with Progressive Blur ── */}
+      <div
+        className="liquid-theater-right"
+        style={{
+          height: '100%',
+          maxHeight: 'calc(100vh - 160px)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
+        <div
+          className="fullscreen-lyrics-fade-wrap"
+          style={{ height: '100%', overflow: 'hidden', position: 'relative' }}
+        >
+          <div
+            className="fullscreen-lyrics-scroll"
+            ref={scrollRef}
+            style={{
+              height: '100%',
+              overflowY: 'auto',
+              padding: '60px 20px 140px 10px',
+              scrollbarWidth: 'none',
+              scrollBehavior: 'smooth',
+            }}
+          >
+            {lyrics.length === 0 ? (
+              <div
+                className="liquid-right-ambient-stage"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  justifyContent: 'center',
+                  gap: 22,
+                  padding: '30px 10px',
+                  width: '100%',
+                  maxWidth: 580,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 12,
+                      background: 'rgba(255, 255, 255, 0.07)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: accentColor || '#22d3ee',
+                    }}
+                  >
+                    <Activity size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#ffffff' }}>
+                      {lyricStatus === 'loading' ? 'Loading Synced Lyrics…' : 'Ambient Audio Spectrum'}
+                    </h3>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--text-dim, rgba(255, 255, 255, 0.6))' }}>
+                      {lyricStatus === 'loading' ? 'Resolving word timing data' : 'Instrumental Mode · Signal Path Telemetry Active'}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    width: '100%',
+                    height: 160,
+                    borderRadius: 18,
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    boxShadow: 'inset 0 1px 0.5px rgba(255, 255, 255, 0.1)',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '12px 16px',
+                  }}
+                >
+                  <Visualizer mode={(vizMode === 'circle' || vizMode === 'vectorscope') ? 'baseline' : (vizMode || 'wave')} />
+                </div>
+              </div>
+            ) : (
+              lyrics.map((l, i) => {
+                const isActive = lyricsDisplayMode !== 'static' && i === activeIdx;
+                return (
+                  <div
+                    key={i}
+                    data-idx={i}
+                    onClick={() => {
+                      if (lyricsDisplayMode !== 'static') {
+                        seek(l.time_secs - lyricOffset / 1000);
+                      }
+                    }}
+                    style={{
+                      cursor: lyricsDisplayMode !== 'static' ? 'pointer' : 'default',
+                      padding: '12px 0',
+                      textAlign: 'left',
+                      fontFamily: "'Bricolage Grotesque', var(--font-display, sans-serif)",
+                      fontSize: 'clamp(1.5rem, 2.4vw, 2.35rem)',
+                      fontWeight: 700,
+                      lineHeight: 1.3,
+                      letterSpacing: '-0.02em',
+                      color: isActive ? '#ffffff' : 'rgba(255, 255, 255, 0.45)',
+                      opacity: isActive ? 1 : 0.30,
+                      filter: isActive ? 'blur(0px)' : 'blur(1.8px)',
+                      transform: isActive ? 'scale(1.03) translateX(6px)' : 'scale(1) translateX(0)',
+                      transition: 'all 0.35s cubic-bezier(0.2, 0, 0, 1)',
+                      willChange: 'filter, opacity, transform',
+                    }}
+                  >
+                    <div>
+                      {lyricsDisplayMode === 'karaoke' && isActive && l.words && l.words.length > 0 ? (
+                        <KaraokeActiveLine
+                          words={l.words}
+                          positionSecs={playbackPositionSecs}
+                          lyricOffset={lyricOffset}
+                          isPlaying={isPlaying}
+                        />
+                      ) : (
+                        l.text || '♪'
+                      )}
+                    </div>
+                    {showRomaji && l.romaji && l.romaji !== l.text && (
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 500,
+                          color: 'var(--text-dim, rgba(255, 255, 255, 0.6))',
+                          marginTop: 4,
+                          letterSpacing: 0,
+                          filter: 'none',
+                        }}
+                      >
+                        {l.romaji}
+                      </div>
+                    )}
+                    {showTranslation && l.translation && (
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 500,
+                          color: 'var(--text-dim, rgba(255, 255, 255, 0.6))',
+                          marginTop: 4,
+                          letterSpacing: 0,
+                          filter: 'none',
+                        }}
+                      >
+                        {l.translation}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
     </motion.div>

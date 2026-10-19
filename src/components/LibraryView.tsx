@@ -12,10 +12,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { 
   MoreVertical, RefreshCw, Activity, Loader2, Heart, ThumbsDown, DownloadCloud, Check, Trash2, 
   ListMusic, Disc, ArrowUpDown, Search, X, Sparkles, HardDrive, Globe, GripVertical, ArrowUp, ArrowDown, 
-  Play, Tag, ListPlus, Plus, FolderPlus, Image, FileText, MinusCircle, Sliders, Layers, Terminal, BookOpen, Waves, LayoutGrid, ChevronDown 
+  Play, Tag, ListPlus, Plus, FolderPlus, Image, FileText, MinusCircle 
 } from 'lucide-react';
 import defaultCover from '../assets/default_cover.png';
-import { Track, CloudTrack as ProviderCloudTrack, Playlist, LibraryDesign } from '../store/types';
+import { Track, CloudTrack as ProviderCloudTrack, Playlist } from '../store/types';
 import { useVirtualList } from '../utils/useVirtualList';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { matchesSearchQuery } from '../utils/searchParser';
@@ -24,16 +24,6 @@ import { AlbumsView } from './AlbumsView';
 import { SimpleLRU } from '../utils/lruCache';
 import { fmt, baseName, isStreamTrack, isLosslessTrack, cloudTrackToVirtualTrack, getMenuPosition, startSonicMix } from '../utils';
 import { shuffleArray } from '../utils/shuffle';
-import './LibraryDesigns.css';
-
-export const LIBRARY_DESIGNS: { id: LibraryDesign; label: string; icon: React.ReactNode; desc: string }[] = [
-  { id: 'classic', label: 'Classic', icon: <LayoutGrid size={14} />, desc: 'Track table and album grid' },
-  { id: 'studio', label: 'Compact', icon: <Sliders size={14} />, desc: 'Compact rows with audio format labels' },
-  { id: 'editorial', label: 'Large rows', icon: <BookOpen size={14} />, desc: 'Larger artwork and serif text' },
-  { id: 'crate', label: 'Split view', icon: <Layers size={14} />, desc: 'Artist sidebar beside the track list' },
-  { id: 'ambient', label: 'Rounded', icon: <Waves size={14} />, desc: 'Rounded rows with translucent backgrounds' },
-  { id: 'brutalist', label: 'Grid', icon: <Terminal size={14} />, desc: 'Square rows with visible grid lines' },
-];
 
 const entryKey = (track: Track) => track.playlist_entry_id !== undefined ? `entry:${track.playlist_entry_id}` : track.source_context ? `recording:${track.source_context.recording_id}` : track.path;
 
@@ -565,15 +555,13 @@ interface TrackRowProps {
   isSelected?: boolean;
   onRowClick?: (t: any, i: number, e: React.MouseEvent) => void;
   onSelectArtist?: (artist: string) => void;
-  design?: LibraryDesign;
 }
 
 const TrackRow = memo(({ 
   t, i, totalTracks: _totalTracks, active, isHighRes, currentPlaylist: _currentPlaylist, 
   playTrack, setView, onOpenMenu,
   toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes,
-  isDraggable, isDragged, isDragOver, onPointerDragStart, isSelected, onRowClick, onSelectArtist,
-  design
+  isDraggable, isDragged, isDragOver, onPointerDragStart, isSelected, onRowClick, onSelectArtist
 }: TrackRowProps) => {
   const isDolbyAtmos = t.format?.toLowerCase() === 'dolby' || t.format?.toLowerCase() === 'atmos' || t.format?.toLowerCase() === 'dolby atmos';
   return (
@@ -630,13 +618,7 @@ const TrackRow = memo(({
             <GripVertical size={14} style={{ opacity: isDragged ? 0.3 : 0.6 }} />
           </div>
         ) : (
-          design === 'brutalist' ? (
-            active ? '[▶]' : `[${String(i + 1).padStart(2, '0')}]`
-          ) : design === 'studio' ? (
-            <span className="studio-mono">{active ? '▶' : String(i + 1).padStart(2, '0')}</span>
-          ) : (
-            active ? '▶' : i + 1
-          )
+          active ? '▶' : i + 1
         )}
       </td>
       <td style={{ textAlign: 'center', padding: '0 4px' }}>
@@ -684,13 +666,7 @@ const TrackRow = memo(({
         </div>
       </td>
       <td>
-        {design === 'editorial' ? (
-          <div className="editorial-sleeve-thumb">
-            <TrackThumbnail path={t.path} coverUrl={t.cover_url} />
-          </div>
-        ) : (
-          <TrackThumbnail path={t.path} coverUrl={t.cover_url} />
-        )}
+        <TrackThumbnail path={t.path} coverUrl={t.cover_url} />
       </td>
       <td className="cell-truncate">
         <div className="track-name">{t.title || baseName(t.path)}</div>
@@ -710,45 +686,32 @@ const TrackRow = memo(({
       </td>
       <td style={{ textAlign: 'center' }}>
         {t.format && (
-          design === 'studio' ? (
-            <span className={`studio-codec-badge ${
-              t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd') ? 'dsd' :
-              isHighRes ? 'flac' : ''
-            }`}>
-              {t.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'STREAM' : t.format.toUpperCase()}
-            </span>
-          ) : design === 'brutalist' ? (
-            <span className="brutalist-tag">{t.format.toUpperCase()}</span>
-          ) : design === 'ambient' ? (
-            <span className="ambient-capsule-badge">{t.format.toUpperCase()}</span>
-          ) : (
-            <span 
-              className={`quality-tag ${isHighRes ? 'high-res' : ''} ${
-                isStreamTrack(t.path, t.format) || t.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'web-stream' : ''
-              } ${
-                t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd') ? 'dsd-gold' : ''
-              } ${isDolbyAtmos ? 'dolby-atmos' : ''}`}
-              style={{
-                background: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
-                  ? 'linear-gradient(135deg, #FFE082, #FFB300, #FF8F00)'
-                  : undefined,
-                boxShadow: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
-                  ? '0 0 10px rgba(255, 179, 0, 0.45)'
-                  : undefined,
-                border: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
-                  ? '1px solid rgba(255, 224, 130, 0.4)'
-                  : undefined,
-                color: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
-                  ? '#0a0a0f'
-                  : undefined,
-                fontWeight: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
-                  ? 800
-                  : undefined
-              }}
-            >
-              {t.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'WEB STREAM' : t.format.toUpperCase()}
-            </span>
-          )
+          <span 
+            className={`quality-tag ${isHighRes ? 'high-res' : ''} ${
+              isStreamTrack(t.path, t.format) || t.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'web-stream' : ''
+            } ${
+              t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd') ? 'dsd-gold' : ''
+            } ${isDolbyAtmos ? 'dolby-atmos' : ''}`}
+            style={{
+              background: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
+                ? 'linear-gradient(135deg, #FFE082, #FFB300, #FF8F00)'
+                : undefined,
+              boxShadow: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
+                ? '0 0 10px rgba(255, 179, 0, 0.45)'
+                : undefined,
+              border: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
+                ? '1px solid rgba(255, 224, 130, 0.4)'
+                : undefined,
+              color: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
+                ? '#0a0a0f'
+                : undefined,
+              fontWeight: (t.format.toLowerCase().includes('dsf') || t.format.toLowerCase().includes('dff') || t.format.toLowerCase().includes('dsd'))
+                ? 800
+                : undefined
+            }}
+          >
+            {t.format.toUpperCase() === 'YOUTUBE DIRECT' ? 'WEB STREAM' : t.format.toUpperCase()}
+          </span>
         )}
       </td>
       <td style={{ textAlign: 'right', overflow: 'visible' }}>
@@ -907,9 +870,7 @@ export function LibraryView() {
     matchMetadata, addToQueue, playNextInQueue, playlists, addToPlaylist,
     subsonicUrl, subsonicUser, subsonicConnected, subsonicPass,
     jellyfinUrl, jellyfinConnected, toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
-    setCoverArtModalTrack, librarySearchQuery, setLibrarySearchQuery,
-    libraryDesign, setLibraryDesign,
-    albumViewMode
+    setCoverArtModalTrack, librarySearchQuery, setLibrarySearchQuery
   } = useStore(useShallow(s => ({
     view: s.view,
     tracks: s.tracks,
@@ -940,9 +901,6 @@ export function LibraryView() {
     setCoverArtModalTrack: s.setCoverArtModalTrack,
     librarySearchQuery: s.librarySearchQuery,
     setLibrarySearchQuery: s.setLibrarySearchQuery,
-    libraryDesign: s.libraryDesign,
-    setLibraryDesign: s.setLibraryDesign,
-    albumViewMode: s.albumViewMode,
   })));
 
   useEffect(() => {
@@ -1006,24 +964,6 @@ export function LibraryView() {
   const [searchQuery, setSearchQuery] = useState(librarySearchQuery || '');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(librarySearchQuery || '');
   const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  const [designMenuOpen, setDesignMenuOpen] = useState(false);
-  const designMenuRef = useRef<HTMLDivElement | null>(null);
-  const [crateArtistSearch, setCrateArtistSearch] = useState('');
-  const [selectedCrateArtist, setSelectedCrateArtist] = useState<string | null>(null);
-  const crateSidebarRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (designMenuRef.current && !designMenuRef.current.contains(e.target as Node)) {
-        setDesignMenuOpen(false);
-      }
-    };
-    if (designMenuOpen) {
-      window.addEventListener('click', handleClickOutside);
-      return () => window.removeEventListener('click', handleClickOutside);
-    }
-  }, [designMenuOpen]);
 
   // Sync with store-level librarySearchQuery navigation
   useEffect(() => {
@@ -1298,24 +1238,6 @@ export function LibraryView() {
 
   const countAll = sourceTracks.length;
 
-  const crateArtists = useMemo(() => {
-    if (libraryDesign !== 'crate') return [];
-    const counts = new Map<string, number>();
-    for (const t of sourceTracks) {
-      const art = t.artist || 'Unknown Artist';
-      counts.set(art, (counts.get(art) || 0) + 1);
-    }
-    const list = Array.from(counts.entries()).map(([artist, count]) => ({ artist, count }));
-    list.sort((a, b) => a.artist.localeCompare(b.artist));
-    return list;
-  }, [sourceTracks, libraryDesign]);
-
-  const filteredCrateArtists = useMemo(() => {
-    if (!crateArtistSearch.trim()) return crateArtists;
-    const q = crateArtistSearch.toLowerCase();
-    return crateArtists.filter(a => a.artist.toLowerCase().includes(q));
-  }, [crateArtists, crateArtistSearch]);
-
   const filteredTracks = useMemo(() => {
     return sourceTracks.filter((t: any) => {
       // 1. Quick Filter Chip
@@ -1324,16 +1246,11 @@ export function LibraryView() {
       if (activeFilter === 'local' && isStreamTrack(t.path, t.format)) return false;
       if (activeFilter === 'streams' && !isStreamTrack(t.path, t.format)) return false;
 
-      // 2. Crate Digger artist filter
-      if (libraryDesign === 'crate' && selectedCrateArtist && (t.artist || 'Unknown Artist') !== selectedCrateArtist) {
-        return false;
-      }
-
-      // 3. Scoped Search Query matching
+      // 2. Scoped Search Query matching
       if (!debouncedSearchQuery) return true;
       return matchesSearchQuery(t, debouncedSearchQuery);
     });
-  }, [sourceTracks, activeFilter, libraryDesign, selectedCrateArtist, debouncedSearchQuery]);
+  }, [sourceTracks, activeFilter, debouncedSearchQuery]);
 
   // Multi-Select keyboard shortcuts (Ctrl+A / Esc)
   useEffect(() => {
@@ -1427,12 +1344,7 @@ export function LibraryView() {
     window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Loved ${selected.length} songs`, type: 'success' } }));
   };
 
-  const itemHeight = 
-    libraryDesign === 'studio' ? 38 :
-    libraryDesign === 'editorial' ? 68 :
-    libraryDesign === 'crate' ? 42 :
-    libraryDesign === 'ambient' ? 56 :
-    libraryDesign === 'brutalist' ? 40 : 52;
+  const itemHeight = 52;
 
   const {
     visibleItems: virtualLocalTracks,
@@ -1443,16 +1355,6 @@ export function LibraryView() {
     itemHeight,
     overscan: 12,
     scrollContainer: scrollRef,
-  });
-
-  const {
-    visibleItems: virtualCrateArtists,
-    topSpacerHeight: topCrateSpacer,
-    bottomSpacerHeight: bottomCrateSpacer,
-  } = useVirtualList(filteredCrateArtists, {
-    itemHeight: 34,
-    overscan: 8,
-    scrollContainer: crateSidebarRef,
   });
 
   const {
@@ -1512,16 +1414,13 @@ export function LibraryView() {
     ? (activeSector === 'subsonic' ? subsonicTracks.length > 0 : jellyfinTracks.length > 0)
     : tracks.length > 0;
 
-  const currentDesignConfig = LIBRARY_DESIGNS.find(d => d.id === libraryDesign) || LIBRARY_DESIGNS[0];
-
   return (
     <div 
       ref={scrollRef}
-      className={`library-wrap design-${libraryDesign} album-view-${albumViewMode}`} 
+      className="library-wrap design-classic album-view-grid" 
       data-scroll-container="true"
       onClick={() => {
         setActiveMenu(null);
-        setDesignMenuOpen(false);
       }}
       onScroll={(e) => {
         const target = e.currentTarget;
@@ -1600,58 +1499,6 @@ export function LibraryView() {
                     <Disc size={14} /> Albums
                   </button>
                 </div>
-
-                {/* Track Design Switcher Pill */}
-                {viewMode === 'tracks' && (
-                  <div style={{ position: 'relative' }} ref={designMenuRef}>
-                    <button
-                      type="button"
-                      className="library-design-switcher-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDesignMenuOpen(!designMenuOpen);
-                      }}
-                      title="Switch Track Design Style"
-                    >
-                      {currentDesignConfig.icon}
-                      <span>{currentDesignConfig.label}</span>
-                      <ChevronDown size={12} style={{ opacity: 0.7 }} />
-                    </button>
-                    <AnimatePresence>
-                      {designMenuOpen && (
-                        <motion.div
-                          className="library-design-menu-popover"
-                          initial={{ opacity: 0, y: 6, scale: 0.96 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 6, scale: 0.96 }}
-                          transition={{ duration: 0.15 }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div style={{ padding: '4px 8px 8px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-dim)' }}>
-                            Track Design
-                          </div>
-                          {LIBRARY_DESIGNS.map(d => (
-                            <button
-                              key={d.id}
-                              type="button"
-                              className={`library-design-option ${libraryDesign === d.id ? 'active' : ''}`}
-                              onClick={() => {
-                                setLibraryDesign(d.id as any);
-                                setDesignMenuOpen(false);
-                              }}
-                            >
-                              <span className="library-design-option-icon">{d.icon}</span>
-                              <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left', minWidth: 0 }}>
-                                <span style={{ fontSize: 13, fontWeight: 600 }}>{d.label}</span>
-                                <span style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.desc}</span>
-                              </div>
-                            </button>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -2025,169 +1872,56 @@ export function LibraryView() {
                 </div>
               )}
               {sourceTracks.length > 0 && libraryReady && (
-                <>
-                  {libraryDesign === 'crate' ? (
-                    <div className="crate-container">
-                      <div className="crate-sidebar">
-                        <div className="crate-sidebar-header">
-                          <span>Artists</span>
-                          <span className="crate-artist-count">{crateArtists.length}</span>
-                        </div>
-                        <div style={{ padding: '8px 10px' }}>
-                          <input
-                            type="text"
-                            placeholder="Filter artists..."
-                            value={crateArtistSearch}
-                            onChange={(e) => setCrateArtistSearch(e.target.value)}
-                            style={{
-                              width: '100%',
-                              background: 'rgba(255, 255, 255, 0.05)',
-                              border: '1px solid var(--glass-border)',
-                              borderRadius: 6,
-                              padding: '6px 10px',
-                              fontSize: 12,
-                              color: 'var(--text)',
-                              outline: 'none',
-                              boxSizing: 'border-box'
-                            }}
-                          />
-                        </div>
-                        <div className="crate-sidebar-list" ref={crateSidebarRef}>
-                          <div
-                            className={`crate-artist-item ${selectedCrateArtist === null ? 'active' : ''}`}
-                            onClick={() => {
-                              setSelectedCrateArtist(null);
-                              scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
-                            }}
-                          >
-                            <span>All Artists</span>
-                            <span className="crate-artist-count">{sourceTracks.length}</span>
-                          </div>
-                          {topCrateSpacer > 0 && <div style={{ height: topCrateSpacer }} />}
-                          {virtualCrateArtists.map(item => (
-                            <div
-                              key={item.artist}
-                              className={`crate-artist-item ${selectedCrateArtist === item.artist ? 'active' : ''}`}
-                              onClick={() => {
-                                setSelectedCrateArtist(item.artist);
-                                scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' });
-                              }}
-                            >
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.artist}</span>
-                              <span className="crate-artist-count">{item.count}</span>
-                            </div>
-                          ))}
-                          {bottomCrateSpacer > 0 && <div style={{ height: bottomCrateSpacer }} />}
-                        </div>
-                      </div>
-                      <div className="crate-main-pane">
-                        <table className="track-table">
-                          <thead>
-                            <tr>
-                              <th style={{ width: 50, textAlign: 'center' }}>#</th>
-                              <th style={{ width: 68, textAlign: 'center' }}></th>
-                              <th style={{ width: 52 }}></th>
-                              <th style={{ width: '38%' }}>Title</th>
-                              <th style={{ width: '28%' }}>Artist</th>
-                              <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
-                              <th style={{ width: 140, textAlign: 'right' }}>Time</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {topLocalSpacer > 0 && <tr style={{ height: topLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
-                            {virtualLocalTracks.map((t: any, idx: number) => {
-                              const i = localStartIndex + idx;
-                              const active = currentTrackPath === t.path;
-                              const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
-                              const isDraggable = !!currentPlaylist && !debouncedSearchQuery && activeFilter === 'all';
+                <table className="track-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 50, textAlign: 'center' }}>#</th>
+                      <th style={{ width: 68, textAlign: 'center' }}></th>
+                      <th style={{ width: 52 }}></th>
+                      <th style={{ width: '38%' }}>Title</th>
+                      <th style={{ width: '28%' }}>Artist</th>
+                      <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
+                      <th style={{ width: 140, textAlign: 'right' }}>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topLocalSpacer > 0 && <tr style={{ height: topLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
+                    {virtualLocalTracks.map((t: any, idx: number) => {
+                      const i = localStartIndex + idx;
+                      const active = currentTrackPath === t.path;
+                      const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
+                      const isDraggable = !!currentPlaylist && !debouncedSearchQuery && activeFilter === 'all';
 
-                              return (
-                                <TrackRow
-                                  key={entryKey(t)}
-                                  t={t}
-                                  i={i}
-                                  totalTracks={filteredTracks.length}
-                                  active={active}
-                                  isHighRes={isHighRes}
-                                  currentPlaylist={currentPlaylist}
-                                  playTrack={playTrack}
-                                  setView={setView}
-                                  onOpenMenu={handleOpenMenu}
-                                  toggleLoveTrack={toggleLoveTrack}
-                                  toggleDislikeTrack={toggleDislikeTrack}
-                                  cacheCloudTrack={cacheCloudTrack}
-                                  deleteCachedTrack={deleteCachedTrack}
-                                  cachedCloudHashes={cachedCloudHashes}
-                                  isDraggable={isDraggable}
-                                  isDragged={draggedIdx === i}
-                                  isDragOver={dragOverIdx === i}
-                                  onPointerDragStart={startPlaylistPointerDrag}
-                                  isSelected={selectedSet.has(entryKey(t))}
-                                  onRowClick={handleTrackRowClick}
-                                  onSelectArtist={handleSelectArtist}
-                                  design={libraryDesign}
-                                />
-                              );
-                            })}
-                            {bottomLocalSpacer > 0 && <tr style={{ height: bottomLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : (
-                    <table className="track-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: 50, textAlign: 'center' }}>#</th>
-                          <th style={{ width: 68, textAlign: 'center' }}></th>
-                          <th style={{ width: 52 }}></th>
-                          <th style={{ width: '38%' }}>Title</th>
-                          <th style={{ width: '28%' }}>Artist</th>
-                          <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
-                          <th style={{ width: 140, textAlign: 'right' }}>Time</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {topLocalSpacer > 0 && <tr style={{ height: topLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
-                        {virtualLocalTracks.map((t: any, idx: number) => {
-                          const i = localStartIndex + idx;
-                          const active = currentTrackPath === t.path;
-                          const isHighRes = t.format?.toLowerCase() === 'flac' || t.format?.toLowerCase() === 'wav';
-                          const isDraggable = !!currentPlaylist && !debouncedSearchQuery && activeFilter === 'all';
-
-                          return (
-                            <TrackRow
-                              key={entryKey(t)}
-                              t={t}
-                              i={i}
-                              totalTracks={filteredTracks.length}
-                              active={active}
-                              isHighRes={isHighRes}
-                              currentPlaylist={currentPlaylist}
-                              playTrack={playTrack}
-                              setView={setView}
-                              onOpenMenu={handleOpenMenu}
-                              toggleLoveTrack={toggleLoveTrack}
-                              toggleDislikeTrack={toggleDislikeTrack}
-                              cacheCloudTrack={cacheCloudTrack}
-                              deleteCachedTrack={deleteCachedTrack}
-                              cachedCloudHashes={cachedCloudHashes}
-                              isDraggable={isDraggable}
-                              isDragged={draggedIdx === i}
-                              isDragOver={dragOverIdx === i}
-                              onPointerDragStart={startPlaylistPointerDrag}
-                              isSelected={selectedSet.has(entryKey(t))}
-                              onRowClick={handleTrackRowClick}
-                              onSelectArtist={handleSelectArtist}
-                              design={libraryDesign}
-                            />
-                          );
-                        })}
-                        {bottomLocalSpacer > 0 && <tr style={{ height: bottomLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
-                      </tbody>
-                    </table>
-                  )}
-                </>
+                      return (
+                        <TrackRow
+                          key={entryKey(t)}
+                          t={t}
+                          i={i}
+                          totalTracks={filteredTracks.length}
+                          active={active}
+                          isHighRes={isHighRes}
+                          currentPlaylist={currentPlaylist}
+                          playTrack={playTrack}
+                          setView={setView}
+                          onOpenMenu={handleOpenMenu}
+                          toggleLoveTrack={toggleLoveTrack}
+                          toggleDislikeTrack={toggleDislikeTrack}
+                          cacheCloudTrack={cacheCloudTrack}
+                          deleteCachedTrack={deleteCachedTrack}
+                          cachedCloudHashes={cachedCloudHashes}
+                          isDraggable={isDraggable}
+                          isDragged={draggedIdx === i}
+                          isDragOver={dragOverIdx === i}
+                          onPointerDragStart={startPlaylistPointerDrag}
+                          isSelected={selectedSet.has(entryKey(t))}
+                          onRowClick={handleTrackRowClick}
+                          onSelectArtist={handleSelectArtist}
+                        />
+                      );
+                    })}
+                    {bottomLocalSpacer > 0 && <tr style={{ height: bottomLocalSpacer }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
+                  </tbody>
+                </table>
               )}
             </>
           )}

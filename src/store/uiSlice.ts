@@ -225,7 +225,10 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     return (stored as AlbumViewMode) || 'classic';
   })(),
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
-  theaterModeDesign: (safeGetStorage('aideo-theater-design') as any) || (safeGetStorage('aideo-fullscreen-layout') as any) || 'stage',
+  theaterModeDesign: (() => {
+    const stored = safeGetStorage('aideo-theater-design') || safeGetStorage('aideo-fullscreen-layout');
+    return stored === 'zen' ? 'zen' : 'studio';
+  })(),
   theaterHudStyle: (safeGetStorage('aideo-theater-hud-style') as any) || 'capsule',
   canvasEnabled: safeGetStorage('aideo-canvas-enabled') !== 'false',
   canvasMode: (safeGetStorage('aideo-canvas-mode') as CanvasMode) || 'both',
@@ -281,10 +284,11 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   },
 
   setView: (view: any) => {
-    if (view && typeof view === 'string') {
-      safeSetStorage('aideo-last-view', view);
+    const normalized = view === 'aideolab' ? 'aideo_lab' : view;
+    if (normalized && typeof normalized === 'string') {
+      safeSetStorage('aideo-last-view', normalized);
     }
-    set({ view });
+    set({ view: normalized });
   },
 
   setDiscoveryData: (discoveryData: any) => set({ discoveryData }),
@@ -362,7 +366,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   toggleProMode: () => set(s => ({ showProMode: !s.showProMode })),
 
-  toggleControlCenter: () => set(s => ({ showControlCenter: !s.showControlCenter })),
+  toggleControlCenter: () => get().setView('aideolab'),
 
   setSidebarNavItems: (items: SidebarNavItemConfig[]) => {
     safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(items));
@@ -607,8 +611,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   },
 
   setTheaterModeDesign: (design: any) => {
-    safeSetStorage('aideo-theater-design', design);
-    set({ theaterModeDesign: design });
+    const normalized = design === 'zen' ? 'zen' : 'studio';
+    safeSetStorage('aideo-theater-design', normalized);
+    set({ theaterModeDesign: normalized });
   },
 
   setTheaterHudStyle: (style: any) => {

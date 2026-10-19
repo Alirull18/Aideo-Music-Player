@@ -376,7 +376,7 @@ export interface NetworkTelemetry {
   active_stream_total_bytes: number;
 }
 
-export type ViewMode = 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'aideo' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts' | 'downloaded';
+export type ViewMode = 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'aideo' | 'settings' | 'aideo_lab' | 'aideolab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts' | 'downloaded';
 
 export type SidebarNavItemId = 
   | 'aideo'
@@ -844,7 +844,7 @@ export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 
 export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage' | 'spotify' | 'apple';
 export type LibraryDesign = 'classic' | 'studio' | 'editorial' | 'crate' | 'ambient' | 'brutalist';
 export type AlbumViewMode = 'classic' | 'compact' | 'editorial';
-export type TheaterModeDesign = 'stage' | 'zen' | 'studio' | 'vinyl' | 'poster' | 'scope';
+export type TheaterModeDesign = 'studio' | 'zen';
 export type TheaterHudStyle = 'capsule' | 'master' | 'minimal' | 'analog';
 export type CanvasMode = 'off' | 'artwork' | 'backdrop' | 'both';
 

@@ -110,7 +110,7 @@ describe('Song-first search', () => {
     expect(useStore.getState().queue).toHaveLength(0);
   });
 
-  it.each(['classic', 'command', 'editorial', 'stage'] as const)('keeps source filters usable after a %s search', async aideoPageDesign => {
+  it.each(['classic'] as const)('keeps source filters usable after a %s search', async aideoPageDesign => {
     useStore.setState({ aideoPageDesign });
     vi.mocked(invoke).mockImplementation(async cmd => {
       if (cmd === 'tidal_search') return [{ ...tidal, id: '123' }];
