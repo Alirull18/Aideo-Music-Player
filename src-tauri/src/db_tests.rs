@@ -505,4 +505,83 @@ mod tests {
         };
         assert!(invalid_rec.to_json().is_err(), "33 sources must exceed durable ceiling and be rejected");
     }
+
+    #[test]
+    fn test_concurrent_wal_reads_during_scan() {
+        use crate::db::*;
+        let db_path = std::env::temp_dir().join(format!(
+            "aideo-wal-concurrent-{}.sqlite",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_str = db_path.to_str().unwrap();
+
+        let mut writer_conn = init_db(path_str).unwrap();
+        let seed_tracks: Vec<Track> = (0..25)
+            .map(|i| Track {
+                id: 0,
+                path: format!("C:/music/seed_{i}.flac"),
+                title: Some(format!("Seed Track {i}")),
+                artist: Some("Seed Artist".into()),
+                album: Some("Seed Album".into()),
+                duration: Some(180.0),
+                format: Some("FLAC".into()),
+                lyric_offset: 0,
+                loved: Some(0),
+                disliked: Some(0),
+                cover_url: None,
+                path_hash: None,
+                bpm: None,
+                energy: None,
+                bass_ratio: None,
+                treble_ratio: None,
+                replaygain_gain: Some(-4.5),
+                track_number: Some(i + 1),
+                disc_number: Some(1),
+                genre: None,
+            })
+            .collect();
+        let mut seed_batch = seed_tracks;
+        save_tracks(&mut writer_conn, &mut seed_batch).unwrap();
+
+        let pool = init_db_pool(path_str, 4).unwrap();
+
+        let tx = writer_conn.transaction().unwrap();
+        for i in 0..100 {
+            tx.execute(
+                "INSERT INTO tracks (path, title, artist, album, duration, format) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    format!("C:/music/scanning_{i}.flac"),
+                    format!("Scanning {i}"),
+                    "Scanner",
+                    "Scan Batch",
+                    200.0,
+                    "FLAC"
+                ],
+            )
+            .unwrap();
+        }
+
+        let reader_conn = pool.get().unwrap();
+        let start = std::time::Instant::now();
+        let page = get_tracks_paginated(&reader_conn, 0, 20, None, None).unwrap();
+        let single = get_track_by_path(&reader_conn, "C:/music/seed_0.flac").unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(page.tracks.len(), 20);
+        assert_eq!(single.replaygain_gain, Some(-4.5));
+        assert!(
+            elapsed < std::time::Duration::from_millis(5),
+            "Pooled WAL reader query took {:?}, expected < 5ms while writer transaction is open",
+            elapsed
+        );
+
+        tx.commit().unwrap();
+        drop(reader_conn);
+        drop(pool);
+        drop(writer_conn);
+        let _ = std::fs::remove_file(&db_path);
+    }
 }

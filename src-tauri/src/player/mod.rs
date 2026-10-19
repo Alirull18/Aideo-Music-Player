@@ -433,6 +433,7 @@ pub struct Player {
     pub file_ch: Arc<AtomicU8>,
     pub file_format: Arc<Mutex<Option<String>>>,
     pub effective_audio_path: Arc<EffectiveAudioPathState>,
+    pub db_pool: Option<crate::db::DbPool>,
 }
 
 fn analyzer_loop(rx: Receiver<(Vec<f32>, f32)>, app_handle: tauri::AppHandle) {
@@ -619,7 +620,7 @@ impl Player {
             .spawn(move || player_loop(cmd_rx, cmd_tx_clone, s, c, p, v, exc, bp, dr, ca, dsp, dev, qt, cp, app, fft_tx, ds, fr, fc, fmt, audio_path))
             .expect("Failed to spawn player thread");
 
-        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, preferred_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache, decode_shutdown, file_rate, file_ch, file_format, effective_audio_path }
+        Player { cmd_tx, status, current_track, position_secs, volume, exclusive_mode, dsp_state, target_device, preferred_device, queue, app_handle, current_process, ffmpeg_path, bit_perfect, current_dev_rate, cache, decode_shutdown, file_rate, file_ch, file_format, effective_audio_path, db_pool: None }
     }
 
     pub fn is_bit_perfect_verified(&self) -> bool {
@@ -2248,14 +2249,17 @@ fn play_file(
     let mut is_manual_change = false;
 
     let track_rg_gain: f32 = if let Some(app_state) = app_handle.try_state::<crate::AppState>() {
-        let conn = safe_lock(&app_state.db);
-        conn.query_row(
-            "SELECT replaygain_gain FROM tracks WHERE path = ?1",
-            rusqlite::params![path],
-            |r| r.get::<_, Option<f64>>(0),
-        )
-        .unwrap_or(None)
-        .unwrap_or(0.0) as f32
+        crate::with_db_reader(app_state.get_reader_conn(), &app_state.db, |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT replaygain_gain FROM tracks WHERE path = ?1",
+                    rusqlite::params![path],
+                    |r| r.get::<_, Option<f64>>(0),
+                )
+                .unwrap_or(None)
+                .unwrap_or(0.0) as f32)
+        })
+        .unwrap_or(0.0)
     } else {
         0.0f32
     };

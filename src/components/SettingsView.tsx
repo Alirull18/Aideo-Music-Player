@@ -495,7 +495,7 @@ export function SettingsView() {
     keepAwake, toggleKeepAwake,
     discordEnabled, toggleDiscord,
     lowSpecMode, toggleLowSpecMode,
-    dsp, setDSP, playback, playbackExclusive, playbackBitPerfect, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
+    dsp, setDSP, playbackStatus, playbackEffectiveAudioPath, playbackExclusive, playbackBitPerfect, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
     listenbrainzToken, listenbrainzUsername, listenbrainzEnabled,
     validateAndSetListenbrainzToken, setListenbrainzToken, toggleListenbrainzScrobble,
     sidebarLastfmVisible, sidebarListenbrainzVisible,
@@ -556,7 +556,8 @@ export function SettingsView() {
     setDSP: s.setDSP,
     playbackExclusive: s.playback.exclusive,
     playbackBitPerfect: s.playback.bit_perfect,
-    playback: s.playback,
+    playbackStatus: s.playback.status,
+    playbackEffectiveAudioPath: s.playback.effective_audio_path,
     toggleExclusive: s.toggleExclusive,
     devices: s.devices,
     currentDevice: s.currentDevice,
@@ -3900,7 +3901,7 @@ export function SettingsView() {
                         requestedExclusive: playbackExclusive,
                         exclusiveTiming: dsp.exclusive_mode_timing,
                         requestedBitPerfect: playbackBitPerfect,
-                        effectiveAudioPath: playback.effective_audio_path,
+                        effectiveAudioPath: playbackEffectiveAudioPath,
                         audioProfile: dsp.audio_profile,
                         upsampleRate: dsp.upsample_rate,
                         dither: dsp.dither,
@@ -3997,7 +3998,7 @@ export function SettingsView() {
               <div>
                 <div className="settings-ctrl-title">Audio Output Path</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
-                  Effective output: {getAudioPathPresentation(playback).hudLabel}
+                  Effective output: {getAudioPathPresentation({ effective_audio_path: playbackEffectiveAudioPath, status: playbackStatus }).hudLabel}
                 </div>
                 <AudioOutputPathSelector compact />
               </div>

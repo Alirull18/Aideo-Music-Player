@@ -89,7 +89,7 @@ pub fn mix_crossfade_frames_scaled(
 
 pub fn get_track_perceived_gain_db(app_handle: &tauri::AppHandle, path: &str) -> Option<f32> {
     let app_state = app_handle.try_state::<crate::AppState>()?;
-    let conn = safe_lock(&app_state.db);
+    let conn = app_state.read_conn();
     let has_sonic = crate::db::column_exists(&conn, "tracks", "sonic_profile");
     let query = if has_sonic {
         "SELECT replaygain_gain, sonic_profile FROM tracks WHERE path = ?1"

@@ -1,6 +1,5 @@
 use tauri::{Manager, State};
 use crate::AppState;
-use crate::safe_lock;
 use futures::StreamExt;
 use super::matcher::*;
 use super::{ChartEntry, ChartFallback, ChartPage, DiscoveryHubData, YoutubeMix, YoutubeTrack};
@@ -1433,7 +1432,7 @@ pub async fn get_youtube_autoplay_recommendations_internal(
     if tracks.len() < 10 {
         let extra_seeds: Vec<(String, String)> = {
             let mut seeds = Vec::new();
-            let conn = crate::safe_lock(&state.db);
+            let conn = state.read_conn();
 
             // Look for loved streams by the exact same artist
             if let Ok(mut stmt) = conn.prepare(
@@ -1549,7 +1548,7 @@ pub async fn get_youtube_autoplay_recommendations_internal(
     // Query recently played track titles/artists from db for taste weighting (not hard dropping)
     let recently_played: std::collections::HashSet<String> = {
         let mut plays = std::collections::HashSet::new();
-        let conn = crate::safe_lock(&state.db);
+        let conn = state.read_conn();
         if let Ok(mut stmt) = conn.prepare(
             "SELECT title, artist FROM playback_history
              WHERE title IS NOT NULL AND artist IS NOT NULL AND title != '' AND artist != ''
@@ -1625,7 +1624,7 @@ pub async fn get_youtube_autoplay_recommendations_internal(
     // ── TASTE-WEIGHTED SCORING PIPELINE ──
     let artist_skip_stats: std::collections::HashMap<String, (i64, i64)> = {
         let mut stats = std::collections::HashMap::new();
-        let conn = crate::safe_lock(&state.db);
+        let conn = state.read_conn();
         if let Ok(mut stmt) = conn.prepare(
             "SELECT artist, COUNT(*), SUM(skipped) FROM playback_history GROUP BY artist"
         ) {
@@ -1642,7 +1641,7 @@ pub async fn get_youtube_autoplay_recommendations_internal(
 
     let loved_tokens: std::collections::HashMap<String, u32> = {
         let mut tokens = std::collections::HashMap::new();
-        let conn = crate::safe_lock(&state.db);
+        let conn = state.read_conn();
         if let Ok(mut stmt) = conn.prepare(
             "SELECT title FROM playback_history WHERE skipped = 0"
         ) {
@@ -3065,7 +3064,7 @@ pub async fn get_personalized_discovery_hub_internal(
 
     // 1. Gather all required DB context upfront in one quick lock
     let (top_genre, lib_tracks, play_counts, recently_loved_tracks, recently_played_tracks, top_listened_tracks, artist_skip_stats, library_signatures) = {
-        let conn = safe_lock(&state.db);
+        let conn = state.read_conn();
 
         // A. Top genre
         let mut top_genre_val = "Chill".to_string();
@@ -3202,7 +3201,7 @@ pub async fn get_personalized_discovery_hub_internal(
         let lib_tracks: Vec<_> = lib_tracks.into_iter().filter(|track| saved_track_provider(track) == crate::db::SourceProvider::Local && std::path::Path::new(&track.path).is_file()).collect();
         let (recs, charts) = generate_local_discovery_fallback(&lib_tracks, &play_counts);
         let (mixed_for_you, recently_played, heavy_rotation, forgotten_gems, playlist_mixes) = {
-            let conn = safe_lock(&state.db);
+            let conn = state.read_conn();
             let mixes = generate_local_mixes(&conn, &seed_artists, &top_artists);
             let (rec_p, heavy_r, forgot_g, p_mixes, unmatched_r, unmatched_t) =
                 extract_library_shelves(&conn, &lib_tracks, &play_counts, &recently_played_tracks, &top_listened_tracks, true);
@@ -3644,7 +3643,7 @@ pub async fn get_personalized_discovery_hub_internal(
     let top_artists_mix = top_artists.clone();
     let top_genre_mix = top_genre.clone();
     let recent_repeats_mix = {
-        let conn = safe_lock(&state.db);
+        let conn = state.read_conn();
         let cutoff = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64 - 7 * 86_400).unwrap_or(0);
         let mut repeats = Vec::new();
         if let Ok(mut stmt) = conn.prepare("SELECT track_path, title, artist FROM playback_history WHERE timestamp >= ?1 AND signal_quality = 'qualified' AND listened_seconds >= MIN(120.0, duration * 0.5) AND title IS NOT NULL AND artist IS NOT NULL AND NOT EXISTS (SELECT 1 FROM tracks d WHERE d.disliked = 1 AND (d.path = playback_history.track_path OR (lower(d.title) = lower(playback_history.title) AND lower(d.artist) = lower(playback_history.artist)))) GROUP BY track_path, title, artist HAVING COUNT(*) >= 2 ORDER BY COUNT(*) DESC, MAX(timestamp) DESC LIMIT 20") {
@@ -3681,12 +3680,12 @@ pub async fn get_personalized_discovery_hub_internal(
         global_charts = local_charts;
     }
     if mixed_for_you.is_empty() {
-        let conn = safe_lock(&state.db);
+        let conn = state.read_conn();
         mixed_for_you = generate_local_mixes(&conn, &seed_artists, &top_artists);
     }
 
     let (recently_played, heavy_rotation, forgotten_gems, playlist_mixes, unmatched_recent, unmatched_top) = {
-        let conn = safe_lock(&state.db);
+        let conn = state.read_conn();
         extract_library_shelves(&conn, &lib_tracks, &play_counts, &recently_played_tracks, &top_listened_tracks, false)
     };
 

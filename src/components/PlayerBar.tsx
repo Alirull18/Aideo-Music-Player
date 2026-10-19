@@ -62,6 +62,7 @@ function ClassicProgressRow({
   const positionSecs = useStore((s) => s.playback.position_secs);
   const pct = duration > 0 ? (positionSecs / duration) * 100 : 0;
 
+
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clickPct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));

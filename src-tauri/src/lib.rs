@@ -358,6 +358,14 @@ impl AppState {
             .map_err(|e| format!("Failed to acquire database connection: {}", e))
     }
 
+    /// Read-only connection: pooled WAL reader, falling back to the shared writer mutex.
+    pub fn read_conn(&self) -> ReadConn<'_> {
+        match self.get_reader_conn() {
+            Ok(c) => ReadConn::Pooled(c),
+            Err(_) => ReadConn::Shared(safe_lock(&self.db)),
+        }
+    }
+
     pub fn get_dsp_state(&self) -> player::DSPState {
         let player = safe_lock(&self.player);
         let dsp = safe_lock(&player.dsp_state).clone();
@@ -372,17 +380,37 @@ impl AppState {
     }
 }
 
-fn with_db_reader<F, R>(state: &State<'_, AppState>, f: F) -> Result<R, String>
+pub enum ReadConn<'a> {
+    Pooled(r2d2::PooledConnection<db::SqliteConnectionManager>),
+    Shared(std::sync::MutexGuard<'a, rusqlite::Connection>),
+}
+
+impl std::ops::Deref for ReadConn<'_> {
+    type Target = rusqlite::Connection;
+    fn deref(&self) -> &rusqlite::Connection {
+        match self {
+            ReadConn::Pooled(c) => c,
+            ReadConn::Shared(g) => g,
+        }
+    }
+}
+
+pub(crate) fn with_db_reader<F, R>(
+    reader_conn: Result<r2d2::PooledConnection<db::SqliteConnectionManager>, String>,
+    db_fallback: &Mutex<rusqlite::Connection>,
+    f: F,
+) -> Result<R, String>
 where
     F: FnOnce(&rusqlite::Connection) -> Result<R, String>,
 {
-    if let Ok(conn) = state.get_reader_conn() {
+    if let Ok(conn) = reader_conn {
         f(&conn)
     } else {
-        let conn = safe_lock(&state.db);
+        let conn = safe_lock(db_fallback);
         f(&conn)
     }
 }
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -1620,6 +1648,7 @@ pub fn start_audio_device_watcher(
 async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
     let activity = library_health::begin_library_activity()?;
     let db_conn_arc = Arc::clone(&state.db);
+    let state_clone = (*state).clone();
     let app_handle_clone = app_handle.clone();
     
     tokio::task::spawn_blocking(move || {
@@ -1673,18 +1702,19 @@ async fn scan_and_save(dirs: Vec<String>, app_handle: AppHandle, state: State<'_
             });
         }
 
-        let conn = safe_lock(&db_conn_arc);
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(0);
-        Ok(count as usize)
+        with_db_reader(state_clone.get_reader_conn(), &db_conn_arc, |conn| {
+            let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0)).unwrap_or(0);
+            Ok(count as usize)
+        })
     }).await.map_err(|e| format!("Scanning task panicked: {}", e))?
 }
 
 #[tauri::command]
 async fn clean_missing_tracks(state: State<'_, AppState>) -> Result<usize, String> {
     let db_conn_arc = Arc::clone(&state.db);
+    let state_clone = (*state).clone();
     tokio::task::spawn_blocking(move || {
-        let db_tracks = {
-            let conn = safe_lock(&db_conn_arc);
+        let db_tracks = with_db_reader(state_clone.get_reader_conn(), &db_conn_arc, |conn| {
             let mut stmt = conn.prepare("SELECT id, path FROM tracks").map_err(|e| e.to_string())?;
             let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
             let mut list = Vec::new();
@@ -1693,8 +1723,8 @@ async fn clean_missing_tracks(state: State<'_, AppState>) -> Result<usize, Strin
                 let path: String = row.get(1).map_err(|e| e.to_string())?;
                 list.push((id, path));
             }
-            list
-        };
+            Ok(list)
+        })?;
 
         let mut paths_to_delete = Vec::new();
         for (_, path) in &db_tracks {
@@ -1817,12 +1847,12 @@ fn delete_cached_track(stream_url: String, state: State<'_, AppState>) -> Result
 
 #[tauri::command]
 fn get_library_directories(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    with_db_reader(&state, |conn| db::get_library_directories(conn).map_err(|e| e.to_string()))
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_library_directories(conn).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
 fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::Playlist>, String> {
-    with_db_reader(&state, |conn| db::get_playlists(conn).map_err(|e| e.to_string()))
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_playlists(conn).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -1862,7 +1892,7 @@ fn reorder_playlist(playlist_id: i32, track_paths: Vec<String>, entry_ids: Optio
 
 #[tauri::command]
 fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
-    with_db_reader(&state, |conn| db::get_playlist_entries(conn, playlist_id).map_err(|e| e.to_string()))
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_playlist_entries(conn, playlist_id).map_err(|e| e.to_string()))
 }
 
 
@@ -1882,7 +1912,7 @@ fn update_playlist_source(entry_id: i64, source_context: db::RecordingSources, m
 
 #[tauri::command]
 fn get_unified_favorites(state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
-    with_db_reader(&state, |conn| {
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| {
         let id = conn.query_row("SELECT id FROM playlists WHERE name = 'Favorite Songs'", [], |r| r.get::<_, i32>(0));
         match id {
             Ok(id) => db::get_playlist_entries(conn, id).map(|entries| entries.into_iter().filter(|e| e.source_context.is_some()).collect()).map_err(|e| e.to_string()),
@@ -1894,7 +1924,7 @@ fn get_unified_favorites(state: State<'_, AppState>) -> Result<Vec<db::PlaylistE
 
 #[tauri::command]
 fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    with_db_reader(&state, |conn| db::get_all_tracks(conn).map_err(|e| e.to_string()))
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_all_tracks(conn).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -1905,7 +1935,7 @@ fn get_library_page(
     search: Option<String>,
     sort_by: Option<String>,
 ) -> Result<db::PaginatedTracks, String> {
-    with_db_reader(&state, |conn| {
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| {
         db::get_tracks_paginated(conn, offset, limit, search.as_deref(), sort_by.as_deref())
             .map_err(|e| e.to_string())
     })
@@ -1916,7 +1946,7 @@ fn get_library_count(
     state: State<'_, AppState>,
     search: Option<String>,
 ) -> Result<usize, String> {
-    with_db_reader(&state, |conn| {
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| {
         db::get_tracks_count(conn, search.as_deref()).map_err(|e| e.to_string())
     })
 }
@@ -2317,10 +2347,9 @@ async fn apply_online_cover(state: State<'_, AppState>, path: String, url: Strin
         return Err("Invalid image URL".to_string());
     }
 
-    let canonical_target = {
-        let conn = safe_lock(&state.db);
-        verify_authorized_library_track(&conn, &path)?
-    };
+    let canonical_target = with_db_reader(state.get_reader_conn(), &state.db, |conn| {
+        verify_authorized_library_track(conn, &path)
+    })?;
 
     let client = get_http_client();
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
@@ -2368,10 +2397,9 @@ async fn apply_local_cover(state: State<'_, AppState>, path: String, base64_data
 
     let decoded = base64::engine::general_purpose::STANDARD.decode(clean_base64.trim().as_bytes()).map_err(|e| e.to_string())?;
     
-    let canonical_target = {
-        let conn = safe_lock(&state.db);
-        verify_authorized_library_track(&conn, &path)?
-    };
+    let canonical_target = with_db_reader(state.get_reader_conn(), &state.db, |conn| {
+        verify_authorized_library_track(conn, &path)
+    })?;
 
     let parent = canonical_target.parent().ok_or("Invalid path")?;
     let stem = canonical_target.file_stem().ok_or("Invalid filename")?.to_str().ok_or("Invalid UTF-8 in stem")?;
@@ -2606,7 +2634,7 @@ pub struct PlaybackHistoryRow {
 
 #[tauri::command]
 fn get_unsynced_history(state: State<'_, AppState>) -> Result<Vec<PlaybackHistoryRow>, String> {
-    with_db_reader(&state, |conn| {
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| {
     let mut stmt = conn.prepare(
         "SELECT id, track_path, title, artist, album, duration, format, timestamp, duration_played, skipped, genre, playback_source 
          FROM playback_history 
@@ -2726,7 +2754,7 @@ pub struct ListeningInsightsPayload {
 
 #[tauri::command]
 fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<ListeningInsightsPayload, String> {
-    with_db_reader(&state, |conn| {
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| {
     
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -3179,7 +3207,7 @@ fn create_smart_playlist(name: String, rules_json: String, state: State<'_, AppS
 
 #[tauri::command]
 fn get_smart_playlists(state: State<'_, AppState>) -> Result<Vec<db::SmartPlaylist>, String> {
-    with_db_reader(&state, |conn| db::get_smart_playlists(conn).map_err(|e| e.to_string()))
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_smart_playlists(conn).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -3190,7 +3218,7 @@ fn delete_smart_playlist(id: i32, state: State<'_, AppState>) -> Result<(), Stri
 
 #[tauri::command]
 fn execute_smart_playlist(rules_json: String, state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
-    with_db_reader(&state, |conn| db::execute_smart_rules(conn, &rules_json).map_err(|e| e.to_string()))
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| db::execute_smart_rules(conn, &rules_json).map_err(|e| e.to_string()))
 }
 
 #[tauri::command]
@@ -3204,8 +3232,7 @@ fn set_global_shortcuts(
 
 #[tauri::command]
 fn export_playlist_m3u(playlist_id: i32, dest_path: String, state: State<'_, AppState>) -> Result<usize, String> {
-    let conn = safe_lock(&state.db);
-    m3u::export_playlist_m3u(&conn, playlist_id, &dest_path)
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| m3u::export_playlist_m3u(conn, playlist_id, &dest_path))
 }
 
 #[tauri::command]
@@ -3695,7 +3722,7 @@ fn rank_similar_tracks(all_tracks: Vec<crate::db::Track>, path: &str, excluded_p
 
 #[tauri::command]
 async fn get_similar_tracks(state: State<'_, AppState>, path: String, excluded_paths: Option<Vec<String>>) -> Result<Vec<crate::db::Track>, String> {
-    let all_tracks = with_db_reader(&state, |conn| crate::db::get_all_tracks(conn).map_err(|e| e.to_string()))?;
+    let all_tracks = with_db_reader(state.get_reader_conn(), &state.db, |conn| crate::db::get_all_tracks(conn).map_err(|e| e.to_string()))?;
     rank_similar_tracks(all_tracks, &path, excluded_paths.as_deref().unwrap_or(&[]))
 }
 
@@ -3905,7 +3932,7 @@ fn toggle_keep_awake(enable: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn get_track_by_path(path: String, state: State<'_, AppState>) -> Result<db::Track, String> {
-    with_db_reader(&state, |conn| db::get_track_by_path(conn, &path).map_err(|e| e.to_string()))
+    with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_track_by_path(conn, &path).map_err(|e| e.to_string()))
 }
 
 // ── Tag Editor Commands ───────────────────────────────────────────────────
@@ -4514,7 +4541,9 @@ pub fn run() {
                 controls_opt = Some(controls);
             }
 
-            let player_arc = Arc::new(Mutex::new(player::Player::new(app.handle().clone())));
+            let mut player_instance = player::Player::new(app.handle().clone());
+            player_instance.db_pool = db_pool.clone();
+            let player_arc = Arc::new(Mutex::new(player_instance));
             let db_arc = Arc::new(Mutex::new(conn));
             let media_controls_arc = Arc::new(Mutex::new(controls_opt));
             let cached_devices_arc = Arc::new(Mutex::new(Vec::new()));
@@ -4544,27 +4573,27 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 use tauri::Manager;
                 let state = app_handle_clone.state::<AppState>();
-                let tracks_to_heal = {
-                    let conn = crate::safe_lock(&state.db);
-                    let mut stmt = match conn.prepare(
-                        "SELECT path, title, artist 
+                let tracks_to_heal = match with_db_reader(state.get_reader_conn(), &state.db, |conn| {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT path, title, artist 
                          FROM tracks 
                          WHERE (cover_url IS NULL OR cover_url LIKE '%ytimg.com%') 
-                           AND (path LIKE 'http%' OR format = 'YouTube Direct')"
-                    ) {
-                        Ok(s) => s,
-                        Err(_) => return,
-                    };
-                    let rows = stmt.query_map([], |row| {
-                        let path: String = row.get(0)?;
-                        let title: Option<String> = row.get(1)?;
-                        let artist: Option<String> = row.get(2)?;
-                        Ok((path, title, artist))
-                    });
-                    match rows {
-                        Ok(r) => r.filter_map(|x| x.ok()).collect::<Vec<_>>(),
-                        Err(_) => return,
-                    }
+                           AND (path LIKE 'http%' OR format = 'YouTube Direct')",
+                        )
+                        .map_err(|e| e.to_string())?;
+                    let rows = stmt
+                        .query_map([], |row| {
+                            let path: String = row.get(0)?;
+                            let title: Option<String> = row.get(1)?;
+                            let artist: Option<String> = row.get(2)?;
+                            Ok((path, title, artist))
+                        })
+                        .map_err(|e| e.to_string())?;
+                    Ok(rows.filter_map(|x| x.ok()).collect::<Vec<_>>())
+                }) {
+                    Ok(tracks) => tracks,
+                    Err(_) => return,
                 };
 
                 if !tracks_to_heal.is_empty() {

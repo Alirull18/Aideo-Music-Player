@@ -139,7 +139,7 @@ pub async fn search_local_sources(query: String, state: tauri::State<'_, crate::
         if filtered.is_empty() { clean_query.split_whitespace().map(str::to_lowercase).collect() } else { filtered }
     };
     if words.is_empty() || query.len() > 512 { return Ok(Vec::new()); }
-    let tracks = crate::db::get_all_tracks(&crate::safe_lock(&state.db)).map_err(|e| e.to_string())?;
+    let tracks = crate::db::get_all_tracks(&state.read_conn()).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         tracks.into_iter().filter(|t| std::path::Path::new(&t.path).is_absolute())
             .filter(|t| {
