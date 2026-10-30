@@ -278,6 +278,8 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
         [],
     )?;
 
+    conn.execute("CREATE TABLE IF NOT EXISTS addon_preferences (id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1)", [])?;
+
     // Create playlist tables
     conn.execute(
         "CREATE TABLE IF NOT EXISTS playlists (

@@ -2,6 +2,7 @@ import type { StoreApi } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor, type PlaybackSource, type PlayerState, type Track } from './types';
 import { setOnlineTrackCache, rememberResolvedPath } from '../utils';
+import { musicSearchOptions } from '../utils/musicAddons';
 import { markListeningEnd, radioAllowsLocal } from '../utils/recommendations';
 import { applySourcePreference, bounded, isLocalUnifiedTrack, matchingSources, rankSources, resolveSource, searchSources, sourceKey, sourceMetadata, sourceName, sourceSearchQuery } from '../utils/unifiedSources';
 
@@ -32,10 +33,11 @@ export function clearEnrichmentState(): void {
 
 export function boundedSearchSources(
   query: string,
-  enabled: { tidal: boolean; qobuz: boolean; youtube?: boolean },
+  enabled: { youtube?: boolean; addons?: string[] },
   update?: (result: any) => void
 ): Promise<any> {
-  const cacheKey = `${query}:${Boolean(enabled.tidal)}:${Boolean(enabled.qobuz)}:${Boolean(enabled.youtube !== false)}`;
+  const options = { ...enabled, addons: [...new Set(enabled.addons || [])].sort() };
+  const cacheKey = JSON.stringify([query, enabled.youtube !== false, options.addons]);
   const existing = inFlightEnrichments.get(cacheKey);
   if (existing) {
     return existing;
@@ -44,7 +46,7 @@ export function boundedSearchSources(
   const runJob = async (): Promise<any> => {
     activeEnrichmentJobs++;
     try {
-      return await searchSources(query, enabled, update || (() => {}));
+      return await searchSources(query, options, update || (() => {}));
     } finally {
       activeEnrichmentJobs--;
       inFlightEnrichments.delete(cacheKey);
@@ -102,7 +104,7 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
   const enabled = (source: PlaybackSource) => (source.provider === 'local'
     && (!track.is_autoplay || get().appMode === 'local' || radioAllowsLocal(get().autoplaySeedTrack || get().currentTrack))) || (source.provider !== 'local' && get().appMode !== 'local'
     && (!(track.is_autoplay || track.is_generated_mix) || get().recommendationEngine === 'our' || source.provider === get().recommendationEngine)
-    && (source.provider === 'youtube' || source.provider === 'addon' || (source.provider === 'tidal' ? get().tidalConnected : get().qobuzConnected && get().qobuzExperimentalEnabled)));
+    && (source.provider === 'youtube' || source.provider === 'addon'));
   const ordered = rankSources(context.sources.filter(enabled), quality, get().preferredSource);
   if (context.selection.mode === 'explicit') {
     const selected = context.selection.source;
@@ -154,11 +156,7 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
   const permanentAuthFailure = (error: string) => /not authenticated|unauthorized|invalid[_ -]grant|rejected your session token|reconnect/i.test(error);
   const preResolutionAuthErrors = new Map<string, string>();
   const slowPreResolutions = new Set<string>();
-  const discover = () => discovery ||= boundedSearchSources(sourceSearchQuery(track), {
-    tidal: get().appMode !== 'local' && get().tidalConnected,
-    qobuz: get().appMode !== 'local' && get().qobuzConnected && get().qobuzExperimentalEnabled,
-    youtube: get().appMode !== 'local',
-  }, () => {});
+  const discover = () => discovery ||= boundedSearchSources(sourceSearchQuery(track), musicSearchOptions(get().appMode, get().addons), () => {});
   const attempt = async (failure?: string) => {
     const attemptToken = ++attemptSequence;
     const attemptId = `attempt_${Date.now()}_${token}_${attemptToken}`;
@@ -192,8 +190,6 @@ export async function playUnifiedTrack(set: SetState, get: () => PlayerState, or
         const authError = preResolutionAuthErrors.get(sourceKey(source));
         if (authError) throw new Error(authError);
         if (!enabled(source)) throw new Error('Source is unavailable');
-        if (source.provider === 'tidal' && !get().tidalConnected) throw new Error('Tidal is disconnected');
-        if (source.provider === 'qobuz' && (!get().qobuzConnected || !get().qobuzExperimentalEnabled)) throw new Error('Qobuz is unavailable');
         const resolution = resolveSource(source, quality, Boolean(failure), remainingMs);
         const result = await bounded(resolution, slowPreResolutions.has(sourceKey(source)) && !failure ? Math.min(750, remainingMs) : remainingMs);
         if (!active()) return;

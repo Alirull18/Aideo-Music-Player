@@ -2,6 +2,13 @@ import { getSupabaseClient } from './supabaseClient';
 import { invoke } from '@tauri-apps/api/core';
 import type { PlayerState } from '../store/types';
 
+// Addon source ids look like `com.example.addon:track-1` (mirrors valid_source_id in addons/mod.rs).
+// The cloud playlist_tracks table has no source_context/metadata columns, so these entries can't
+// round-trip: a path-only pull would insert rows the library hides. Skip them in both directions.
+// ponytail: add source_context + metadata_json columns to cloud playlist_tracks, then sync addon tracks.
+const ADDON_SOURCE_PATH = /^[a-z0-9-]+(\.[a-z0-9-]+)+:[^\\/]/;
+export const isAddonSourcePath = (path: unknown): boolean => typeof path === 'string' && ADDON_SOURCE_PATH.test(path);
+
 export async function syncToCloud(get: () => PlayerState, set: (state: Partial<PlayerState>) => void): Promise<void> {
   if (localStorage.getItem('aideo_local_restore_sync')) {
     get().setPlaybackError('Local backup restored data is awaiting review. Resume cloud sync from Local backup settings.');
@@ -108,6 +115,7 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
     // 3. Sync Playlists
     const playlists = state.playlists;
+    let playlistFailures = 0;
     for (const pl of playlists) {
       const { data, error } = await supabase
         .from('playlists')
@@ -122,9 +130,19 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
       const cloudPlaylistId = data?.[0]?.id;
       if (cloudPlaylistId) {
         try {
-          const tracks = await invoke<any[]>('get_playlist_tracks', { playlistId: pl.id });
+          const tracks = (await invoke<any[]>('get_playlist_tracks', { playlistId: pl.id }) ?? [])
+            .filter(t => !t.source_context && !isAddonSourcePath(t.path));
+          // Keep a copy so a failed replacement insert can't leave the cloud playlist empty.
+          const { data: backupRows, error: backupError } = await supabase
+            .from('playlist_tracks').select('*').eq('playlist_id', cloudPlaylistId);
+          if (backupError) {
+            playlistFailures++;
+            console.error(`[Sync] Error reading cloud playlist ${pl.name} before replace:`, backupError.message);
+            continue;
+          }
           const { error: delError } = await supabase.from('playlist_tracks').delete().eq('playlist_id', cloudPlaylistId);
           if (delError) {
+            playlistFailures++;
             console.error(`[Sync] Error clearing cloud playlist tracks for ${pl.name}:`, delError.message);
             continue;
           }
@@ -139,10 +157,16 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
             const { error: insError } = await supabase.from('playlist_tracks').insert(trackPayload);
             if (insError) {
+              playlistFailures++;
               console.error(`[Sync] Error inserting cloud playlist tracks for ${pl.name}:`, insError.message);
+              if (backupRows && backupRows.length > 0) {
+                const { error: restoreError } = await supabase.from('playlist_tracks').insert(backupRows);
+                if (restoreError) console.error(`[Sync] Could not restore cloud playlist ${pl.name}:`, restoreError.message);
+              }
             }
           }
         } catch (e) {
+          playlistFailures++;
           console.error('[Sync] Error fetching playlist tracks:', e);
         }
       }
@@ -186,7 +210,11 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
       }
     }
 
-    state.setPlaybackSuccess('Sync to cloud complete!');
+    if (playlistFailures > 0) {
+      state.setPlaybackError(`Sync to cloud finished, but ${playlistFailures} playlist update(s) failed.`);
+    } else {
+      state.setPlaybackSuccess('Sync to cloud complete!');
+    }
   } catch (err: any) {
     console.error('[Sync] Sync to cloud failed:', err);
     state.setPlaybackError(`Sync to cloud failed: ${err.message || err}`);
@@ -308,7 +336,7 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
 
             if (!tracksError && cloudTracks) {
               for (const ct of cloudTracks) {
-                if (!localPaths.has(ct.track_path)) {
+                if (!localPaths.has(ct.track_path) && !isAddonSourcePath(ct.track_path)) {
                   await invoke('add_to_playlist', { playlistId: localPl.id, path: ct.track_path });
                 }
               }
@@ -328,6 +356,7 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
 
               if (!tracksError && cloudTracks) {
                 for (const ct of cloudTracks) {
+                  if (isAddonSourcePath(ct.track_path)) continue;
                   await invoke('add_to_playlist', { playlistId: newLocalPl.id, path: ct.track_path });
                 }
               }

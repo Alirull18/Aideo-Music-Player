@@ -1,8 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { PlaybackSource, RecordingSources, SourceMetadata, SourceQuality, SourceSelection, StreamingQuality, Track } from '../store/types';
 
-export const streamCacheKey = (track: Pick<Track, 'format' | 'path'>, quality: StreamingQuality, id = track.path) => `${track.format === 'Qobuz FLAC' ? 'qobuz' : 'tidal'}:${id}:${quality}`;
-
 export async function bounded<T>(promise: Promise<T>, timeoutMs = 15000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -872,10 +870,10 @@ export interface SourceSearch {
   errors: Record<string, string>;
 }
 
-export async function searchSources(query: string, enabled: { tidal: boolean; qobuz: boolean; youtube?: boolean; addons?: string[] }, update: (result: SourceSearch) => void): Promise<SourceSearch> {
+export async function searchSources(query: string, enabled: { youtube?: boolean; addons?: string[] }, update: (result: SourceSearch) => void): Promise<SourceSearch> {
   const parsed = parseMusicSearchQuery(query);
   const cleanQuery = parsed.cleanQuery;
-  const providers = ['local', ...(enabled.youtube !== false ? ['youtube'] : []), ...(enabled.tidal ? ['tidal'] : []), ...(enabled.qobuz ? ['qobuz'] : []), ...(enabled.addons || []).map(id => `addon:${id}`)];
+  const providers = ['local', ...(enabled.youtube !== false ? ['youtube'] : []), ...(enabled.addons || []).map(id => `addon:${id}`)];
   const found: Track[] = [];
   const pending = new Set(providers);
   const errors: Record<string, string> = {};
@@ -908,8 +906,7 @@ export async function searchSources(query: string, enabled: { tidal: boolean; qo
         const found = await bounded(invoke<any[]>('addon_search', { addonId, query: cleanQuery }));
         register(provider, (found || []).map(t => catalogTrack(t, 'addon')));
       } else {
-        const catalog = await bounded(invoke<any[]>(`${provider}_search`, { query: cleanQuery }));
-        register(provider, (catalog || []).map(t => catalogTrack(t, provider as 'tidal' | 'qobuz')));
+        throw new Error(`Unknown source provider: ${provider}`);
       }
     } catch (error) { fail(provider, error); }
   }));
@@ -1090,7 +1087,8 @@ export async function resolveSource(source: PlaybackSource, quality: StreamingQu
         return { url: source.id, quality: { lossless: tags?.lossless, sample_rate: tags?.sample_rate, bit_depth: tags?.bit_depth, codec: tags?.format } };
       }
       if (source.provider === 'youtube') return { url: `https://www.youtube.com/watch?v=${source.id}`, quality: { lossless: false } };
-      const result = await bounded(invoke<ResolvedSource>(`${source.provider}_resolve_source`, { trackId: source.id, requestedQuality: quality }), timeoutMs);
+      if (source.provider !== 'addon') throw new Error(`${sourceName(source)} is no longer built in. Install a source addon in Settings.`);
+      const result = await bounded(invoke<ResolvedSource>('addon_resolve_source', { trackId: source.id, requestedQuality: quality }), timeoutMs);
       if (!result || typeof result.url !== 'string' || !/^https?:\/\//.test(result.url) || !result.quality) throw new Error('Invalid stream response');
       if (cache.size >= 200) cache.delete(cache.keys().next().value!);
       cache.set(key, { at: Date.now(), result });

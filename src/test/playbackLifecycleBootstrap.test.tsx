@@ -37,46 +37,11 @@ if (!(window as any).ResizeObserver) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useStore.setState({ tidalConnected: false } as any);
 });
 
 afterEach(() => {
   clearRecentToasts();
   cleanup();
-});
-
-describe('Tidal session restoration on app boot', () => {
-  function mockBackend(tidalLoggedIn: boolean) {
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-      if (cmd === 'tidal_login_poll_status') return tidalLoggedIn;
-      if (cmd === 'check_update') return { available: false };
-      if (/playlists|devices|queue|tracks|history|recap|library/i.test(cmd)) return [];
-      return null;
-    });
-  }
-
-  it('restores tidalConnected=true on startup without visiting Settings', async () => {
-    mockBackend(true);
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(useStore.getState().tidalConnected).toBe(true);
-    });
-    expect(invoke).toHaveBeenCalledWith('tidal_login_poll_status');
-  });
-
-  it('stays disconnected and does not crash when no session exists', async () => {
-    mockBackend(false);
-
-    render(<App />);
-
-    // Give the bootstrap effect a tick to settle
-    await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith('tidal_login_poll_status');
-    });
-    expect(useStore.getState().tidalConnected).toBe(false);
-  });
 });
 
 describe('Playback lifecycle attempt correlation', () => {
@@ -226,15 +191,11 @@ describe('Playback lifecycle attempt correlation', () => {
     }
   });
 
-  it('shows asynchronous provider and scanner failures without JSON payloads', () => {
+  it('shows asynchronous scanner failures without JSON payloads', () => {
     useStore.setState({ notificationsEnabled: true, developerNotifications: false });
     act(() => {
-      emit('tidal-download-error', { filename: 'Tidal song', track_id: '1', error: 'Session expired' });
-      emit('qobuz-download-error', { filename: 'Qobuz song', track_id: '2', error: 'Download denied' });
       emit('scanner-error', 'Cannot open selected folder');
     });
-    expect(screen.getByText('Tidal download failed (Tidal song): Session expired')).toBeInTheDocument();
-    expect(screen.getByText('Qobuz download failed (Qobuz song): Download denied')).toBeInTheDocument();
     expect(screen.getByText('Cannot open selected folder')).toBeInTheDocument();
   });
   it('ignores stale buffering feedback and clears the live buffering card on completion', async () => {

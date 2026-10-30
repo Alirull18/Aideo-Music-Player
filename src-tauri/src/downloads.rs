@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Mutex,
     },
     time::Duration,
 };
@@ -345,119 +345,32 @@ fn youtube_streams(json: &serde_json::Value) -> Vec<DownloadStream> {
         .collect()
 }
 
-async fn resolve_format(
-    app: &AppHandle,
-    source: &PlaybackSource,
-    format: &str,
-) -> Result<DownloadStream, String> {
+async fn resolve_format(source: &PlaybackSource, format: &str) -> Result<DownloadStream, String> {
     validate_source(source)?;
-    if source.provider == SourceProvider::Youtube {
-        return youtube_streams(&youtube_formats(&source.id).await?)
-            .into_iter()
-            .find(|s| s.option.id == format)
-            .ok_or("The selected Webstream format is no longer available".into());
+    // Streaming-service downloads live in addons; only Webstream (YouTube) is downloadable from core.
+    if source.provider != SourceProvider::Youtube {
+        return Err("Unsupported download source".into());
     }
-    let resolved = match source.provider {
-        SourceProvider::Tidal => {
-            crate::tidal::resolve_download_format(
-                &app.state::<Arc<crate::tidal::TidalState>>(),
-                app,
-                &source.id,
-                format,
-            )
-            .await?
-        }
-        SourceProvider::Qobuz => {
-            crate::qobuz::resolve_download_format(
-                &app.state::<Arc<crate::qobuz::QobuzState>>(),
-                app,
-                &source.id,
-                format.parse().map_err(|_| "Invalid Qobuz format")?,
-            )
-            .await?
-        }
-        _ => return Err("Unsupported download source".into()),
-    };
-    let codec = resolved
-        .quality
-        .codec
-        .as_deref()
-        .unwrap_or("")
-        .to_lowercase();
-    let extension = if codec.contains("flac") {
-        "flac"
-    } else if codec.contains("mpeg") && !codec.contains("mp4") {
-        "mp3"
-    } else if codec.contains("aac") || codec.contains("mp4") || codec.contains("m4a") {
-        "m4a"
-    } else {
-        return Err("The provider did not verify a supported download container".into());
-    };
-    Ok(DownloadStream {
-        option: DownloadOption {
-            id: format.into(),
-            label: quality_label(&resolved.quality),
-            extension: extension.into(),
-            quality: resolved.quality,
-        },
-        url: resolved.url,
-        headers: Default::default(),
-    })
+    youtube_streams(&youtube_formats(&source.id).await?)
+        .into_iter()
+        .find(|s| s.option.id == format)
+        .ok_or("The selected Webstream format is no longer available".into())
 }
 
 #[tauri::command]
 pub async fn get_track_download_options(
-    app: AppHandle,
     source: PlaybackSource,
 ) -> Result<Vec<DownloadOption>, String> {
     validate_source(&source)?;
-    if source.provider == SourceProvider::Youtube {
-        let options: Vec<_> = youtube_streams(&youtube_formats(&source.id).await?)
-            .into_iter()
-            .map(|s| s.option)
-            .collect();
-        return if options.is_empty() {
-            Err("No directly downloadable audio formats were found".into())
-        } else {
-            Ok(options)
-        };
+    if source.provider != SourceProvider::Youtube {
+        return Err("Unsupported download source".into());
     }
-    let formats: &[&str] = if source.provider == SourceProvider::Tidal {
-        &["HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"]
-    } else {
-        &["27", "7", "6", "5"]
-    };
-    let results = futures::future::join_all(
-        formats
-            .iter()
-            .map(|format| resolve_format(&app, &source, format)),
-    )
-    .await;
-    let mut options: Vec<DownloadOption> = Vec::new();
-    let mut last_error = "No downloadable qualities are available for this account".to_string();
-    for result in results {
-        match result {
-            Ok(stream) => {
-                // Preserve distinct requested tiers even when provider resolution metadata is missing.
-                let tier = match stream.option.id.as_str() {
-                    "HI_RES_LOSSLESS" => "Hi-Res lossless",
-                    "LOSSLESS" => "Lossless",
-                    "HIGH" => "High",
-                    "LOW" => "Low",
-                    "27" => "24-bit up to 192 kHz",
-                    "7" => "24-bit up to 96 kHz",
-                    "6" => "CD quality",
-                    _ => "Compressed",
-                };
-                let mut option = stream.option;
-                option.label = format!("{tier} · {}", option.label);
-                options.push(option);
-            }
-            Err(error) => last_error = error,
-        }
-    }
+    let options: Vec<_> = youtube_streams(&youtube_formats(&source.id).await?)
+        .into_iter()
+        .map(|s| s.option)
+        .collect();
     if options.is_empty() {
-        Err(last_error)
+        Err("No directly downloadable audio formats were found".into())
     } else {
         Ok(options)
     }
@@ -721,7 +634,7 @@ pub(crate) fn commit_file(partial: &Path, target: &Path, replace: bool) -> Resul
 }
 
 async fn transfer(app: &AppHandle, job: &DownloadJob, partial: &Path) -> Result<(), String> {
-    let stream = resolve_format(app, &job.source, &job.option.id).await?;
+    let stream = resolve_format(&job.source, &job.option.id).await?;
     if stream.option.extension != job.option.extension
         || stream.option.quality != job.option.quality
     {

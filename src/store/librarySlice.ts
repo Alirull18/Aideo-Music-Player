@@ -1,16 +1,16 @@
 import { sortAlbumTracks } from '../utils/albumUtils';
-import { streamCacheKey, applySourcePreference, cleanSourceContext, isLocalUnifiedTrack, bounded } from '../utils/unifiedSources';
+import { applySourcePreference, cleanSourceContext, isLocalUnifiedTrack, bounded, catalogTrack } from '../utils/unifiedSources';
+import { musicSearchOptions } from '../utils/musicAddons';
 import { manageSourceQueue, cancelSourcePlayback, playbackRequest, playUnifiedTrack } from './sourcePlayback';
 import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseDuration, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, trackIdToStreamUrl, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
+import { pathsEqual, baseName, parseDuration, parseStreamMetadata, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
-import { notifyTidalAuthFailure } from './tidalSlice';
-import { notifyQobuzAuthFailure } from './qobuzSlice';
+import { isRetiredCloudTrack, RETIRED_PROVIDER_MESSAGE } from './retiredProviders';
 import { scheduleOsTrackNotification, cancelOsTrackNotification } from '../utils/notifications';
 import { feedbackContext, sameRecommendationRecording, rankRecommendations, recommendationAllowed, filterAutomaticQueue, startListening, finishListening, markListeningEnd, invalidateRecommendationPreferences } from '../utils/recommendations';
 
@@ -222,7 +222,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   autoplayDiscoveryLevel: (localStorage.getItem('aideo_autoplay_discovery_level') as 'familiarity' | 'balanced' | 'discovery') || 'balanced',
   recommendationEngine: (() => {
     const saved = localStorage.getItem('aideo_recommendation_engine');
-    return (saved === 'youtube' || saved === 'tidal' || saved === 'our') ? saved : 'our';
+    return (saved === 'youtube' || saved === 'our') ? saved : 'our';
   })(),
   autoplaySeedTrack: null,
   autoplaySessionHistory: [],
@@ -444,7 +444,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       else if (get().stopBoundary) await get().cancelStopAfter();
     }
     if (!preservePlaybackSession) get().dismissPlaybackRecovery();
-    const requestedQuality = get().streamingQuality;
     if (!preservePlaybackSession) markListeningEnd('skipped');
     track = applySourcePreference(track);
     cancelSourcePlayback();
@@ -497,12 +496,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     let isCached = false;
     if (isOnline) {
       try {
-        let lookupUrl = track.path;
-        if (track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') {
-          const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(track, requestedQuality));
-          if (cachedResolved) lookupUrl = cachedResolved.url;
-        }
-        isCached = await invoke<boolean>('check_url_is_cached', { url: lookupUrl });
+        isCached = await invoke<boolean>('check_url_is_cached', { url: track.path });
       } catch (err) {
         console.error('Failed to check if track is cached:', err);
       }
@@ -605,47 +599,9 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
 
       let finalPath = track.path;
-      const isCloudProvider = track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC';
-      const originalTrackId = resolvedPathMap.get(track.path);
-      const effectiveTrackId = (!track.path.startsWith('http://') && !track.path.startsWith('https://')) ? track.path : originalTrackId;
-      if (isCloudProvider && effectiveTrackId) {
-        try {
-          const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(track, requestedQuality, effectiveTrackId));
-          // Only reuse cached stream URL if resolved within 30 seconds (prevent using expired CDN tokens)
-          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
-            finalPath = cachedResolved.url;
-            console.log('[Streaming] Using fresh pre-resolved stream URL for track:', track.title);
-          } else {
-            const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            finalPath = await invoke<string>(resolver, { trackId: effectiveTrackId, requestedQuality });
-            trackIdToStreamUrl.set(streamCacheKey(track, requestedQuality, effectiveTrackId), { url: finalPath, resolvedAt: Date.now() });
-          }
-          rememberResolvedPath(finalPath, effectiveTrackId);
-        } catch (e) {
-          trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality, effectiveTrackId));
-          if (!isCurrentRequest()) return;
-          console.error('Failed to resolve streaming URL in playTrack:', e);
-          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(e, set)) ||
-                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(e, set));
-          if (!notified) {
-            window.dispatchEvent(new CustomEvent('ui-toast', {
-              detail: { message: `Failed to load ${track.format} stream: ${e}`, type: 'error' }
-            }));
-          }
-          set(s => ({
-            playback: {
-              ...s.playback,
-              status: 'Stopped',
-              is_buffering: false,
-              current_track: null,
-            }
-          }));
-          return;
-        }
-      }
-
-      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !finalPath.startsWith('http://') && !finalPath.startsWith('https://')) {
-        console.error('Aborting playback: stream URL unresolved for', track.title);
+      if (isRetiredCloudTrack({ format: track.format, path: finalPath })) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: RETIRED_PROVIDER_MESSAGE, type: 'warning' } }));
+        console.error('Aborting playback: retired provider track', track.title);
         set(s => ({
           playback: {
             ...s.playback,
@@ -770,7 +726,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         });
       }
 
-      await fetchTrackMetadataAndLyrics(track, set, get, isOnline || track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC');
+      await fetchTrackMetadataAndLyrics(track, set, get, isOnline);
 
     } catch (e) {
       cancelOsTrackNotification();
@@ -1128,7 +1084,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
   },
 
   preCacheNextTracks: async () => {
-    const requestedQuality = get().streamingQuality;
     const lookaheadEnabled = get().dsp?.lookahead_prebuffer_enabled ?? true;
     if (!lookaheadEnabled) return;
 
@@ -1143,32 +1098,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         console.log('[Pre-Cache] Pre-resolving YouTube track:', track.title);
         invoke('pre_resolve_youtube_url', { url: track.path }).catch(() => {});
       } 
-      else if (track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') {
-        const providerName = track.format === 'Qobuz FLAC' ? 'Qobuz' : 'Tidal';
-        console.log(`[Pre-Cache] Pre-caching ${providerName} track:`, track.title);
-        (async () => {
-          try {
-            const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(track, requestedQuality));
-            let finalUrl = '';
-            if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
-              finalUrl = cachedResolved.url;
-            } else {
-              const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-              finalUrl = await invoke<string>(resolver, { trackId: track.path, requestedQuality });
-              trackIdToStreamUrl.set(streamCacheKey(track, requestedQuality), { url: finalUrl, resolvedAt: Date.now() });
-              rememberResolvedPath(finalUrl, track.path);
-            }
-            if (finalUrl) {
-              invoke('cache_cloud_track', { streamUrl: finalUrl }).catch(() => {});
-            }
-          } catch (e) {
-            trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
-            console.error(`[Pre-Cache] Failed to pre-cache ${providerName} track:`, e);
-            notifyTidalAuthFailure(e, set);
-            notifyQobuzAuthFailure(e, set);
-          }
-        })();
-      } 
+      else if (isRetiredCloudTrack(track)) continue;
       else if (track.path.startsWith('http://') || track.path.startsWith('https://')) {
         console.log('[Pre-Cache] Pre-caching Cloud/Subsonic track:', track.title);
         invoke('cache_cloud_track', { streamUrl: track.path }).catch(() => {});
@@ -1253,60 +1183,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     try {
       console.log(`[autoplay] Generating upcoming radio queue using seed: '${safeSeedTitle}' by '${safeSeedArtist}'...`);
       let recommendedTracks: Track[] = [];
-      const engine = get().recommendationEngine || 'our';
-
-      const fetchTidalRadio = async (): Promise<Track[]> => {
-        try {
-          const tracks = await invoke<any[]>('get_tidal_autoplay_recommendations', {
-            artist: safeSeedArtist,
-            title: safeSeedTitle
-          });
-          if (Array.isArray(tracks) && tracks.length > 0) {
-            return tracks.map(t => ({
-              id: -20000 - Number(t.id || 0),
-              path: t.id,
-              title: t.title || 'Unknown Title',
-              artist: t.artist || 'Unknown Artist',
-              duration: typeof t.duration === 'number' && Number.isFinite(t.duration) && t.duration > 0 ? t.duration : null,
-              format: 'Tidal FLAC',
-              lyric_offset: 0,
-              cover_url: t.cover_url || null,
-              recording_evidence: t.recording_evidence,
-              is_autoplay: true
-            }));
-          }
-        } catch (err) {
-          console.warn('[autoplay] get_tidal_autoplay_recommendations error:', err);
-        }
-        return [];
-      };
-
-      const fetchQobuzRadio = async (): Promise<Track[]> => {
-        try {
-          const tracks = await invoke<any[]>('get_qobuz_autoplay_recommendations', {
-            artist: safeSeedArtist,
-            title: safeSeedTitle
-          });
-          if (Array.isArray(tracks) && tracks.length > 0) {
-            return tracks.map(t => ({
-              id: -50000 - Number(t.id || 0),
-              path: t.id,
-              title: t.title || 'Unknown Title',
-              artist: t.artist || 'Unknown Artist',
-              duration: typeof t.duration === 'number' && Number.isFinite(t.duration) && t.duration > 0 ? t.duration : null,
-              format: 'Qobuz FLAC',
-              lyric_offset: 0,
-              cover_url: t.cover_url || null,
-              recording_evidence: t.recording_evidence,
-              is_autoplay: true
-            }));
-          }
-        } catch (err) {
-          console.warn('[autoplay] get_qobuz_autoplay_recommendations error:', err);
-        }
-        return [];
-      };
-
       const fetchYoutubeRadio = async (): Promise<Track[]> => {
         try {
           let videoId = seedTrack.active_source?.provider === 'youtube' ? seedTrack.active_source.id : '';
@@ -1386,13 +1262,23 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         return [];
       };
 
+      // Eclipse addons have no radio endpoint: search by the seed's artist and treat results as candidates.
+      const fetchAddonRadio = async (addonId: string): Promise<Track[]> => {
+        const raw = await invoke<any[]>('addon_search', { addonId, query: `${safeSeedArtist} ${safeSeedTitle}`.trim() });
+        return Array.isArray(raw) ? raw.map(t => ({ ...catalogTrack(t, 'addon'), is_autoplay: true })) : [];
+      };
+
       const requested = get();
       const local = requested.tracks.filter(t => !isStreamTrack(t.path, t.format));
       const tasks: Promise<Track[]>[] = [];
       if (requested.appMode !== 'local') {
-        if (engine !== 'tidal') tasks.push(bounded(fetchYoutubeRadio(), 8000).catch(() => []));
-        if (engine !== 'youtube' && requested.tidalConnected) tasks.push(bounded(fetchTidalRadio(), 8000).catch(() => []));
-        if (engine === 'our' && requested.qobuzConnected && requested.qobuzExperimentalEnabled) tasks.push(bounded(fetchQobuzRadio(), 8000).catch(() => []));
+        tasks.push(bounded(fetchYoutubeRadio(), 8000).catch(() => []));
+        // Data saver avoids extra background catalog traffic.
+        if (requested.streamingQuality !== 'data_saver') {
+          for (const addonId of musicSearchOptions(requested.appMode, requested.addons).addons) {
+            tasks.push(bounded(fetchAddonRadio(addonId), 8000).catch(() => []));
+          }
+        }
       }
       const online = (await Promise.all(tasks)).flat();
       const relatedness = Object.fromEntries(online.map((t, i) => [t.path, 1 - 0.5 * i / Math.max(1, online.length)]));
@@ -1479,7 +1365,7 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     if (get().autoplayEnabled && get().currentTrack) void get().triggerAutoplayRadio(get().currentTrack!, false);
   },
 
-  setRecommendationEngine: (engine: 'our' | 'youtube' | 'tidal') => {
+  setRecommendationEngine: (engine: 'our' | 'youtube') => {
     localStorage.setItem('aideo_recommendation_engine', engine);
     set({ recommendationEngine: engine });
     autoplayReqSeq++;

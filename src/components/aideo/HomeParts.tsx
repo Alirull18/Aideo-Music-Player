@@ -3,6 +3,7 @@ import { Search, X, History, Music, Play, Loader2, MoreVertical } from 'lucide-r
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
+import { musicAddons } from '../../utils/musicAddons';
 import { DiscoveryHubData, YoutubeTrack, LEGACY_AIDEO_PAGE_DESIGNS } from '../../store/types';
 import { SimpleLRU } from '../../utils/lruCache';
 import { discoveryTrack, trackSignature } from '../../utils/discoveryFeed';
@@ -272,11 +273,8 @@ export interface SearchBarProps {
   suggestions: string[];
   quickResults: any[];
   history: string[];
-  source: 'all' | 'youtube' | 'tidal' | 'qobuz';
-  onSourceChange: (s: 'all' | 'youtube' | 'tidal' | 'qobuz') => void;
-  tidalConnected: boolean;
-  qobuzEnabled: boolean;
-  qobuzConnected: boolean;
+  source: string;
+  onSourceChange: (s: string) => void;
   onSubmit: () => void;
   onPickQuery: (q: string) => void;
   onDeleteHistory: (e: React.MouseEvent, q: string) => void;
@@ -291,7 +289,7 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
   const {
     appMode,
     query, onQueryChange, focused, onFocusChange, suggestions, quickResults, history,
-    source, onSourceChange, tidalConnected, qobuzEnabled, qobuzConnected,
+    source, onSourceChange,
     onSubmit, onPickQuery, onDeleteHistory, onPlayQuickTrack, isSearching,
     onTrackContextMenu,
   } = props;
@@ -307,22 +305,14 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
     return () => document.removeEventListener('mousedown', onDown);
   }, [onFocusChange]);
 
-  const sources: Array<{ id: 'all' | 'youtube' | 'tidal' | 'qobuz'; label: string; dot?: string }> = [
+  const addons = useStore(s => s.addons);
+  const sources = [
     { id: 'all', label: 'All sources' },
     { id: 'youtube', label: variant === 'pill' ? 'Web' : 'Webstream' },
-    { id: 'tidal', label: 'Tidal', dot: tidalConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' },
-    ...(qobuzEnabled ? [{ id: 'qobuz' as const, label: variant === 'pill' ? 'Qobuz' : 'Qobuz β', dot: qobuzConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }] : []),
+    ...musicAddons(addons).map(addon => ({ id: addon.id, label: addon.name })),
   ];
 
-  const pickSource = (id: 'all' | 'youtube' | 'tidal' | 'qobuz') => {
-    onSourceChange(id);
-    if (id === 'tidal' && !tidalConnected) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal first in Settings > Library > Tidal.', type: 'warning' } }));
-    }
-    if (id === 'qobuz' && !qobuzConnected) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Qobuz first in Settings > Library > Qobuz (Experimental).', type: 'warning' } }));
-    }
-  };
+  const pickSource = (id: string) => onSourceChange(id);
 
   const showDropdown = focused && (history.length > 0 || suggestions.length > 0 || quickResults.length > 0);
 

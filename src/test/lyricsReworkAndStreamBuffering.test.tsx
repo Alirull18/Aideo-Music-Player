@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { KaraokeActiveLine } from '../components/KaraokeActiveLine';
 import { sortLyricLines, parseDuration, isRadioStream, fmt } from '../utils';
-import { tidalResultsToHubTracks } from '../utils/tidalHub';
 import { useStore } from '../store';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -125,30 +124,6 @@ describe('Tidal Duration Preservation & Minute Display', () => {
     m.mockResolvedValue(null);
   });
 
-  it('tidalResultsToHubTracks preserves duration in seconds', () => {
-    const rawResults = [
-      {
-        id: '12345678',
-        title: 'Lossless Anthem',
-        artist: 'HiFi Artist',
-        album: 'Audiophile Album',
-        duration: 215, // 3:35
-      },
-      {
-        id: '87654321',
-        title: 'Zero Duration Song',
-        artist: 'Mystery Artist',
-        duration: 0,
-      },
-    ];
-
-    const hubTracks = tidalResultsToHubTracks(rawResults);
-    expect(hubTracks[0].duration).toBe(215);
-    expect(hubTracks[0].duration_raw).toBe('3:35');
-    expect(hubTracks[1].duration).toBeUndefined();
-    expect(hubTracks[1].duration_raw).toBe('--:--');
-  });
-
   it('parseDuration converts string duration to seconds and fmt formats it', () => {
     expect(parseDuration('3:45')).toBe(225);
     expect(parseDuration('03:45')).toBe(225);
@@ -165,30 +140,6 @@ describe('Tidal Duration Preservation & Minute Display', () => {
     expect(isRadioStream(tidalTrack, 'https://sp-pr-cf.audio.tidal.com/track/12345678.flac', 0)).toBe(false);
   });
 
-  it('playTidalResult normalizes track duration using duration_raw fallback', async () => {
-    const originalPlayTrack = useStore.getState().playTrack;
-    const playTrackSpy = vi.fn().mockResolvedValue(undefined);
-    useStore.setState({ playTrack: playTrackSpy as any });
-
-    try {
-      const trackWithoutDuration: any = {
-        id: 'tidal-999',
-        path: '999',
-        title: 'Tidal Track Without Duration Field',
-        artist: 'Artist',
-        duration_raw: '4:12',
-        format: 'Tidal FLAC',
-      };
-
-      await useStore.getState().playTidalResult(trackWithoutDuration);
-
-      expect(playTrackSpy).toHaveBeenCalledTimes(1);
-      const passedTrack = playTrackSpy.mock.calls[0][0];
-      expect(passedTrack.duration).toBe(252);
-    } finally {
-      useStore.setState({ playTrack: originalPlayTrack });
-    }
-  });
 });
 
 describe('Stream Buffering & Clock Stabilization', () => {

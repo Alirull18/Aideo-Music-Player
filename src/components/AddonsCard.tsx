@@ -3,8 +3,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store';
 
 export default function AddonsCard() {
-  const { addons, addonBusy, loadAddons, installAddon, removeAddon } = useStore(useShallow(s => ({
+  const { addons, addonBusy, loadAddons, installAddon, removeAddon, setAddonEnabled } = useStore(useShallow(s => ({
     addons: s.addons, addonBusy: s.addonBusy, loadAddons: s.loadAddons, installAddon: s.installAddon, removeAddon: s.removeAddon,
+    setAddonEnabled: s.setAddonEnabled,
   })));
   const [url, setUrl] = useState('');
 
@@ -41,7 +42,19 @@ export default function AddonsCard() {
             <div>{a.name} <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>v{a.version}</span></div>
             <div style={{ color: 'var(--text-dim)', fontSize: 11 }}>{a.origin}</div>
           </div>
-          <button type="button" className="settings-btn" aria-label={`Remove ${a.name}`} onClick={() => void removeAddon(a.id)}>Remove</button>
+          <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              aria-label={`Enable ${a.name}`}
+              checked={a.enabled !== false}
+              disabled={a.builtin}
+              onChange={e => void setAddonEnabled(a.id, e.target.checked)}
+            />
+            Enabled
+          </label>
+          {!a.builtin && (
+            <button type="button" className="settings-btn" aria-label={`Remove ${a.name}`} onClick={() => void removeAddon(a.id)}>Remove</button>
+          )}
         </div>
       ))}
     </div>

@@ -131,7 +131,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   sidebarCollapsed: safeGetStorage('aideo-sidebar-collapsed') === 'true',
   liquidBackgroundEnabled: safeGetStorage('aideo-liquid-bg') !== 'false',
   showSmartMixWidget: safeGetStorage('aideo-show-smart-mix') !== 'false',
-  qobuzExperimentalEnabled: safeGetStorage('aideo-qobuz-experimental') === 'true',
+  pendingSettingsTab: null,
   playbackError: null,
   playbackRecovery: null,
   playbackSuccess: null,
@@ -465,12 +465,6 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     const next = !get().showSmartMixWidget;
     localStorage.setItem('aideo-show-smart-mix', String(next));
     set({ showSmartMixWidget: next });
-  },
-
-  toggleQobuzExperimental: () => {
-    const next = !get().qobuzExperimentalEnabled;
-    localStorage.setItem('aideo-qobuz-experimental', String(next));
-    set({ qobuzExperimentalEnabled: next });
   },
 
   resetProMode: () => {

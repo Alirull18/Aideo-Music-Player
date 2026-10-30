@@ -9,6 +9,8 @@ export interface AddonInfo {
   icon?: string | null;
   origin: string;
   resources: string[];
+  builtin?: boolean;
+  enabled?: boolean;
 }
 
 const toast = (message: string, type: 'success' | 'error') =>
@@ -22,7 +24,7 @@ export const createAddonSlice: StateCreator<PlayerState, [], [], any> = (set, ge
     try {
       set({ addons: (await invoke<AddonInfo[]>('addon_list')) ?? [] });
     } catch {
-      set({ addons: [] });
+      toast('Failed to load addons. Please try again.', 'error');
     }
   },
 
@@ -36,6 +38,15 @@ export const createAddonSlice: StateCreator<PlayerState, [], [], any> = (set, ge
       toast(`Addon install failed: ${e}`, 'error');
     } finally {
       set({ addonBusy: false });
+    }
+  },
+
+  setAddonEnabled: async (addonId: string, enabled: boolean) => {
+    try {
+      await invoke('addon_set_enabled', { addonId, enabled });
+      await get().loadAddons();
+    } catch (e) {
+      toast(`Failed to update addon: ${e}`, 'error');
     }
   },
 

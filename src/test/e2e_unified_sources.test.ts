@@ -21,7 +21,6 @@ import {
   saveSourceChoice,
   resolveSource,
   clearSourceCache,
-  streamCacheKey,
   sourceSearchQuery,
   sourceName,
 } from '../utils/unifiedSources';
@@ -54,21 +53,30 @@ const createTrack = (overrides: Partial<Track> = {}): Track => {
   };
 };
 
-const createTidalTrack = (id: string, overrides: Partial<Track> = {}): Track =>
+// Two realistic Eclipse addon catalogs standing in for generic third-party streaming sources.
+const ALPHA = 'com.test.alpha';
+const BETA = 'com.test.beta';
+const createAddonTrack = (addonId: string, id: string, overrides: Partial<Track> = {}): Track =>
   createTrack({
-    id: -30000 - Number(id),
-    path: id,
-    format: 'Tidal FLAC',
+    id: -1,
+    path: `${addonId}:${id}`,
+    format: 'Addon',
     ...overrides,
   });
-
-const createQobuzTrack = (id: string, overrides: Partial<Track> = {}): Track =>
-  createTrack({
-    id: -60000 - Number(id),
-    path: id,
-    format: 'Qobuz FLAC',
-    ...overrides,
-  });
+const createAlphaTrack = (id: string, overrides: Partial<Track> = {}): Track => createAddonTrack(ALPHA, id, overrides);
+const createBetaTrack = (id: string, overrides: Partial<Track> = {}): Track => createAddonTrack(BETA, id, overrides);
+const alphaSource = (id: string): PlaybackSource => ({ provider: 'addon', id: `${ALPHA}:${id}` });
+const betaSource = (id: string): PlaybackSource => ({ provider: 'addon', id: `${BETA}:${id}` });
+// Mocks addon_resolve_source; handlers are keyed by addon id prefix.
+const resolveByAddon = (handlers: Record<string, (trackId: string) => unknown>, rest: (cmd: string) => unknown = () => null) =>
+  vi.mocked(invoke).mockImplementation((async (cmd: string, args?: any) => {
+    if (cmd === 'addon_resolve_source') {
+      const h = handlers[String(args.trackId).split(':')[0]];
+      if (!h) throw new Error('Unknown addon');
+      return h(args.trackId);
+    }
+    return rest(cmd);
+  }) as any);
 
 const createYoutubeTrack = (id: string, overrides: Partial<Track> = {}): Track =>
   createTrack({
@@ -93,9 +101,6 @@ describe('E2E Unified Music Sources Test Suite', () => {
       currentPlaylist: null,
       sourceQueueManaged: false,
       appMode: 'hybrid',
-      tidalConnected: true,
-      qobuzConnected: true,
-      qobuzExperimentalEnabled: true,
       streamingQuality: 'best_available',
       preferredSource: 'auto',
       chromecast_connected: false,
@@ -238,9 +243,9 @@ describe('E2E Unified Music Sources Test Suite', () => {
     // Feature 4: Separate Display vs Safe Cohort
     describe('Feature 4: Separate Display vs Safe Cohort', () => {
       it('F4.1: groupRecordings displays same song once with all candidate sources', () => {
-        const tidal = createTidalTrack('123', { duration: 180 });
-        const qobuz = createQobuzTrack('456', { duration: 181 });
-        const rows = groupRecordings([tidal, qobuz], 'Test');
+        const alpha = createAlphaTrack('123', { duration: 180 });
+        const beta = createBetaTrack('456', { duration: 181 });
+        const rows = groupRecordings([alpha, beta], 'Test');
         expect(rows).toHaveLength(1);
         expect(rows[0].source_context?.sources).toHaveLength(2);
       });
@@ -253,17 +258,17 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F4.3: matchingSources isolates valid cohort from dissimilar results', () => {
         const anchor = createTrack({ path: 'C:/anchor.flac' });
-        const match = createTidalTrack('101', { duration: 181 });
-        const mismatch = createTidalTrack('102', { title: 'Different Song', duration: 250 });
+        const match = createAlphaTrack('101', { duration: 181 });
+        const mismatch = createAlphaTrack('102', { title: 'Different Song', duration: 250 });
         const results = groupRecordings([match, mismatch], '');
         const cohort = matchingSources(anchor, results);
-        expect(cohort.some(s => s.id === '101')).toBe(true);
-        expect(cohort.some(s => s.id === '102')).toBe(false);
+        expect(cohort.some(s => s.id === `${ALPHA}:101`)).toBe(true);
+        expect(cohort.some(s => s.id === `${ALPHA}:102`)).toBe(false);
       });
 
       it('F4.4: display group preserves unique recording_id across candidate updates', () => {
         const t1 = createTrack({ title: 'Song', artist: 'Artist', duration: 180 });
-        const t2 = createTidalTrack('999', { title: 'Song', artist: 'Artist', duration: 181 });
+        const t2 = createAlphaTrack('999', { title: 'Song', artist: 'Artist', duration: 181 });
         const group = groupRecordings([t1, t2], '')[0];
         expect(group.source_context?.recording_id).toBeDefined();
       });
@@ -383,7 +388,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
     describe('Feature 8: Removal of Invented Durations', () => {
       it('F8.1: catalogTrack returns duration: null when duration is missing or undefined', () => {
         const raw = { id: '123', title: 'Song', artist: 'Artist' };
-        const parsed = catalogTrack(raw, 'tidal');
+        const parsed = catalogTrack(raw, 'addon');
         expect(parsed.duration).toBeNull();
       });
 
@@ -407,7 +412,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F8.5: catalogTrack preserves unknown duration as null rather than inventing 180s', () => {
         const raw = { id: '999', title: 'Unknown Length', artist: 'Artist' };
-        const parsed = catalogTrack(raw, 'tidal');
+        const parsed = catalogTrack(raw, 'addon');
         expect(parsed.duration).not.toBe(180);
         expect(parsed.duration).toBeNull();
       });
@@ -416,10 +421,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
     // Feature 9: Explicit vs Auto Source Model
     describe('Feature 9: Explicit vs Auto Source Model', () => {
       it('F9.1: explicit source selection prioritizes specified provider in playback order', () => {
-        const tidal: PlaybackSource = { provider: 'tidal', id: '123' };
-        const qobuz: PlaybackSource = { provider: 'qobuz', id: '456' };
-        const ranked = rankSources([tidal, qobuz], 'best_available', 'auto');
-        expect(ranked).toBeDefined();
+        const alpha = alphaSource('123');
+        const beta = betaSource('456');
+        const ranked = rankSources([alpha, beta], 'best_available', 'auto');
+        expect(ranked.map(sourceKey).sort()).toEqual([sourceKey(alpha), sourceKey(beta)]);
       });
 
       it('F9.2: Auto mode ranks by quality preference (local > hires > lossy)', () => {
@@ -499,7 +504,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F10.5: background discovery attaches alternatives without interrupting playback', () => {
         const current = createTrack({ path: 'C:/song.flac' });
-        const discovered = createTidalTrack('999');
+        const discovered = createAlphaTrack('999');
         const results = groupRecordings([current, discovered], '');
         expect(results).toHaveLength(1);
         expect(results[0].source_context?.sources).toHaveLength(2);
@@ -589,17 +594,12 @@ describe('E2E Unified Music Sources Test Suite', () => {
         expect(useStore.getState().streamingQuality).toBe('standard_lossless');
       });
 
-      it('F13.4: store tracks tidal and qobuz connectivity states', () => {
-        useStore.setState({ tidalConnected: false, qobuzConnected: false });
-        expect(useStore.getState().tidalConnected).toBe(false);
-        expect(useStore.getState().qobuzConnected).toBe(false);
-      });
-
       it('F13.5: store updates currentTrack active_source reactively', () => {
         const track = createTrack();
-        const source: PlaybackSource = { provider: 'tidal', id: '123' };
+        const source = alphaSource('123');
         useStore.setState({ currentTrack: { ...track, active_source: source } });
-        expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+        expect(useStore.getState().currentTrack?.active_source?.provider).toBe('addon');
+        expect(useStore.getState().currentTrack?.active_source?.id).toBe(`${ALPHA}:123`);
       });
     });
 
@@ -612,48 +612,48 @@ describe('E2E Unified Music Sources Test Suite', () => {
           return [];
         });
         const snapshots: any[] = [];
-        await searchSources('Song', { tidal: false, qobuz: false }, s => snapshots.push(s));
+        await searchSources('Song', {}, s => snapshots.push(s));
         expect(snapshots.length).toBeGreaterThan(0);
       });
 
       it('F14.2: searchSources records pending provider names correctly', async () => {
-        let finishTidal!: (v: any) => void;
+        let finishAddon!: (v: any) => void;
         vi.mocked(invoke).mockImplementation(async cmd => {
           if (cmd === 'search_local_sources') return [];
-          if (cmd === 'tidal_search') return new Promise(r => { finishTidal = r; });
+          if (cmd === 'addon_search') return new Promise(r => { finishAddon = r; });
           return [];
         });
         const snapshots: any[] = [];
-        const promise = searchSources('Song', { tidal: true, qobuz: false }, s => snapshots.push(s));
-        await vi.waitFor(() => expect(finishTidal).toBeTypeOf('function'));
-        expect(snapshots[0].pending).toContain('tidal');
-        finishTidal([]);
+        const promise = searchSources('Song', { youtube: false, addons: [ALPHA] }, s => snapshots.push(s));
+        await vi.waitFor(() => expect(finishAddon).toBeTypeOf('function'));
+        expect(snapshots[0].pending).toContain(`addon:${ALPHA}`);
+        finishAddon([]);
         await promise;
       });
 
       it('F14.3: progressive enrichment maintains stable recording_id for cards', () => {
         const local = createTrack({ path: 'C:/song.flac', duration: 180 });
-        const tidal = createTidalTrack('123', { duration: 181 });
+        const addon = createAlphaTrack('123', { duration: 180 });
         const step1 = groupRecordings([local], '');
-        const step2 = groupRecordings([local, tidal], '');
+        const step2 = groupRecordings([local, addon], '');
         expect(step1[0].source_context?.recording_id).toBe(step2[0].source_context?.recording_id);
       });
 
       it('F14.4: isolated provider failure does not cancel successful provider results', async () => {
         vi.mocked(invoke).mockImplementation(async cmd => {
           if (cmd === 'search_local_sources') return [createTrack({ path: 'C:/song.flac' })];
-          if (cmd === 'tidal_search') throw new Error('Network timeout');
+          if (cmd === 'addon_search') throw new Error('Network timeout');
           return [];
         });
-        const result = await searchSources('Song', { tidal: true, qobuz: false }, () => {});
+        const result = await searchSources('Song', { youtube: false, addons: [ALPHA] }, () => {});
         expect(result.tracks).toHaveLength(1);
-        expect(result.errors.tidal).toContain('Network timeout');
+        expect(result.errors[`addon:${ALPHA}`]).toContain('Network timeout');
       });
 
       it('F14.5: progressive results coalesce identical songs across providers', () => {
         const local = createTrack({ title: 'Song', artist: 'Artist', duration: 200 });
-        const qobuz = createQobuzTrack('456', { title: 'Song', artist: 'Artist', duration: 201 });
-        const rows = groupRecordings([local, qobuz], '');
+        const addon = createBetaTrack('456', { title: 'Song', artist: 'Artist', duration: 201 });
+        const rows = groupRecordings([local, addon], '');
         expect(rows).toHaveLength(1);
         expect(rows[0].source_context?.sources).toHaveLength(2);
       });
@@ -662,15 +662,14 @@ describe('E2E Unified Music Sources Test Suite', () => {
     // Feature 15: Reactive Source Picker Sync
     describe('Feature 15: Reactive Source Picker Sync', () => {
       it('F15.1: sourceKey generates unique canonical keys per provider and ID', () => {
-        expect(sourceKey({ provider: 'tidal', id: '100' })).toBe('tidal:100');
-        expect(sourceKey({ provider: 'qobuz', id: '100' })).toBe('qobuz:100');
+        expect(sourceKey(alphaSource('100'))).toBe(`addon:${ALPHA}:100`);
+        expect(sourceKey({ provider: 'youtube', id: 'abcdefghijk' })).toBe('youtube:abcdefghijk');
         expect(sourceKey({ provider: 'local', id: 'C:/a.flac' })).toBe('local:C:/a.flac');
       });
 
       it('F15.2: sourceName returns readable label for each provider', () => {
         expect(sourceName({ provider: 'local', id: '1' })).toBe('Local file');
-        expect(sourceName({ provider: 'tidal', id: '1' })).toBe('Tidal');
-        expect(sourceName({ provider: 'qobuz', id: '1' })).toBe('Qobuz');
+        expect(sourceName(alphaSource('1'))).toBe('Addon');
         expect(sourceName({ provider: 'youtube', id: '1' })).toBe('Webstream');
       });
 
@@ -698,10 +697,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
       });
 
       it('F15.5: rankSources respects preferred provider tie-breaker', () => {
-        const s1: PlaybackSource = { provider: 'tidal', id: '1', catalog_quality: { lossless: true } };
-        const s2: PlaybackSource = { provider: 'qobuz', id: '2', catalog_quality: { lossless: true } };
-        const ranked = rankSources([s1, s2], 'standard_lossless', 'qobuz');
-        expect(ranked[0].provider).toBe('qobuz');
+        const s1: PlaybackSource = { ...alphaSource('1'), catalog_quality: { lossless: true } };
+        const s2: PlaybackSource = { provider: 'youtube', id: 'abcdefghijk', catalog_quality: { lossless: true } };
+        expect(rankSources([s1, s2], 'standard_lossless', 'youtube')[0].provider).toBe('youtube');
+        expect(rankSources([s1, s2], 'standard_lossless', 'addon')[0].provider).toBe('addon');
       });
     });
 
@@ -714,24 +713,25 @@ describe('E2E Unified Music Sources Test Suite', () => {
         expect(track.duration).toBe(200);
       });
 
-      it('F16.2: catalogTrack converts raw Tidal result to unified track structure', () => {
-        const raw = { id: 12345, title: 'Tidal Song', artist: 'Artist', duration: 180, quality: 'LOSSLESS' };
-        const track = catalogTrack(raw, 'tidal');
-        expect(track.format).toBe('Tidal FLAC');
+      it('F16.2: catalogTrack converts raw addon result to unified track structure', () => {
+        const raw = { id: `${ALPHA}:12345`, title: 'Addon Song', artist: 'Artist', duration: 180, catalog_quality: { lossless: true } };
+        const track = catalogTrack(raw, 'addon');
+        expect(track.format).toBe('Addon');
+        expect(track.path).toBe(`${ALPHA}:12345`);
+        expect(sourceFor(track)).toMatchObject({ provider: 'addon', id: `${ALPHA}:12345` });
         expect(track.catalog_quality?.lossless).toBe(true);
       });
 
-      it('F16.3: catalogTrack converts raw Qobuz result to unified track structure', () => {
-        const raw = { id: 67890, title: 'Qobuz Song', artist: 'Artist', duration: 240, quality: 'HI_RES_LOSSLESS' };
-        const track = catalogTrack(raw, 'qobuz');
-        expect(track.format).toBe('Qobuz FLAC');
-        expect(track.catalog_quality?.lossless).toBe(true);
+      it('F16.3: catalogTrack preserves hi-res catalog quality reported by an addon', () => {
+        const raw = { id: `${BETA}:67890`, title: 'Hi-Res Song', artist: 'Artist', duration: 240, catalog_quality: { lossless: true, sample_rate: 96000, bit_depth: 24 } };
+        const track = catalogTrack(raw, 'addon');
+        expect(track.catalog_quality).toMatchObject({ lossless: true, sample_rate: 96000, bit_depth: 24 });
       });
 
       it('F16.4: groupRecordings processes both quick and full search tracks uniformly', () => {
         const yt = catalogTrack({ id: 'abcdefghijk', title: 'Song (Official Audio)', artist: 'Artist' }, 'youtube');
-        const tidal = catalogTrack({ id: 123, title: 'Song', artist: 'Artist' }, 'tidal');
-        const rows = groupRecordings([yt, tidal], 'Song');
+        const addon = catalogTrack({ id: `${ALPHA}:123`, title: 'Song', artist: 'Artist' }, 'addon');
+        const rows = groupRecordings([yt, addon], 'Song');
         expect(rows).toHaveLength(1);
       });
 
@@ -749,7 +749,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         const anchor = createTrack({ path: 'C:/song.flac' });
         const homeRow = groupRecordings([
           anchor,
-          createTidalTrack('777', { duration: 181 }),
+          createAlphaTrack('777', { duration: 181 }),
           createYoutubeTrack('12345678901', { duration: 181 }),
         ], '');
         const sources = matchingSources(anchor, homeRow);
@@ -775,32 +775,33 @@ describe('E2E Unified Music Sources Test Suite', () => {
         expect(sourceFor(createTrack({ path: 'https://music.youtube.com/watch?v=12345678901' }))?.provider).toBe('youtube');
       });
 
-      it('F17.5: sourceFor identifies Tidal and Qobuz ID formats safely', () => {
-        expect(sourceFor(createTidalTrack('98765'))?.provider).toBe('tidal');
-        expect(sourceFor(createQobuzTrack('54321'))?.provider).toBe('qobuz');
+      it('F17.5: sourceFor identifies addon ID formats safely and rejects dotless addon ids', () => {
+        expect(sourceFor(createAlphaTrack('98765'))).toMatchObject({ provider: 'addon', id: `${ALPHA}:98765` });
+        expect(sourceFor(createBetaTrack('54321'))).toMatchObject({ provider: 'addon', id: `${BETA}:54321` });
+        expect(sourceFor(createTrack({ format: 'Addon', path: 'nodot:1' }))).toBeNull();
       });
     });
 
-    // Feature 18: Eliminate 2.5s Tidal Drop
-    describe('Feature 18: Eliminate 2.5s Tidal Drop', () => {
+    // Feature 18: Eliminate 2.5s Slow-Provider Drop
+    describe('Feature 18: Eliminate 2.5s Slow-Provider Drop', () => {
       it('F18.1: searchSources waits for slow provider resolution without premature 2.5s drop', async () => {
-        let finishTidal!: (v: any) => void;
+        let finishAddon!: (v: any) => void;
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_search') return new Promise(r => { finishTidal = r; });
+          if (cmd === 'addon_search') return new Promise(r => { finishAddon = r; });
           return [];
         });
-        const promise = searchSources('Test', { tidal: true, qobuz: false }, () => {});
-        await vi.waitFor(() => expect(finishTidal).toBeTypeOf('function'));
-        finishTidal([{ id: '123', title: 'Test Song', artist: 'Artist', duration: 180 }]);
+        const promise = searchSources('Test', { youtube: false, addons: [ALPHA] }, () => {});
+        await vi.waitFor(() => expect(finishAddon).toBeTypeOf('function'));
+        finishAddon([{ id: `${ALPHA}:123`, title: 'Test Song', artist: 'Artist', duration: 180 }]);
         const result = await promise;
         expect(result.tracks).toHaveLength(1);
       });
 
       it('F18.2: slow provider responses are properly merged into accumulated tracks', async () => {
         const local = createTrack({ path: 'C:/song.flac' });
-        const tidal = createTidalTrack('456');
+        const addon = createAlphaTrack('456');
         const rows1 = groupRecordings([local], '');
-        const rows2 = groupRecordings([local, tidal], '');
+        const rows2 = groupRecordings([local, addon], '');
         expect(rows1[0].source_context?.sources).toHaveLength(1);
         expect(rows2[0].source_context?.sources).toHaveLength(2);
       });
@@ -808,7 +809,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
       it('F18.3: bounded helper rejects promises that exceed the 15-second total timeout', async () => {
         vi.useFakeTimers();
         vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
-        const promise = resolveSource({ provider: 'tidal', id: '123' }, 'best_available');
+        const promise = resolveSource(alphaSource('123'), 'best_available');
         vi.advanceTimersByTime(15001);
         await expect(promise).rejects.toThrow('Source timed out');
         vi.useRealTimers();
@@ -816,13 +817,13 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F18.4: successful provider response completes within deadline', async () => {
         vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/audio', quality: { lossless: true } });
-        const res = await resolveSource({ provider: 'tidal', id: '123' }, 'best_available');
+        const res = await resolveSource(alphaSource('123'), 'best_available');
         expect(res.url).toBe('https://cdn.example/audio');
       });
 
       it('F18.5: searchSources updates pending list progressively without timing out prematurely', async () => {
         vi.mocked(invoke).mockResolvedValue([]);
-        const res = await searchSources('Query', { tidal: true, qobuz: true }, () => {});
+        const res = await searchSources('Query', { addons: [ALPHA, BETA] }, () => {});
         expect(res.pending).toHaveLength(0);
       });
     });
@@ -968,20 +969,13 @@ describe('E2E Unified Music Sources Test Suite', () => {
       it('F23.3: background discovery only triggers for enabled streaming providers', async () => {
         useStore.setState({ appMode: 'local' });
         vi.mocked(invoke).mockResolvedValue([]);
-        await searchSources('Song', { tidal: false, qobuz: false, youtube: false }, () => {});
-        expect(invoke).not.toHaveBeenCalledWith('tidal_search', expect.anything());
-        expect(invoke).not.toHaveBeenCalledWith('qobuz_search', expect.anything());
+        await searchSources('Song', { youtube: false }, () => {});
+        expect(invoke).not.toHaveBeenCalledWith('addon_search', expect.anything());
+        expect(invoke).not.toHaveBeenCalledWith('search_youtube', expect.anything());
       });
 
       it('F23.4: clearSourceCache empties the resolution cache cleanly', () => {
         expect(() => clearSourceCache()).not.toThrow();
-      });
-
-      it('F23.5: streamCacheKey creates distinct cache namespaces by quality and provider', () => {
-        const trackTidal = createTrack({ format: 'Tidal FLAC', path: '123' });
-        const trackQobuz = createTrack({ format: 'Qobuz FLAC', path: '123' });
-        expect(streamCacheKey(trackTidal, 'best_available')).toBe('tidal:123:best_available');
-        expect(streamCacheKey(trackQobuz, 'best_available')).toBe('qobuz:123:best_available');
       });
     });
 
@@ -1050,10 +1044,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
       it('F25.1: stopTrack cancels in-flight resolution and updates playback status to Stopped', async () => {
         let finish!: (v: any) => void;
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') return new Promise(r => { finish = r; });
+          if (cmd === 'addon_resolve_source') return new Promise(r => { finish = r; });
           return null;
         });
-        const track = createTidalTrack('123');
+        const track = createAlphaTrack('123');
         const row = groupRecordings([track], '')[0];
         const pending = playUnifiedTrack(useStore.setState, useStore.getState, row);
         await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
@@ -1067,10 +1061,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
       it('F25.2: pauseTrack prevents audio playback from starting if resolved while paused', async () => {
         let finish!: (v: any) => void;
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') return new Promise(r => { finish = r; });
+          if (cmd === 'addon_resolve_source') return new Promise(r => { finish = r; });
           return null;
         });
-        const track = createTidalTrack('123');
+        const track = createAlphaTrack('123');
         const row = groupRecordings([track], '')[0];
         const pending = playUnifiedTrack(useStore.setState, useStore.getState, row);
         await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
@@ -1085,10 +1079,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
         let finishFirst!: (v: any) => void;
         vi.mocked(invoke).mockImplementation(async cmd => {
           if (cmd === 'check_files_exist') return [true];
-          if (cmd === 'tidal_resolve_source') return new Promise(r => { finishFirst = r; });
+          if (cmd === 'addon_resolve_source') return new Promise(r => { finishFirst = r; });
           return null;
         });
-        const slow = createTidalTrack('111');
+        const slow = createAlphaTrack('111');
         const fast = createTrack({ path: 'C:/fast.flac' });
         const p1 = playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([slow], '')[0]);
         await vi.waitFor(() => expect(finishFirst).toBeTypeOf('function'));
@@ -1124,7 +1118,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
       it('F26.1: resolveSource times out on hung provider call', async () => {
         vi.useFakeTimers();
         vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
-        const promise = resolveSource({ provider: 'tidal', id: 'hung' }, 'best_available');
+        const promise = resolveSource(alphaSource('hung'), 'best_available');
         vi.advanceTimersByTime(15001);
         await expect(promise).rejects.toThrow('Source timed out');
         vi.useRealTimers();
@@ -1141,7 +1135,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F26.3: cached resolutions return immediately without consuming deadline', async () => {
         vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/cached', quality: { lossless: true } });
-        const s: PlaybackSource = { provider: 'tidal', id: 'cached_test' };
+        const s = alphaSource('cached_test');
         const res1 = await resolveSource(s, 'best_available');
         const res2 = await resolveSource(s, 'best_available');
         expect(res1.url).toBe(res2.url);
@@ -1150,7 +1144,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F26.4: fresh=true bypasses cache to obtain renewed stream', async () => {
         vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/audio', quality: { lossless: true } });
-        const s: PlaybackSource = { provider: 'tidal', id: 'fresh_test' };
+        const s = alphaSource('fresh_test');
         await resolveSource(s, 'best_available');
         await resolveSource(s, 'best_available', true);
         expect(invoke).toHaveBeenCalledTimes(2);
@@ -1159,13 +1153,13 @@ describe('E2E Unified Music Sources Test Suite', () => {
       it('F26.5: searchSources bounded call safely handles timeouts per provider', async () => {
         vi.useFakeTimers();
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_search') return new Promise(() => {});
+          if (cmd === 'addon_search') return new Promise(() => {});
           return [];
         });
-        const searchPromise = searchSources('Test', { tidal: true, qobuz: false }, () => {});
+        const searchPromise = searchSources('Test', { youtube: false, addons: [ALPHA] }, () => {});
         vi.advanceTimersByTime(15001);
         const res = await searchPromise;
-        expect(res.errors.tidal).toContain('Source timed out');
+        expect(res.errors[`addon:${ALPHA}`]).toContain('Source timed out');
         vi.useRealTimers();
       });
     });
@@ -1232,61 +1226,53 @@ describe('E2E Unified Music Sources Test Suite', () => {
     // Feature 28: Safe Fallback on Preferred Failure
     describe('Feature 28: Safe Fallback on Preferred Failure', () => {
       it('F28.1: falls back to equivalent alternative when preferred source resolution fails', async () => {
-        vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') throw new Error('403 Forbidden');
-          if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-          return null;
+        resolveByAddon({
+          [ALPHA]: () => { throw new Error('403 Forbidden'); },
+          [BETA]: () => ({ url: 'https://beta.example/audio', quality: { lossless: true } }),
         });
-        const tidal = createTidalTrack('123');
-        const qobuz = createQobuzTrack('456');
-        const row = groupRecordings([tidal, qobuz], '')[0];
+        const row = groupRecordings([createAlphaTrack('123'), createBetaTrack('456')], '')[0];
         await playUnifiedTrack(useStore.setState, useStore.getState, row);
-        expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz');
+        expect(useStore.getState().currentTrack?.active_source?.id).toBe(`${BETA}:456`);
+        expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://beta.example/audio' }));
       });
 
       it('F28.2: fallback retains user explicit source selection in source_context', async () => {
-        vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') throw new Error('404 Not Found');
-          if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-          return null;
+        resolveByAddon({
+          [ALPHA]: () => { throw new Error('404 Not Found'); },
+          [BETA]: () => ({ url: 'https://beta.example/audio', quality: { lossless: true } }),
         });
-        const tidal = createTidalTrack('123');
-        const qobuz = createQobuzTrack('456');
-        const row = groupRecordings([tidal, qobuz], '')[0];
+        const row = groupRecordings([createAlphaTrack('123'), createBetaTrack('456')], '')[0];
         const explicitTrack: Track = {
           ...row,
           source_context: {
             ...row.source_context!,
-            selection: { mode: 'explicit', source: { provider: 'tidal', id: '123' } },
+            selection: { mode: 'explicit', source: alphaSource('123') },
           },
         };
         await playUnifiedTrack(useStore.setState, useStore.getState, explicitTrack);
         expect(useStore.getState().currentTrack?.source_context?.selection.mode).toBe('explicit');
-        expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz');
+        expect(useStore.getState().currentTrack?.active_source?.id).toBe(`${BETA}:456`);
       });
 
       it('F28.3: fallback dispatches ui-toast event to inform listener', async () => {
         const toastSpy = vi.fn();
         window.addEventListener('ui-toast', toastSpy);
-        vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') throw new Error('Fail');
-          if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-          return null;
+        resolveByAddon({
+          [ALPHA]: () => { throw new Error('Fail'); },
+          [BETA]: () => ({ url: 'https://beta.example/audio', quality: { lossless: true } }),
         });
-        const tidal = createTidalTrack('123');
-        const qobuz = createQobuzTrack('456');
-        const row = groupRecordings([tidal, qobuz], '')[0];
+        const row = groupRecordings([createAlphaTrack('123'), createBetaTrack('456')], '')[0];
         const explicitTrack = {
           ...row,
           source_context: {
             ...row.source_context!,
-            selection: { mode: 'explicit' as const, source: { provider: 'tidal' as const, id: '123' } },
+            selection: { mode: 'explicit' as const, source: alphaSource('123') },
           },
         };
         await playUnifiedTrack(useStore.setState, useStore.getState, explicitTrack);
         expect(toastSpy).toHaveBeenCalledWith(expect.objectContaining({
           detail: expect.objectContaining({
-            message: expect.stringContaining('Using Qobuz for this play'),
+            message: expect.stringContaining('Source unavailable. Using Addon for this play'),
           }),
         }));
         window.removeEventListener('ui-toast', toastSpy);
@@ -1301,10 +1287,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F28.5: playback stops with clear error when all sources fail', async () => {
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') throw new Error('Server error');
+          if (cmd === 'addon_resolve_source') throw new Error('Server error');
           return null;
         });
-        const track = createTidalTrack('123');
+        const track = createAlphaTrack('123');
         await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([track], '')[0]);
         expect(useStore.getState().playback.status).toBe('Stopped');
         expect(useStore.getState().playbackError).toContain('No source could play this recording');
@@ -1321,20 +1307,12 @@ describe('E2E Unified Music Sources Test Suite', () => {
         await expect(resolveSource({ provider: 'local', id: 'C:/missing.flac' }, 'best_available')).rejects.toThrow('Local file is unavailable');
       });
 
-      it('F29.2: excludes disconnected Tidal provider from available playback sources', async () => {
-        useStore.setState({ tidalConnected: false });
-        const track = createTidalTrack('123');
+      it('F29.2: persisted retired-provider sources are never enabled for playback', async () => {
+        const track = createTrack({ format: 'Tidal FLAC', path: '123' });
         await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([track], '')[0]);
         expect(useStore.getState().playbackError).toContain('No source could play this recording');
         expect(useStore.getState().playback.status).toBe('Stopped');
-      });
-
-      it('F29.3: excludes unavailable Qobuz provider from playback sources', async () => {
-        useStore.setState({ qobuzConnected: false });
-        const track = createQobuzTrack('123');
-        await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([track], '')[0]);
-        expect(useStore.getState().playbackError).toContain('No source could play this recording');
-        expect(useStore.getState().playback.status).toBe('Stopped');
+        expect(invoke).not.toHaveBeenCalledWith('addon_resolve_source', expect.anything());
       });
 
       it('F29.4: handles decoder failure via handleSourceFailure asynchronously', async () => {
@@ -1350,39 +1328,45 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F29.5: invalid stream response with non-HTTP URL throws error', async () => {
         vi.mocked(invoke).mockResolvedValue({ url: 'file:///bad/path', quality: {} });
-        await expect(resolveSource({ provider: 'tidal', id: '123' }, 'best_available')).rejects.toThrow('Invalid stream response');
+        await expect(resolveSource(alphaSource('123'), 'best_available')).rejects.toThrow('Invalid stream response');
       });
     });
 
     // Feature 30: Cache Key Isolation
     describe('Feature 30: Cache Key Isolation', () => {
-      it('F30.1: streamCacheKey partitions by provider and ID', () => {
-        const tidal = createTrack({ format: 'Tidal FLAC', path: '99' });
-        const qobuz = createTrack({ format: 'Qobuz FLAC', path: '99' });
-        expect(streamCacheKey(tidal, 'best_available')).not.toBe(streamCacheKey(qobuz, 'best_available'));
+      it('F30.1: resolution cache partitions by addon and track ID', async () => {
+        vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/audio', quality: { lossless: true } });
+        await resolveSource(alphaSource('99'), 'best_available');
+        await resolveSource(betaSource('99'), 'best_available');
+        expect(invoke).toHaveBeenCalledTimes(2);
+        await resolveSource(alphaSource('99'), 'best_available');
+        expect(invoke).toHaveBeenCalledTimes(2);
       });
 
-      it('F30.2: streamCacheKey partitions by streaming quality', () => {
-        const tidal = createTrack({ format: 'Tidal FLAC', path: '99' });
-        const best = streamCacheKey(tidal, 'best_available');
-        const saver = streamCacheKey(tidal, 'data_saver');
-        expect(best).not.toBe(saver);
+      it('F30.2: resolution cache partitions by streaming quality', async () => {
+        vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/audio', quality: { lossless: true } });
+        await resolveSource(alphaSource('99'), 'best_available');
+        await resolveSource(alphaSource('99'), 'data_saver');
+        expect(invoke).toHaveBeenCalledTimes(2);
+        expect(invoke).toHaveBeenCalledWith('addon_resolve_source', { trackId: `${ALPHA}:99`, requestedQuality: 'data_saver' });
       });
 
-      it('F30.3: sourceKey isolates different providers with identical IDs', () => {
-        const s1: PlaybackSource = { provider: 'tidal', id: '123' };
-        const s2: PlaybackSource = { provider: 'qobuz', id: '123' };
-        const s3: PlaybackSource = { provider: 'local', id: '123' };
-        expect(sourceKey(s1)).toBe('tidal:123');
-        expect(sourceKey(s2)).toBe('qobuz:123');
-        expect(sourceKey(s3)).toBe('local:123');
+      it('F30.3: sourceKey isolates different providers and addons with identical IDs', () => {
+        const s1: PlaybackSource = { provider: 'youtube', id: '123' };
+        const s2: PlaybackSource = alphaSource('123');
+        const s3: PlaybackSource = betaSource('123');
+        const s4: PlaybackSource = { provider: 'local', id: '123' };
+        expect(sourceKey(s1)).toBe('youtube:123');
+        expect(sourceKey(s2)).toBe(`addon:${ALPHA}:123`);
+        expect(sourceKey(s3)).toBe(`addon:${BETA}:123`);
+        expect(sourceKey(s4)).toBe('local:123');
       });
 
       it('F30.4: clearSourceCache evicts in-memory resolution cache', async () => {
         vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/1', quality: {} });
-        await resolveSource({ provider: 'tidal', id: 'abc' }, 'best_available');
+        await resolveSource(alphaSource('abc'), 'best_available');
         clearSourceCache();
-        await resolveSource({ provider: 'tidal', id: 'abc' }, 'best_available');
+        await resolveSource(alphaSource('abc'), 'best_available');
         expect(invoke).toHaveBeenCalledTimes(2);
       });
 
@@ -1399,25 +1383,25 @@ describe('E2E Unified Music Sources Test Suite', () => {
         expect(yt.catalog_quality?.lossless).toBe(false);
       });
 
-      it('F31.2: Tidal lossless labels are categorized as lossless catalog quality', () => {
-        const tidal = catalogTrack({ id: 123, quality: 'LOSSLESS' }, 'tidal');
-        expect(tidal.catalog_quality?.lossless).toBe(true);
+      it('F31.2: addon-reported lossless catalog quality is preserved', () => {
+        const addon = catalogTrack({ id: `${ALPHA}:123`, catalog_quality: { lossless: true } }, 'addon');
+        expect(addon.catalog_quality?.lossless).toBe(true);
       });
 
-      it('F31.3: Qobuz HI_RES_LOSSLESS is categorized as lossless catalog quality', () => {
-        const qobuz = catalogTrack({ id: 456, quality: 'HI_RES_LOSSLESS' }, 'qobuz');
-        expect(qobuz.catalog_quality?.lossless).toBe(true);
+      it('F31.3: addon quality labels alone never imply lossless catalog quality', () => {
+        const addon = catalogTrack({ id: `${BETA}:456`, quality: 'HI_RES_LOSSLESS' }, 'addon');
+        expect(addon.catalog_quality?.lossless).toBeUndefined();
       });
 
       it('F31.4: rankSources ranks lossless higher than lossy under best_available', () => {
         const lossy: PlaybackSource = { provider: 'youtube', id: '1', catalog_quality: { lossless: false } };
-        const lossless: PlaybackSource = { provider: 'tidal', id: '2', catalog_quality: { lossless: true, sample_rate: 44100, bit_depth: 16 } };
+        const lossless: PlaybackSource = { ...alphaSource('2'), catalog_quality: { lossless: true, sample_rate: 44100, bit_depth: 16 } };
         const ranked = rankSources([lossy, lossless], 'best_available');
-        expect(ranked[0].provider).toBe('tidal');
+        expect(ranked[0].provider).toBe('addon');
       });
 
       it('F31.5: rankSources prioritizes lossy or local in data_saver mode', () => {
-        const hires: PlaybackSource = { provider: 'qobuz', id: '1', catalog_quality: { lossless: true, sample_rate: 192000, bit_depth: 24 } };
+        const hires: PlaybackSource = { ...betaSource('1'), catalog_quality: { lossless: true, sample_rate: 192000, bit_depth: 24 } };
         const lossy: PlaybackSource = { provider: 'youtube', id: '2', catalog_quality: { lossless: false } };
         const ranked = rankSources([hires, lossy], 'data_saver');
         expect(ranked[0].provider).toBe('youtube');
@@ -1440,27 +1424,28 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F32.3: saveSourceChoice rejects context with >32 sources', async () => {
         const track = createTrack();
-        const sources = Array.from({ length: 35 }, (_, i) => ({ provider: 'tidal' as const, id: String(i + 1) }));
+        const sources = Array.from({ length: 35 }, (_, i) => ({ provider: 'addon' as const, id: `${ALPHA}:${i + 1}` }));
         const badContext: any = { recording_id: 'rec-1', sources, selection: { mode: 'auto' } };
         await expect(saveSourceChoice(track, badContext)).rejects.toThrow('Invalid recording source choice');
       });
 
       it('F32.4: atomic cache promotion ensures online track cache records valid URLs', async () => {
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio.flac', quality: { lossless: true } };
+          if (cmd === 'addon_resolve_source') return { url: 'https://cdn.example/audio.flac', quality: { lossless: true } };
           return null;
         });
-        const track = createTidalTrack('123');
+        const track = createAlphaTrack('123');
         await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([track], '')[0]);
         expect(useStore.getState().currentTrack?.active_quality?.lossless).toBe(true);
+        expect(useStore.getState().playback.current_track).toBe('https://cdn.example/audio.flac');
       });
 
       it('F32.5: failed stream resolution does not write valid stream to storage', async () => {
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') throw new Error('Corrupt data');
+          if (cmd === 'addon_resolve_source') throw new Error('Corrupt data');
           return null;
         });
-        const track = createTidalTrack('123');
+        const track = createAlphaTrack('123');
         await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([track], '')[0]);
         expect(useStore.getState().playback.current_track).toBeNull();
       });
@@ -1544,10 +1529,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
       });
 
       it('F34.3: UPnP streaming applies seek after source switch', async () => {
-        const track = createTidalTrack('123');
+        const track = createAlphaTrack('123');
         useStore.setState({ currentTrack: track, upnp_connected: true });
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: {} };
+          if (cmd === 'addon_resolve_source') return { url: 'https://cdn.example/audio', quality: {} };
           return null;
         });
         await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([track], '')[0], true, false, 60, true);
@@ -1556,10 +1541,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
       });
 
       it('F34.4: Chromecast streaming passes startPos directly', async () => {
-        const track = createTidalTrack('123');
+        const track = createAlphaTrack('123');
         useStore.setState({ currentTrack: track, chromecast_connected: true });
         vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: {} };
+          if (cmd === 'addon_resolve_source') return { url: 'https://cdn.example/audio', quality: {} };
           return null;
         });
         await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([track], '')[0], true, false, 90, true);
@@ -1596,11 +1581,11 @@ describe('E2E Unified Music Sources Test Suite', () => {
       });
 
       it('F35.3: queue stores track source contexts rather than transient streaming URLs', async () => {
-        const tidal = createTidalTrack('123');
-        const row = groupRecordings([tidal], '')[0];
+        const addon = createAlphaTrack('123');
+        const row = groupRecordings([addon], '')[0];
         await useStore.getState().addToQueue(row);
         expect(useStore.getState().queue[0].source_context).toEqual(row.source_context);
-        expect(useStore.getState().queue[0].path).toBe('123');
+        expect(useStore.getState().queue[0].path).toBe(`${ALPHA}:123`);
       });
 
       it('F35.4: queue reordering preserves track metadata', async () => {
@@ -1659,7 +1644,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         const track = createTrack({ playlist_entry_id: 55 });
         const row = groupRecordings([track], '')[0];
         localStorage.setItem('aideo_recording_source_preferences', JSON.stringify({
-          [row.source_context!.recording_id]: { mode: 'explicit', source: { provider: 'tidal', id: '999' } },
+          [row.source_context!.recording_id]: { mode: 'explicit', source: alphaSource('999') },
         }));
         const applied = applySourcePreference(row);
         expect(applied.source_context?.selection.mode).toBe('auto');
@@ -1676,8 +1661,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
         });
         await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([local], '')[0]);
         expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'C:/Music/gapless.flac', startPos: 0 }));
-        expect(invoke).not.toHaveBeenCalledWith('tidal_resolve_source', expect.anything());
-        expect(invoke).not.toHaveBeenCalledWith('qobuz_resolve_source', expect.anything());
+        expect(invoke).not.toHaveBeenCalledWith('addon_resolve_source', expect.anything());
       });
 
       it('F37.2: local files pass catalog quality metadata to active track', async () => {
@@ -1708,9 +1692,9 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F37.4: appMode local disables online resolution entirely', async () => {
         useStore.setState({ appMode: 'local' });
-        const tidal = createTidalTrack('123');
+        const addon = createAlphaTrack('123');
         const local = createTrack({ path: 'C:/local.flac' });
-        const row = groupRecordings([tidal, local], '')[0];
+        const row = groupRecordings([addon, local], '')[0];
         vi.mocked(invoke).mockImplementation(async cmd => {
           if (cmd === 'check_files_exist') return [true];
           return null;
@@ -1786,44 +1770,44 @@ describe('E2E Unified Music Sources Test Suite', () => {
     describe('Feature 39: 32-Source Durable Ceiling', () => {
       it('F39.1: groupRecordings caps candidate sources at 32', () => {
         const candidates = Array.from({ length: 40 }, (_, i) =>
-          createTidalTrack(String(i + 1), { title: 'Song', artist: 'Artist' })
+          createAlphaTrack(String(i + 1), { title: 'Song', artist: 'Artist' })
         );
         const rows = groupRecordings(candidates, 'Song');
         expect(rows[0].source_context?.sources).toHaveLength(32);
       });
 
       it('F39.2: 32-source ceiling preserves representation across distinct providers', () => {
-        const tidalCopies = Array.from({ length: 35 }, (_, i) => createTidalTrack(String(i + 1)));
+        const addonCopies = Array.from({ length: 35 }, (_, i) => createAlphaTrack(String(i + 1)));
         const local = createTrack({ path: 'C:/song.flac' });
         const yt = createYoutubeTrack('abcdefghijk');
-        const rows = groupRecordings([...tidalCopies, local, yt], '');
+        const rows = groupRecordings([...addonCopies, local, yt], '');
         const providers = new Set(rows[0].source_context?.sources.map(s => s.provider));
         expect(providers.has('local')).toBe(true);
         expect(providers.has('youtube')).toBe(true);
-        expect(providers.has('tidal')).toBe(true);
+        expect(providers.has('addon')).toBe(true);
       });
 
       it('F39.3: matchingSources caps joined sources at 32', () => {
         const anchor = createTrack({ path: 'C:/anchor.flac' });
-        const results = Array.from({ length: 45 }, (_, i) => createTidalTrack(String(i + 1)));
+        const results = Array.from({ length: 45 }, (_, i) => createAlphaTrack(String(i + 1)));
         const grouped = groupRecordings(results, '');
         const matched = matchingSources(anchor, grouped);
         expect(matched.length).toBeLessThanOrEqual(32);
       });
 
       it('F39.4: deduplication replaces duplicate provider sources first when ceiling reached', () => {
-        const tidals = Array.from({ length: 32 }, (_, i) => createTidalTrack(String(i + 1)));
-        const qobuz = createQobuzTrack('999');
-        const rows = groupRecordings([...tidals, qobuz], '');
-        expect(rows[0].source_context?.sources.some(s => s.provider === 'qobuz')).toBe(true);
+        const addons = Array.from({ length: 32 }, (_, i) => createAlphaTrack(String(i + 1)));
+        const yt = createYoutubeTrack('abcdefghijk');
+        const rows = groupRecordings([...addons, yt], '');
+        expect(rows[0].source_context?.sources.some(s => s.provider === 'youtube')).toBe(true);
         expect(rows[0].source_context?.sources).toHaveLength(32);
       });
 
       it('F39.5: persistence rejects context exceeding 32 sources', async () => {
         const track = createTrack();
         const excessiveSources = Array.from({ length: 33 }, (_, i) => ({
-          provider: 'tidal' as const,
-          id: String(i + 1),
+          provider: 'addon' as const,
+          id: `${ALPHA}:${i + 1}`,
         }));
         const badContext: any = {
           recording_id: 'rec-over-32',
@@ -1922,8 +1906,9 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       it('F41.2: resolving stream sources does not call WASAPI or DAC reconfiguration', async () => {
         vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/audio', quality: { lossless: true } });
-        await resolveSource({ provider: 'tidal', id: '123' }, 'best_available');
+        await resolveSource(alphaSource('123'), 'best_available');
         expect(invoke).not.toHaveBeenCalledWith('set_device_sample_rate', expect.anything());
+        expect(invoke).not.toHaveBeenCalledWith('set_wasapi_exclusive', expect.anything());
       });
 
       it('F41.3: source switching preserves current output volume and driver settings', async () => {
@@ -1947,21 +1932,19 @@ describe('E2E Unified Music Sources Test Suite', () => {
       });
 
       it('F41.4: fallback does not alter bit-perfect mode flag in store', async () => {
-        vi.mocked(invoke).mockImplementation(async cmd => {
-          if (cmd === 'tidal_resolve_source') throw new Error('Fail');
-          if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: {} };
-          return null;
+        useStore.setState({ playback: { ...useStore.getState().playback, bit_perfect: true } });
+        resolveByAddon({
+          [ALPHA]: () => { throw new Error('Fail'); },
+          [BETA]: () => ({ url: 'https://beta.example/audio', quality: {} }),
         });
-        const tidal = createTidalTrack('123');
-        const qobuz = createQobuzTrack('456');
-        await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([tidal, qobuz], '')[0]);
-        expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz');
+        await playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([createAlphaTrack('123'), createBetaTrack('456')], '')[0]);
+        expect(useStore.getState().currentTrack?.active_source?.id).toBe(`${BETA}:456`);
+        expect(useStore.getState().playback.bit_perfect).toBe(true);
+        expect(invoke).not.toHaveBeenCalledWith('set_bit_perfect', expect.anything());
       });
 
       it('F41.5: rankSources evaluation is purely computational and produces zero hardware IPC side effects', () => {
-        const s1: PlaybackSource = { provider: 'tidal', id: '1' };
-        const s2: PlaybackSource = { provider: 'qobuz', id: '2' };
-        rankSources([s1, s2], 'best_available');
+        rankSources([alphaSource('1'), betaSource('2')], 'best_available');
         expect(invoke).not.toHaveBeenCalled();
       });
     });
@@ -2031,7 +2014,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
     it('T2.10: handles extreme number of sources gracefully (e.g. 100 identical candidates)', () => {
       const tracks = Array.from({ length: 100 }, (_, i) =>
-        createTidalTrack(String(i + 1), { title: 'Viral Hit', artist: 'Pop Star' })
+        createAlphaTrack(String(i + 1), { title: 'Viral Hit', artist: 'Pop Star' })
       );
       const rows = groupRecordings(tracks, 'Viral Hit');
       expect(rows).toHaveLength(1);
@@ -2067,8 +2050,8 @@ describe('E2E Unified Music Sources Test Suite', () => {
     });
 
     it('T2.15: handles missing quality metadata safely in rankSources', () => {
-      const s1: PlaybackSource = { provider: 'tidal', id: '1', catalog_quality: null };
-      const s2: PlaybackSource = { provider: 'qobuz', id: '2', catalog_quality: undefined };
+      const s1: PlaybackSource = { ...alphaSource('1'), catalog_quality: null };
+      const s2: PlaybackSource = { ...betaSource('2'), catalog_quality: undefined };
       expect(() => rankSources([s1, s2], 'best_available')).not.toThrow();
     });
   });
@@ -2079,24 +2062,23 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
   describe('Tier 3: Cross-Feature Combinations', () => {
     it('T3.1: Matcher Equivalence + Playback Fallback (F5 + F7 + F28)', async () => {
-      vi.mocked(invoke).mockImplementation(async cmd => {
-        if (cmd === 'tidal_resolve_source') throw new Error('Unavailable');
-        if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-        return null;
+      resolveByAddon({
+        [ALPHA]: () => { throw new Error('Unavailable'); },
+        [BETA]: () => ({ url: 'https://beta.example/audio', quality: { lossless: true } }),
       });
-      const tidal = createTidalTrack('100', { duration: 180 });
-      const qobuz = createQobuzTrack('200', { duration: 182 });
-      const row = groupRecordings([tidal, qobuz], '')[0];
+      const alpha = createAlphaTrack('100', { duration: 180 });
+      const beta = createBetaTrack('200', { duration: 182 });
+      const row = groupRecordings([alpha, beta], '')[0];
       await playUnifiedTrack(useStore.setState, useStore.getState, row);
-      expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz');
+      expect(useStore.getState().currentTrack?.active_source?.id).toBe(`${BETA}:200`);
     });
 
     it('T3.2: 20-Minute Cap + Progressive Search Enrichment (F14 + F19 + F20)', async () => {
       const shortVideo = catalogTrack({ id: '11111111111', title: 'Great Song', artist: 'Artist', duration_raw: '3:30' }, 'youtube');
       const longVideo = catalogTrack({ id: '22222222222', title: 'Great Song (Live Stream)', artist: 'Artist', duration_raw: '45:00' }, 'youtube');
       const podcast = catalogTrack({ id: '33333333333', title: 'Great Song Podcast Review', artist: 'Artist', duration_raw: '10:00' }, 'youtube');
-      const tidal = createTidalTrack('123', { title: 'Great Song', artist: 'Artist', duration: 210 });
-      const rows = groupRecordings([shortVideo, longVideo, podcast, tidal], 'Great Song');
+      const addon = createAlphaTrack('123', { title: 'Great Song', artist: 'Artist', duration: 210 });
+      const rows = groupRecordings([shortVideo, longVideo, podcast, addon], 'Great Song');
       expect(rows).toHaveLength(1);
       expect(rows[0].source_context?.sources.some(s => s.id === '11111111111')).toBe(true);
       expect(rows[0].source_context?.sources.some(s => s.id === '22222222222')).toBe(false);
@@ -2105,26 +2087,26 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
     it('T3.3: Explicit Selection + Centralized Store + Source Picker (F9 + F13 + F15)', async () => {
       const track = createTrack();
-      const row = groupRecordings([track, createQobuzTrack('456')], '')[0];
+      const row = groupRecordings([track, createBetaTrack('456')], '')[0];
       const explicitContext: RecordingSources = {
         ...row.source_context!,
-        selection: { mode: 'explicit', source: { provider: 'qobuz', id: '456' } },
+        selection: { mode: 'explicit', source: betaSource('456') },
       };
       await saveSourceChoice(row, explicitContext);
       useStore.setState({ currentTrack: row });
       const applied = applySourcePreference(row);
       expect(applied.source_context?.selection.mode).toBe('explicit');
-      expect((applied.source_context?.selection as any).source.id).toBe('456');
+      expect((applied.source_context?.selection as any).source.id).toBe(`${BETA}:456`);
     });
 
     it('T3.4: Rapid Cancellation + Attempt Tracking (F24 + F25 + F33)', async () => {
       let finish!: (v: any) => void;
       vi.mocked(invoke).mockImplementation(async cmd => {
-        if (cmd === 'tidal_resolve_source') return new Promise(r => { finish = r; });
+        if (cmd === 'addon_resolve_source') return new Promise(r => { finish = r; });
         if (cmd === 'check_files_exist') return [true];
         return null;
       });
-      const slow = createTidalTrack('123');
+      const slow = createAlphaTrack('123');
       const fast = createTrack({ path: 'C:/fast.flac' });
       const p1 = playUnifiedTrack(useStore.setState, useStore.getState, groupRecordings([slow], '')[0]);
       await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
@@ -2154,7 +2136,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
       const track = createTrack({ path: 'C:/playing.flac' });
       const row = groupRecordings([track], '')[0];
       useStore.setState({ currentTrack: row, playback: { ...useStore.getState().playback, status: 'Playing' } });
-      const better = createQobuzTrack('777', {
+      const better = createBetaTrack('777', {
         catalog_quality: { lossless: true, sample_rate: 192000, bit_depth: 24 },
       });
       const enriched = groupRecordings([track, better], '')[0];
@@ -2163,7 +2145,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
     });
 
     it('T3.7: 32-Source Ceiling + Additive Persistence v1->v2 (F38 + F39)', async () => {
-      const candidates = Array.from({ length: 35 }, (_, i) => createTidalTrack(String(i + 1)));
+      const candidates = Array.from({ length: 35 }, (_, i) => createAlphaTrack(String(i + 1)));
       const row = groupRecordings(candidates, '')[0];
       expect(row.source_context?.sources).toHaveLength(32);
       await saveSourceChoice(row, row.source_context!);
@@ -2172,10 +2154,10 @@ describe('E2E Unified Music Sources Test Suite', () => {
     });
 
     it('T3.8: Clean/Explicit Separation + Multi-Provider Search Grouping (F11 + F16)', () => {
-      const cleanTidal = createTidalTrack('1', { recording_evidence: { version: 'Clean' } });
-      const expTidal = createTidalTrack('2', { recording_evidence: { version: 'Explicit' } });
-      const expQobuz = createQobuzTrack('3', { recording_evidence: { version: 'Explicit' } });
-      const rows = groupRecordings([cleanTidal, expTidal, expQobuz], '');
+      const cleanAlpha = createAlphaTrack('1', { recording_evidence: { version: 'Clean' } });
+      const expAlpha = createAlphaTrack('2', { recording_evidence: { version: 'Explicit' } });
+      const expBeta = createBetaTrack('3', { recording_evidence: { version: 'Explicit' } });
+      const rows = groupRecordings([cleanAlpha, expAlpha, expBeta], '');
       expect(rows).toHaveLength(2);
       const expRow = rows.find(r => r.recording_evidence?.version === 'Explicit');
       expect(expRow?.source_context?.sources).toHaveLength(2);
@@ -2188,25 +2170,22 @@ describe('E2E Unified Music Sources Test Suite', () => {
     });
 
     it('T3.10: Decoder Failure + Strict Fallback Exhaustion (F27 + F28 + F29)', async () => {
-      vi.mocked(invoke).mockImplementation(async cmd => {
-        if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: {} };
-        if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: {} };
-        return null;
+      resolveByAddon({
+        [ALPHA]: () => ({ url: 'https://alpha.example/audio', quality: {} }),
+        [BETA]: () => ({ url: 'https://beta.example/audio', quality: {} }),
       });
-      const tidal = createTidalTrack('123');
-      const qobuz = createQobuzTrack('456');
-      const row = groupRecordings([tidal, qobuz], '')[0];
+      const row = groupRecordings([createAlphaTrack('123'), createBetaTrack('456')], '')[0];
       const explicitTrack = {
         ...row,
         source_context: {
           ...row.source_context!,
-          selection: { mode: 'explicit' as const, source: { provider: 'tidal' as const, id: '123' } },
+          selection: { mode: 'explicit' as const, source: alphaSource('123') },
         },
       };
       await playUnifiedTrack(useStore.setState, useStore.getState, explicitTrack);
-      handleSourceFailure('https://tidal.example/audio', 'Decode error');
-      await vi.waitFor(() => expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz'));
-      handleSourceFailure('https://qobuz.example/audio', 'Decode error');
+      handleSourceFailure('https://alpha.example/audio', 'Decode error');
+      await vi.waitFor(() => expect(useStore.getState().currentTrack?.active_source?.id).toBe(`${BETA}:456`));
+      handleSourceFailure('https://beta.example/audio', 'Decode error');
       await vi.waitFor(() => expect(useStore.getState().playback.status).toBe('Stopped'));
       expect(useStore.getState().playbackError).toContain('No source could play this recording');
     });
@@ -2220,39 +2199,39 @@ describe('E2E Unified Music Sources Test Suite', () => {
     it('Scenario 1: End-to-end Search to Playback with Fallback', async () => {
       vi.mocked(invoke).mockImplementation(async cmd => {
         if (cmd === 'search_local_sources') return [createTrack({ path: 'C:/Music/TakSegampangItu.flac', title: 'Tak Segampang Itu', artist: 'Anggi Marito', duration: 231 })];
-        if (cmd === 'tidal_search') return [{ id: 101, title: 'Tak Segampang Itu', artist: 'Anggi Marito', duration: 231, quality: 'LOSSLESS' }];
+        if (cmd === 'addon_search') return [{ id: `${ALPHA}:101`, title: 'Tak Segampang Itu', artist: 'Anggi Marito', duration: 231, catalog_quality: { lossless: true } }];
         if (cmd === 'search_youtube') return [{ id: 'gR_qbfGkwpc', title: 'Tak Segampang Itu (Official Music Video)', artist: 'Anggi Marito - Topic', duration_raw: '3:52' }];
         return [];
       });
-      const searchRes = await searchSources('Anggi Marito Tak Segampang Itu', { tidal: true, qobuz: false }, () => {});
+      const searchRes = await searchSources('Anggi Marito Tak Segampang Itu', { addons: [ALPHA] }, () => {});
       expect(searchRes.tracks).toHaveLength(1);
       const songRow = searchRes.tracks[0];
       expect(songRow.source_context?.sources.length).toBeGreaterThanOrEqual(2);
 
       vi.mocked(invoke).mockImplementation(async cmd => {
         if (cmd === 'check_files_exist') return [false];
-        if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/stream.flac', quality: { lossless: true } };
+        if (cmd === 'addon_resolve_source') return { url: 'https://cdn.example/stream.flac', quality: { lossless: true } };
         return null;
       });
       await playUnifiedTrack(useStore.setState, useStore.getState, songRow);
-      expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+      expect(useStore.getState().currentTrack?.active_source?.id).toBe(`${ALPHA}:101`);
       expect(useStore.getState().playback.status).toBe('Playing');
     });
 
     it('Scenario 2: Multi-Surface Source Picker Convergence', async () => {
       const local = createTrack({ path: 'C:/Music/track.flac', title: 'Convergence', artist: 'Artist', duration: 180 });
-      const qobuz = createQobuzTrack('789', { title: 'Convergence', artist: 'Artist', duration: 181 });
-      const row = groupRecordings([local, qobuz], '')[0];
+      const addon = createBetaTrack('789', { title: 'Convergence', artist: 'Artist', duration: 181 });
+      const row = groupRecordings([local, addon], '')[0];
 
       const explicitContext: RecordingSources = {
         ...row.source_context!,
-        selection: { mode: 'explicit', source: { provider: 'qobuz', id: '789' } },
+        selection: { mode: 'explicit', source: betaSource('789') },
       };
       await saveSourceChoice(row, explicitContext);
 
       const searchTrack = applySourcePreference(row);
       expect(searchTrack.source_context?.selection.mode).toBe('explicit');
-      expect((searchTrack.source_context?.selection as any).source.provider).toBe('qobuz');
+      expect((searchTrack.source_context?.selection as any).source.id).toBe(`${BETA}:789`);
     });
 
     it('Scenario 3: Rapid Queue Advancement & Cancellation Stress', async () => {
@@ -2289,8 +2268,8 @@ describe('E2E Unified Music Sources Test Suite', () => {
     it('Scenario 5: Offline/Local-Only Transition & WASAPI Integrity', async () => {
       useStore.setState({ appMode: 'local', streamingQuality: 'best_available' });
       const local = createTrack({ path: 'C:/Symphony.flac', duration: 3600 });
-      const tidal = createTidalTrack('999', { duration: 3600 });
-      const row = groupRecordings([local, tidal], '')[0];
+      const addon = createAlphaTrack('999', { duration: 3600 });
+      const row = groupRecordings([local, addon], '')[0];
 
       vi.mocked(invoke).mockImplementation(async cmd => {
         if (cmd === 'check_files_exist') return [true];
@@ -2300,7 +2279,7 @@ describe('E2E Unified Music Sources Test Suite', () => {
 
       expect(useStore.getState().currentTrack?.active_source?.provider).toBe('local');
       expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'C:/Symphony.flac', startPos: 0 }));
-      expect(invoke).not.toHaveBeenCalledWith('tidal_resolve_source', expect.anything());
+      expect(invoke).not.toHaveBeenCalledWith('addon_resolve_source', expect.anything());
     });
   });
 });

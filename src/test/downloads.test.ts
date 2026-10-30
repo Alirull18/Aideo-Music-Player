@@ -14,8 +14,8 @@ import { searchSources, type SourceSearch } from '../utils/unifiedSources';
 
 vi.mock('../utils/unifiedSources', async importOriginal => ({ ...await importOriginal<typeof import('../utils/unifiedSources')>(), searchSources: vi.fn() }));
 
-const track: Track = { id: -1, path: '123', title: 'Song', artist: 'Artist', album: 'Album', duration: 180, format: 'Tidal FLAC', lyric_offset: 0 };
-const alternative: PlaybackSource = { provider: 'qobuz', id: '456', metadata: { title: 'Song', artist: 'Artist', album: 'Other Album', duration: 180 } };
+const track: Track = { id: -1, path: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', title: 'Song', artist: 'Artist', album: 'Album', duration: 180, format: 'YouTube Direct', lyric_offset: 0 };
+const alternative: PlaybackSource = { provider: 'youtube', id: 'bbbbbbbbbbb', metadata: { title: 'Song', artist: 'Artist', album: 'Other Album', duration: 180 } };
 const sourceContext = { recording_id: 'recording', sources: [alternative], selection: { mode: 'auto' as const } };
 const selectedTrack = { ...track, source_context: sourceContext };
 const option: DownloadOption = { id: '6', label: 'FLAC · 16-bit · 44.1 kHz', extension: 'flac', quality: { lossless: true, codec: 'audio/flac', bit_depth: 16, sample_rate: 44100 } };
@@ -27,7 +27,7 @@ beforeEach(() => {
   cleanup(); vi.clearAllMocks(); handlers.clear();
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
   useDownloadStore.setState({ track: null, jobs: [], paths: [], hidden: [] });
-  useStore.setState({ view: 'library', appMode: 'hybrid', tidalConnected: true, qobuzConnected: true, qobuzExperimentalEnabled: true, sourceRegistry: {}, currentTrack: track, loadLibrary: vi.fn().mockResolvedValue(undefined) });
+  useStore.setState({ view: 'library', appMode: 'hybrid', sourceRegistry: {}, currentTrack: track, loadLibrary: vi.fn().mockResolvedValue(undefined) });
   vi.mocked(searchSources).mockImplementation(async (_query, _enabled, update) => { update(emptySearch); return emptySearch; });
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === 'get_download_folder') return { folder: 'C:\\Music', configured: true };
@@ -80,27 +80,27 @@ describe('track downloads', () => {
   });
 
   it('keeps possible matches visible alongside confident matches without mutating the recording', () => {
-    const candidate: PlaybackSource = { ...alternative, id: '789', metadata: { ...alternative.metadata!, duration: 245 }, match_assessment: 'equivalent' };
-    const unrelated = { ...track, title: 'Different Song', path: '999', source_context: { ...sourceContext, sources: [{ ...alternative, id: '999' }] } };
+    const candidate: PlaybackSource = { ...alternative, id: 'ccccccccccc', metadata: { ...alternative.metadata!, duration: 245 }, match_assessment: 'equivalent' };
+    const unrelated = { ...track, title: 'Different Song', path: '999', source_context: { ...sourceContext, sources: [{ ...alternative, id: 'ddddddddddd' }] } };
     const result = { ...track, source_context: { ...sourceContext, sources: [alternative], display_candidates: [candidate] } };
     const before = JSON.stringify(selectedTrack);
     const copies = collectDownloadSources(selectedTrack, [result, unrelated]);
-    expect(copies.find(copy => copy.id === '456')?.match_assessment).toBe('equivalent');
-    expect(copies.find(copy => copy.id === '789')?.match_assessment).toBe('candidate');
-    expect(copies.some(copy => copy.id === '999')).toBe(false);
+    expect(copies.find(copy => copy.id === 'bbbbbbbbbbb')?.match_assessment).toBe('equivalent');
+    expect(copies.find(copy => copy.id === 'ccccccccccc')?.match_assessment).toBe('candidate');
+    expect(copies.some(copy => copy.id === 'ddddddddddd')).toBe(false);
     expect(JSON.stringify(selectedTrack)).toBe(before);
   });
 
   it('shows known copies while other providers are pending or fail', async () => {
     vi.mocked(searchSources).mockImplementation(async (_query, _enabled, update) => {
-      const result = { ...emptySearch, pending: ['youtube'], errors: { tidal: 'Service unavailable' } };
+      const result = { ...emptySearch, pending: ['youtube'], errors: { addon: 'Service unavailable' } };
       update(result); return result;
     });
     render(createElement(DownloadChooser, { track: selectedTrack }));
-    expect(screen.getByRole('button', { name: /Qobuz/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Other Album/ })).toBeEnabled();
     expect(await screen.findByText('Checking youtube…')).toBeInTheDocument();
-    expect(screen.getByText(/Couldn’t check tidal/)).toBeInTheDocument();
-    expect(searchSources).toHaveBeenCalledWith(expect.any(String), { tidal: true, qobuz: true, youtube: true }, expect.any(Function));
+    expect(screen.getByText(/Couldn’t check addon/)).toBeInTheDocument();
+    expect(searchSources).toHaveBeenCalledWith(expect.any(String), { youtube: true }, expect.any(Function));
   });
 
   it('downloads the chosen source and quality without changing playback or source preferences', async () => {
@@ -114,11 +114,11 @@ describe('track downloads', () => {
     useDownloadStore.getState().open(selectedTrack);
     const playback = useStore.getState().playback;
     render(createElement(DownloadManager));
-    fireEvent.click(screen.getByRole('button', { name: /Qobuz/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Other Album/ }));
     const quality = await screen.findByRole('combobox', { name: 'Download quality' });
     fireEvent.change(quality, { target: { value: '5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('start_track_download', { source: expect.objectContaining({ provider: 'qobuz', id: '456' }), option: second, folder: 'C:\\Music', collision: 'ask' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('start_track_download', { source: expect.objectContaining({ provider: 'youtube', id: 'bbbbbbbbbbb' }), option: second, folder: 'C:\\Music', collision: 'ask' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByRole('complementary', { name: 'Download notifications' })).toBeInTheDocument();
     expect(useStore.getState().currentTrack).toEqual(track);
@@ -136,7 +136,7 @@ describe('track downloads', () => {
       return [];
     });
     render(createElement(DownloadChooser, { track: selectedTrack }));
-    fireEvent.click(screen.getByRole('button', { name: /Qobuz/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Other Album/ }));
     await screen.findByRole('combobox');
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('set_download_folder', { folder: 'D:\\Songs' }));
@@ -154,7 +154,7 @@ describe('track downloads', () => {
       return [];
     });
     render(createElement(DownloadChooser, { track: selectedTrack }));
-    fireEvent.click(screen.getByRole('button', { name: /Qobuz/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Other Album/ }));
     await screen.findByRole('combobox');
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Keep both' }));
@@ -166,16 +166,16 @@ describe('track downloads', () => {
     vi.mocked(invoke).mockImplementation(async (command, args) => {
       if (command === 'get_download_folder') return { folder: 'C:\\Music', configured: true };
       if (command === 'get_track_download_options') {
-        if ((args as { source: PlaybackSource }).source.provider === 'qobuz') return new Promise<DownloadOption[]>(resolve => { finishOld = resolve; });
-        return [{ ...option, id: 'LOSSLESS', label: 'Tidal lossless' }];
+        if ((args as { source: PlaybackSource }).source.id === 'bbbbbbbbbbb') return new Promise<DownloadOption[]>(resolve => { finishOld = resolve; });
+        return [{ ...option, id: 'LOSSLESS', label: 'Original lossless' }];
       }
       return [];
     });
     render(createElement(DownloadChooser, { track: selectedTrack }));
-    fireEvent.click(screen.getByRole('button', { name: /Qobuz/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Other Album/ }));
     await waitFor(() => expect(finishOld).toBeDefined());
-    fireEvent.click(screen.getByRole('button', { name: /Tidal/ }));
-    await screen.findByRole('option', { name: 'Tidal lossless' });
+    fireEvent.click(screen.getByRole('button', { name: /(?<!Other )Album · Version/ }));
+    await screen.findByRole('option', { name: 'Original lossless' });
     await act(async () => finishOld([option]));
     expect(screen.getByRole('combobox')).toHaveValue('LOSSLESS');
     expect(screen.queryByRole('option', { name: option.label })).not.toBeInTheDocument();
@@ -192,9 +192,9 @@ describe('track downloads', () => {
       return [];
     });
     render(createElement(DownloadChooser, { track: selectedTrack }));
-    fireEvent.click(screen.getByRole('button', { name: /Qobuz/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Other Album/ }));
     await screen.findByText('Temporary provider failure');
-    fireEvent.click(screen.getByRole('button', { name: /Qobuz/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Other Album/ }));
     await screen.findByRole('option', { name: option.label });
     expect(attempts).toBe(2);
     expect(screen.queryByText('Temporary provider failure')).not.toBeInTheDocument();

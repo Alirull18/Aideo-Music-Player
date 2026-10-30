@@ -1,10 +1,34 @@
 //! Runtime-installed Eclipse addons: manifest metadata lives in SQLite, the base URL
 //! (which may embed a user token) lives in the OS keyring and is never sent to the frontend.
 pub mod eclipse;
+pub mod lyrics;
 
 use crate::{safe_lock, AppState};
 use serde::Serialize;
 use tauri::State;
+use std::collections::HashSet;
+use std::sync::{OnceLock, RwLock};
+
+pub const YOUTUBE: &str = "org.aideo.youtube";
+pub const LYRICS: &str = "org.aideo.lyrics";
+pub const TRANSLATION: &str = "org.aideo.translation";
+
+fn disabled() -> &'static RwLock<HashSet<String>> {
+    static DISABLED: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
+    DISABLED.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
+pub fn is_enabled(id: &str) -> bool {
+    [YOUTUBE, LYRICS, TRANSLATION].contains(&id) || disabled().read().map(|ids| !ids.contains(id)).unwrap_or(false)
+}
+
+pub fn initialize(conn: &rusqlite::Connection) -> Result<(), String> {
+    let mut stmt = conn.prepare("SELECT id FROM addon_preferences WHERE enabled = 0").map_err(|e| e.to_string())?;
+    let ids = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?
+        .collect::<Result<HashSet<_>, _>>().map_err(|e| e.to_string())?;
+    *disabled().write().map_err(|_| "Addon preferences unavailable")? = ids;
+    Ok(())
+}
 
 const KEYRING_SERVICE: &str = "aideo-addon";
 
@@ -31,10 +55,23 @@ pub struct AddonInfo {
     pub content_type: Option<String>,
     /// scheme://host:port only.
     pub origin: String,
+    pub builtin: bool,
+    pub enabled: bool,
+}
+
+fn builtins() -> Vec<AddonInfo> {
+    [(YOUTUBE, "YouTube", vec!["search", "stream"]),
+     (LYRICS, "Synced lyrics · LRCLIB / Kugou / BiniLyrics", vec!["lyrics"]),
+     (TRANSLATION, "Lyric translation", vec!["translate"])].into_iter().map(|(id, name, resources)| AddonInfo {
+        id: id.into(), name: name.into(), version: "1".into(), icon: None,
+        resources: resources.into_iter().map(String::from).collect(), content_type: None,
+        origin: "internal".into(), builtin: true, enabled: is_enabled(id),
+    }).collect()
 }
 
 fn info(m: eclipse::Manifest, origin: String) -> AddonInfo {
-    AddonInfo { id: m.id, name: m.name, version: m.version, icon: m.icon, resources: m.resources, content_type: m.content_type, origin }
+    let enabled = is_enabled(&m.id);
+    AddonInfo { id: m.id, name: m.name, version: m.version, icon: m.icon, resources: m.resources, content_type: m.content_type, origin, builtin: false, enabled }
 }
 
 fn origin_of(u: &url::Url) -> String {
@@ -61,16 +98,23 @@ pub async fn addon_list(state: State<'_, AppState>) -> Result<Vec<AddonInfo>, St
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(|e| e.to_string())?;
-    Ok(rows
-        .flatten()
-        .filter_map(|(json, origin)| serde_json::from_str::<eclipse::Manifest>(&json).ok().map(|m| info(m, origin)))
-        .collect())
+    let mut entries = builtins();
+    for row in rows {
+        let (json, origin) = row.map_err(|e| e.to_string())?;
+        if let Ok(manifest) = serde_json::from_str::<eclipse::Manifest>(&json) {
+            entries.push(info(manifest, origin));
+        }
+    }
+    Ok(entries)
 }
 
 #[tauri::command]
 pub async fn addon_install(state: State<'_, AppState>, manifest_url: String) -> Result<AddonInfo, String> {
     let base = eclipse::base_from_manifest_url(&manifest_url)?;
     let manifest = eclipse::fetch_manifest(eclipse::client(), &base).await?;
+    if builtins().iter().any(|entry| entry.id == manifest.id) {
+        return Err("Internal addon ids cannot be replaced".into());
+    }
     let origin = origin_of(&base);
     let json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
     // A different server must not silently take over an installed addon's id (and its stored token).
@@ -101,6 +145,9 @@ pub async fn addon_remove(state: State<'_, AppState>, addon_id: String) -> Resul
     if !valid_addon_id(&addon_id) {
         return Err("Invalid addon id".into());
     }
+    if builtins().iter().any(|entry| entry.id == addon_id) {
+        return Err("Internal addons can be disabled but not removed".into());
+    }
     safe_lock(&state.db)
         .execute("DELETE FROM addons WHERE id = ?1", rusqlite::params![addon_id])
         .map_err(|e| e.to_string())?;
@@ -108,28 +155,102 @@ pub async fn addon_remove(state: State<'_, AppState>, addon_id: String) -> Resul
     Ok(())
 }
 
+fn require_resource(state: &AppState, id: &str, resource: &str) -> Result<(), String> {
+    if !valid_addon_id(id) || !is_enabled(id) {
+        return Err("Addon is disabled or invalid".into());
+    }
+    let json: String = state.read_conn().query_row(
+        "SELECT manifest_json FROM addons WHERE id = ?1", [id], |row| row.get(0),
+    ).map_err(|_| "Addon is not installed")?;
+    let manifest: eclipse::Manifest = serde_json::from_str(&json).map_err(|_| "Invalid stored addon manifest")?;
+    if !manifest.resources.iter().any(|entry| entry == resource) {
+        return Err("Addon does not provide this resource".into());
+    }
+    Ok(())
+}
+
+pub fn enabled_bases(state: &AppState, resource: &str) -> Vec<(String, url::Url)> {
+    let manifests: Vec<String> = {
+        let conn = state.read_conn();
+        let Ok(mut stmt) = conn.prepare("SELECT manifest_json FROM addons ORDER BY installed_at, id") else { return Vec::new() };
+        let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else { return Vec::new() };
+        rows.filter_map(Result::ok).collect()
+    };
+    manifests.into_iter().filter_map(|json| {
+        let manifest: eclipse::Manifest = serde_json::from_str(&json).ok()?;
+        if !is_enabled(&manifest.id) || !manifest.resources.iter().any(|entry| entry == resource) { return None; }
+        Some((manifest.id.clone(), load_base(&manifest.id).ok()?))
+    }).collect()
+}
+
 #[tauri::command]
-pub async fn addon_search(addon_id: String, query: String) -> Result<Vec<eclipse::AddonTrack>, String> {
+pub async fn addon_set_enabled(state: State<'_, AppState>, addon_id: String, enabled: bool) -> Result<(), String> {
+    if !valid_addon_id(&addon_id) { return Err("Invalid addon id".into()); }
+    if !enabled && [YOUTUBE, LYRICS, TRANSLATION].contains(&addon_id.as_str()) {
+        return Err("Internal addons cannot be disabled".into());
+    }
+    if !builtins().iter().any(|entry| entry.id == addon_id) {
+        let installed: bool = state.read_conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM addons WHERE id = ?1)", [&addon_id], |row| row.get(0),
+        ).map_err(|e| e.to_string())?;
+        if !installed { return Err("Addon is not installed".into()); }
+    }
+    let mut ids = disabled().write().map_err(|_| "Addon preferences unavailable")?;
+    safe_lock(&state.db).execute(
+        "INSERT INTO addon_preferences (id, enabled) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled",
+        rusqlite::params![addon_id, enabled],
+    ).map_err(|e| e.to_string())?;
+    if enabled { ids.remove(&addon_id); } else { ids.insert(addon_id); }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn addon_search(state: State<'_, AppState>, addon_id: String, query: String) -> Result<Vec<eclipse::AddonTrack>, String> {
     if !valid_addon_id(&addon_id) || query.len() > 512 {
         return Err("Invalid addon search".into());
     }
-    eclipse::search(eclipse::client(), &addon_id, &load_base(&addon_id)?, &query).await
+    require_resource(&state, &addon_id, "search")?;
+    let tracks = eclipse::search(eclipse::client(), &addon_id, &load_base(&addon_id)?, &query).await?;
+    require_resource(&state, &addon_id, "search")?;
+    Ok(tracks)
+}
+
+#[tauri::command]
+pub async fn addon_catalog(state: State<'_, AppState>, addon_id: String, kind: String, id: String) -> Result<Vec<eclipse::AddonTrack>, String> {
+    require_resource(&state, &addon_id, "search")?;
+    let tracks = eclipse::catalog(eclipse::client(), &addon_id, &load_base(&addon_id)?, &kind, &id).await?;
+    require_resource(&state, &addon_id, "search")?;
+    Ok(tracks)
 }
 
 /// Dispatched dynamically by the frontend as `${provider}_resolve_source` with provider = "addon".
 #[tauri::command]
 pub async fn addon_resolve_source(
+    state: State<'_, AppState>,
     track_id: String,
     requested_quality: Option<crate::sources::StreamingQuality>,
 ) -> Result<crate::sources::ResolvedStream, String> {
     let _ = requested_quality; // Eclipse /stream/{id} has no quality parameter.
     let (addon_id, tid) = track_id.split_once(':').filter(|_| valid_source_id(&track_id)).ok_or("Invalid addon track id")?;
-    eclipse::resolve(eclipse::client(), &load_base(addon_id)?, tid).await
+    require_resource(&state, addon_id, "stream")?;
+    let stream = eclipse::resolve(eclipse::client(), &load_base(addon_id)?, tid).await?;
+    require_resource(&state, addon_id, "stream")?;
+    Ok(stream)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_manifests_are_capability_specific() {
+        let entries = builtins();
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().all(|a| a.builtin && a.enabled && valid_addon_id(&a.id)));
+        assert!(entries[0].resources.contains(&"search".into()));
+        assert!(entries[1].resources.contains(&"lyrics".into()));
+        assert!(entries[2].resources.contains(&"translate".into()));
+    }
 
     #[test]
     fn test_addon_id_validation() {

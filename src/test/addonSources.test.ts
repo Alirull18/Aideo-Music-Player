@@ -26,7 +26,7 @@ describe('Eclipse addon sources', () => {
       if (cmd === 'addon_search') return [addonTrack];
       return [];
     });
-    const result = await searchSources('song', { tidal: false, qobuz: false, youtube: false, addons: [ADDON] }, () => {});
+    const result = await searchSources('song', { youtube: false, addons: [ADDON] }, () => {});
     expect(invoke).toHaveBeenCalledWith('addon_search', { addonId: ADDON, query: 'song' });
     const track = result.tracks.find(t => t.format === 'Addon');
     expect(track?.path).toBe(`${ADDON}:t1`);
@@ -39,7 +39,7 @@ describe('Eclipse addon sources', () => {
       if (cmd === 'addon_search') throw new Error('Addon timed out');
       return [];
     });
-    const result = await searchSources('song', { tidal: false, qobuz: false, youtube: false, addons: [ADDON] }, () => {});
+    const result = await searchSources('song', { youtube: false, addons: [ADDON] }, () => {});
     expect(result.errors[`addon:${ADDON}`]).toContain('Addon timed out');
     expect(result.pending).toEqual([]);
   });

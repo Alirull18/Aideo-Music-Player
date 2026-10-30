@@ -756,106 +756,6 @@ const TrackRow = memo(({
   );
 });
 
-const CloudTrackRow = memo(({ 
-  t, i, active, onOpenMenu, playCloudTrack,
-  cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, onSelectArtist
-}: {
-  t: CloudTrack,
-  i: number,
-  active: boolean,
-  onOpenMenu: (track: any, index: number, anchor: DOMRect | { x: number; y: number }, isCloud?: boolean) => void,
-  playCloudTrack: (track: CloudTrack) => void,
-  cacheCloudTrack: (track: any) => Promise<void>,
-  deleteCachedTrack: (streamUrl: string) => Promise<void>,
-  cachedCloudHashes: string[],
-  onSelectArtist?: (artist: string) => void
-}) => {
-  const vt = cloudTrackToVirtualTrack(t);
-  
-  return (
-    <tr className={`track-row${active ? ' playing' : ''}`}
-      style={{ position: 'relative', zIndex: 1 }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onOpenMenu(vt, i, { x: e.clientX, y: e.clientY }, true);
-      }}
-      onClick={() => playCloudTrack(t)}>
-      <td style={{ textAlign: 'center', color: active ? 'var(--accent)' : 'var(--text-dim)', fontSize: 12 }}>
-        {active ? '▶' : i + 1}
-      </td>
-      <td>
-        <TrackThumbnail path={t.stream_url} coverUrl={t.cover_url} />
-      </td>
-      <td className="cell-truncate">
-        <div className="track-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>{t.title}</span>
-          <span style={{ 
-            fontSize: 9, fontWeight: 800, padding: '2px 5px', borderRadius: 4, 
-            background: t.provider === 'subsonic' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(168, 85, 247, 0.1)', 
-            color: t.provider === 'subsonic' ? '#6366f1' : '#a855f7',
-            border: t.provider === 'subsonic' ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid rgba(168, 85, 247, 0.2)'
-          }}>
-            {t.provider.toUpperCase()}
-          </span>
-        </div>
-      </td>
-      <td className="cell-truncate">
-        <div 
-          className="track-sub"
-          style={{ cursor: t.artist ? 'pointer' : 'default' }}
-          title={t.artist ? `Filter by artist: ${t.artist}` : undefined}
-          onClick={(e) => {
-            if (t.artist && onSelectArtist) {
-              e.stopPropagation();
-              onSelectArtist(t.artist);
-            }
-          }}
-        >{t.artist || '—'}</div>
-      </td>
-      <td style={{ textAlign: 'center' }}>
-        <span className="quality-tag high-res">LOSSLESS</span>
-      </td>
-      <td style={{ textAlign: 'right', overflow: 'visible' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-          <span style={{ 
-            fontVariantNumeric: 'tabular-nums', 
-            fontSize: 12, 
-            color: 'var(--text-dim)', 
-            minWidth: 38, 
-            textAlign: 'right' 
-          }}>
-            {fmt(t.duration)}
-          </span>
-          <div style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CloudCacheButton 
-              streamUrl={t.stream_url} 
-              cacheCloudTrack={() => cacheCloudTrack(t)} 
-              deleteCachedTrack={deleteCachedTrack} 
-              cachedCloudHashes={cachedCloudHashes} 
-              precomputedHash={t.path_hash}
-            />
-          </div>
-          <div style={{ width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <button
-              className="icon-btn"
-              type="button"
-              title="More options"
-              onClick={(e) => { 
-                e.stopPropagation(); 
-                onOpenMenu(vt, i, e.currentTarget.getBoundingClientRect(), true); 
-              }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4 }}
-            >
-              <MoreVertical size={16} />
-            </button>
-          </div>
-        </div>
-      </td>
-    </tr>
-  );
-});
-
 export function LibraryView() {
   const healthDetails = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -868,8 +768,7 @@ export function LibraryView() {
     view, tracks, currentTrackPath, loadLibrary, playTrack, setView, currentPlaylist, removeFromPlaylist,
     reorderPlaylistTracks,
     matchMetadata, addToQueue, playNextInQueue, playlists, addToPlaylist,
-    subsonicUrl, subsonicUser, subsonicConnected, subsonicPass,
-    jellyfinUrl, jellyfinConnected, toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
+    toggleLoveTrack, toggleDislikeTrack, cacheCloudTrack, deleteCachedTrack, cachedCloudHashes, fetchCachedCloudHashes,
     setCoverArtModalTrack, librarySearchQuery, setLibrarySearchQuery
   } = useStore(useShallow(s => ({
     view: s.view,
@@ -886,12 +785,6 @@ export function LibraryView() {
     playNextInQueue: s.playNextInQueue,
     playlists: s.playlists,
     addToPlaylist: s.addToPlaylist,
-    subsonicUrl: s.subsonicUrl,
-    subsonicUser: s.subsonicUser,
-    subsonicConnected: s.subsonicConnected,
-    subsonicPass: s.subsonicPass,
-    jellyfinUrl: s.jellyfinUrl,
-    jellyfinConnected: s.jellyfinConnected,
     toggleLoveTrack: s.toggleLoveTrack,
     toggleDislikeTrack: s.toggleDislikeTrack,
     cacheCloudTrack: s.cacheCloudTrack,
@@ -910,7 +803,6 @@ export function LibraryView() {
     }
   }, [view, currentPlaylist]);
 
-  const [activeSector, setActiveSector] = useState<'local' | 'subsonic' | 'jellyfin'>('local');
   const [activeFilter, setActiveFilter] = useState<QuickFilterType>('all');
   const [viewMode, setViewModeState] = useState<'tracks' | 'albums'>(() => {
     return (safeGetStorage('aideo-library-view-mode') as 'tracks' | 'albums') || 'tracks';
@@ -945,7 +837,7 @@ export function LibraryView() {
 
   useEffect(() => {
     setActiveFilter('all');
-  }, [view, currentPlaylist, activeSector]);
+  }, [view, currentPlaylist]);
   const [matchData, setMatchData] = useState<{ track: any, match: any } | null>(null);
   const [isMatching, setIsMatching] = useState<number | null>(null);
   const [playlistModalFor, setPlaylistModalFor] = useState<any | null>(null);
@@ -987,7 +879,7 @@ export function LibraryView() {
   useEffect(() => {
     setSelectedTrackPaths([]);
     setLastSelectedIdx(null);
-  }, [view, currentPlaylist, activeSector, activeFilter]);
+  }, [view, currentPlaylist, activeFilter]);
   
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -1043,163 +935,6 @@ export function LibraryView() {
     }
   }, []);
   
-  // Cloud collections and pagination
-  const [subsonicTracks, setSubsonicTracks] = useState<CloudTrack[]>([]);
-  const [subsonicLoading, setSubsonicLoading] = useState(false);
-  const [subsonicHasMore, setSubsonicHasMore] = useState(true);
-  
-  const [jellyfinTracks, setJellyfinTracks] = useState<CloudTrack[]>([]);
-  const [jellyfinLoading, setJellyfinLoading] = useState(false);
-  const [jellyfinHasMore, setJellyfinHasMore] = useState(true);
-  
-  const [cloudSearchQuery, setCloudSearchQuery] = useState('');
-
-  useEffect(() => {
-    if (activeSector === 'subsonic' && !subsonicConnected) {
-      setActiveSector('local');
-    }
-    if (activeSector === 'jellyfin' && !jellyfinConnected) {
-      setActiveSector('local');
-    }
-  }, [subsonicConnected, jellyfinConnected, activeSector]);
-
-  useEffect(() => {
-    if (activeSector === 'subsonic' && subsonicTracks.length === 0) {
-      fetchSubsonicTracks(0, true);
-    } else if (activeSector === 'jellyfin' && jellyfinTracks.length === 0) {
-      fetchJellyfinTracks(0, true);
-    }
-  }, [activeSector]);
-
-  const fetchSubsonicTracks = async (offset: number, isInitial: boolean) => {
-    if (subsonicLoading) return;
-    setSubsonicLoading(true);
-    try {
-      const pass = subsonicPass || '';
-      const limit = isInitial ? 100 : 50;
-      const results = await invoke<CloudTrack[]>('subsonic_get_library', {
-        url: subsonicUrl,
-        user: subsonicUser,
-        pass,
-        query: cloudSearchQuery.trim(),
-        offset,
-        limit
-      });
-      if (isInitial) {
-        setSubsonicTracks(results);
-        setSubsonicHasMore(results.length >= 100);
-      } else {
-        setSubsonicTracks(prev => [...prev, ...results]);
-        setSubsonicHasMore(results.length >= 50);
-      }
-    } catch (err) {
-      console.error('Failed to fetch Subsonic tracks:', err);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Subsonic fetch failed: ${err}`, type: 'error' } 
-      }));
-    } finally {
-      setSubsonicLoading(false);
-    }
-  };
-
-  const fetchJellyfinTracks = async (offset: number, isInitial: boolean) => {
-    if (jellyfinLoading) return;
-    setJellyfinLoading(true);
-    try {
-      const apiKey = localStorage.getItem('aideo_jellyfin_api_key') || '';
-      const limit = isInitial ? 100 : 50;
-      const results = await invoke<CloudTrack[]>('jellyfin_get_library', {
-        url: jellyfinUrl,
-        apiKey,
-        query: cloudSearchQuery.trim(),
-        offset,
-        limit
-      });
-      if (isInitial) {
-        setJellyfinTracks(results);
-        setJellyfinHasMore(results.length >= 100);
-      } else {
-        setJellyfinTracks(prev => [...prev, ...results]);
-        setJellyfinHasMore(results.length >= 50);
-      }
-    } catch (err) {
-      console.error('Failed to fetch Jellyfin tracks:', err);
-      window.dispatchEvent(new CustomEvent('ui-toast', { 
-        detail: { message: `Jellyfin fetch failed: ${err}`, type: 'error' } 
-      }));
-    } finally {
-      setJellyfinLoading(false);
-    }
-  };
-
-  const loadMoreSubsonic = () => {
-    if (subsonicLoading || !subsonicHasMore) return;
-    fetchSubsonicTracks(subsonicTracks.length, false);
-  };
-
-  const loadMoreJellyfin = () => {
-    if (jellyfinLoading || !jellyfinHasMore) return;
-    fetchJellyfinTracks(jellyfinTracks.length, false);
-  };
-
-  const handleCloudSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (activeSector === 'subsonic') {
-      fetchSubsonicTracks(0, true);
-    } else if (activeSector === 'jellyfin') {
-      fetchJellyfinTracks(0, true);
-    }
-  };
-
-  const playCloudTrack = async (ct: CloudTrack) => {
-    const vt = cloudTrackToVirtualTrack(ct);
-    await playTrack(vt);
-    
-    if (ct.cover_url) {
-      useStore.setState({ coverArt: ct.cover_url });
-      invoke('update_media_metadata', {
-        title: ct.title,
-        artist: ct.artist,
-        coverUrl: ct.cover_url,
-        duration: ct.duration,
-      }).catch(() => {});
-    }
-  };
-
-  const handlePlayAllCloud = async (shuffle = false) => {
-    const currentList = activeSector === 'subsonic' ? subsonicTracks : jellyfinTracks;
-    if (currentList.length === 0) return;
-    
-    const virtualTracks = currentList.map(cloudTrackToVirtualTrack);
-    let tracksToQueue: any[] = [];
-    let firstTrack: any = null;
-    
-    if (shuffle) {
-      const shuffled = shuffleArray(virtualTracks);
-      firstTrack = shuffled[0];
-      tracksToQueue = shuffled.slice(1);
-      persistQueueState(tracksToQueue, { shuffle: true });
-    } else {
-      firstTrack = virtualTracks[0];
-      tracksToQueue = virtualTracks.slice(1);
-      persistQueueState(tracksToQueue, { shuffle: false });
-    }
-    
-    // Sync the queue to the backend immediately to prevent duplicates/desyncs
-    try {
-      await invoke('clear_queue');
-      if (tracksToQueue.length > 0) {
-        const paths = tracksToQueue.map(t => t.path);
-        await invoke('add_to_queue_bulk', { paths });
-      }
-    } catch (e) {
-      console.error('Failed to sync cloud queue to backend:', e);
-    }
-
-    await playTrack(firstTrack, false, false);
-    setView('nowplaying');
-  };
-
   useEffect(() => {
     if (editModalFor) {
       setEditTitle(editModalFor.title || '');
@@ -1357,28 +1092,6 @@ export function LibraryView() {
     scrollContainer: scrollRef,
   });
 
-  const {
-    visibleItems: virtualSubsonicTracks,
-    topSpacerHeight: topSubsonicSpacer,
-    bottomSpacerHeight: bottomSubsonicSpacer,
-    startIndex: subsonicStartIndex,
-  } = useVirtualList(subsonicTracks, {
-    itemHeight,
-    overscan: 12,
-    scrollContainer: scrollRef,
-  });
-
-  const {
-    visibleItems: virtualJellyfinTracks,
-    topSpacerHeight: topJellyfinSpacer,
-    bottomSpacerHeight: bottomJellyfinSpacer,
-    startIndex: jellyfinStartIndex,
-  } = useVirtualList(jellyfinTracks, {
-    itemHeight,
-    overscan: 12,
-    scrollContainer: scrollRef,
-  });
-
   const applyMatch = async () => {
     if (!matchData) return;
     const { track, match } = matchData;
@@ -1409,10 +1122,7 @@ export function LibraryView() {
     }
   };
 
-  const isCloudTab = activeSector !== 'local';
-  const showPlayControls = isCloudTab 
-    ? (activeSector === 'subsonic' ? subsonicTracks.length > 0 : jellyfinTracks.length > 0)
-    : tracks.length > 0;
+  const showPlayControls = tracks.length > 0;
 
   return (
     <div 
@@ -1422,23 +1132,13 @@ export function LibraryView() {
       onClick={() => {
         setActiveMenu(null);
       }}
-      onScroll={(e) => {
-        const target = e.currentTarget;
-        if (activeSector !== 'local' && target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
-          if (activeSector === 'subsonic') {
-            loadMoreSubsonic();
-          } else if (activeSector === 'jellyfin') {
-            loadMoreJellyfin();
-          }
-        }
-      }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24 }}>
         <div>
           <h1 className="library-title" style={{ marginBottom: 4 }}>
             {currentPlaylist ? currentPlaylist.name : (isLovedStreamsView ? 'Loved Streams' : (viewMode === 'albums' ? 'Albums' : 'Music Library'))}
           </h1>
-          {!currentPlaylist && !isCloudTab && !isLovedStreamsView && (
+          {!currentPlaylist && !isLovedStreamsView && (
             <details ref={healthDetails} style={{ marginTop: 12 }}>
               <summary style={{ cursor: 'pointer', padding: '8px 0', color: 'var(--text)' }}>Library health</summary>
               <LibraryHealthPanel />
@@ -1448,13 +1148,9 @@ export function LibraryView() {
             <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>
               {viewMode === 'albums' ? (
                 `${albumCount} ${albumCount === 1 ? 'album' : 'albums'}`
-              ) : isCloudTab ? (
-                activeSector === 'subsonic' 
-                  ? `${subsonicTracks.length} cloud tracks loaded`
-                  : `${jellyfinTracks.length} cloud tracks loaded`
               ) : (
                 searchQuery || activeFilter !== 'all' ? `${filteredTracks.length} / ${sourceTracks.length}` : sourceTracks.length
-              )} {viewMode !== 'albums' && !isCloudTab && (sourceTracks.length === 1 && !searchQuery && activeFilter === 'all' ? 'track' : 'tracks')}
+              )} {viewMode !== 'albums' && (sourceTracks.length === 1 && !searchQuery && activeFilter === 'all' ? 'track' : 'tracks')}
             </div>
 
             {!isLovedStreamsView && !currentPlaylist && (
@@ -1506,30 +1202,7 @@ export function LibraryView() {
 
         {showPlayControls && (
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            {isCloudTab ? (
-              <form onSubmit={handleCloudSearch} style={{ display: 'flex', gap: 8 }}>
-                <input 
-                  type="text" 
-                  placeholder={activeSector === 'subsonic' ? "Search Subsonic..." : "Search Jellyfin..."} 
-                  value={cloudSearchQuery}
-                  onChange={(e) => setCloudSearchQuery(e.target.value)}
-                  style={{
-                    background: 'var(--glass)', border: '1px solid var(--glass-border)',
-                    borderRadius: 10, padding: '9px 14px', color: 'var(--text)', outline: 'none',
-                    width: 220, fontSize: 13, transition: 'border-color 0.2s'
-                  }}
-                  onFocus={(e) => e.target.style.borderColor = activeSector === 'subsonic' ? '#6366f1' : '#a855f7'}
-                  onBlur={(e) => e.target.style.borderColor = 'var(--glass-border)'}
-                />
-                <button 
-                  type="submit" 
-                  className="btn btn-secondary" 
-                  style={{ fontSize: 12, padding: '9px 14px' }}
-                >
-                  Search
-                </button>
-              </form>
-            ) : (
+            {(
               <div style={{ position: 'relative', width: 240 }}>
                 <Search 
                   size={15} 
@@ -1643,8 +1316,6 @@ export function LibraryView() {
 
                   playTrack(firstTrack, false, false);
                   setView('nowplaying');
-                } else if (isCloudTab) {
-                  handlePlayAllCloud(true);
                 } else {
                   persistQueueState([], { shuffle: true });
                   const randomIdx = Math.floor(Math.random() * sourceTracks.length);
@@ -1674,8 +1345,6 @@ export function LibraryView() {
 
                   playTrack(firstTrack, false, false);
                   setView('nowplaying');
-                } else if (isCloudTab) {
-                  handlePlayAllCloud(false);
                 } else {
                   useStore.setState({ shuffle: false, queue: [] });
                   playTrack(sourceTracks[0]);
@@ -1687,9 +1356,7 @@ export function LibraryView() {
                 alignItems: 'center', 
                 gap: 8, 
                 padding: '10px 24px',
-                background: isCloudTab 
-                  ? (activeSector === 'subsonic' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'linear-gradient(135deg, #a855f7, #7c3aed)') 
-                  : 'var(--dynamic-accent, #8b5cf6)'
+                background: 'var(--dynamic-accent, #8b5cf6)'
               }}
             >
               <Play size={14} fill="currentColor" />
@@ -1699,81 +1366,9 @@ export function LibraryView() {
         )}
       </div>
 
-      {/* Multi-Sector Tab Selector */}
-      {!currentPlaylist && !isLovedStreamsView && (subsonicConnected || jellyfinConnected) && (
-        <div style={{ 
-          display: 'flex', 
-          gap: 8, 
-          background: 'rgba(0, 0, 0, 0.2)', 
-          padding: 4, 
-          borderRadius: 12, 
-          border: '1px solid var(--glass-border)',
-          width: 'fit-content',
-          marginBottom: 24
-        }}>
-          <button
-            onClick={() => setActiveSector('local')}
-            className={`btn ${activeSector === 'local' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ 
-              fontSize: 12, 
-              padding: '6px 14px', 
-              borderRadius: 8,
-              background: activeSector === 'local' ? 'var(--dynamic-accent, #8b5cf6)' : 'transparent',
-              border: 'none',
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6
-            }}
-          >
-            💿 Local Music
-          </button>
-          
-          {subsonicConnected && (
-            <button
-              onClick={() => setActiveSector('subsonic')}
-              className={`btn ${activeSector === 'subsonic' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ 
-                fontSize: 12, 
-                padding: '6px 14px', 
-                borderRadius: 8,
-                background: activeSector === 'subsonic' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'transparent',
-                border: 'none',
-                color: 'white',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6
-              }}
-            >
-              ☁️ Subsonic Cloud
-            </button>
-          )}
-
-          {jellyfinConnected && (
-            <button
-              onClick={() => setActiveSector('jellyfin')}
-              className={`btn ${activeSector === 'jellyfin' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ 
-                fontSize: 12, 
-                padding: '6px 14px', 
-                borderRadius: 8,
-                background: activeSector === 'jellyfin' ? 'linear-gradient(135deg, #a855f7, #7c3aed)' : 'transparent',
-                border: 'none',
-                color: 'white',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6
-              }}
-            >
-              🍇 Jellyfin Cloud
-            </button>
-          )}
-        </div>
-      )}
-
       {viewMode === 'albums' ? (
-        <AlbumsView 
-          tracks={isCloudTab ? (activeSector === 'subsonic' ? subsonicTracks : jellyfinTracks) : (activeFilter === 'all' ? sourceTracks : filteredTracks)} 
+        <AlbumsView
+          tracks={activeFilter === 'all' ? sourceTracks : filteredTracks}
           searchQuery={debouncedSearchQuery} 
           sortBy={albumSortBy} 
           onAlbumCountChange={setAlbumCount} 
@@ -1781,7 +1376,7 @@ export function LibraryView() {
       ) : (
         <>
           {/* Quick Filter Chips Bar */}
-          {sourceTracks.length > 0 && activeSector === 'local' && viewMode === 'tracks' && (
+          {sourceTracks.length > 0 && viewMode === 'tracks' && (
             <div style={{ 
               display: 'flex', 
               alignItems: 'center', 
@@ -1841,7 +1436,7 @@ export function LibraryView() {
           )}
 
           {/* Local Table rendering */}
-          {activeSector === 'local' && (
+          {(
             <>
               {sourceTracks.length === 0 && (
                 <p style={{ color: 'var(--text-dim)' }}>
@@ -1926,111 +1521,6 @@ export function LibraryView() {
             </>
           )}
 
-          {/* Subsonic Table rendering */}
-          {activeSector === 'subsonic' && (
-            <>
-              {subsonicTracks.length === 0 && !subsonicLoading && (
-                <p style={{ color: 'var(--text-dim)', textAlign: 'center', padding: '40px 0' }}>
-                  No tracks found on your Subsonic server.
-                </p>
-              )}
-              {subsonicTracks.length > 0 && (
-                <table className="track-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 50, textAlign: 'center' }}>#</th>
-                      <th style={{ width: 52 }}></th>
-                      <th style={{ width: '42%' }}>Title</th>
-                      <th style={{ width: '32%' }}>Artist</th>
-                      <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
-                      <th style={{ width: 140, textAlign: 'right' }}>Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topSubsonicSpacer > 0 && <tr style={{ height: topSubsonicSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
-                    {virtualSubsonicTracks.map((t: CloudTrack, idx: number) => {
-                      const i = subsonicStartIndex + idx;
-                      const active = currentTrackPath === t.stream_url;
-                      return (
-                        <CloudTrackRow
-                          key={t.stream_url || t.id}
-                          t={t}
-                          i={i}
-                          active={active}
-                          onOpenMenu={handleOpenMenu}
-                          playCloudTrack={playCloudTrack}
-                          cacheCloudTrack={cacheCloudTrack}
-                          deleteCachedTrack={deleteCachedTrack}
-                          cachedCloudHashes={cachedCloudHashes}
-                          onSelectArtist={handleSelectArtist}
-                        />
-                      );
-                    })}
-                    {bottomSubsonicSpacer > 0 && <tr style={{ height: bottomSubsonicSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
-                  </tbody>
-                </table>
-              )}
-              {subsonicLoading && (
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 24, gap: 8, color: 'var(--text-dim)', fontSize: 13 }}>
-                  <Loader2 className="pulse" size={16} color="#6366f1" />
-                  <span>Fetching Subsonic library...</span>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Jellyfin Table rendering */}
-          {activeSector === 'jellyfin' && (
-            <>
-              {jellyfinTracks.length === 0 && !jellyfinLoading && (
-                <p style={{ color: 'var(--text-dim)', textAlign: 'center', padding: '40px 0' }}>
-                  No tracks found on your Jellyfin server.
-                </p>
-              )}
-              {jellyfinTracks.length > 0 && (
-                <table className="track-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 50, textAlign: 'center' }}>#</th>
-                      <th style={{ width: 52 }}></th>
-                      <th style={{ width: '42%' }}>Title</th>
-                      <th style={{ width: '32%' }}>Artist</th>
-                      <th style={{ width: 100, textAlign: 'center' }}>Quality</th>
-                      <th style={{ width: 140, textAlign: 'right' }}>Time</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topJellyfinSpacer > 0 && <tr style={{ height: topJellyfinSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
-                    {virtualJellyfinTracks.map((t: CloudTrack, idx: number) => {
-                      const i = jellyfinStartIndex + idx;
-                      const active = currentTrackPath === t.stream_url;
-                      return (
-                        <CloudTrackRow
-                          key={t.stream_url || t.id}
-                          t={t}
-                          i={i}
-                          active={active}
-                          onOpenMenu={handleOpenMenu}
-                          playCloudTrack={playCloudTrack}
-                          cacheCloudTrack={cacheCloudTrack}
-                          deleteCachedTrack={deleteCachedTrack}
-                          cachedCloudHashes={cachedCloudHashes}
-                          onSelectArtist={handleSelectArtist}
-                        />
-                      );
-                    })}
-                    {bottomJellyfinSpacer > 0 && <tr style={{ height: bottomJellyfinSpacer }}><td colSpan={6} style={{ padding: 0, border: 'none' }} /></tr>}
-                  </tbody>
-                </table>
-              )}
-              {jellyfinLoading && (
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 24, gap: 8, color: 'var(--text-dim)', fontSize: 13 }}>
-                  <Loader2 className="pulse" size={16} color="#a855f7" />
-                  <span>Fetching Jellyfin library...</span>
-                </div>
-              )}
-            </>
-          )}
         </>
       )}
 

@@ -30,6 +30,8 @@ jobs:
         run: npx tsc --noEmit
       - name: Frontend tests
         run: npx vitest run src/test
+      - name: Cloud addon tests
+        run: node --test addons-sdk/cloud/server.test.mjs addons-sdk/cloud/premium.test.mjs
       - name: Frontend Production Build (No .env)
         run: npm run build
 

@@ -9,24 +9,6 @@ pub enum StreamingQuality {
     DataSaver,
 }
 
-impl StreamingQuality {
-    pub fn tidal(self) -> &'static [&'static str] {
-        match self {
-            Self::BestAvailable => &["HI_RES_LOSSLESS", "HI_RES", "LOSSLESS", "HIGH", "LOW"],
-            Self::StandardLossless => &["LOSSLESS", "HIGH", "LOW"],
-            Self::DataSaver => &["LOW", "HIGH"],
-        }
-    }
-
-    pub fn qobuz(self) -> &'static [u32] {
-        match self {
-            Self::BestAvailable => &crate::qobuz::FORMAT_LADDER,
-            Self::StandardLossless => &[6, 5],
-            Self::DataSaver => &[5],
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct SourceQuality {
     pub lossless: Option<bool>,
@@ -112,6 +94,14 @@ pub struct ResolvedStream {
     pub quality: SourceQuality,
 }
 
+/// Caps concurrency (3) and wall time (8s) of recommendation fan-out so a slow provider can't pile up requests.
+pub(crate) async fn bounded_recommendation<T>(work: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+    static GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
+    let _permit = GATE.try_acquire().map_err(|_| "Recommendation requests are busy".to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(8), work).await
+        .map_err(|_| "Recommendation deadline exceeded".to_string())?
+}
+
 pub fn validate_track_id(id: &str) -> Result<(), String> {
     if id.is_empty() || id.len() > 32 || !id.bytes().all(|b| b.is_ascii_digit()) {
         return Err("Invalid provider track ID".into());
@@ -172,13 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn quality_preferences_request_the_expected_provider_formats() {
-        assert_eq!(StreamingQuality::BestAvailable.tidal()[0], "HI_RES_LOSSLESS");
-        assert_eq!(StreamingQuality::StandardLossless.tidal(), &["LOSSLESS", "HIGH", "LOW"]);
-        assert_eq!(StreamingQuality::DataSaver.tidal(), &["LOW", "HIGH"]);
-        assert_eq!(StreamingQuality::BestAvailable.qobuz(), &[27, 7, 6, 5]);
-        assert_eq!(StreamingQuality::StandardLossless.qobuz(), &[6, 5]);
-        assert_eq!(StreamingQuality::DataSaver.qobuz(), &[5]);
+    fn track_id_validation() {
         assert!(validate_track_id("123").is_ok());
         assert!(validate_track_id("https://cdn.example/123").is_err());
         assert!(validate_track_id("../123").is_err());

@@ -1285,7 +1285,7 @@ pub async fn get_youtube_autoplay_recommendations_internal(
     discovery_level: String,
     state: tauri::State<'_, crate::AppState>,
 ) -> Result<Vec<YoutubeTrack>, String> {
-    crate::tidal::bounded_recommendation(async {
+    crate::sources::bounded_recommendation(async {
 
     let api_key = fetch_innertube_key().await;
     println!("[youtube] Aideo Autoplay Engine v2: Resolving Watch Next Radio for '{}' by '{}' (Discovery Level: {})", title, artist, discovery_level);
@@ -3057,7 +3057,7 @@ pub async fn get_personalized_discovery_hub_internal(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DiscoveryHubData, String> {
-    crate::tidal::bounded_recommendation(async {
+    crate::sources::bounded_recommendation(async {
 
     use rand::Rng;
     use rand::seq::SliceRandom;

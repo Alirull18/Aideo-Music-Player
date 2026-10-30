@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncToCloud, syncFromCloud } from '../utils/syncEngine';
+import { syncToCloud, syncFromCloud, isAddonSourcePath } from '../utils/syncEngine';
 import { useStore } from '../store';
 import * as supabaseClientModule from '../utils/supabaseClient';
 import { invoke } from '@tauri-apps/api/core';
@@ -57,6 +57,87 @@ describe('syncEngine non-destructive sync', () => {
       ]),
       { onConflict: 'user_id,track_path' }
     );
+  });
+
+  it('syncToCloud restores the cloud playlist and reports failure when the replacement insert fails', async () => {
+    const oldRows = [{ playlist_id: 9, track_path: 'old.mp3', position: 0, title: 'Old', artist: 'A' }];
+    const inserts: any[][] = [];
+    const insertMock = vi.fn(async (rows: any[]) => {
+      inserts.push(rows);
+      return inserts.length === 1 ? { error: { message: 'boom' } } : { error: null };
+    });
+    const mockSupabase = {
+      from: vi.fn((table: string) => {
+        if (table === 'playlists') {
+          return { upsert: vi.fn().mockReturnValue({ select: vi.fn().mockResolvedValue({ data: [{ id: 9 }], error: null }) }) };
+        }
+        if (table === 'playlist_tracks') {
+          return {
+            select: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ data: oldRows, error: null }) }),
+            delete: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
+            insert: insertMock,
+          };
+        }
+        return { upsert: vi.fn().mockResolvedValue({ error: null }), insert: vi.fn().mockResolvedValue({ error: null }) };
+      }),
+    };
+    vi.spyOn(supabaseClientModule, 'getSupabaseClient').mockReturnValue(mockSupabase as any);
+    (invoke as any).mockImplementation(async (cmd: string) =>
+      cmd === 'get_playlist_tracks' ? [{ path: 'new.mp3', title: 'New', artist: 'B' }] : []);
+    const setPlaybackError = vi.fn();
+    const setPlaybackSuccess = vi.fn();
+    useStore.setState({
+      user: { id: 'u1' } as any,
+      tracks: [],
+      playlists: [{ id: 1, name: 'Mix' } as any],
+      setPlaybackError,
+      setPlaybackSuccess,
+    } as any);
+
+    await syncToCloud(useStore.getState, useStore.setState);
+
+    expect(inserts[1]).toEqual(oldRows);
+    expect(setPlaybackError).toHaveBeenCalledWith(expect.stringContaining('playlist'));
+    expect(setPlaybackSuccess).not.toHaveBeenCalled();
+  });
+
+  it('recognises addon source ids but not local or URL paths', () => {
+    expect(isAddonSourcePath('com.example.addon:track-1')).toBe(true);
+    expect(isAddonSourcePath('C:\\Music\\a.flac')).toBe(false);
+    expect(isAddonSourcePath('c:/music/a.flac')).toBe(false);
+    expect(isAddonSourcePath('https://cdn.example/a.mp3')).toBe(false);
+    expect(isAddonSourcePath('/home/u/music.mp3')).toBe(false);
+    expect(isAddonSourcePath(undefined)).toBe(false);
+  });
+
+  it('syncToCloud does not push addon tracks (cloud table cannot store their source context)', async () => {
+    const inserts: any[][] = [];
+    const mockSupabase = {
+      from: vi.fn((table: string) => {
+        if (table === 'playlists') {
+          return { upsert: vi.fn().mockReturnValue({ select: vi.fn().mockResolvedValue({ data: [{ id: 9 }], error: null }) }) };
+        }
+        if (table === 'playlist_tracks') {
+          return {
+            select: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ data: [], error: null }) }),
+            delete: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
+            insert: vi.fn(async (rows: any[]) => { inserts.push(rows); return { error: null }; }),
+          };
+        }
+        return { upsert: vi.fn().mockResolvedValue({ error: null }), insert: vi.fn().mockResolvedValue({ error: null }) };
+      }),
+    };
+    vi.spyOn(supabaseClientModule, 'getSupabaseClient').mockReturnValue(mockSupabase as any);
+    (invoke as any).mockImplementation(async (cmd: string) => cmd === 'get_playlist_tracks' ? [
+      { path: 'C:\\Music\\local.flac', title: 'Local', artist: 'A' },
+      { path: 'com.x.y:42', title: 'Addon', artist: 'B', source_context: { recording_id: 'r', sources: [] } },
+    ] : []);
+    useStore.setState({ user: { id: 'u1' } as any, tracks: [], playlists: [{ id: 1, name: 'Mix' } as any] } as any);
+
+    await syncToCloud(useStore.getState, useStore.setState);
+
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].map(r => r.track_path)).toEqual(['C:\\Music\\local.flac']);
   });
 
   it('syncFromCloud should restore cloud liked tracks without unloving local tracks', async () => {

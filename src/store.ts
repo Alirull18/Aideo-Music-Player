@@ -7,8 +7,6 @@ import { createMetadataSlice } from './store/metadataSlice';
 import { createLastfmSlice } from './store/lastfmSlice';
 import { createListenbrainzSlice } from './store/listenbrainzSlice';
 import { createCloudSlice } from './store/cloudSlice';
-import { createTidalSlice } from './store/tidalSlice';
-import { createQobuzSlice } from './store/qobuzSlice';
 import { createAuthSlice } from './store/authSlice';
 import { createAddonSlice } from './store/addonSlice';
 
@@ -23,8 +21,6 @@ export const useStore = create<PlayerState>()((...a) => ({
   ...createLastfmSlice(...a),
   ...createListenbrainzSlice(...a),
   ...createCloudSlice(...a),
-  ...createTidalSlice(...a),
-  ...createQobuzSlice(...a),
   ...createAuthSlice(...a),
   ...createAddonSlice(...a),
 }));

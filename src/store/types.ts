@@ -420,6 +420,7 @@ export interface PlayerState {
   loadAddons: () => Promise<void>;
   installAddon: (manifestUrl: string) => Promise<void>;
   removeAddon: (addonId: string) => Promise<void>;
+  setAddonEnabled: (addonId: string, enabled: boolean) => Promise<void>;
 
   view: ViewMode;
   networkTelemetry: NetworkTelemetry | null;
@@ -485,26 +486,7 @@ export interface PlayerState {
   showLyricsHeader: boolean;
   scrobbleEnabled: boolean;
   lastfmSessionKey: string | null;
-  tidalConnected: boolean;
-  tidalSearching: boolean;
-  tidalSearchResults: Track[];
   pendingSettingsTab: string | null;
-  checkTidalStatus: () => Promise<void>;
-  searchTidal: (query: string) => Promise<void>;
-  playTidalResult: (track: Track) => Promise<void>;
-  downloadTidalTrack: (track: Track) => Promise<void>;
-
-  // Qobuz Streaming (Experimental)
-  qobuzExperimentalEnabled: boolean;
-  toggleQobuzExperimental: () => void;
-  qobuzConnected: boolean;
-  qobuzSearching: boolean;
-  qobuzSearchResults: Track[];
-  checkQobuzStatus: () => Promise<void>;
-  openQobuzLoginWindow: () => Promise<void>;
-  searchQobuz: (query: string) => Promise<void>;
-  playQobuzResult: (track: Track) => Promise<void>;
-  downloadQobuzTrack: (track: Track) => Promise<void>;
   lastfmToken: string | null;
   scrobbledCurrent: boolean;
   lastScrobble: { artist: string; track: string } | null;
@@ -522,7 +504,7 @@ export interface PlayerState {
   currentHistoryId: number | null;
   autoplayEnabled: boolean;
   autoplayDiscoveryLevel: 'familiarity' | 'balanced' | 'discovery';
-  recommendationEngine: 'our' | 'youtube' | 'tidal';
+  recommendationEngine: 'our' | 'youtube';
   autoplaySeedTrack: Track | null;
   autoplaySessionHistory: Track[];
   recentlyClearedAutoplayPaths: string[];
@@ -636,7 +618,7 @@ export interface PlayerState {
   toggleRepeat: () => void;
   toggleAutoplay: () => Promise<void>;
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => void;
-  setRecommendationEngine: (engine: 'our' | 'youtube' | 'tidal') => void;
+  setRecommendationEngine: (engine: 'our' | 'youtube') => void;
   triggerAutoplayRadio: (track: Track, forceReset?: boolean) => Promise<void>;
   pauseTrack: () => Promise<void>;
   resumeTrack: () => Promise<void>;
@@ -708,22 +690,6 @@ export interface PlayerState {
 
 
 
-  // Cloud Connections State
-  subsonicUrl: string;
-  subsonicUser: string;
-  subsonicPass: string;
-  subsonicConnected: boolean;
-  subsonicLoading: boolean;
-  jellyfinUrl: string;
-  jellyfinConnected: boolean;
-  jellyfinLoading: boolean;
-
-  // Cloud Connections Actions
-  connectSubsonic: (url: string, user: string, pass: string) => Promise<boolean>;
-  disconnectSubsonic: () => void;
-  loadSubsonicPassword: () => Promise<void>;
-  connectJellyfin: (url: string, apiKey: string) => Promise<boolean>;
-  disconnectJellyfin: () => void;
   batchDownloadProgress: BatchDownloadProgress | null;
   downloadBatchPlaylist: (items: BatchDownloadItem[], playlistName?: string) => Promise<number>;
 

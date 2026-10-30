@@ -17,11 +17,11 @@ describe('Stream queue metadata persistence (regression: "Lgf.audio.tidal.com" q
       queue: [],
       currentTrack: null,
       playHistory: [],
-      recommendationEngine: 'tidal',
-      tidalConnected: true,
+      recommendationEngine: 'our',
       appMode: 'hybrid',
       repeat: 'all',
       autoplayEnabled: true,
+      sourceQueueManaged: false,
     });
   });
 
@@ -47,49 +47,59 @@ describe('Stream queue metadata persistence (regression: "Lgf.audio.tidal.com" q
   });
 
   it('caches track metadata under the resolved URL so parseStreamMetadata returns the real title', () => {
-    const track = { id: -1, path: TIDAL_ID, title: 'Blue Valentine', artist: 'NMIXX', duration: 186, format: 'Tidal FLAC', lyric_offset: 0 };
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
-        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
-      if (cmd === 'tidal_get_stream_url') return TIDAL_URL;
-      if (cmd === 'add_to_queue') {
-        expect(args.path).toBe(TIDAL_URL);
-        return null;
-      }
-      return null;
-    });
-
-    return useStore.getState().addToQueue({ ...track }).then(() => {
-      expect(resolvedPathMap.get(TIDAL_URL)).toBe(TIDAL_ID);
-      const meta = parseStreamMetadata(TIDAL_URL);
-      expect(meta.title).toBe('Blue Valentine');
-      expect(meta.artist).toBe('NMIXX');
-    });
+    const track = { id: -1, path: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', title: 'Blue Valentine', artist: 'NMIXX', duration: 186, format: 'YouTube Direct', lyric_offset: 0 };
+    onlineTrackCache.set(TIDAL_URL, track as Track);
+    rememberResolvedPath(TIDAL_URL, track.path);
+    const meta = parseStreamMetadata(TIDAL_URL);
+    expect(meta.title).toBe('Blue Valentine');
+    expect(meta.artist).toBe('NMIXX');
   });
 
-  it('initializeQueue resolves Tidal track IDs to stream URLs before pushing to the backend', async () => {
+  it('refuses to queue a retired Tidal track and tells the user why', async () => {
+    const toasts: string[] = [];
+    const onToast = (e: Event) => toasts.push((e as CustomEvent).detail.message);
+    window.addEventListener('ui-toast', onToast);
+    vi.mocked(invoke).mockResolvedValue(null);
+    const queued = await useStore.getState().addToQueue({ id: -1, path: TIDAL_ID, title: 'Blue Valentine', artist: 'NMIXX', duration: 186, format: 'Tidal FLAC', lyric_offset: 0 });
+    window.removeEventListener('ui-toast', onToast);
+    expect(queued).toBeUndefined();
+    expect(useStore.getState().queue).toEqual([]);
+    expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'add_to_queue')).toBe(false);
+    expect(toasts.some(m => m.includes('no longer built in'))).toBe(true);
+  });
+
+  it.each(['addToQueue', 'playNextInQueue'] as const)('rejects a bare retired track in a source-managed queue through %s', async action => {
+    vi.mocked(invoke).mockClear();
+    useStore.setState({ sourceQueueManaged: true });
+    await useStore.getState()[action]({ id: -1, path: TIDAL_ID, title: 'Song', artist: 'Artist', duration: 180, format: 'Tidal FLAC', lyric_offset: 0 });
+    expect(useStore.getState().queue).toEqual([]);
+    expect(invoke).not.toHaveBeenCalledWith('set_source_queue_mode', expect.anything());
+  });
+
+  it.each(['addToQueue', 'playNextInQueue'] as const)('hydrates a saved live fallback before retired-track rejection through %s', async action => {
+    const context = { recording_id: 'saved-fallback', sources: [{ provider: 'addon', id: 'com.test.mock:123' }], selection: { mode: 'auto' } };
+    localStorage.setItem('aideo_library_source_choices', JSON.stringify({ [`Tidal FLAC:${TIDAL_ID}`]: context }));
+    vi.mocked(invoke).mockResolvedValue(null);
+    await useStore.getState()[action]({ id: -1, path: TIDAL_ID, title: 'Song', artist: 'Artist', duration: 180, format: 'Tidal FLAC', lyric_offset: 0 });
+    expect(useStore.getState().queue[0]?.source_context).toMatchObject(context);
+  });
+
+  it('initializeQueue keeps retired Tidal entries out of the backend queue', async () => {
     const bulkPaths: string[] = [];
     vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
-        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
-      if (cmd === 'tidal_get_stream_url') return TIDAL_URL;
       if (cmd === 'check_files_exist') return [];
-      if (cmd === 'clear_queue') return null;
-      if (cmd === 'add_to_queue_bulk') {
-        bulkPaths.push(...args.paths);
-        return null;
-      }
+      if (cmd === 'add_to_queue_bulk') { bulkPaths.push(...args.paths); return null; }
       return null;
     });
     localStorage.setItem('aideo_queue', JSON.stringify([
       { id: -1, path: TIDAL_ID, title: 'Blue Valentine', artist: 'NMIXX', duration: 186, format: 'Tidal FLAC', lyric_offset: 0 },
+      { id: -2, path: 'https://example.com/live.mp3', title: 'Live', artist: 'Radio', duration: 0, format: 'Web Stream', lyric_offset: 0 },
     ]));
 
     await useStore.getState().initializeQueue();
 
-    expect(bulkPaths).toEqual([TIDAL_URL]);
-    expect(useStore.getState().queue[0].title).toBe('Blue Valentine');
-    // Metadata is recoverable from the URL alone (survives restarts)
-    expect(parseStreamMetadata(TIDAL_URL).title).toBe('Blue Valentine');
+    expect(bulkPaths).not.toContain(TIDAL_ID);
+    expect(bulkPaths).toContain('https://example.com/live.mp3');
   });
 
   it('initializeQueue heals queue entries whose title degraded to a bare hostname', async () => {
@@ -263,7 +273,7 @@ describe('Autoplay seed sanitization (regression: random songs fill queue on str
     let received: any = null;
     vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
         if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
-      if (cmd === 'get_tidal_autoplay_recommendations') {
+      if (cmd === 'get_youtube_autoplay_recommendations') {
         received = args;
         return [];
       }
@@ -272,11 +282,11 @@ describe('Autoplay seed sanitization (regression: random songs fill queue on str
 
     await useStore.getState().triggerAutoplayRadio({
       id: -1002,
-      path: '253975903',
+      path: 'aaaaaaaaaaa',
       title: 'Blue Valentine',
       artist: 'Online Stream',
       duration: 186,
-      format: 'Tidal FLAC',
+      format: 'YouTube Direct',
       lyric_offset: 0,
     }, true);
 

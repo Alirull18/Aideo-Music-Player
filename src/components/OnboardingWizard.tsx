@@ -387,7 +387,7 @@ export function OnboardingWizard() {
                   </div>
                   <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: '#ffffff' }}>Hybrid Mode</h3>
                   <p style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                    Play local files and online streams, search music services, and connect Subsonic or Jellyfin.
+                    Play local files and online streams, and add music sources with addons.
                   </p>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: selectedMode === 'hybrid' ? `rgb(${rgbAccent})` : 'var(--text-dim)' }}>

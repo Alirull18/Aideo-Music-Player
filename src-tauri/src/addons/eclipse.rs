@@ -2,7 +2,7 @@
 //! Everything here treats the addon and its responses as untrusted input.
 use crate::sources::{RecordingEvidence, ResolvedStream, SourceQuality};
 use serde::{Deserialize, Serialize};
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
 use std::sync::OnceLock;
 use std::time::Duration;
 use url::{Host, Url};
@@ -68,14 +68,44 @@ pub(crate) fn is_blocked_host(u: &Url) -> bool {
     }
 }
 
-/// Redirect policy for the stream downloader: follow public http(s) hops only, so a public addon
-/// can't bounce the player into the LAN or a metadata endpoint after `check_url` approved the first URL.
-pub(crate) fn redirect_target_allowed(u: &Url) -> bool {
-    matches!(u.scheme(), "http" | "https") && u.username().is_empty() && !is_blocked_host(u) && !is_private_host(u)
+fn ip_denied(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4_private(v4) || v4_blocked(v4),
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => v4_private(v4) || v4_blocked(v4),
+            None => v6.is_loopback() || v6.is_unspecified() || v6.is_multicast()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 || (v6.segments()[0] & 0xffc0) == 0xfe80,
+        },
+    }
 }
 
-/// Scheme/host policy for user-supplied URLs. ponytail: literal-IP checks only, so DNS
-/// rebinding is not covered; pin `lookup_host` results via `ClientBuilder::resolve` if addons ever run unattended.
+fn system_lookup(host: &str, port: u16) -> std::io::Result<Vec<IpAddr>> {
+    Ok((host, port).to_socket_addrs()?.map(|a| a.ip()).collect())
+}
+
+/// Redirect policy for the stream downloader: follow public http(s) hops only, so a public addon
+/// can't bounce the player into the LAN or a metadata endpoint after `check_url` approved the first URL.
+/// Domain hops are resolved and refused if any address is private/blocked (fails closed on lookup error).
+pub(crate) fn redirect_target_allowed(u: &Url) -> bool {
+    redirect_target_allowed_with(u, system_lookup)
+}
+
+fn redirect_target_allowed_with(u: &Url, lookup: impl Fn(&str, u16) -> std::io::Result<Vec<IpAddr>>) -> bool {
+    if !(matches!(u.scheme(), "http" | "https") && u.username().is_empty() && !is_blocked_host(u) && !is_private_host(u)) {
+        return false;
+    }
+    match u.host() {
+        Some(Host::Domain(d)) => match lookup(d, u.port_or_known_default().unwrap_or(443)) {
+            Ok(addrs) => !addrs.is_empty() && !addrs.into_iter().any(ip_denied),
+            Err(_) => false,
+        },
+        _ => true,
+    }
+}
+
+/// Scheme/host policy for user-supplied URLs. ponytail: the initial URL is checked by literal IP/name only
+/// and redirect hops are resolved once before connecting, so DNS rebinding between check and connect is not
+/// covered; pin results via `ClientBuilder::resolve_to_addrs` if addons ever run unattended.
 pub(crate) fn check_url(u: &Url, allow_private: bool) -> Result<(), String> {
     if !matches!(u.scheme(), "http" | "https") {
         return Err("Addon URL must be http(s)".into());
@@ -168,8 +198,10 @@ pub(crate) async fn fetch_manifest(c: &reqwest::Client, base: &Url) -> Result<Ma
         return Err("Addon manifest is invalid".into());
     }
     let has = |r: &str| m.resources.iter().any(|x| x == r);
-    if !has("search") || !has("stream") {
-        return Err("Addon must provide both search and stream".into());
+    let music = has("search") && has("stream");
+    // Lyrics/translate are an Aideo extension on top of the Eclipse protocol.
+    if !music && !has("lyrics") && !has("translate") {
+        return Err("Addon must provide search+stream, lyrics, or translate".into());
     }
     Ok(Manifest { icon: m.icon.filter(|i| http_url(i)), ..m })
 }
@@ -217,9 +249,12 @@ pub(crate) async fn search(c: &reqwest::Client, addon_id: &str, base: &Url, q: &
     let mut u = endpoint(base, &["search"]);
     u.query_pairs_mut().append_pair("q", q);
     let res: SearchResponse = get_json(c, u, SEARCH_BUDGET).await?;
+    Ok(parse_tracks(addon_id, res.tracks))
+}
+
+fn parse_tracks(addon_id: &str, tracks: Vec<serde_json::Value>) -> Vec<AddonTrack> {
     // One malformed item must not discard the batch.
-    Ok(res
-        .tracks
+    tracks
         .into_iter()
         .take(MAX_TRACKS)
         .filter_map(|v| {
@@ -243,7 +278,37 @@ pub(crate) async fn search(c: &reqwest::Client, addon_id: &str, base: &Url, q: &
                 catalog_quality: SourceQuality { lossless: t.format.as_deref().map(lossless_format), ..Default::default() },
             })
         })
-        .collect())
+        .collect()
+}
+
+/// Album/artist detail pages use the same `{tracks:[...]}` shape as search.
+pub(crate) async fn catalog(c: &reqwest::Client, addon_id: &str, base: &Url, kind: &str, id: &str) -> Result<Vec<AddonTrack>, String> {
+    if !matches!(kind, "album" | "artist") || !clean(id, 512) {
+        return Err("Invalid addon catalog request".into());
+    }
+    let res: SearchResponse = get_json(c, endpoint(base, &[kind, id]), SEARCH_BUDGET).await?;
+    Ok(parse_tracks(addon_id, res.tracks))
+}
+
+/// Aideo extension: `/lyrics?q=` -> `{lyrics:[{syncedLyrics,plainLyrics,source,..}]}`.
+pub(crate) async fn lyrics(c: &reqwest::Client, base: &Url, q: &str) -> Result<Vec<serde_json::Value>, String> {
+    #[derive(Deserialize)]
+    struct R { #[serde(default)] lyrics: Vec<serde_json::Value> }
+    let mut u = endpoint(base, &["lyrics"]);
+    u.query_pairs_mut().append_pair("q", q);
+    let r: R = get_json(c, u, SEARCH_BUDGET).await?;
+    Ok(r.lyrics.into_iter().take(10).collect())
+}
+
+/// Aideo extension: `/translate?q=` -> `{translation:"..."}`.
+pub(crate) async fn translate(c: &reqwest::Client, base: &Url, text: &str) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct R { translation: String }
+    let mut u = endpoint(base, &["translate"]);
+    u.query_pairs_mut().append_pair("q", text);
+    let r: R = get_json(c, u, SEARCH_BUDGET).await?;
+    if r.translation.len() > 8192 { return Err("Addon response too large".into()); }
+    Ok(r.translation)
 }
 
 #[derive(Deserialize)]
@@ -307,6 +372,9 @@ mod tests {
                         "/tok/search?q=hello+world" => r#"{"tracks":[{"id":7,"title":"Song","artist":"A","artworkURL":"https://x/y.jpg","isrc":"USRC12345678","format":"flac","duration":240.7},{"id":"bad"}]}"#.to_string(),
                         "/tok/stream/track%201" => r#"{"url":"https://cdn.example/a.flac","codec":"flac","sampleRate":96000,"bitDepth":24}"#.to_string(),
                         "/tok/stream/leak" => r#"{"url":"http://10.0.0.5/a.flac"}"#.to_string(),
+                        "/tok/lyrics?q=Song" => r#"{"lyrics":[{"syncedLyrics":"[00:01.00]Line","source":"Mock"}]}"#.to_string(),
+                        "/tok/translate?q=Line" => r#"{"translation":"Translated"}"#.to_string(),
+                        "/tok/album/7" | "/tok/artist/7" => r#"{"tracks":[{"id":7,"title":"Song","artist":"A"}]}"#.to_string(),
                         "/tok/big" => format!("\"{}\"", "a".repeat(3 * 1024 * 1024)),
                         _ => String::new(),
                     };
@@ -353,6 +421,17 @@ mod tests {
         assert!(big.is_err(), "3 MiB body must exceed the cap");
     }
 
+    #[tokio::test]
+    async fn extension_resources_and_catalog_routes() {
+        let c = build_client(true);
+        let base = base_from_manifest_url(&mock_server().await).unwrap();
+        assert_eq!(lyrics(&c, &base, "Song").await.unwrap()[0]["source"], "Mock");
+        assert_eq!(translate(&c, &base, "Line").await.unwrap(), "Translated");
+        for resource in ["album", "artist"] {
+            assert_eq!(catalog(&c, "com.test.mock", &base, resource, "7").await.unwrap()[0].id, "com.test.mock:7");
+        }
+    }
+
     #[test]
     fn test_check_url_policy() {
         let ok = |s: &str, p: bool| check_url(&Url::parse(s).unwrap(), p).is_ok();
@@ -371,10 +450,29 @@ mod tests {
         assert!(!ok("https://[::ffff:169.254.169.254]/", true), "v4-mapped link-local is blocked");
         assert!(!ok("https://localhost./", false), "trailing-dot localhost is private");
         assert!(!ok("https://100.64.1.1/", false), "CGNAT is private");
-        assert!(redirect_target_allowed(&Url::parse("https://cdn.example/a").unwrap()));
+        let public = |_: &str, _: u16| Ok(vec!["93.184.216.34".parse::<IpAddr>().unwrap()]);
+        assert!(redirect_target_allowed_with(&Url::parse("https://cdn.example/a").unwrap(), public));
         assert!(!redirect_target_allowed(&Url::parse("http://192.168.1.1/x").unwrap()));
         assert!(!redirect_target_allowed(&Url::parse("http://169.254.169.254/").unwrap()));
         assert!(!redirect_target_allowed(&Url::parse("file:///etc/passwd").unwrap()));
         assert!(base_from_manifest_url("https://example.com/manifest.json").is_ok());
+    }
+
+    #[test]
+    fn redirect_hostnames_resolving_to_internal_addresses_are_refused() {
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let hop = Url::parse("http://innocent.example/stream").unwrap();
+        for internal in ["127.0.0.1", "192.168.1.10", "10.0.0.5", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1"] {
+            let a = ip(internal);
+            assert!(!redirect_target_allowed_with(&hop, move |_, _| Ok(vec![a])), "{internal} must be refused");
+        }
+        // one internal answer among public ones is still refused
+        let mixed = vec![ip("93.184.216.34"), ip("192.168.1.10")];
+        assert!(!redirect_target_allowed_with(&hop, move |_, _| Ok(mixed.clone())));
+        // lookup failure / empty answer fails closed
+        assert!(!redirect_target_allowed_with(&hop, |_, _| Err(std::io::Error::other("nxdomain"))));
+        assert!(!redirect_target_allowed_with(&hop, |_, _| Ok(vec![])));
+        // public answer is followed
+        assert!(redirect_target_allowed_with(&hop, |_, _| Ok(vec!["93.184.216.34".parse().unwrap()])));
     }
 }

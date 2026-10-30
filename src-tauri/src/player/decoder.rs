@@ -996,7 +996,7 @@ pub fn spawn_youtube_downloader(
                 println!("[player-bg] Transcode completed successfully for {}", hash_clone);
                 // Encrypt the temp file to cache path via atomic staging
                 if let Ok(bytes) = std::fs::read(&temp_path) {
-                    let encrypted = crate::cloud::xor_cipher(&bytes);
+                    let encrypted = crate::cache::xor_cipher(&bytes);
                     let temp_write_path = cache_path.with_extension("tmp_promote");
                     if std::fs::write(&temp_write_path, encrypted).is_ok() {
                         if let Err(e) = promote_temp_to_cache_atomic(&temp_write_path, &cache_path, 1024) {
@@ -1697,7 +1697,7 @@ pub fn prepare_decoder(
             let mut use_cache = false;
             if cache_path.exists() {
                 if let Ok(encrypted_bytes) = std::fs::read(&cache_path) {
-                    let decrypted_bytes = crate::cloud::xor_cipher(&encrypted_bytes);
+                    let decrypted_bytes = crate::cache::xor_cipher(&encrypted_bytes);
                     let is_corrupted = decrypted_bytes.len() < 1024 ||
                         (decrypted_bytes.len() > 10 &&
                          (decrypted_bytes[0] == b'<' ||
@@ -1836,7 +1836,7 @@ pub fn prepare_decoder(
         let target_cache = structured_cache.filter(|p| p.exists()).or_else(|| legacy_cache.filter(|p| p.exists()));
         if let Some(cache_path) = target_cache {
             if let Ok(encrypted_bytes) = std::fs::read(&cache_path) {
-                let decrypted_bytes = crate::cloud::xor_cipher(&encrypted_bytes);
+                let decrypted_bytes = crate::cache::xor_cipher(&encrypted_bytes);
                 let is_corrupted = decrypted_bytes.len() < 1024 ||
                     (decrypted_bytes.len() > 10 &&
                      (decrypted_bytes[0] == b'<' ||

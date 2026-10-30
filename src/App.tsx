@@ -3,6 +3,7 @@ import { handleSourceFailure } from './store/sourcePlayback';
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { useStore, Track } from './store';
 import { useUpdaterStore } from './store/updaterStore';
+import { purgeLegacyServerCredentials } from './store/cloudSlice';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
@@ -271,16 +272,13 @@ function AideoApp() {
   } = useUpdaterStore();
 
   useEffect(() => {
-    const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession, checkTidalStatus, loadAddons } = useStore.getState();
+    const { fetchDevices, initializeQueue, checkSession, loadAddons } = useStore.getState();
     loadLibrary();
     fetchPlaylists();
     fetchDevices();
     initializeQueue();
-    loadSubsonicPassword();
+    void purgeLegacyServerCredentials();
     checkSession().catch(e => console.error("checkSession error:", e));
-    // Restore Tidal session flag from backend keyring so tidalConnected is
-    // correct immediately after a webview reload, without visiting Settings.
-    checkTidalStatus();
     void loadAddons();
 
     // Synchronize Windows Keep Awake status with backend on startup
@@ -355,29 +353,20 @@ function AideoApp() {
         if (isCancelled) return;
         const url = event.payload;
         try {
-          const hash = url.split('#')[1];
-          if (!hash) return;
-          const params = new URLSearchParams(hash);
-          const access_token = params.get('access_token');
-          const refresh_token = params.get('refresh_token');
-
-          if (access_token && refresh_token) {
-            const { getSupabaseClient } = await import('./utils/supabaseClient');
-            const client = getSupabaseClient();
-            if (client) {
-              const { data: { session }, error } = await client.auth.setSession({ access_token, refresh_token });
-              if (error) throw error;
-              if (session) {
-                useStore.setState({
-                  session,
-                  user: session.user ?? null,
-                  authLoading: false
-                });
-                window.dispatchEvent(new CustomEvent('ui-toast', { 
-                  detail: { message: 'Signed in successfully!', type: 'success' } 
-                }));
-              }
-            }
+          const { getSupabaseClient } = await import('./utils/supabaseClient');
+          const client = getSupabaseClient();
+          if (!client) return;
+          const { sessionFromOAuthCallback } = await import('./utils/oauthCallback');
+          const session = await sessionFromOAuthCallback(url, client);
+          if (session) {
+            useStore.setState({
+              session,
+              user: session.user ?? null,
+              authLoading: false
+            });
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: 'Signed in successfully!', type: 'success' }
+            }));
           }
         } catch (e: any) {
           console.error('Failed to resolve OAuth session from callback:', e);
@@ -463,16 +452,6 @@ function AideoApp() {
     cleanups.push(() => clearInterval(clockInterval));
 
     const setupListeners = async () => {
-      for (const provider of ['tidal', 'qobuz']) {
-        const unlisten = await listen<{ filename: string; track_id: string; error: string }>(`${provider}-download-error`, event => {
-          if (isCancelled) return;
-          window.dispatchEvent(new CustomEvent('ui-toast', {
-            detail: { message: `${provider === 'tidal' ? 'Tidal' : 'Qobuz'} download failed (${event.payload.filename}): ${event.payload.error}`, type: 'error' }
-          }));
-        });
-        if (isCancelled) { unlisten(); return; }
-        cleanups.push(unlisten);
-      }
       const uScannerError = await listen<string>('scanner-error', event => {
         if (isCancelled) return;
         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: event.payload, title: 'Library Scan', type: 'error' } }));
