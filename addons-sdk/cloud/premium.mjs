@@ -5,13 +5,23 @@ import { invalid, readJson, upstreamError, validateCatalog } from './http.mjs';
 
 export function premiumConfig(env) {
   const provider = env.PROVIDER;
-  const token = provider === 'tidal' ? env.TIDAL_ACCESS_TOKEN : env.QOBUZ_AUTH_TOKEN;
-  if (typeof token !== 'string' || !token) throw new Error('Set an authorized user token');
   if (provider === 'tidal') {
-    const country = env.TIDAL_COUNTRY_CODE;
-    if (!/^[A-Z]{2}$/.test(country ?? '')) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
-    return { provider, token, country };
+    const token = env.TIDAL_ACCESS_TOKEN ?? '';
+    const refreshToken = env.TIDAL_REFRESH_TOKEN ?? '';
+    const clientId = env.TIDAL_CLIENT_ID ?? '';
+    const clientSecret = env.TIDAL_CLIENT_SECRET ?? '';
+    const country = env.TIDAL_COUNTRY_CODE ?? '';
+    if ([token, refreshToken, clientId, clientSecret, country].some(v => typeof v !== 'string')) {
+      throw new Error('Set TIDAL_ACCESS_TOKEN or TIDAL_CLIENT_ID');
+    }
+    if (!token && !clientId) throw new Error('Set TIDAL_ACCESS_TOKEN or TIDAL_CLIENT_ID');
+    if (refreshToken && !clientId) throw new Error('Set TIDAL_CLIENT_ID when using TIDAL_REFRESH_TOKEN');
+    if (country && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
+    if (!clientId && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
+    return { provider, token, refreshToken, clientId, clientSecret, country };
   }
+  const token = env.QOBUZ_AUTH_TOKEN;
+  if (typeof token !== 'string' || !token) throw new Error('Set an authorized user token');
   const appId = env.QOBUZ_APP_ID;
   const secret = env.QOBUZ_APP_SECRET;
   if (typeof appId !== 'string' || !appId || typeof secret !== 'string' || !secret) {
@@ -54,18 +64,86 @@ function title(item) {
 export function createPremiumAdapter(config, fetchUpstream) {
   const tidal = config.provider === 'tidal';
   const base = tidal ? 'https://api.tidal.com/v1/' : 'https://www.qobuz.com/api.json/0.2/';
-  const auth = tidal ? { Authorization: `Bearer ${config.token}` }
-    : { 'X-App-Id': config.appId, 'X-User-Auth-Token': config.token };
+  const session = {
+    accessToken: config.token || '',
+    refreshToken: config.refreshToken || '',
+    expiresAt: config.token && !config.refreshToken ? Infinity : (config.token ? Date.now() + 3600_000 : 0),
+    country: config.country || '',
+    refreshPromise: null,
+    deviceCode: '',
+  };
 
   async function fetchSafe(url, headers) {
     try {
       return await fetchUpstream(url, { headers, redirect: 'error', signal: AbortSignal.timeout(30_000) });
     } catch { throw upstreamError(); }
   }
-  async function api(path, params = {}) {
+  async function postForm(url, params) {
+    try {
+      return await fetchUpstream(new URL(url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(params).toString(),
+        redirect: 'error',
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch { throw upstreamError(); }
+  }
+  async function refreshAccessToken() {
+    if (!tidal || !config.clientId || !session.refreshToken) throw upstreamError();
+    if (session.refreshPromise) return session.refreshPromise;
+    session.refreshPromise = (async () => {
+      const res = await postForm('https://auth.tidal.com/v1/oauth2/token', {
+        grant_type: 'refresh_token',
+        refresh_token: session.refreshToken,
+        client_id: config.clientId,
+        ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+      });
+      const data = await readJson(res);
+      if (typeof data?.access_token !== 'string' || !data.access_token) throw upstreamError();
+      session.accessToken = data.access_token;
+      if (typeof data.refresh_token === 'string' && data.refresh_token) {
+        session.refreshToken = data.refresh_token;
+      }
+      session.expiresAt = Date.now() + (Number.isFinite(data.expires_in) && data.expires_in > 0 ? data.expires_in : 3600) * 1000;
+      if (!session.country && typeof data.user?.countryCode === 'string' && /^[A-Z]{2}$/.test(data.user.countryCode)) {
+        session.country = data.user.countryCode;
+      }
+      return session.accessToken;
+    })().finally(() => { session.refreshPromise = null; });
+    return session.refreshPromise;
+  }
+  async function ensureAccessToken() {
+    if (!tidal) return config.token;
+    if ((!session.accessToken || Date.now() + 60_000 >= session.expiresAt) && config.clientId && session.refreshToken) {
+      await refreshAccessToken();
+    }
+    if (!session.accessToken) throw upstreamError();
+    return session.accessToken;
+  }
+  async function api(path, params = {}, allowRetry = true) {
+    const token = await ensureAccessToken();
     const url = new URL(path, base);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
-    return fetchSafe(url, auth);
+    const headers = tidal ? { Authorization: `Bearer ${token}` }
+      : { 'X-App-Id': config.appId, 'X-User-Auth-Token': token };
+    const res = await fetchSafe(url, headers);
+    if (tidal && res.status === 401 && allowRetry && config.clientId && session.refreshToken) {
+      await res.body?.cancel();
+      await refreshAccessToken();
+      return api(path, params, false);
+    }
+    return res;
+  }
+  async function ensureCountry() {
+    if (!session.country) await ensureAccessToken();
+    if (session.country) return session.country;
+    const data = await readJson(await api('sessions'));
+    if (typeof data?.countryCode === 'string' && /^[A-Z]{2}$/.test(data.countryCode)) {
+      session.country = data.countryCode;
+      return session.country;
+    }
+    throw upstreamError();
   }
   function validateId(id) {
     if (typeof id !== 'string' || !/^\d{1,20}$/.test(id)) throw invalid();
@@ -101,8 +179,9 @@ export function createPremiumAdapter(config, fetchUpstream) {
   return {
     async catalog(query = '', offset = 0, limit = 100) {
       validateCatalog(query, offset, limit);
+      const countryCode = tidal ? await ensureCountry() : undefined;
       const json = await readJson(await api(tidal ? 'search' : 'track/search', {
-        query, offset, limit, ...(tidal ? { types: 'TRACKS', countryCode: config.country } : {}),
+        query, offset, limit, ...(tidal ? { types: 'TRACKS', countryCode } : {}),
       }));
       const rows = json?.tracks?.items;
       if (!Array.isArray(rows)) throw upstreamError();
@@ -126,6 +205,66 @@ export function createPremiumAdapter(config, fetchUpstream) {
       const response = await api(tidal ? 'sessions' : 'user/get');
       await readJson(response);
       return true;
+    },
+    async startDeviceAuth() {
+      if (!tidal || !config.clientId) throw invalid();
+      const data = await readJson(await postForm('https://auth.tidal.com/v1/oauth2/device_authorization', {
+        client_id: config.clientId,
+        scope: 'r_usr w_usr w_sub',
+        ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+      }));
+      if (typeof data?.deviceCode !== 'string' || !data.deviceCode
+        || typeof data?.userCode !== 'string' || !data.userCode) throw upstreamError();
+      session.deviceCode = data.deviceCode;
+      const rawComplete = typeof data.verificationUriComplete === 'string' && data.verificationUriComplete
+        ? data.verificationUriComplete : 'https://link.tidal.com';
+      const verificationUriComplete = /^https?:\/\//i.test(rawComplete) ? rawComplete : `https://${rawComplete}`;
+      let parsed;
+      try { parsed = new URL(verificationUriComplete); } catch { throw upstreamError(); }
+      if (parsed.protocol !== 'https:'
+        || (parsed.hostname !== 'tidal.com' && !parsed.hostname.endsWith('.tidal.com'))) throw upstreamError();
+      return {
+        userCode: data.userCode,
+        verificationUri: typeof data.verificationUri === 'string' ? data.verificationUri : 'link.tidal.com',
+        verificationUriComplete,
+        expiresIn: Number.isFinite(data.expiresIn) ? data.expiresIn : 300,
+        interval: Number.isFinite(data.interval) ? data.interval : 5,
+      };
+    },
+    async pollDeviceAuth() {
+      if (!tidal || !config.clientId || !session.deviceCode) throw invalid();
+      const res = await postForm('https://auth.tidal.com/v1/oauth2/token', {
+        client_id: config.clientId,
+        ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+        device_code: session.deviceCode,
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        scope: 'r_usr w_usr w_sub',
+      });
+      if (res.ok) {
+        const data = await readJson(res);
+        if (typeof data?.access_token !== 'string' || !data.access_token) throw upstreamError();
+        session.accessToken = data.access_token;
+        session.refreshToken = typeof data.refresh_token === 'string' && data.refresh_token
+          ? data.refresh_token : session.refreshToken;
+        session.expiresAt = Date.now() + (Number.isFinite(data.expires_in) && data.expires_in > 0 ? data.expires_in : 3600) * 1000;
+        if (typeof data.user?.countryCode === 'string' && /^[A-Z]{2}$/.test(data.user.countryCode)) {
+          session.country = data.user.countryCode;
+        }
+        session.deviceCode = '';
+        return { authenticated: true, countryCode: session.country || null };
+      }
+      if (res.status === 400) {
+        let err;
+        try { err = await res.json(); } catch { err = null; }
+        if (err?.error === 'authorization_pending' || err?.error === 'slow_down') {
+          return { authenticated: false, pending: true };
+        }
+        session.deviceCode = '';
+        throw upstreamError();
+      }
+      await res.body?.cancel();
+      session.deviceCode = '';
+      throw upstreamError();
     },
   };
 }

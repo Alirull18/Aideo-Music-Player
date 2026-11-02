@@ -10202,3 +10202,21 @@ html.light-theme .modal-overlay {
 .reliability-controls button { margin: 4px 8px 4px 0; }
 .reliability-controls p { margin: 8px 0; }
 .reliability-controls :is(p, li, small) { overflow-wrap: anywhere; }
+
+/* ── Source Addons & Animations ── */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.addon-card-item {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.addon-card-item:hover {
+  background: var(--glass-h);
+  border-color: rgba(255, 255, 255, 0.14);
+}

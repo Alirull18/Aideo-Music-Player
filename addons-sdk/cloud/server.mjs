@@ -162,15 +162,26 @@ export function createServer(config, fetchUpstream = fetch) {
     if (request.headers.origin) {
       response.setHeader('Access-Control-Allow-Origin', request.headers.origin);
       response.setHeader('Vary', 'Origin');
-      response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       response.setHeader('Access-Control-Allow-Headers', 'Range');
       response.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
     }
     if (Date.now() - windowStart > 60_000) { windowStart = Date.now(); requests = 0; }
     if (++requests > 600) { send(response, 429, { error: 'Too many requests' }); return; }
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
-    if (request.method !== 'GET') { send(response, 405, { error: 'GET required' }); return; }
     const path = new URL(request.url, base).pathname;
+    if (request.method === 'POST') {
+      if (path === '/auth/device') {
+        if (provider !== 'tidal') throw invalid();
+        send(response, 200, await adapter.startDeviceAuth()); return;
+      }
+      if (path === '/auth/poll') {
+        if (provider !== 'tidal') throw invalid();
+        send(response, 200, await adapter.pollDeviceAuth()); return;
+      }
+      send(response, 405, { error: 'GET required' }); return;
+    }
+    if (request.method !== 'GET') { send(response, 405, { error: 'GET required' }); return; }
     // Eclipse protocol: /manifest.json, /search?q=, /stream/{id} (the Aideo host namespaces ids itself).
     if (path === '/manifest.json') {
       send(response, 200, {

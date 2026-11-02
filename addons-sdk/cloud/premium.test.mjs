@@ -15,8 +15,22 @@ test('premium configuration requires authorized tokens and Qobuz signing credent
   assert.equal(loadConfig(qobuz).provider, 'qobuz');
   assert.equal(loadConfig(tidal).port, 7013);
   assert.equal(loadConfig(qobuz).port, 7014);
-  for (const env of [{ ...tidal, TIDAL_ACCESS_TOKEN: '' }, { ...tidal, TIDAL_COUNTRY_CODE: 'not-country' },
-    { ...qobuz, QOBUZ_AUTH_TOKEN: '' }, { ...qobuz, QOBUZ_APP_ID: '' }, { ...qobuz, QOBUZ_APP_SECRET: '' }]) {
+  const refreshMode = loadConfig({ PROVIDER: 'tidal', TIDAL_CLIENT_ID: 'client-1', TIDAL_REFRESH_TOKEN: 'ref-1' });
+  assert.equal(refreshMode.clientId, 'client-1');
+  assert.equal(refreshMode.refreshToken, 'ref-1');
+  assert.equal(refreshMode.country, '');
+  const deviceMode = loadConfig({ PROVIDER: 'tidal', TIDAL_CLIENT_ID: 'client-1', TIDAL_CLIENT_SECRET: 'sec-1' });
+  assert.equal(deviceMode.clientId, 'client-1');
+  assert.equal(deviceMode.clientSecret, 'sec-1');
+  for (const env of [
+    { ...tidal, TIDAL_ACCESS_TOKEN: '' },
+    { ...tidal, TIDAL_COUNTRY_CODE: 'not-country' },
+    { PROVIDER: 'tidal', TIDAL_REFRESH_TOKEN: 'ref-only', TIDAL_COUNTRY_CODE: 'MY' },
+    { PROVIDER: 'tidal', TIDAL_CLIENT_ID: 'client-1', TIDAL_COUNTRY_CODE: 'usa' },
+    { ...qobuz, QOBUZ_AUTH_TOKEN: '' },
+    { ...qobuz, QOBUZ_APP_ID: '' },
+    { ...qobuz, QOBUZ_APP_SECRET: '' },
+  ]) {
     assert.throws(() => loadConfig(env));
   }
 });
@@ -178,4 +192,184 @@ test('premium health uses authenticated session endpoints; HTTP streams contain 
     assert.ok(!JSON.stringify(stream).includes('authorized'));
     assert.ok(calls[0].pathname.endsWith(config.PROVIDER === 'tidal' ? '/sessions' : '/user/get'));
   }
+});
+
+test('Tidal proactive refresh deduplicates concurrent calls and resolves country from OAuth or sessions', async () => {
+  const tokenPosts = [];
+  const apiCalls = [];
+  const config = loadConfig({
+    PROVIDER: 'tidal', TIDAL_CLIENT_ID: 'client-id', TIDAL_CLIENT_SECRET: 'client-secret',
+    TIDAL_REFRESH_TOKEN: 'initial-refresh',
+  });
+  const adapter = createAdapter(config, async (url, options) => {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'auth.tidal.com') {
+      tokenPosts.push({ url: parsed, options });
+      return json({
+        access_token: 'fresh-access-token',
+        refresh_token: 'rotated-refresh-token',
+        expires_in: 3600,
+        user: { countryCode: 'JP' },
+      });
+    }
+    apiCalls.push({ url: parsed, options });
+    return json({ tracks: { items: [{ id: 10, title: 'Song', artist: { name: 'Art' }, album: { title: 'Alb' }, duration: 100 }] } });
+  });
+  const [first, second] = await Promise.all([adapter.catalog('one'), adapter.catalog('two')]);
+  assert.equal(first[0].id, '10');
+  assert.equal(second[0].id, '10');
+  assert.equal(tokenPosts.length, 1);
+  const body = new URLSearchParams(tokenPosts[0].options.body);
+  assert.equal(body.get('grant_type'), 'refresh_token');
+  assert.equal(body.get('refresh_token'), 'initial-refresh');
+  assert.equal(body.get('client_id'), 'client-id');
+  assert.equal(body.get('client_secret'), 'client-secret');
+  assert.equal(apiCalls.length, 2);
+  for (const call of apiCalls) {
+    assert.equal(call.options.headers.Authorization, 'Bearer fresh-access-token');
+    assert.equal(call.url.searchParams.get('countryCode'), 'JP');
+  }
+
+  let sessionCalls = 0;
+  const fallbackAdapter = createAdapter(loadConfig({
+    PROVIDER: 'tidal', TIDAL_CLIENT_ID: 'client-id', TIDAL_REFRESH_TOKEN: 'ref-2',
+  }), async url => {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'auth.tidal.com') return json({ access_token: 'tok-2', expires_in: 3600 });
+    if (parsed.pathname.endsWith('/sessions')) { sessionCalls++; return json({ countryCode: 'GB' }); }
+    assert.equal(parsed.searchParams.get('countryCode'), 'GB');
+    return json({ tracks: { items: [] } });
+  });
+  await fallbackAdapter.catalog('test');
+  await fallbackAdapter.catalog('test2');
+  assert.equal(sessionCalls, 1);
+});
+
+test('Tidal reactive 401 refreshes token once and retries, stopping without leaking secrets if retry 401s', async () => {
+  const calls = [];
+  const config = loadConfig({
+    PROVIDER: 'tidal', TIDAL_ACCESS_TOKEN: 'expired-token', TIDAL_REFRESH_TOKEN: 'secret-refresh-token',
+    TIDAL_CLIENT_ID: 'client-id', TIDAL_COUNTRY_CODE: 'US',
+  });
+  let refreshed = false;
+  const adapter = createAdapter(config, async (url, options) => {
+    const parsed = new URL(url);
+    calls.push({ url: parsed, options });
+    if (parsed.hostname === 'auth.tidal.com') {
+      refreshed = true;
+      return json({ access_token: 'renewed-token', refresh_token: 'new-refresh-secret', expires_in: 3600 });
+    }
+    if (options.headers.Authorization === 'Bearer expired-token') {
+      return new Response('expired-token', { status: 401 });
+    }
+    if (parsed.pathname.includes('playbackinfopostpaywall')) {
+      return json({ manifest: manifest({ encryptionType: 'NONE', urls: ['https://audio.tidal.com/flac'] }) });
+    }
+    if (parsed.hostname === 'audio.tidal.com') return new Response('flac-bytes');
+    return json({ tracks: { items: [{ id: 7, title: 'Recovered', duration: 90 }] } });
+  });
+  const tracks = await adapter.catalog('retry');
+  assert.equal(tracks[0].title, 'Recovered');
+  assert.ok(refreshed);
+  assert.equal(await (await adapter.media('7', false)).text(), 'flac-bytes');
+
+  let authAttempts = 0;
+  let apiAttempts = 0;
+  const failingAdapter = createAdapter(config, async url => {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'auth.tidal.com') {
+      authAttempts++;
+      return json({ access_token: 'still-unauthorized-secret', expires_in: 3600 });
+    }
+    apiAttempts++;
+    return new Response('still-unauthorized-secret', { status: 401 });
+  });
+  await assert.rejects(failingAdapter.catalog('fail'), err => {
+    return !err.message.includes('still-unauthorized-secret') && !err.message.includes('secret-refresh-token');
+  });
+  assert.equal(authAttempts, 1);
+  assert.equal(apiAttempts, 2);
+});
+
+test('Tidal loopback HTTP Device Authorization flow authenticates and enables catalog and stream', async t => {
+  let pollCount = 0;
+  const server = createServer(loadConfig({
+    PROVIDER: 'tidal', TIDAL_CLIENT_ID: 'device-client-id', TIDAL_CLIENT_SECRET: 'device-secret',
+  }), async (url, options) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/v1/oauth2/device_authorization') {
+      const body = new URLSearchParams(options.body);
+      assert.equal(body.get('client_id'), 'device-client-id');
+      assert.equal(body.get('scope'), 'r_usr w_usr w_sub');
+      return json({
+        deviceCode: 'dev-code-123',
+        userCode: 'ABCD-1234',
+        verificationUri: 'link.tidal.com',
+        verificationUriComplete: 'link.tidal.com/ABCD-1234',
+        expiresIn: 300,
+        interval: 2,
+      });
+    }
+    if (parsed.pathname === '/v1/oauth2/token') {
+      pollCount++;
+      const body = new URLSearchParams(options.body);
+      assert.equal(body.get('device_code'), 'dev-code-123');
+      assert.equal(body.get('grant_type'), 'urn:ietf:params:oauth:grant-type:device_code');
+      if (pollCount === 1) {
+        return new Response(JSON.stringify({ error: 'authorization_pending' }), { status: 400 });
+      }
+      return json({
+        access_token: 'device-access-token',
+        refresh_token: 'device-refresh-token',
+        expires_in: 3600,
+        user: { countryCode: 'DE' },
+      });
+    }
+    if (parsed.pathname === '/v1/search') {
+      assert.equal(options.headers.Authorization, 'Bearer device-access-token');
+      assert.equal(parsed.searchParams.get('countryCode'), 'DE');
+      return json({ tracks: { items: [{ id: 42, title: 'Device Track', duration: 180 }] } });
+    }
+    if (parsed.pathname.includes('playbackinfopostpaywall')) {
+      assert.equal(options.headers.Authorization, 'Bearer device-access-token');
+      return json({ manifest: manifest({ encryptionType: 'NONE', urls: ['https://audio.tidal.com/stream42'] }) });
+    }
+    return new Response('device-audio-stream');
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  assert.equal((await fetch(`${base}/auth/poll`, { method: 'POST' })).status, 400);
+
+  const startRes = await fetch(`${base}/auth/device`, { method: 'POST' });
+  assert.equal(startRes.status, 200);
+  const startData = await startRes.json();
+  assert.deepEqual(startData, {
+    userCode: 'ABCD-1234',
+    verificationUri: 'link.tidal.com',
+    verificationUriComplete: 'https://link.tidal.com/ABCD-1234',
+    expiresIn: 300,
+    interval: 2,
+  });
+
+  const pendingRes = await fetch(`${base}/auth/poll`, { method: 'POST' });
+  assert.equal(pendingRes.status, 200);
+  assert.deepEqual(await pendingRes.json(), { authenticated: false, pending: true });
+
+  const authRes = await fetch(`${base}/auth/poll`, { method: 'POST' });
+  assert.equal(authRes.status, 200);
+  assert.deepEqual(await authRes.json(), { authenticated: true, countryCode: 'DE' });
+
+  const searchRes = await fetch(`${base}/search?q=test`);
+  assert.equal(searchRes.status, 200);
+  const searchData = await searchRes.json();
+  assert.equal(searchData.tracks[0].id, '42');
+
+  const streamRes = await fetch(`${base}/stream/42`);
+  assert.equal(streamRes.status, 200);
+  const streamData = await streamRes.json();
+  const audioRes = await fetch(streamData.url);
+  assert.equal(await audioRes.text(), 'device-audio-stream');
 });
