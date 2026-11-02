@@ -19,16 +19,31 @@ export function loadConfig(env = process.env) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be between 1 and 65535');
   if (provider === 'tidal' || provider === 'qobuz') return Object.freeze({ ...premiumConfig(env), port });
   const prefix = provider.toUpperCase();
-  const url = new URL(env[`${prefix}_URL`]);
+  const rawUrl = env[`${prefix}_URL`];
+  const allowUnconfigured = env.ALLOW_UNCONFIGURED === '1';
+  if (allowUnconfigured && (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim())) {
+    const user = typeof env.SUBSONIC_USER === 'string' ? env.SUBSONIC_USER : '';
+    const secret = provider === 'subsonic'
+      ? (typeof env.SUBSONIC_PASSWORD === 'string' ? env.SUBSONIC_PASSWORD : '')
+      : (typeof env.JELLYFIN_API_KEY === 'string' ? env.JELLYFIN_API_KEY : '');
+    return Object.freeze({ provider, url: '', user, secret, port });
+  }
+  const url = new URL(rawUrl);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw new Error('Server URL must be HTTP(S) without credentials, query or fragment');
   }
   const user = env.SUBSONIC_USER;
   const secret = provider === 'subsonic' ? env.SUBSONIC_PASSWORD : env.JELLYFIN_API_KEY;
-  if (typeof secret !== 'string' || !secret || (provider === 'subsonic' && (typeof user !== 'string' || !user))) {
+  if (!allowUnconfigured && (typeof secret !== 'string' || !secret || (provider === 'subsonic' && (typeof user !== 'string' || !user)))) {
     throw new Error(`Set ${prefix} server credentials in the server environment`);
   }
-  return Object.freeze({ provider, url: `${url.href.replace(/\/+$/, '')}/`, user, secret, port });
+  return Object.freeze({
+    provider,
+    url: `${url.href.replace(/\/+$/, '')}/`,
+    user: typeof user === 'string' ? user : '',
+    secret: typeof secret === 'string' ? secret : '',
+    port,
+  });
 }
 
 const text = (value, fallback) => typeof value === 'string' && value ? value : fallback;
@@ -309,7 +324,16 @@ export function createServer(config, fetchUpstream = fetch) {
     if (request.method === 'POST') {
       if (path === '/auth/device') {
         if (provider !== 'tidal') throw invalid();
-        send(response, 200, await adapter.startDeviceAuth()); return;
+        try {
+          send(response, 200, await adapter.startDeviceAuth());
+        } catch (error) {
+          if (error.status === 400) {
+            send(response, 400, { error: 'Configure your Tidal Client ID or Access Token in Credentials first' });
+            return;
+          }
+          throw error;
+        }
+        return;
       }
       if (path === '/auth/poll') {
         if (provider !== 'tidal') throw invalid();

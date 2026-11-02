@@ -5,6 +5,7 @@ import { invalid, readJson, upstreamError, validateCatalog } from './http.mjs';
 
 export function premiumConfig(env) {
   const provider = env.PROVIDER;
+  const allowUnconfigured = env.ALLOW_UNCONFIGURED === '1';
   if (provider === 'tidal') {
     const token = env.TIDAL_ACCESS_TOKEN ?? '';
     const refreshToken = env.TIDAL_REFRESH_TOKEN ?? '';
@@ -14,20 +15,27 @@ export function premiumConfig(env) {
     if ([token, refreshToken, clientId, clientSecret, country].some(v => typeof v !== 'string')) {
       throw new Error('Set TIDAL_ACCESS_TOKEN or TIDAL_CLIENT_ID');
     }
+    if (allowUnconfigured) {
+      if (country && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
+      return { provider, token, refreshToken, clientId, clientSecret, country };
+    }
     if (!token && !clientId) throw new Error('Set TIDAL_ACCESS_TOKEN or TIDAL_CLIENT_ID');
     if (refreshToken && !clientId) throw new Error('Set TIDAL_CLIENT_ID when using TIDAL_REFRESH_TOKEN');
     if (country && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
     if (!clientId && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
     return { provider, token, refreshToken, clientId, clientSecret, country };
   }
-  const token = env.QOBUZ_AUTH_TOKEN;
-  if (typeof token !== 'string' || !token) throw new Error('Set an authorized user token');
-  const appId = env.QOBUZ_APP_ID;
-  const secret = env.QOBUZ_APP_SECRET;
-  if (typeof appId !== 'string' || !appId || typeof secret !== 'string' || !secret) {
+  const token = env.QOBUZ_AUTH_TOKEN ?? env.QOBUZ_USER_AUTH_TOKEN ?? '';
+  const appId = env.QOBUZ_APP_ID ?? '';
+  const secret = env.QOBUZ_APP_SECRET ?? '';
+  if (allowUnconfigured) {
+    return { provider, token: String(token), appId: String(appId), secret: String(secret) };
+  }
+  if (typeof env.QOBUZ_AUTH_TOKEN !== 'string' || !env.QOBUZ_AUTH_TOKEN) throw new Error('Set an authorized user token');
+  if (typeof env.QOBUZ_APP_ID !== 'string' || !env.QOBUZ_APP_ID || typeof env.QOBUZ_APP_SECRET !== 'string' || !env.QOBUZ_APP_SECRET) {
     throw new Error('Set your authorized Qobuz app ID and signing secret');
   }
-  return { provider, token, appId, secret };
+  return { provider, token: env.QOBUZ_AUTH_TOKEN, appId: env.QOBUZ_APP_ID, secret: env.QOBUZ_APP_SECRET };
 }
 
 function cdnUrl(value, provider) {

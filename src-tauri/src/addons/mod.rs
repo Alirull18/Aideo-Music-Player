@@ -115,6 +115,9 @@ pub async fn addon_list(state: State<'_, AppState>) -> Result<Vec<AddonInfo>, St
     let mut entries = builtins();
     for row in rows {
         let (json, origin) = row.map_err(|e| e.to_string())?;
+        if let Ok(u) = url::Url::parse(&origin) {
+            eclipse::ensure_local_cloud_server(&u);
+        }
         if let Ok(manifest) = serde_json::from_str::<eclipse::Manifest>(&json) {
             entries.push(info(manifest, origin));
         }

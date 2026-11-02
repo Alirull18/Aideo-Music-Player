@@ -236,7 +236,11 @@ export default function AddonsCard() {
     try {
       const res = await fetch(`${cleanOrigin}/auth/device`, { method: 'POST' });
       if (!res.ok) {
-        throw new Error('Failed to start Tidal login');
+        const errData = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 400) {
+          setExpandedCreds((prev) => ({ ...prev, [a.id]: true }));
+        }
+        throw new Error(errData.error || 'Failed to start Tidal device login');
       }
       const data = (await res.json()) as {
         userCode: string;
@@ -250,11 +254,40 @@ export default function AddonsCard() {
         userCode: data.userCode,
         verificationUriComplete: data.verificationUriComplete,
       });
-    } catch {
+    } catch (e: any) {
+      if (e instanceof TypeError) {
+        try {
+          const data = await invoke<{
+            userCode?: string;
+            verificationUriComplete?: string;
+          } | null>('addon_auth_start_device', { addonId: a.id });
+          if (data?.userCode && data?.verificationUriComplete) {
+            setTidalAuth({
+              status: 'polling',
+              addonId: a.id,
+              origin: cleanOrigin,
+              userCode: data.userCode,
+              verificationUriComplete: data.verificationUriComplete,
+            });
+            return;
+          }
+        } catch (ipcErr: any) {
+          const msg = typeof ipcErr === 'string' ? ipcErr : ipcErr?.message;
+          if (msg && msg.includes('Credentials')) {
+            setExpandedCreds((prev) => ({ ...prev, [a.id]: true }));
+          }
+          setTidalAuth({
+            status: 'error',
+            addonId: a.id,
+            message: msg || 'Failed to start Tidal device login',
+          });
+          return;
+        }
+      }
       setTidalAuth({
         status: 'error',
         addonId: a.id,
-        message: 'Failed to start Tidal device login',
+        message: e?.message || 'Failed to start Tidal device login',
       });
     }
   };
@@ -278,14 +311,28 @@ export default function AddonsCard() {
     setCredErrorMap((prev) => ({ ...prev, [a.id]: null }));
     try {
       if (cleanOrigin && /^https?:\/\//i.test(cleanOrigin)) {
-        const res = await fetch(`${cleanOrigin}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentials }),
-        });
-        const data = (await res.json().catch(() => ({}))) as { authenticated?: boolean; error?: string };
-        if (!res.ok || data.authenticated === false) {
-          throw new Error(data.error || `Failed to authenticate ${a.name}`);
+        try {
+          const res = await fetch(`${cleanOrigin}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credentials }),
+          });
+          const data = (await res.json().catch(() => ({}))) as { authenticated?: boolean; error?: string };
+          if (!res.ok || data.authenticated === false) {
+            throw new Error(data.error || `Failed to authenticate ${a.name}`);
+          }
+        } catch (fetchErr: any) {
+          if (fetchErr instanceof TypeError) {
+            const data = await invoke<{ authenticated?: boolean; error?: string } | null>('addon_auth_login', {
+              addonId: a.id,
+              credentials,
+            });
+            if (data && data.authenticated === false) {
+              throw new Error(data.error || `Failed to authenticate ${a.name}`);
+            }
+          } else {
+            throw fetchErr;
+          }
         }
       } else {
         await invoke('addon_auth_login', { addonId: a.id, credentials });

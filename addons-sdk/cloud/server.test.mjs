@@ -323,3 +323,17 @@ test('manifest exposes auth spec and /auth/status, /auth/login, /auth/logout man
   assert.equal(statusAfterLogin.host, 'https://navidrome.example.com/');
   assert.equal(statusAfterLogin.user, 'alice');
 });
+
+test('ALLOW_UNCONFIGURED=1 starts all 4 providers without pre-set credentials and serves manifest and status', async t => {
+  for (const provider of ['subsonic', 'jellyfin', 'tidal', 'qobuz']) {
+    const base = await serve(t, { PROVIDER: provider, ALLOW_UNCONFIGURED: '1' }, async () => json({}));
+    const manifest = await (await fetch(`${base}/manifest.json`)).json();
+    assert.equal(manifest.id, `org.aideo.${provider}`);
+    assert.ok(manifest.description);
+    assert.ok(manifest.auth);
+    const status = await (await fetch(`${base}/auth/status`)).json();
+    assert.equal(status.ok, true);
+    assert.equal(status.provider, provider);
+    assert.equal(status.authenticated, false);
+  }
+});
