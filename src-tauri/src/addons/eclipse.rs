@@ -348,6 +348,12 @@ pub(crate) fn ensure_local_cloud_server(base: &Url) {
                 cmd.arg(format!("--env-file={}", env_file.display()));
             }
         }
+        if let Some(session_file) = dirs::data_dir().map(|d| d.join("Aideo").join("addon-sessions").join(format!("{provider}.json"))) {
+            if let Some(parent) = session_file.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            cmd.env("SESSION_FILE", session_file);
+        }
         cmd.arg(&server_mjs)
             .env("PROVIDER", provider)
             .env("PORT", port.to_string())

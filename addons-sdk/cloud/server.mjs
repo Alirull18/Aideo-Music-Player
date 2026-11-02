@@ -1,10 +1,33 @@
 // Node >=22. Run: node --env-file=your-private.env addons-sdk/cloud/server.mjs
 // See the provider .env.example files for server-only credential names.
 import { createHash, randomBytes } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer as httpServer } from 'node:http';
+import { dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
+
+function readSessionFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath.trim()) return null;
+  try {
+    const raw = readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionFile(filePath, data) {
+  if (typeof filePath !== 'string' || !filePath.trim()) return;
+  try {
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, JSON.stringify(data), { mode: 0o600 });
+  } catch {
+    // Ignore disk persistence errors
+  }
+}
 
 const origins = new Set(['tauri://localhost', 'http://tauri.localhost',
   'https://tauri.localhost', 'http://localhost:1420']);
@@ -21,12 +44,13 @@ export function loadConfig(env = process.env) {
   const prefix = provider.toUpperCase();
   const rawUrl = env[`${prefix}_URL`];
   const allowUnconfigured = env.ALLOW_UNCONFIGURED === '1';
+  const sessionFile = typeof env.SESSION_FILE === 'string' && env.SESSION_FILE.trim() ? env.SESSION_FILE.trim() : '';
   if (allowUnconfigured && (!rawUrl || typeof rawUrl !== 'string' || !rawUrl.trim())) {
     const user = typeof env.SUBSONIC_USER === 'string' ? env.SUBSONIC_USER : '';
     const secret = provider === 'subsonic'
       ? (typeof env.SUBSONIC_PASSWORD === 'string' ? env.SUBSONIC_PASSWORD : '')
       : (typeof env.JELLYFIN_API_KEY === 'string' ? env.JELLYFIN_API_KEY : '');
-    return Object.freeze({ provider, url: '', user, secret, port });
+    return Object.freeze({ provider, url: '', user, secret, port, ...(sessionFile ? { sessionFile } : {}) });
   }
   const url = new URL(rawUrl);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
@@ -43,6 +67,7 @@ export function loadConfig(env = process.env) {
     user: typeof user === 'string' ? user : '',
     secret: typeof secret === 'string' ? secret : '',
     port,
+    ...(sessionFile ? { sessionFile } : {}),
   });
 }
 
@@ -113,13 +138,19 @@ export function manifestAuthSpec(provider) {
 export function createAdapter(config, fetchUpstream = fetch) {
   if (['tidal', 'qobuz'].includes(config.provider)) return createPremiumAdapter(config, fetchUpstream);
   const { provider } = config;
-  let base = config.url || '';
-  let user = config.user || '';
-  let secret = config.secret || '';
-  let token = config.token || '';
-  let salt = config.salt || '';
-  let userId = config.userId || '';
+  const saved = readSessionFile(config.sessionFile);
+  let base = config.url || (typeof saved?.base === 'string' ? saved.base : '');
+  let user = config.user || (typeof saved?.user === 'string' ? saved.user : '');
+  let secret = config.secret || (typeof saved?.secret === 'string' ? saved.secret : '');
+  let token = config.token || (typeof saved?.token === 'string' ? saved.token : '');
+  let salt = config.salt || (typeof saved?.salt === 'string' ? saved.salt : '');
+  let userId = config.userId || (typeof saved?.userId === 'string' ? saved.userId : '');
   const subsonic = provider === 'subsonic';
+
+  function persistSession() {
+    if (!config.sessionFile) return;
+    writeSessionFile(config.sessionFile, { base, user, secret, token, salt, userId });
+  }
 
   async function request(path, params = {}, headers = {}) {
     if (!base || (subsonic ? !user || (!secret && !(token && salt)) : !secret)) throw upstreamError();
@@ -181,6 +212,7 @@ export function createAdapter(config, fetchUpstream = fetch) {
         if (typeof key === 'string' && key.trim()) secret = key.trim();
         if (typeof creds.userId === 'string') userId = creds.userId.trim();
       }
+      persistSession();
       return this.status();
     },
     async logout() {
@@ -191,6 +223,7 @@ export function createAdapter(config, fetchUpstream = fetch) {
       } else {
         secret = '';
       }
+      if (config.sessionFile) writeSessionFile(config.sessionFile, {});
       return this.status();
     },
     async catalog(query = '', offset = 0, limit = 100) {
@@ -398,7 +431,10 @@ export function createServer(config, fetchUpstream = fetch) {
       let id;
       try { id = decodeURIComponent(stream[1]); } catch { throw invalid(); }
       parseId(`${provider}:${id}`, provider);
-      send(response, 200, { url: `${base}/audio/${encodeURIComponent(`${provider}:${id}`)}` }); return;
+      send(response, 200, {
+        url: `${base}/audio/${encodeURIComponent(`${provider}:${id}`)}`,
+        ...(adapter.streamMeta ? adapter.streamMeta(id) : {}),
+      }); return;
     }
     const media = path.match(/^\/(audio|cover)\/(.+)$/);
     if (media) { await proxy(adapter, parseId(media[2], provider), media[1] === 'cover', request, response); return; }

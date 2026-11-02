@@ -465,6 +465,37 @@ export default function AddonsCard() {
     return null;
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    for (const a of addons) {
+      if (isCore(a) || !getEffectiveAuth(a)) continue;
+      try {
+        void Promise.resolve(
+          invoke<{ authenticated?: boolean; countryCode?: string | null }>('addon_auth_status', { addonId: a.id })
+        )
+          .then((status) => {
+            if (cancelled || !status) return;
+            if (status.authenticated === true) {
+              setConnectedMap((prev) => (prev[a.id] ? prev : { ...prev, [a.id]: true }));
+              if (isTidalAddon(a)) {
+                setTidalAuth((prev) =>
+                  prev.status === 'idle'
+                    ? { status: 'connected', addonId: a.id, countryCode: status.countryCode ?? null }
+                    : prev
+                );
+              }
+            }
+          })
+          .catch(() => {});
+      } catch {
+        // Ignore if Tauri invoke bridge is unavailable
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [addons]);
+
   const coreAddons = addons.filter(isCore);
   const externalAddons = addons.filter((a) => !isCore(a));
   const installedIds = new Set(addons.map((a) => a.id.toLowerCase()));

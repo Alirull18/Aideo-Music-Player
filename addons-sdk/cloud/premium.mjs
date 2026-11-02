@@ -1,14 +1,38 @@
 // Authorized-token subset of HEAD tidal.rs/qobuz.rs: search, quality fallback and signed streams.
 // ponytail: supply/rotate your own authorized tokens; add server-side OAuth refresh when unattended use requires it.
 import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { invalid, readJson, upstreamError, validateCatalog } from './http.mjs';
 
 const DEFAULT_TIDAL_CLIENT_ID = '4N3n6Q1x95LL5K7p';
 const DEFAULT_TIDAL_CLIENT_SECRET = 'oKOXfJW371cX6xaZ0PyhgG' + 'NBdNLlBZd4AKKYougMjik=';
 
+function readSessionFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath.trim()) return null;
+  try {
+    const raw = readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionFile(filePath, data) {
+  if (typeof filePath !== 'string' || !filePath.trim()) return;
+  try {
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, JSON.stringify(data), { mode: 0o600 });
+  } catch {
+    // Ignore disk persistence errors so in-memory session continues working
+  }
+}
+
 export function premiumConfig(env) {
   const provider = env.PROVIDER;
   const allowUnconfigured = env.ALLOW_UNCONFIGURED === '1';
+  const sessionFile = typeof env.SESSION_FILE === 'string' && env.SESSION_FILE.trim() ? env.SESSION_FILE.trim() : '';
   if (provider === 'tidal') {
     const token = env.TIDAL_ACCESS_TOKEN ?? '';
     const refreshToken = env.TIDAL_REFRESH_TOKEN ?? '';
@@ -27,25 +51,46 @@ export function premiumConfig(env) {
         clientId: clientId || DEFAULT_TIDAL_CLIENT_ID,
         clientSecret: clientSecret || (clientId ? '' : DEFAULT_TIDAL_CLIENT_SECRET),
         country,
+        ...(sessionFile ? { sessionFile } : {}),
       };
     }
     if (!token && !clientId) throw new Error('Set TIDAL_ACCESS_TOKEN or TIDAL_CLIENT_ID');
     if (refreshToken && !clientId) throw new Error('Set TIDAL_CLIENT_ID when using TIDAL_REFRESH_TOKEN');
     if (country && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
     if (!clientId && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
-    return { provider, token, refreshToken, clientId, clientSecret, country };
+    return {
+      provider,
+      token,
+      refreshToken,
+      clientId,
+      clientSecret,
+      country,
+      ...(sessionFile ? { sessionFile } : {}),
+    };
   }
   const token = env.QOBUZ_AUTH_TOKEN ?? env.QOBUZ_USER_AUTH_TOKEN ?? '';
   const appId = env.QOBUZ_APP_ID ?? '';
   const secret = env.QOBUZ_APP_SECRET ?? '';
   if (allowUnconfigured) {
-    return { provider, token: String(token), appId: String(appId), secret: String(secret) };
+    return {
+      provider,
+      token: String(token),
+      appId: String(appId),
+      secret: String(secret),
+      ...(sessionFile ? { sessionFile } : {}),
+    };
   }
   if (typeof env.QOBUZ_AUTH_TOKEN !== 'string' || !env.QOBUZ_AUTH_TOKEN) throw new Error('Set an authorized user token');
   if (typeof env.QOBUZ_APP_ID !== 'string' || !env.QOBUZ_APP_ID || typeof env.QOBUZ_APP_SECRET !== 'string' || !env.QOBUZ_APP_SECRET) {
     throw new Error('Set your authorized Qobuz app ID and signing secret');
   }
-  return { provider, token: env.QOBUZ_AUTH_TOKEN, appId: env.QOBUZ_APP_ID, secret: env.QOBUZ_APP_SECRET };
+  return {
+    provider,
+    token: env.QOBUZ_AUTH_TOKEN,
+    appId: env.QOBUZ_APP_ID,
+    secret: env.QOBUZ_APP_SECRET,
+    ...(sessionFile ? { sessionFile } : {}),
+  };
 }
 
 function cdnUrl(value, provider) {
@@ -82,19 +127,45 @@ function title(item) {
 export function createPremiumAdapter(config, fetchUpstream) {
   const tidal = config.provider === 'tidal';
   const base = tidal ? 'https://api.tidal.com/v1/' : 'https://www.qobuz.com/api.json/0.2/';
+  const saved = readSessionFile(config.sessionFile);
+  const initialToken = config.token || (typeof saved?.accessToken === 'string' ? saved.accessToken : '');
+  const initialRefreshToken = config.refreshToken || (typeof saved?.refreshToken === 'string' ? saved.refreshToken : '');
+  const initialSecret = config.secret || (typeof saved?.secret === 'string' ? saved.secret : '');
   const session = {
-    accessToken: config.token || '',
-    refreshToken: config.refreshToken || '',
-    clientId: config.clientId || '',
-    clientSecret: config.clientSecret || '',
-    appId: config.appId || '',
-    secret: config.secret || '',
-    formatId: config.formatId || '27',
-    expiresAt: config.token && !config.refreshToken ? Infinity : (config.token ? Date.now() + 3600_000 : 0),
-    country: config.country || '',
+    accessToken: initialToken,
+    refreshToken: initialRefreshToken,
+    clientId: (typeof saved?.clientId === 'string' && saved.clientId) || config.clientId || '',
+    clientSecret: (typeof saved?.clientSecret === 'string' && saved.clientSecret) || config.clientSecret || '',
+    appId: config.appId || (typeof saved?.appId === 'string' ? saved.appId : ''),
+    secret: initialSecret,
+    secrets: Array.isArray(saved?.secrets)
+      ? saved.secrets.filter(s => typeof s === 'string' && s)
+      : (initialSecret ? [initialSecret] : []),
+    formatId: config.formatId || (typeof saved?.formatId === 'string' && saved.formatId ? saved.formatId : '27'),
+    expiresAt: Number.isFinite(saved?.expiresAt) && saved.expiresAt > 0
+      ? saved.expiresAt
+      : (initialToken && !initialRefreshToken ? Infinity : (initialToken ? Date.now() + 3600_000 : 0)),
+    country: config.country || (typeof saved?.country === 'string' ? saved.country : ''),
     refreshPromise: null,
     deviceCode: '',
   };
+  const trackQualities = new Map();
+
+  function persistSession() {
+    if (!config.sessionFile) return;
+    writeSessionFile(config.sessionFile, {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      clientId: session.clientId,
+      clientSecret: session.clientSecret,
+      appId: session.appId,
+      secret: session.secret,
+      secrets: session.secrets,
+      formatId: session.formatId,
+      expiresAt: Number.isFinite(session.expiresAt) ? session.expiresAt : null,
+      country: session.country,
+    });
+  }
 
   async function fetchSafe(url, headers) {
     try {
@@ -132,6 +203,7 @@ export function createPremiumAdapter(config, fetchUpstream) {
       if (!session.country && typeof data.user?.countryCode === 'string' && /^[A-Z]{2}$/.test(data.user.countryCode)) {
         session.country = data.user.countryCode;
       }
+      persistSession();
       return session.accessToken;
     })().finally(() => { session.refreshPromise = null; });
     return session.refreshPromise;
@@ -149,6 +221,10 @@ export function createPremiumAdapter(config, fetchUpstream) {
   }
   async function api(path, params = {}, allowRetry = true) {
     const token = await ensureAccessToken();
+    if (!tidal && !session.appId) {
+      try { await ensureQobuzAppCredentials(); } catch { /* fallback below */ }
+      if (!session.appId) session.appId = '950096963';
+    }
     const url = new URL(path, base);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
     const headers = tidal ? { Authorization: `Bearer ${token}` }
@@ -167,6 +243,7 @@ export function createPremiumAdapter(config, fetchUpstream) {
     const data = await readJson(await api('sessions'));
     if (typeof data?.countryCode === 'string' && /^[A-Z]{2}$/.test(data.countryCode)) {
       session.country = data.countryCode;
+      persistSession();
       return session.country;
     }
     throw upstreamError();
@@ -184,20 +261,50 @@ export function createPremiumAdapter(config, fetchUpstream) {
     return item?.album?.image?.large || item?.album?.image?.small;
   }
   async function resolve(id) {
+    if (!tidal && !session.secret) {
+      try { await ensureQobuzAppCredentials(); } catch { /* ignore if offline or already set */ }
+    }
     for (const quality of tidal ? ['HI_RES_LOSSLESS', 'HI_RES', 'LOSSLESS', 'HIGH', 'LOW'] : [27, 7, 6, 5]) {
       const params = tidal ? { playbackmode: 'STREAM', audioquality: quality, assetpresentation: 'FULL' }
         : { format_id: quality, intent: 'stream', track_id: id };
-      const ts = Math.floor(Date.now() / 1000);
-      const input = 'trackgetFileUrl' + Object.keys(params).sort().map(key => `${key}${params[key]}`).join('')
-        + ts + session.secret;
-      const signedParams = tidal ? params : { ...params, request_ts: ts,
-        request_sig: createHash('md5').update(input).digest('hex') };
-      const response = await api(tidal ? `tracks/${id}/playbackinfopostpaywall` : 'track/getFileUrl', signedParams);
-      if (response.status === 401) { await response.body?.cancel(); throw upstreamError(); }
-      try {
-        const json = await readJson(response);
-        return cdnUrl(tidal ? directManifest(json.manifest) : json.url, config.provider);
-      } catch { /* An unavailable entitlement or unusable rendition advances the original quality ladder. */ }
+      if (tidal) {
+        const response = await api(`tracks/${id}/playbackinfopostpaywall`, params);
+        if (response.status === 401) { await response.body?.cancel(); throw upstreamError(); }
+        try {
+          const json = await readJson(response);
+          return cdnUrl(directManifest(json.manifest), config.provider);
+        } catch { /* An unavailable entitlement or unusable rendition advances the original quality ladder. */ }
+        continue;
+      }
+      const candidateSecrets = session.secrets?.length ? [...session.secrets] : [session.secret];
+      for (const candidateSecret of candidateSecrets) {
+        const ts = Math.floor(Date.now() / 1000);
+        const input = 'trackgetFileUrl' + Object.keys(params).sort().map(key => `${key}${params[key]}`).join('')
+          + ts + candidateSecret;
+        const signedParams = {
+          ...params,
+          request_ts: ts,
+          request_sig: createHash('md5').update(input).digest('hex'),
+        };
+        const response = await api('track/getFileUrl', signedParams);
+        if (response.status === 401) { await response.body?.cancel(); throw upstreamError(); }
+        if (response.status === 400 && candidateSecrets.length > 1) {
+          await response.body?.cancel();
+          continue;
+        }
+        try {
+          const json = await readJson(response);
+          const resolvedUrl = cdnUrl(json.url, config.provider);
+          if (candidateSecret && session.secret !== candidateSecret) {
+            session.secret = candidateSecret;
+            session.secrets = [candidateSecret, ...candidateSecrets.filter(s => s !== candidateSecret)];
+            persistSession();
+          }
+          return resolvedUrl;
+        } catch {
+          break;
+        }
+      }
     }
     throw upstreamError();
   }
@@ -214,19 +321,29 @@ export function createPremiumAdapter(config, fetchUpstream) {
     const appIdMatch = bundleJs.match(/production:\{api:\{appId:"(\d{9})"/) ?? bundleJs.match(/appId:"(\d{9})"/);
     if (!appIdMatch?.[1]) throw upstreamError();
     session.appId = appIdMatch[1];
+    const candidates = [];
     const tzSecrets = [...bundleJs.matchAll(/timezone:"([^"]+)",[^}]*?secret:"([A-Za-z0-9+/=]{8,})"/g)];
     if (tzSecrets.length > 0) {
       tzSecrets.sort((a, b) => {
         const rank = tz => (tz === 'Europe/Paris' ? 0 : tz === 'Asia/Tokyo' ? 1 : 2);
         return rank(a[1]) - rank(b[1]);
       });
-      const decoded = Buffer.from(tzSecrets[0][2], 'base64').toString('utf8').trim();
-      if (decoded.length >= 8) session.secret = decoded;
+      for (const match of tzSecrets) {
+        try {
+          const decoded = Buffer.from(match[2], 'base64').toString('utf8').trim();
+          if (decoded.length >= 8 && !candidates.includes(decoded)) candidates.push(decoded);
+        } catch { /* ignore invalid base64 */ }
+      }
     }
-    if (!session.secret) {
-      const directMatch = bundleJs.match(/production:\{api:\{appId:"\d{9}",appSecret:"([^"]{8,})"/);
-      if (directMatch?.[1]) session.secret = directMatch[1];
+    const directMatch = bundleJs.match(/production:\{api:\{appId:"\d{9}",appSecret:"([^"]{8,})"/);
+    if (directMatch?.[1] && !candidates.includes(directMatch[1])) {
+      candidates.push(directMatch[1]);
     }
+    if (candidates.length > 0) {
+      session.secrets = candidates;
+      if (!session.secret) session.secret = candidates[0];
+    }
+    persistSession();
     return { appId: session.appId, secret: session.secret };
   }
 
@@ -239,6 +356,7 @@ export function createPremiumAdapter(config, fetchUpstream) {
           authenticated: Boolean(session.accessToken),
           hasRefreshToken: Boolean(session.refreshToken),
           hasClientCredentials: Boolean(session.clientId && session.clientSecret),
+          countryCode: session.country || null,
           expiresAt: Number.isFinite(session.expiresAt) && session.expiresAt > 0 ? session.expiresAt : null,
         };
       }
@@ -268,11 +386,15 @@ export function createPremiumAdapter(config, fetchUpstream) {
         if (!session.accessToken && session.clientId && session.refreshToken) {
           await refreshAccessToken();
         }
+        persistSession();
         return this.status();
       }
       if (typeof creds.appId === 'string' && creds.appId.trim()) session.appId = creds.appId.trim();
       const sec = creds.appSecret ?? creds.secret;
-      if (typeof sec === 'string' && sec.trim()) session.secret = sec.trim();
+      if (typeof sec === 'string' && sec.trim()) {
+        session.secret = sec.trim();
+        if (!session.secrets.includes(session.secret)) session.secrets.unshift(session.secret);
+      }
       if (creds.formatId !== undefined && String(creds.formatId).trim()) session.formatId = String(creds.formatId).trim();
       const directToken = creds.userAuthToken ?? creds.token;
       const loginUser = (creds.email ?? creds.username ?? '').trim();
@@ -295,6 +417,7 @@ export function createPremiumAdapter(config, fetchUpstream) {
         if (typeof data?.user_auth_token !== 'string' || !data.user_auth_token) throw invalid();
         session.accessToken = data.user_auth_token;
       }
+      persistSession();
       return this.status();
     },
     async logout() {
@@ -302,7 +425,11 @@ export function createPremiumAdapter(config, fetchUpstream) {
       session.refreshToken = '';
       session.expiresAt = 0;
       session.deviceCode = '';
+      if (config.sessionFile) writeSessionFile(config.sessionFile, {});
       return this.status();
+    },
+    streamMeta(id) {
+      return trackQualities.get(String(id)) ?? { codec: 'flac' };
     },
     async catalog(query = '', offset = 0, limit = 100) {
       validateCatalog(query, offset, limit);
@@ -320,6 +447,15 @@ export function createPremiumAdapter(config, fetchUpstream) {
           const bitDepth = Number.isInteger(rawDepth) && rawDepth > 0 ? rawDepth : undefined;
           const explicit = typeof item.explicit === 'boolean' ? item.explicit
             : (typeof item.parental_warning === 'boolean' ? item.parental_warning : undefined);
+          if (trackQualities.size >= 500) {
+            const firstKey = trackQualities.keys().next().value;
+            if (firstKey !== undefined) trackQualities.delete(firstKey);
+          }
+          trackQualities.set(String(item.id), {
+            codec: 'flac',
+            ...(sampleRate ? { sampleRate } : {}),
+            ...(bitDepth ? { bitDepth } : {}),
+          });
           return {
             id: String(item.id), title: title(item),
             artist: (tidal ? item.artist?.name : item.performer?.name) || item.artists?.[0]?.name || 'Unknown Artist',
@@ -398,6 +534,7 @@ export function createPremiumAdapter(config, fetchUpstream) {
           session.country = data.user.countryCode;
         }
         session.deviceCode = '';
+        persistSession();
         return { authenticated: true, countryCode: session.country || null };
       }
       if (res.status === 400) {

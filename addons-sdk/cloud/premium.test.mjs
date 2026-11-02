@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { createAdapter, createServer, loadConfig } from './server.mjs';
 
@@ -436,4 +439,89 @@ test('premium manifest auth spec, /auth/status, /auth/login, /auth/logout and Hi
   assert.equal(searchData.tracks[0].upc, '009988776655');
   assert.equal(searchData.tracks[0].version, 'Studio Master');
   assert.equal(searchData.tracks[0].explicit, true);
+
+  const streamMetaRes = await (await fetch(`${base}/stream/99`)).json();
+  assert.equal(streamMetaRes.codec, 'flac');
+  assert.equal(streamMetaRes.sampleRate, 192000);
+  assert.equal(streamMetaRes.bitDepth, 24);
+});
+
+test('SESSION_FILE persists login across restarts and Qobuz rotates bundle candidate secrets on 400', async t => {
+  const sessionFile = join(tmpdir(), `aideo-test-qobuz-session-${ process.pid }-${ Date.now() }.json`);
+  t.after(() => { try { rmSync(sessionFile, { force: true }); } catch {} });
+
+  const decoySecretB64 = Buffer.from('decoy-secret-paris').toString('base64');
+  const activeSecretB64 = Buffer.from('active-secret-tokyo').toString('base64');
+
+  const upstream = async url => {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'play.qobuz.com' && parsed.pathname === '/login') {
+      return new Response('<script src="/resources/1.0.0/bundle.js"></script>');
+    }
+    if (parsed.hostname === 'play.qobuz.com' && parsed.pathname.endsWith('/bundle.js')) {
+      return new Response(
+        `production:{api:{appId:"950096963"}},` +
+        `timezone:"Europe/Paris",secret:"${decoySecretB64}"},` +
+        `timezone:"Asia/Tokyo",secret:"${activeSecretB64}"}`
+      );
+    }
+    if (parsed.pathname.endsWith('getFileUrl')) {
+      const ts = parsed.searchParams.get('request_ts');
+      const sig = parsed.searchParams.get('request_sig');
+      const formatId = parsed.searchParams.get('format_id');
+      const trackId = parsed.searchParams.get('track_id');
+      const expectedActiveSig = createHash('md5')
+        .update(`trackgetFileUrlformat_id${formatId}intentstreamtrack_id${trackId}${ts}active-secret-tokyo`)
+        .digest('hex');
+      if (sig !== expectedActiveSig) {
+        return new Response('Invalid signature', { status: 400 });
+      }
+      return json({ url: 'https://streaming-qobuz-std.akamaized.net/audio.flac' });
+    }
+    if (parsed.hostname === 'streaming-qobuz-std.akamaized.net') {
+      return new Response('qobuz-flac-bytes');
+    }
+    return json({});
+  };
+
+  // Server 1: starts unconfigured, logs in with browser userAuthToken (scraping bundle), persists to sessionFile
+  const config1 = loadConfig({ PROVIDER: 'qobuz', ALLOW_UNCONFIGURED: '1', SESSION_FILE: sessionFile });
+  const server1 = createServer(config1, upstream);
+  server1.listen(0, '127.0.0.1');
+  await once(server1, 'listening');
+  t.after(() => new Promise(resolve => { server1.closeAllConnections(); server1.close(resolve); }));
+  const base1 = `http://127.0.0.1:${server1.address().port}`;
+
+  const loginRes = await fetch(`${base1}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userAuthToken: 'browser-captured-token' }),
+  });
+  assert.equal(loginRes.status, 200);
+  assert.equal((await loginRes.json()).authenticated, true);
+
+  // Server 2: restarts with same SESSION_FILE, starts already authenticated and resolves stream by rotating secrets
+  const config2 = loadConfig({ PROVIDER: 'qobuz', ALLOW_UNCONFIGURED: '1', SESSION_FILE: sessionFile });
+  const server2 = createServer(config2, upstream);
+  server2.listen(0, '127.0.0.1');
+  await once(server2, 'listening');
+  t.after(() => new Promise(resolve => { server2.closeAllConnections(); server2.close(resolve); }));
+  const base2 = `http://127.0.0.1:${server2.address().port}`;
+
+  const status2 = await (await fetch(`${base2}/auth/status`)).json();
+  assert.equal(status2.authenticated, true);
+
+  const audioRes = await fetch(`${base2}/audio/qobuz%3A42`);
+  assert.equal(audioRes.status, 200);
+  assert.equal(await audioRes.text(), 'qobuz-flac-bytes');
+
+  // Logout clears persisted session so Server 3 starts unauthenticated
+  await fetch(`${base2}/auth/logout`, { method: 'POST' });
+  const server3 = createServer(loadConfig({ PROVIDER: 'qobuz', ALLOW_UNCONFIGURED: '1', SESSION_FILE: sessionFile }), upstream);
+  server3.listen(0, '127.0.0.1');
+  await once(server3, 'listening');
+  t.after(() => new Promise(resolve => { server3.closeAllConnections(); server3.close(resolve); }));
+  const base3 = `http://127.0.0.1:${server3.address().port}`;
+  const status3 = await (await fetch(`${base3}/auth/status`)).json();
+  assert.equal(status3.authenticated, false);
 });
