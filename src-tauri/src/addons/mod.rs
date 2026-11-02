@@ -50,9 +50,11 @@ pub struct AddonInfo {
     pub id: String,
     pub name: String,
     pub version: String,
+    pub description: Option<String>,
     pub icon: Option<String>,
     pub resources: Vec<String>,
     pub content_type: Option<String>,
+    pub auth: Option<eclipse::AddonAuthSpec>,
     /// scheme://host:port only.
     pub origin: String,
     pub builtin: bool,
@@ -63,15 +65,27 @@ fn builtins() -> Vec<AddonInfo> {
     [(YOUTUBE, "YouTube", vec!["search", "stream"]),
      (LYRICS, "Synced lyrics · LRCLIB / Kugou / BiniLyrics", vec!["lyrics"]),
      (TRANSLATION, "Lyric translation", vec!["translate"])].into_iter().map(|(id, name, resources)| AddonInfo {
-        id: id.into(), name: name.into(), version: "1".into(), icon: None,
-        resources: resources.into_iter().map(String::from).collect(), content_type: None,
+        id: id.into(), name: name.into(), version: "1".into(), description: None, icon: None,
+        resources: resources.into_iter().map(String::from).collect(), content_type: None, auth: None,
         origin: "internal".into(), builtin: true, enabled: is_enabled(id),
     }).collect()
 }
 
 fn info(m: eclipse::Manifest, origin: String) -> AddonInfo {
     let enabled = is_enabled(&m.id);
-    AddonInfo { id: m.id, name: m.name, version: m.version, icon: m.icon, resources: m.resources, content_type: m.content_type, origin, builtin: false, enabled }
+    AddonInfo {
+        id: m.id,
+        name: m.name,
+        version: m.version,
+        description: m.description,
+        icon: m.icon,
+        resources: m.resources,
+        content_type: m.content_type,
+        auth: m.auth,
+        origin,
+        builtin: false,
+        enabled,
+    }
 }
 
 fn origin_of(u: &url::Url) -> String {
@@ -230,12 +244,60 @@ pub async fn addon_resolve_source(
     track_id: String,
     requested_quality: Option<crate::sources::StreamingQuality>,
 ) -> Result<crate::sources::ResolvedStream, String> {
-    let _ = requested_quality; // Eclipse /stream/{id} has no quality parameter.
     let (addon_id, tid) = track_id.split_once(':').filter(|_| valid_source_id(&track_id)).ok_or("Invalid addon track id")?;
     require_resource(&state, addon_id, "stream")?;
-    let stream = eclipse::resolve(eclipse::client(), &load_base(addon_id)?, tid).await?;
+    let stream = eclipse::resolve(eclipse::client(), &load_base(addon_id)?, tid, requested_quality).await?;
     require_resource(&state, addon_id, "stream")?;
     Ok(stream)
+}
+
+fn require_installed_base(state: &AppState, id: &str) -> Result<url::Url, String> {
+    if !valid_addon_id(id) {
+        return Err("Invalid addon id".into());
+    }
+    let installed: bool = state
+        .read_conn()
+        .query_row("SELECT EXISTS(SELECT 1 FROM addons WHERE id = ?1)", [id], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if !installed {
+        return Err("Addon is not installed".into());
+    }
+    load_base(id)
+}
+
+#[tauri::command]
+pub async fn addon_auth_status(state: State<'_, AppState>, addon_id: String) -> Result<serde_json::Value, String> {
+    let base = require_installed_base(&state, &addon_id)?;
+    eclipse::auth_status(eclipse::client(), &base).await
+}
+
+#[tauri::command]
+pub async fn addon_auth_start_device(state: State<'_, AppState>, addon_id: String) -> Result<serde_json::Value, String> {
+    let base = require_installed_base(&state, &addon_id)?;
+    eclipse::auth_start_device(eclipse::client(), &base).await
+}
+
+#[tauri::command]
+pub async fn addon_auth_poll_device(state: State<'_, AppState>, addon_id: String) -> Result<serde_json::Value, String> {
+    let base = require_installed_base(&state, &addon_id)?;
+    eclipse::auth_poll_device(eclipse::client(), &base).await
+}
+
+#[tauri::command]
+pub async fn addon_auth_login(
+    state: State<'_, AppState>,
+    addon_id: String,
+    credentials: std::collections::HashMap<String, String>,
+) -> Result<serde_json::Value, String> {
+    let base = require_installed_base(&state, &addon_id)?;
+    let creds = serde_json::to_value(credentials).map_err(|e| e.to_string())?;
+    eclipse::auth_login(eclipse::client(), &base, creds).await
+}
+
+#[tauri::command]
+pub async fn addon_auth_logout(state: State<'_, AppState>, addon_id: String) -> Result<serde_json::Value, String> {
+    let base = require_installed_base(&state, &addon_id)?;
+    eclipse::auth_logout(eclipse::client(), &base).await
 }
 
 #[cfg(test)]

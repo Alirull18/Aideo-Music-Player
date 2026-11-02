@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   applySourcePreference,
   clearSourceCache,
+  deduplicateSourcesForDisplay,
+  registerAddonNames,
   resolveSource,
   searchSources,
   sourceFor,
@@ -67,5 +69,46 @@ describe('Eclipse addon sources', () => {
     const local = sourceFor({ id: 1, path: 'C:/Music/a.flac', format: 'FLAC' } as any);
     expect(local?.provider).toBe('local');
     expect(sourceFor({ id: -1, path: 'C:/Music/a.flac', format: 'Addon' } as any)).toBeNull();
+  });
+
+  it('registerAddonNames formats sourceName as Addon (<Name>) when registered and resets on clearSourceCache', () => {
+    const tidalSource = { provider: 'addon' as const, id: 'org.aideo.tidal:12345' };
+    expect(sourceName(tidalSource)).toBe('Addon');
+
+    registerAddonNames([
+      { id: 'org.aideo.tidal', name: 'Tidal', builtin: false },
+      { id: 'org.aideo.builtin', name: 'BuiltIn', builtin: true },
+    ]);
+    expect(sourceName(tidalSource)).toBe('Addon (Tidal)');
+
+    clearSourceCache();
+    expect(sourceName(tidalSource)).toBe('Addon');
+  });
+
+  it('deduplicateSourcesForDisplay keeps independent 4-track quotas for distinct addon IDs', () => {
+    const makeAddonSources = (addonId: string) =>
+      [1, 2, 3, 4, 5].map((i) => ({
+        provider: 'addon' as const,
+        id: `${addonId}:${i}`,
+        metadata: {
+          title: 'Song',
+          artist: 'Artist',
+          album: `Album Edition ${i}`,
+          duration: 200,
+        },
+        catalog_quality: { lossless: true, sample_rate: 44100, bit_depth: 16 },
+      }));
+
+    const combined = [
+      ...makeAddonSources('org.aideo.tidal'),
+      ...makeAddonSources('org.aideo.qobuz'),
+    ];
+    const deduped = deduplicateSourcesForDisplay(combined);
+    const tidalCount = deduped.filter((s) => s.id.startsWith('org.aideo.tidal:')).length;
+    const qobuzCount = deduped.filter((s) => s.id.startsWith('org.aideo.qobuz:')).length;
+
+    expect(tidalCount).toBe(4);
+    expect(qobuzCount).toBe(4);
+    expect(deduped).toHaveLength(8);
   });
 });

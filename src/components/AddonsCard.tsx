@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Link,
   Plus,
@@ -13,7 +14,7 @@ import {
   Puzzle,
 } from 'lucide-react';
 import { useStore } from '../store';
-import type { AddonInfo } from '../store/addonSlice';
+import { FEATURED_ADDON_CATALOG, type AddonAuthSpec, type AddonInfo } from '../store/addonSlice';
 
 type TidalDeviceAuthState =
   | { status: 'idle' }
@@ -166,6 +167,11 @@ export default function AddonsCard() {
   );
   const [url, setUrl] = useState('');
   const [tidalAuth, setTidalAuth] = useState<TidalDeviceAuthState>({ status: 'idle' });
+  const [expandedCreds, setExpandedCreds] = useState<Record<string, boolean>>({});
+  const [credInputs, setCredInputs] = useState<Record<string, Record<string, string>>>({});
+  const [connectedMap, setConnectedMap] = useState<Record<string, boolean>>({});
+  const [credErrorMap, setCredErrorMap] = useState<Record<string, string | null>>({});
+  const [credBusyMap, setCredBusyMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     void loadAddons();
@@ -200,6 +206,7 @@ export default function AddonsCard() {
             addonId,
             countryCode: data.countryCode ?? null,
           });
+          setConnectedMap((prev) => ({ ...prev, [addonId]: true }));
           window.dispatchEvent(
             new CustomEvent('ui-toast', {
               detail: { message: 'Tidal connected', type: 'success' },
@@ -252,6 +259,76 @@ export default function AddonsCard() {
     }
   };
 
+  const toggleCredForm = (addonId: string) => {
+    setExpandedCreds((prev) => ({ ...prev, [addonId]: !prev[addonId] }));
+    setCredErrorMap((prev) => ({ ...prev, [addonId]: null }));
+  };
+
+  const updateCredField = (addonId: string, key: string, value: string) => {
+    setCredInputs((prev) => ({
+      ...prev,
+      [addonId]: { ...(prev[addonId] || {}), [key]: value },
+    }));
+  };
+
+  const handleSaveCredentials = async (a: AddonInfo) => {
+    const credentials = credInputs[a.id] || {};
+    const cleanOrigin = a.origin ? a.origin.replace(/\/+$/, '') : '';
+    setCredBusyMap((prev) => ({ ...prev, [a.id]: true }));
+    setCredErrorMap((prev) => ({ ...prev, [a.id]: null }));
+    try {
+      if (cleanOrigin && /^https?:\/\//i.test(cleanOrigin)) {
+        const res = await fetch(`${cleanOrigin}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { authenticated?: boolean; error?: string };
+        if (!res.ok || data.authenticated === false) {
+          throw new Error(data.error || `Failed to authenticate ${a.name}`);
+        }
+      } else {
+        await invoke('addon_auth_login', { addonId: a.id, credentials });
+      }
+      setConnectedMap((prev) => ({ ...prev, [a.id]: true }));
+      setExpandedCreds((prev) => ({ ...prev, [a.id]: false }));
+      window.dispatchEvent(
+        new CustomEvent('ui-toast', {
+          detail: { message: `${a.name} connected`, type: 'success' },
+        })
+      );
+    } catch (e: any) {
+      setCredErrorMap((prev) => ({
+        ...prev,
+        [a.id]: e?.message || `Failed to authenticate ${a.name}`,
+      }));
+    } finally {
+      setCredBusyMap((prev) => ({ ...prev, [a.id]: false }));
+    }
+  };
+
+  const handleDisconnect = async (a: AddonInfo) => {
+    const cleanOrigin = a.origin ? a.origin.replace(/\/+$/, '') : '';
+    try {
+      if (cleanOrigin && /^https?:\/\//i.test(cleanOrigin)) {
+        await fetch(`${cleanOrigin}/auth/logout`, { method: 'POST' });
+      } else {
+        await invoke('addon_auth_logout', { addonId: a.id });
+      }
+    } catch {
+      // Ignore logout network error
+    }
+    setConnectedMap((prev) => ({ ...prev, [a.id]: false }));
+    if (tidalAuth.status !== 'idle' && tidalAuth.addonId === a.id) {
+      setTidalAuth({ status: 'idle' });
+    }
+  };
+
+  const handleInstallCatalogItem = async (manifestUrl: string) => {
+    if (addonBusy) return;
+    await installAddon(manifestUrl);
+  };
+
   const submit = async () => {
     const value = url.trim();
     if (!value || addonBusy) return;
@@ -260,14 +337,35 @@ export default function AddonsCard() {
   };
 
   const isCore = (a: AddonInfo) => Boolean(a.builtin || a.origin === 'internal');
+  const isTidalAddon = (a: AddonInfo) =>
+    !isCore(a) && (a.id === 'org.aideo.tidal' || a.id.endsWith('.tidal') || a.name.trim().toLowerCase() === 'tidal');
+
+  const getEffectiveAuth = (a: AddonInfo): AddonAuthSpec | null => {
+    if (isCore(a)) return null;
+    if (a.auth) return a.auth;
+    if (isTidalAddon(a)) return { type: 'device_code', label: 'Connect Tidal' };
+    return null;
+  };
+
   const coreAddons = addons.filter(isCore);
   const externalAddons = addons.filter((a) => !isCore(a));
+  const installedIds = new Set(addons.map((a) => a.id.toLowerCase()));
+  const uninstalledFeatured = FEATURED_ADDON_CATALOG.filter(
+    (item) => !installedIds.has(item.id.toLowerCase())
+  );
 
   const renderAddonCard = (a: AddonInfo) => {
     const core = isCore(a);
     const isEnabled = a.enabled !== false;
-    const isTidal = !core && (a.id === 'org.aideo.tidal' || a.id.endsWith('.tidal'));
-    const isThisTidalAuth = isTidal && tidalAuth.status !== 'idle' && tidalAuth.addonId === a.id;
+    const isTidal = isTidalAddon(a);
+    const authSpec = getEffectiveAuth(a);
+    const isDeviceCode = authSpec?.type === 'device_code';
+    const isCredsOrToken = authSpec?.type === 'credentials' || authSpec?.type === 'token';
+    const isThisDeviceAuth = isDeviceCode && tidalAuth.status !== 'idle' && tidalAuth.addonId === a.id;
+    const isCredExpanded = Boolean(expandedCreds[a.id]);
+    const isConnected = Boolean(connectedMap[a.id]) || (isThisDeviceAuth && tidalAuth.status === 'connected');
+    const credError = credErrorMap[a.id];
+    const credBusy = Boolean(credBusyMap[a.id]);
 
     return (
       <div
@@ -280,243 +378,380 @@ export default function AddonsCard() {
           borderRadius: 12,
           padding: '12px 16px',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
+          flexDirection: 'column',
+          gap: 10,
           transition: 'background-color 0.2s ease, border-color 0.2s ease',
         }}
       >
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
-              {a.name}
-            </span>
-            <span
-              style={{
-                background: 'rgba(255, 255, 255, 0.06)',
-                borderRadius: 9999,
-                padding: '1px 7px',
-                fontSize: 10,
-                fontWeight: 500,
-                color: 'var(--text-dim)',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              v{a.version}
-            </span>
-            {core ? (
-              <span
-                title="Core sources cannot be disabled"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '2px 8px',
-                  borderRadius: 6,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  color: 'var(--text-dim)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                }}
-              >
-                <Lock size={12} />
-                <span>Core Source</span>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+                {a.name}
               </span>
-            ) : (
               <span
-                title={a.origin}
                 style={{
-                  background: 'rgba(255, 255, 255, 0.04)',
-                  border: '1px solid rgba(255, 255, 255, 0.06)',
-                  borderRadius: 6,
-                  padding: '1px 6px',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  borderRadius: 9999,
+                  padding: '1px 7px',
                   fontSize: 10,
+                  fontWeight: 500,
                   color: 'var(--text-dim)',
-                  maxWidth: 200,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {a.origin}
+                v{a.version}
               </span>
+              {core ? (
+                <span
+                  title="Core sources cannot be disabled"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    color: 'var(--text-dim)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                  }}
+                >
+                  <Lock size={12} />
+                  <span>Core Source</span>
+                </span>
+              ) : (
+                <span
+                  title={a.origin}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    borderRadius: 6,
+                    padding: '1px 6px',
+                    fontSize: 10,
+                    color: 'var(--text-dim)',
+                    maxWidth: 200,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {a.origin}
+                </span>
+              )}
+            </div>
+
+            {a.description && (
+              <div className="addons-row-meta" style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                {a.description}
+              </div>
+            )}
+
+            {a.resources && a.resources.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {a.resources.map((res) => (
+                  <ResourceBadge key={res} resource={res} />
+                ))}
+              </div>
+            )}
+
+            {isThisDeviceAuth && tidalAuth.status === 'polling' && (
+              <div
+                style={{
+                  marginTop: 4,
+                  padding: '8px 10px',
+                  borderRadius: 8,
+                  background: 'rgba(14, 165, 233, 0.08)',
+                  border: '1px solid rgba(14, 165, 233, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                  fontSize: 11,
+                }}
+              >
+                <span style={{ color: 'var(--text-dim)' }}>Pair code:</span>
+                <code
+                  data-testid="tidal-user-code"
+                  style={{
+                    fontWeight: 700,
+                    color: '#38bdf8',
+                    background: 'rgba(0, 0, 0, 0.25)',
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                  }}
+                >
+                  {tidalAuth.userCode}
+                </code>
+                <a
+                  href={tidalAuth.verificationUriComplete}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#38bdf8',
+                    fontWeight: 600,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Open Tidal Link
+                </a>
+                <button
+                  type="button"
+                  aria-label="Cancel Tidal login"
+                  className="settings-btn"
+                  onClick={() => setTidalAuth({ status: 'idle' })}
+                  style={{
+                    padding: '2px 8px',
+                    fontSize: 10,
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {isThisDeviceAuth && tidalAuth.status === 'error' && (
+              <div
+                role="alert"
+                style={{
+                  marginTop: 4,
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  color: '#f87171',
+                  fontSize: 11,
+                }}
+              >
+                {tidalAuth.message}
+              </div>
             )}
           </div>
 
-          {a.resources && a.resources.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              {a.resources.map((res) => (
-                <ResourceBadge key={res} resource={res} />
-              ))}
-            </div>
-          )}
-
-          {isThisTidalAuth && tidalAuth.status === 'polling' && (
-            <div
-              style={{
-                marginTop: 4,
-                padding: '8px 10px',
-                borderRadius: 8,
-                background: 'rgba(14, 165, 233, 0.08)',
-                border: '1px solid rgba(14, 165, 233, 0.25)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                flexWrap: 'wrap',
-                fontSize: 11,
-              }}
-            >
-              <span style={{ color: 'var(--text-dim)' }}>Pair code:</span>
-              <code
-                data-testid="tidal-user-code"
-                style={{
-                  fontWeight: 700,
-                  color: '#38bdf8',
-                  background: 'rgba(0, 0, 0, 0.25)',
-                  padding: '2px 6px',
-                  borderRadius: 4,
-                }}
-              >
-                {tidalAuth.userCode}
-              </code>
-              <a
-                href={tidalAuth.verificationUriComplete}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  color: '#38bdf8',
-                  fontWeight: 600,
-                  textDecoration: 'underline',
-                }}
-              >
-                Open Tidal Link
-              </a>
-              <button
-                type="button"
-                aria-label="Cancel Tidal login"
-                className="settings-btn"
-                onClick={() => setTidalAuth({ status: 'idle' })}
-                style={{
-                  padding: '2px 8px',
-                  fontSize: 10,
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {isThisTidalAuth && tidalAuth.status === 'error' && (
-            <div
-              role="alert"
-              style={{
-                marginTop: 4,
-                padding: '6px 10px',
-                borderRadius: 8,
-                background: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.25)',
-                color: '#f87171',
-                fontSize: 11,
-              }}
-            >
-              {tidalAuth.message}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-          {core ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-dim)', opacity: 0.75 }}>
-                Core sources cannot be disabled
-              </span>
-              <SlidingSwitch
-                checked={isEnabled}
-                disabled={true}
-                ariaLabel={`Enable ${a.name}`}
-              />
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {isTidal && (
-                <>
-                  {isThisTidalAuth && tidalAuth.status === 'connected' ? (
-                    <>
-                      <span
-                        style={{
-                          padding: '4px 8px',
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          background: 'rgba(16, 185, 129, 0.12)',
-                          color: '#34d399',
-                          border: '1px solid rgba(16, 185, 129, 0.28)',
-                        }}
-                      >
-                        {tidalAuth.countryCode
-                          ? `Connected (${tidalAuth.countryCode})`
-                          : 'Connected'}
-                      </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            {core ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-dim)', opacity: 0.75 }}>
+                  Core sources cannot be disabled
+                </span>
+                <SlidingSwitch
+                  checked={isEnabled}
+                  disabled={true}
+                  ariaLabel={`Enable ${a.name}`}
+                />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {isDeviceCode && (
+                  <>
+                    {isThisDeviceAuth && tidalAuth.status === 'connected' ? (
+                      <>
+                        <span
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            background: 'rgba(16, 185, 129, 0.12)',
+                            color: '#34d399',
+                            border: '1px solid rgba(16, 185, 129, 0.28)',
+                          }}
+                        >
+                          {tidalAuth.countryCode
+                            ? `Connected (${tidalAuth.countryCode})`
+                            : 'Connected'}
+                        </span>
+                        <button
+                          type="button"
+                          className="settings-btn"
+                          aria-label={isTidal ? 'Reconnect Tidal' : `Reconnect ${a.name}`}
+                          onClick={() => void startTidalDeviceAuth(a)}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: 11,
+                          }}
+                        >
+                          {isTidal ? 'Reconnect Tidal' : `Reconnect ${a.name}`}
+                        </button>
+                      </>
+                    ) : (
                       <button
                         type="button"
                         className="settings-btn"
-                        aria-label="Reconnect Tidal"
+                        aria-label={isTidal ? 'Connect Tidal' : (authSpec?.label || `Connect ${a.name}`)}
+                        disabled={tidalAuth.status === 'starting'}
                         onClick={() => void startTidalDeviceAuth(a)}
                         style={{
                           padding: '6px 12px',
                           fontSize: 11,
                         }}
                       >
-                        Reconnect Tidal
+                        {tidalAuth.status === 'starting' && tidalAuth.addonId === a.id
+                          ? 'Connecting…'
+                          : tidalAuth.status === 'polling' && tidalAuth.addonId === a.id
+                            ? 'Restart Pair'
+                            : isTidal
+                              ? 'Connect Tidal'
+                              : (authSpec?.label || `Connect ${a.name}`)}
                       </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="settings-btn"
-                      aria-label="Connect Tidal"
-                      disabled={tidalAuth.status === 'starting'}
-                      onClick={() => void startTidalDeviceAuth(a)}
-                      style={{
-                        padding: '6px 12px',
-                        fontSize: 11,
-                      }}
-                    >
-                      {tidalAuth.status === 'starting' && tidalAuth.addonId === a.id
-                        ? 'Connecting…'
-                        : tidalAuth.status === 'polling' && tidalAuth.addonId === a.id
-                          ? 'Restart Pair'
-                          : 'Connect Tidal'}
-                    </button>
-                  )}
-                </>
-              )}
-              <SlidingSwitch
-                checked={isEnabled}
-                disabled={false}
-                ariaLabel={`Enable ${a.name}`}
-                onChange={(nextChecked) => void setAddonEnabled(a.id, nextChecked)}
-              />
-              <button
-                type="button"
-                className="settings-btn settings-btn-danger"
-                aria-label={`Remove ${a.name}`}
-                onClick={() => void removeAddon(a.id)}
+                    )}
+                    {authSpec?.fields && authSpec.fields.length > 0 && (
+                      <button
+                        type="button"
+                        className="settings-btn addons-auth-btn"
+                        onClick={() => toggleCredForm(a.id)}
+                        style={{ padding: '6px 10px', fontSize: 11 }}
+                      >
+                        {connectedMap[a.id] ? `${a.name} Connected` : 'Use Credentials / Token'}
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {isCredsOrToken && (
+                  <button
+                    type="button"
+                    className="settings-btn addons-auth-btn"
+                    onClick={() => toggleCredForm(a.id)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 11,
+                      ...(isConnected
+                        ? {
+                            background: 'rgba(16, 185, 129, 0.12)',
+                            color: '#34d399',
+                            border: '1px solid rgba(16, 185, 129, 0.28)',
+                          }
+                        : {}),
+                    }}
+                  >
+                    {isConnected ? `${a.name} Connected` : (authSpec?.label || `Configure ${a.name}`)}
+                  </button>
+                )}
+
+                <SlidingSwitch
+                  checked={isEnabled}
+                  disabled={false}
+                  ariaLabel={`Enable ${a.name}`}
+                  onChange={(nextChecked) => void setAddonEnabled(a.id, nextChecked)}
+                />
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-danger"
+                  aria-label={`Remove ${a.name}`}
+                  onClick={() => void removeAddon(a.id)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 11,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Trash2 size={14} />
+                  <span>Remove</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Expandable Credentials / Token Form */}
+        {!core && isCredExpanded && authSpec && (
+          <form
+            className="addons-cred-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleSaveCredentials(a);
+            }}
+            style={{
+              marginTop: 4,
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'rgba(0, 0, 0, 0.2)',
+              border: '1px solid var(--glass-border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            {authSpec.helpText && (
+              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{authSpec.helpText}</div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+              {(authSpec.fields ?? []).map((field) => (
+                <label
+                  key={field.key}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-dim)' }}
+                >
+                  <span>{field.label}</span>
+                  <input
+                    aria-label={field.label}
+                    type={field.type || 'text'}
+                    placeholder={field.placeholder || ''}
+                    required={Boolean(field.required)}
+                    value={credInputs[a.id]?.[field.key] ?? ''}
+                    onChange={(e) => updateCredField(a.id, field.key, e.target.value)}
+                    style={{
+                      padding: '6px 10px',
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: 8,
+                      color: 'var(--text)',
+                      fontSize: 12,
+                      outline: 'none',
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+            {credError && (
+              <div
+                role="alert"
                 style={{
-                  padding: '6px 12px',
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  color: '#f87171',
                   fontSize: 11,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
                 }}
               >
-                <Trash2 size={14} />
-                <span>Remove</span>
+                {credError}
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+              {isConnected && (
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-danger"
+                  aria-label={`Disconnect ${a.name}`}
+                  onClick={() => void handleDisconnect(a)}
+                  style={{ padding: '6px 12px', fontSize: 11 }}
+                >
+                  Disconnect
+                </button>
+              )}
+              <button
+                type="submit"
+                className="settings-btn"
+                aria-label={`Save ${a.name} credentials`}
+                disabled={credBusy}
+                style={{ padding: '6px 14px', fontSize: 11 }}
+              >
+                {credBusy ? 'Saving…' : 'Save & Connect'}
               </button>
             </div>
-          )}
-        </div>
+          </form>
+        )}
       </div>
     );
   };
@@ -595,6 +830,94 @@ export default function AddonsCard() {
           </button>
         </div>
       </div>
+
+      {/* Featured Addons Catalog */}
+      {uninstalledFeatured.length > 0 && (
+        <div className="addons-catalog-section" style={{ marginTop: 20 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 10,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: 'var(--text)',
+                letterSpacing: '-0.2px',
+              }}
+            >
+              Featured Addons
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              1-click local sidecar catalog
+            </span>
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 8,
+            }}
+          >
+            {uninstalledFeatured.map((item) => (
+              <div
+                key={item.id}
+                className="addons-catalog-item"
+                style={{
+                  background: 'var(--glass)',
+                  border: '1px solid var(--glass-border)',
+                  borderRadius: 12,
+                  padding: '10px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>
+                      {item.name}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        borderRadius: 6,
+                        background: 'rgba(255, 255, 255, 0.06)',
+                        color: 'var(--text-dim)',
+                      }}
+                    >
+                      {item.resources.join(', ')}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', lineHeight: 1.35 }}>
+                    {item.description}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="settings-btn addons-catalog-install-btn"
+                  aria-label={`Install ${item.name}`}
+                  disabled={addonBusy}
+                  onClick={() => void handleInstallCatalogItem(item.manifestUrl)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 11,
+                    flexShrink: 0,
+                  }}
+                >
+                  Install
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Core Sources Section */}
       {coreAddons.length > 0 && (

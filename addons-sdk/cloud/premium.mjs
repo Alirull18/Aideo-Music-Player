@@ -67,6 +67,11 @@ export function createPremiumAdapter(config, fetchUpstream) {
   const session = {
     accessToken: config.token || '',
     refreshToken: config.refreshToken || '',
+    clientId: config.clientId || '',
+    clientSecret: config.clientSecret || '',
+    appId: config.appId || '',
+    secret: config.secret || '',
+    formatId: config.formatId || '27',
     expiresAt: config.token && !config.refreshToken ? Infinity : (config.token ? Date.now() + 3600_000 : 0),
     country: config.country || '',
     refreshPromise: null,
@@ -90,14 +95,14 @@ export function createPremiumAdapter(config, fetchUpstream) {
     } catch { throw upstreamError(); }
   }
   async function refreshAccessToken() {
-    if (!tidal || !config.clientId || !session.refreshToken) throw upstreamError();
+    if (!tidal || !session.clientId || !session.refreshToken) throw upstreamError();
     if (session.refreshPromise) return session.refreshPromise;
     session.refreshPromise = (async () => {
       const res = await postForm('https://auth.tidal.com/v1/oauth2/token', {
         grant_type: 'refresh_token',
         refresh_token: session.refreshToken,
-        client_id: config.clientId,
-        ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+        client_id: session.clientId,
+        ...(session.clientSecret ? { client_secret: session.clientSecret } : {}),
       });
       const data = await readJson(res);
       if (typeof data?.access_token !== 'string' || !data.access_token) throw upstreamError();
@@ -114,8 +119,11 @@ export function createPremiumAdapter(config, fetchUpstream) {
     return session.refreshPromise;
   }
   async function ensureAccessToken() {
-    if (!tidal) return config.token;
-    if ((!session.accessToken || Date.now() + 60_000 >= session.expiresAt) && config.clientId && session.refreshToken) {
+    if (!tidal) {
+      if (!session.accessToken) throw upstreamError();
+      return session.accessToken;
+    }
+    if ((!session.accessToken || Date.now() + 60_000 >= session.expiresAt) && session.clientId && session.refreshToken) {
       await refreshAccessToken();
     }
     if (!session.accessToken) throw upstreamError();
@@ -126,9 +134,9 @@ export function createPremiumAdapter(config, fetchUpstream) {
     const url = new URL(path, base);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
     const headers = tidal ? { Authorization: `Bearer ${token}` }
-      : { 'X-App-Id': config.appId, 'X-User-Auth-Token': token };
+      : { 'X-App-Id': session.appId, 'X-User-Auth-Token': token };
     const res = await fetchSafe(url, headers);
-    if (tidal && res.status === 401 && allowRetry && config.clientId && session.refreshToken) {
+    if (tidal && res.status === 401 && allowRetry && session.clientId && session.refreshToken) {
       await res.body?.cancel();
       await refreshAccessToken();
       return api(path, params, false);
@@ -163,7 +171,7 @@ export function createPremiumAdapter(config, fetchUpstream) {
         : { format_id: quality, intent: 'stream', track_id: id };
       const ts = Math.floor(Date.now() / 1000);
       const input = 'trackgetFileUrl' + Object.keys(params).sort().map(key => `${key}${params[key]}`).join('')
-        + ts + config.secret;
+        + ts + session.secret;
       const signedParams = tidal ? params : { ...params, request_ts: ts,
         request_sig: createHash('md5').update(input).digest('hex') };
       const response = await api(tidal ? `tracks/${id}/playbackinfopostpaywall` : 'track/getFileUrl', signedParams);
@@ -177,6 +185,75 @@ export function createPremiumAdapter(config, fetchUpstream) {
   }
 
   return {
+    status() {
+      if (tidal) {
+        return {
+          ok: true,
+          provider: 'tidal',
+          authenticated: Boolean(session.accessToken),
+          hasRefreshToken: Boolean(session.refreshToken),
+          hasClientCredentials: Boolean(session.clientId && session.clientSecret),
+          expiresAt: Number.isFinite(session.expiresAt) && session.expiresAt > 0 ? session.expiresAt : null,
+        };
+      }
+      return {
+        ok: true,
+        provider: 'qobuz',
+        authenticated: Boolean(session.appId && session.accessToken),
+      };
+    },
+    async login(creds = {}) {
+      if (!creds || typeof creds !== 'object') throw invalid();
+      if (tidal) {
+        if (typeof creds.clientId === 'string' && creds.clientId.trim()) session.clientId = creds.clientId.trim();
+        if (typeof creds.clientSecret === 'string' && creds.clientSecret.trim()) session.clientSecret = creds.clientSecret.trim();
+        const tok = creds.accessToken ?? creds.token;
+        if (typeof tok === 'string' && tok.trim()) {
+          session.accessToken = tok.trim();
+          session.expiresAt = Date.now() + 3600_000;
+        }
+        if (typeof creds.refreshToken === 'string' && creds.refreshToken.trim()) {
+          session.refreshToken = creds.refreshToken.trim();
+        }
+        const cc = creds.countryCode ?? creds.country;
+        if (typeof cc === 'string' && /^[A-Z]{2}$/i.test(cc.trim())) {
+          session.country = cc.trim().toUpperCase();
+        }
+        if (!session.accessToken && session.clientId && session.refreshToken) {
+          await refreshAccessToken();
+        }
+        return this.status();
+      }
+      if (typeof creds.appId === 'string' && creds.appId.trim()) session.appId = creds.appId.trim();
+      const sec = creds.appSecret ?? creds.secret;
+      if (typeof sec === 'string' && sec.trim()) session.secret = sec.trim();
+      if (creds.formatId !== undefined && String(creds.formatId).trim()) session.formatId = String(creds.formatId).trim();
+      const directToken = creds.userAuthToken ?? creds.token;
+      if (typeof directToken === 'string' && directToken.trim()) {
+        session.accessToken = directToken.trim();
+      } else {
+        const loginUser = (creds.email ?? creds.username ?? '').trim();
+        const password = typeof creds.password === 'string' ? creds.password : '';
+        if (loginUser && password && session.appId) {
+          const loginUrl = new URL('user/login', base);
+          loginUrl.searchParams.set('email', loginUser);
+          loginUrl.searchParams.set('password', password);
+          loginUrl.searchParams.set('app_id', session.appId);
+          const res = await fetchSafe(loginUrl, { 'X-App-Id': session.appId });
+          const data = await readJson(res);
+          if (typeof data?.user_auth_token !== 'string' || !data.user_auth_token) throw invalid();
+          session.accessToken = data.user_auth_token;
+        }
+      }
+      return this.status();
+    },
+    async logout() {
+      session.accessToken = '';
+      session.refreshToken = '';
+      session.expiresAt = 0;
+      session.deviceCode = '';
+      return this.status();
+    },
     async catalog(query = '', offset = 0, limit = 100) {
       validateCatalog(query, offset, limit);
       const countryCode = tidal ? await ensureCountry() : undefined;
@@ -186,14 +263,30 @@ export function createPremiumAdapter(config, fetchUpstream) {
       const rows = json?.tracks?.items;
       if (!Array.isArray(rows)) throw upstreamError();
       return rows.filter(item => item && /^\d{1,20}$/.test(String(item.id)) && item.streamable !== false)
-        .slice(0, limit).map(item => ({
-          id: String(item.id), title: title(item),
-          artist: (tidal ? item.artist?.name : item.performer?.name) || item.artists?.[0]?.name || 'Unknown Artist',
-          album: item.album?.title || 'Unknown Album', duration: Number.isFinite(item.duration) && item.duration >= 0 ? item.duration : 0,
-          coverId: (tidal ? item.album?.cover : item.album?.image?.large || item.album?.image?.small) ? String(item.id) : null,
-          trackNumber: (tidal ? item.trackNumber : item.track_number) ?? null,
-          discNumber: (tidal ? item.volumeNumber : item.media_number) ?? null,
-        }));
+        .slice(0, limit).map(item => {
+          const rawRate = tidal ? item.sampleRate : (item.maximum_sampling_rate ?? item.sampleRate);
+          const sampleRate = Number.isFinite(rawRate) && rawRate > 0 ? (rawRate < 1000 ? rawRate * 1000 : rawRate) : undefined;
+          const rawDepth = tidal ? item.bitDepth : (item.maximum_bit_depth ?? item.bitDepth);
+          const bitDepth = Number.isInteger(rawDepth) && rawDepth > 0 ? rawDepth : undefined;
+          const explicit = typeof item.explicit === 'boolean' ? item.explicit
+            : (typeof item.parental_warning === 'boolean' ? item.parental_warning : undefined);
+          return {
+            id: String(item.id), title: title(item),
+            artist: (tidal ? item.artist?.name : item.performer?.name) || item.artists?.[0]?.name || 'Unknown Artist',
+            album: item.album?.title || 'Unknown Album', duration: Number.isFinite(item.duration) && item.duration >= 0 ? item.duration : 0,
+            coverId: (tidal ? item.album?.cover : item.album?.image?.large || item.album?.image?.small) ? String(item.id) : null,
+            trackNumber: (tidal ? item.trackNumber : item.track_number) ?? null,
+            discNumber: (tidal ? item.volumeNumber : item.media_number) ?? null,
+            lossless: true,
+            codec: 'FLAC',
+            ...(sampleRate ? { sampleRate } : {}),
+            ...(bitDepth ? { bitDepth } : {}),
+            ...(typeof item.isrc === 'string' && item.isrc.trim() ? { isrc: item.isrc.trim() } : {}),
+            ...(typeof item.album?.upc === 'string' && item.album.upc.trim() ? { upc: item.album.upc.trim() } : {}),
+            ...(typeof item.version === 'string' && item.version.trim() ? { version: item.version.trim() } : {}),
+            ...(explicit !== undefined ? { explicit } : {}),
+          };
+        });
     },
     async media(id, cover, headers = {}) {
       validateId(id);
@@ -207,11 +300,11 @@ export function createPremiumAdapter(config, fetchUpstream) {
       return true;
     },
     async startDeviceAuth() {
-      if (!tidal || !config.clientId) throw invalid();
+      if (!tidal || !session.clientId) throw invalid();
       const data = await readJson(await postForm('https://auth.tidal.com/v1/oauth2/device_authorization', {
-        client_id: config.clientId,
+        client_id: session.clientId,
         scope: 'r_usr w_usr w_sub',
-        ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+        ...(session.clientSecret ? { client_secret: session.clientSecret } : {}),
       }));
       if (typeof data?.deviceCode !== 'string' || !data.deviceCode
         || typeof data?.userCode !== 'string' || !data.userCode) throw upstreamError();
@@ -232,10 +325,10 @@ export function createPremiumAdapter(config, fetchUpstream) {
       };
     },
     async pollDeviceAuth() {
-      if (!tidal || !config.clientId || !session.deviceCode) throw invalid();
+      if (!tidal || !session.clientId || !session.deviceCode) throw invalid();
       const res = await postForm('https://auth.tidal.com/v1/oauth2/token', {
-        client_id: config.clientId,
-        ...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+        client_id: session.clientId,
+        ...(session.clientSecret ? { client_secret: session.clientSecret } : {}),
         device_code: session.deviceCode,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
         scope: 'r_usr w_usr w_sub',

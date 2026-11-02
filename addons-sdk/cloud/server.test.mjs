@@ -288,3 +288,38 @@ test('upstream errors are generic over HTTP and stream errors preserve range sta
   assert.equal(audio.status, 416);
   assert.ok(!(await audio.text()).includes('private-error'));
 });
+
+test('manifest exposes auth spec and /auth/status, /auth/login, /auth/logout manage Subsonic and Jellyfin sessions', async t => {
+  const base = await serve(t, subsonic, async () => json({ 'subsonic-response': { status: 'ok' } }));
+  const manifest = await (await fetch(`${base}/manifest.json`)).json();
+  assert.equal(manifest.description, 'Personal cloud music server (Subsonic / Navidrome API)');
+  assert.equal(manifest.auth?.type, 'credentials');
+  assert.equal(manifest.auth?.fields?.length, 3);
+
+  const statusBefore = await (await fetch(`${base}/auth/status`)).json();
+  assert.equal(statusBefore.authenticated, true);
+  assert.equal(statusBefore.provider, 'subsonic');
+
+  const logoutRes = await fetch(`${base}/auth/logout`, { method: 'POST' });
+  assert.equal(logoutRes.status, 200);
+  const statusAfterLogout = await logoutRes.json();
+  assert.equal(statusAfterLogout.authenticated, false);
+
+  const badLogin = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentials: {} }),
+  });
+  assert.equal(badLogin.status, 400);
+
+  const loginRes = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentials: { host: 'https://navidrome.example.com', user: 'alice', pass: 'new-pass' } }),
+  });
+  assert.equal(loginRes.status, 200);
+  const statusAfterLogin = await loginRes.json();
+  assert.equal(statusAfterLogin.authenticated, true);
+  assert.equal(statusAfterLogin.host, 'https://navidrome.example.com/');
+  assert.equal(statusAfterLogin.user, 'alice');
+});

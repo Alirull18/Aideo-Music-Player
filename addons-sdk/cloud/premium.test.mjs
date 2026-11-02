@@ -373,3 +373,67 @@ test('Tidal loopback HTTP Device Authorization flow authenticates and enables ca
   const audioRes = await fetch(streamData.url);
   assert.equal(await audioRes.text(), 'device-audio-stream');
 });
+
+test('premium manifest auth spec, /auth/status, /auth/login, /auth/logout and Hi-Res search metadata', async t => {
+  const server = createServer(loadConfig(qobuz), async url => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/user/login')) {
+      assert.equal(parsed.searchParams.get('email'), 'user@example.com');
+      assert.equal(parsed.searchParams.get('password'), 'pass-123');
+      return json({ user_auth_token: 'logged-in-qobuz-token' });
+    }
+    if (parsed.pathname.endsWith('/track/search')) {
+      return json({
+        tracks: {
+          items: [{
+            id: 99,
+            title: 'Master Track',
+            version: 'Studio Master',
+            performer: { name: 'Performer' },
+            album: { title: 'Hi-Res Album', upc: '009988776655' },
+            duration: 210,
+            isrc: 'FRZ112233445',
+            parental_warning: true,
+            maximum_sampling_rate: 192,
+            maximum_bit_depth: 24,
+          }],
+        },
+      });
+    }
+    return json({});
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  const manifestData = await (await fetch(`${base}/manifest.json`)).json();
+  assert.equal(manifestData.description, '24-bit / 192 kHz Studio Masters streaming');
+  assert.equal(manifestData.auth?.type, 'credentials');
+
+  const status1 = await (await fetch(`${base}/auth/status`)).json();
+  assert.equal(status1.authenticated, true);
+
+  const logout = await (await fetch(`${base}/auth/logout`, { method: 'POST' })).json();
+  assert.equal(logout.authenticated, false);
+
+  const loginRes = await fetch(`${base}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentials: { appId: 'authorized-app', email: 'user@example.com', password: 'pass-123' } }),
+  });
+  assert.equal(loginRes.status, 200);
+  const loginStatus = await loginRes.json();
+  assert.equal(loginStatus.authenticated, true);
+
+  const searchData = await (await fetch(`${base}/search?q=master`)).json();
+  assert.equal(searchData.tracks.length, 1);
+  assert.equal(searchData.tracks[0].lossless, true);
+  assert.equal(searchData.tracks[0].codec, 'FLAC');
+  assert.equal(searchData.tracks[0].sampleRate, 192000);
+  assert.equal(searchData.tracks[0].bitDepth, 24);
+  assert.equal(searchData.tracks[0].isrc, 'FRZ112233445');
+  assert.equal(searchData.tracks[0].upc, '009988776655');
+  assert.equal(searchData.tracks[0].version, 'Studio Master');
+  assert.equal(searchData.tracks[0].explicit, true);
+});

@@ -501,7 +501,25 @@ export const sourceSearchQuery = (track: Track) => {
   }
   return `${normalizeArtist(artist)} ${matchingTitle(track)}`.trim();
 };
-export const sourceName = (source: PlaybackSource) => ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'Webstream', addon: 'Addon' })[source.provider];
+const addonDisplayNames = new Map<string, string>();
+
+export function registerAddonNames(addons: readonly { id: string; name: string; builtin?: boolean }[]): void {
+  addonDisplayNames.clear();
+  for (const addon of addons) {
+    if (!addon.builtin && addon.id?.trim() && addon.name?.trim() && addon.name.trim().toLowerCase() !== 'addon') {
+      addonDisplayNames.set(addon.id.trim().toLowerCase(), addon.name.trim());
+    }
+  }
+}
+
+export const sourceName = (source: PlaybackSource) => {
+  if (source.provider === 'addon') {
+    const addonId = source.id.split(':')[0]?.trim().toLowerCase() ?? '';
+    const customName = addonId ? addonDisplayNames.get(addonId) : undefined;
+    return customName ? `Addon (${customName})` : 'Addon';
+  }
+  return ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'Webstream' })[source.provider];
+};
 
 export const sourceMetadata = (track: SourceMetadata): SourceMetadata => ({
   title: track.title, artist: track.artist, album: track.album ?? null, duration: track.duration,
@@ -1066,6 +1084,7 @@ export const inFlightResolutions = new Map<string, Promise<ResolvedSource>>();
 export const clearSourceCache = () => {
   cache.clear();
   inFlightResolutions.clear();
+  addonDisplayNames.clear();
 };
 
 export async function resolveSource(source: PlaybackSource, quality: StreamingQuality, fresh = false, timeoutMs = 15000): Promise<ResolvedSource> {
@@ -1128,8 +1147,16 @@ export function deduplicateSourcesForDisplay(sources: PlaybackSource[], selectio
   const result: PlaybackSource[] = [];
   const seenKeys = new Set<string>();
 
+  const displayBucketKey = (source: PlaybackSource): string => {
+    if (source.provider === 'addon') {
+      const prefix = source.id.split(':')[0]?.trim().toLowerCase();
+      return prefix && prefix.includes('.') ? `addon:${prefix}` : 'addon';
+    }
+    return source.provider;
+  };
+
   const groupSignature = (s: PlaybackSource): string => {
-    const provider = s.provider;
+    const provider = displayBucketKey(s);
     const lossless = s.catalog_quality?.lossless ? '1' : '0';
     const rate = s.catalog_quality?.sample_rate || 0;
     const depth = s.catalog_quality?.bit_depth || 0;
@@ -1147,7 +1174,7 @@ export function deduplicateSourcesForDisplay(sources: PlaybackSource[], selectio
       return `local:${s.id}`;
     }
 
-    // Streaming catalog (Tidal, Qobuz)
+    // Streaming catalog (Tidal, Qobuz, Addons)
     const album = normalizeText(s.metadata?.album || '');
     return `${provider}:${album}:${qKey}:${version}:${explicit}`;
   };
@@ -1174,7 +1201,7 @@ export function deduplicateSourcesForDisplay(sources: PlaybackSource[], selectio
   for (const [, candidates] of groups) {
     const selectedItem = candidates.find(c => sourceKey(c) === selectedKey);
     const chosen = selectedItem || candidates[0];
-    const provider = chosen.provider;
+    const provider = displayBucketKey(chosen);
     const count = providerCounts.get(provider) || 0;
     const max = maxPerProvider[provider] ?? 4;
 

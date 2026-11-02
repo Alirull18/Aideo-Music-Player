@@ -171,17 +171,45 @@ pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(c: &reqwest::Client
     tokio::time::timeout(budget, fut).await.map_err(|_| "Addon timed out".to_string())?
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct AddonAuthField {
+    pub key: String,
+    pub label: String,
+    #[serde(default, rename = "type")]
+    pub field_type: Option<String>,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    #[serde(default)]
+    pub required: Option<bool>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct AddonAuthSpec {
+    #[serde(rename = "type")]
+    pub auth_type: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default, rename = "helpText")]
+    pub help_text: Option<String>,
+    #[serde(default)]
+    pub fields: Vec<AddonAuthField>,
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     pub icon: Option<String>,
     #[serde(default)]
     pub resources: Vec<String>,
     #[serde(default, rename = "contentType")]
     pub content_type: Option<String>,
+    #[serde(default)]
+    pub auth: Option<AddonAuthSpec>,
 }
 
 fn clean(s: &str, max: usize) -> bool {
@@ -232,7 +260,21 @@ struct RawTrack {
     #[serde(default)]
     isrc: Option<String>,
     #[serde(default)]
+    upc: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    explicit: Option<bool>,
+    #[serde(default)]
     format: Option<String>,
+    #[serde(default)]
+    codec: Option<String>,
+    #[serde(default)]
+    lossless: Option<bool>,
+    #[serde(default, rename = "sampleRate")]
+    sample_rate: Option<f64>,
+    #[serde(default, rename = "bitDepth")]
+    bit_depth: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -243,6 +285,11 @@ struct SearchResponse {
 
 fn lossless_format(f: &str) -> bool {
     matches!(f.to_ascii_lowercase().as_str(), "flac" | "alac" | "wav")
+}
+
+fn non_empty(s: &str, max: usize) -> Option<String> {
+    let trimmed = s.trim();
+    clean(trimmed, max).then(|| trimmed.to_string())
 }
 
 pub(crate) async fn search(c: &reqwest::Client, addon_id: &str, base: &Url, q: &str) -> Result<Vec<AddonTrack>, String> {
@@ -267,6 +314,14 @@ fn parse_tracks(addon_id: &str, tracks: Vec<serde_json::Value>) -> Vec<AddonTrac
             if !clean(&tid, 512) || !clean(&t.title, 512) {
                 return None;
             }
+            let codec = t
+                .codec
+                .as_deref()
+                .and_then(|s| non_empty(s, 64))
+                .or_else(|| t.format.as_deref().and_then(|s| non_empty(s, 64)));
+            let lossless = t.lossless.or_else(|| codec.as_deref().map(lossless_format));
+            let sample_rate = t.sample_rate.filter(|r| r.is_finite() && *r > 0.0);
+            let bit_depth = t.bit_depth.filter(|&b| b > 0);
             Some(AddonTrack {
                 id: format!("{addon_id}:{tid}"),
                 title: t.title,
@@ -274,8 +329,18 @@ fn parse_tracks(addon_id: &str, tracks: Vec<serde_json::Value>) -> Vec<AddonTrac
                 album: t.album.unwrap_or_default(),
                 duration: t.duration.filter(|d| d.is_finite() && *d >= 0.0).map(|d| d as u32),
                 cover_url: t.artwork_url.filter(|a| http_url(a)),
-                recording_evidence: RecordingEvidence { isrc: t.isrc.filter(|i| i.len() <= 32), ..Default::default() },
-                catalog_quality: SourceQuality { lossless: t.format.as_deref().map(lossless_format), ..Default::default() },
+                recording_evidence: RecordingEvidence {
+                    isrc: t.isrc.as_deref().and_then(|i| non_empty(i, 32)),
+                    upc: t.upc.as_deref().and_then(|u| non_empty(u, 32)),
+                    version: t.version.as_deref().and_then(|v| non_empty(v, 128)),
+                    explicit: t.explicit,
+                },
+                catalog_quality: SourceQuality {
+                    lossless,
+                    sample_rate,
+                    bit_depth,
+                    codec,
+                },
             })
         })
         .collect()
@@ -291,11 +356,30 @@ pub(crate) async fn catalog(c: &reqwest::Client, addon_id: &str, base: &Url, kin
 }
 
 /// Aideo extension: `/lyrics?q=` -> `{lyrics:[{syncedLyrics,plainLyrics,source,..}]}`.
-pub(crate) async fn lyrics(c: &reqwest::Client, base: &Url, q: &str) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn lyrics(
+    c: &reqwest::Client,
+    base: &Url,
+    q: &str,
+    title: Option<&str>,
+    artist: Option<&str>,
+    album: Option<&str>,
+    duration: Option<f64>,
+) -> Result<Vec<serde_json::Value>, String> {
     #[derive(Deserialize)]
     struct R { #[serde(default)] lyrics: Vec<serde_json::Value> }
     let mut u = endpoint(base, &["lyrics"]);
-    u.query_pairs_mut().append_pair("q", q);
+    {
+        let mut qp = u.query_pairs_mut();
+        qp.append_pair("q", q);
+        for (k, v) in [("title", title), ("artist", artist), ("album", album)] {
+            if let Some(s) = v.map(str::trim).filter(|s| !s.is_empty()) {
+                qp.append_pair(k, s);
+            }
+        }
+        if let Some(d) = duration.filter(|d| d.is_finite() && *d > 0.0) {
+            qp.append_pair("duration", &d.to_string());
+        }
+    }
     let r: R = get_json(c, u, SEARCH_BUDGET).await?;
     Ok(r.lyrics.into_iter().take(10).collect())
 }
@@ -328,8 +412,22 @@ struct RawStream {
     bit_depth: Option<u32>,
 }
 
-pub(crate) async fn resolve(c: &reqwest::Client, base: &Url, track_id: &str) -> Result<ResolvedStream, String> {
-    let s: RawStream = get_json(c, endpoint(base, &["stream", track_id]), STREAM_BUDGET).await?;
+pub(crate) async fn resolve(
+    c: &reqwest::Client,
+    base: &Url,
+    track_id: &str,
+    requested_quality: Option<crate::sources::StreamingQuality>,
+) -> Result<ResolvedStream, String> {
+    let mut req_url = endpoint(base, &["stream", track_id]);
+    if let Some(q) = requested_quality {
+        let q_str = match q {
+            crate::sources::StreamingQuality::BestAvailable => "best_available",
+            crate::sources::StreamingQuality::StandardLossless => "standard_lossless",
+            crate::sources::StreamingQuality::DataSaver => "data_saver",
+        };
+        req_url.query_pairs_mut().append_pair("quality", q_str);
+    }
+    let s: RawStream = get_json(c, req_url, STREAM_BUDGET).await?;
     if s.encrypted == Some(true) || s.manifest.as_deref() == Some("dash") {
         return Err("Addon stream type is not supported".into());
     }
@@ -351,6 +449,57 @@ pub(crate) async fn resolve(c: &reqwest::Client, base: &Url, track_id: &str) -> 
     })
 }
 
+async fn send_auth_json(req: reqwest::RequestBuilder, budget: Duration) -> Result<serde_json::Value, String> {
+    let fut = async {
+        let mut res = req.send().await.map_err(|e| e.without_url().to_string())?;
+        let status = res.status();
+        let mut body = Vec::new();
+        while let Some(chunk) = res.chunk().await.map_err(|e| e.without_url().to_string())? {
+            if body.len() + chunk.len() > MAX_BODY {
+                return Err("Addon response too large".into());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&body) {
+                if let Some(err) = val.get("error").and_then(|e| e.as_str()).filter(|s| !s.trim().is_empty()) {
+                    return Err(err.to_string());
+                }
+            }
+            return Err(format!("Addon auth HTTP {}", status.as_u16()));
+        }
+        serde_json::from_slice(&body).map_err(|_| "Addon returned invalid JSON".to_string())
+    };
+    tokio::time::timeout(budget, fut).await.map_err(|_| "Addon timed out".to_string())?
+}
+
+pub(crate) async fn auth_status(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
+    send_auth_json(c.get(endpoint(base, &["auth", "status"])), MANIFEST_BUDGET).await
+}
+
+pub(crate) async fn auth_start_device(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
+    send_auth_json(c.post(endpoint(base, &["auth", "device"])), MANIFEST_BUDGET).await
+}
+
+pub(crate) async fn auth_poll_device(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
+    send_auth_json(c.post(endpoint(base, &["auth", "poll"])), MANIFEST_BUDGET).await
+}
+
+pub(crate) async fn auth_login(
+    c: &reqwest::Client,
+    base: &Url,
+    credentials: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let req = c
+        .post(endpoint(base, &["auth", "login"]))
+        .json(&serde_json::json!({ "credentials": credentials }));
+    send_auth_json(req, MANIFEST_BUDGET).await
+}
+
+pub(crate) async fn auth_logout(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
+    send_auth_json(c.post(endpoint(base, &["auth", "logout"])), MANIFEST_BUDGET).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,13 +517,16 @@ mod tests {
                     let req = String::from_utf8_lossy(&buf[..n]).to_string();
                     let path = req.split_whitespace().nth(1).unwrap_or("").to_string();
                     let body = match path.as_str() {
-                        "/tok/manifest.json" => r#"{"id":"com.test.mock","name":"Mock","version":"1.0.0","resources":["search","stream"],"icon":"javascript:alert(1)"}"#.to_string(),
-                        "/tok/search?q=hello+world" => r#"{"tracks":[{"id":7,"title":"Song","artist":"A","artworkURL":"https://x/y.jpg","isrc":"USRC12345678","format":"flac","duration":240.7},{"id":"bad"}]}"#.to_string(),
-                        "/tok/stream/track%201" => r#"{"url":"https://cdn.example/a.flac","codec":"flac","sampleRate":96000,"bitDepth":24}"#.to_string(),
+                        "/tok/manifest.json" => r#"{"id":"com.test.mock","name":"Mock","version":"1.0.0","description":"Mock addon","resources":["search","stream"],"icon":"javascript:alert(1)","auth":{"type":"credentials","label":"Login","helpText":"Enter key","fields":[{"key":"apiKey","label":"API Key","type":"password","required":true}]}}"#.to_string(),
+                        "/tok/search?q=hello+world" => r#"{"tracks":[{"id":7,"title":"Song","artist":"A","artworkURL":"https://x/y.jpg","isrc":"USRC12345678","upc":"001234567890","version":"Remastered","explicit":true,"format":"flac","sampleRate":96000,"bitDepth":24,"duration":240.7},{"id":"bad"}]}"#.to_string(),
+                        "/tok/stream/track%201" | "/tok/stream/track%201?quality=best_available" => r#"{"url":"https://cdn.example/a.flac","codec":"flac","sampleRate":96000,"bitDepth":24}"#.to_string(),
                         "/tok/stream/leak" => r#"{"url":"http://10.0.0.5/a.flac"}"#.to_string(),
-                        "/tok/lyrics?q=Song" => r#"{"lyrics":[{"syncedLyrics":"[00:01.00]Line","source":"Mock"}]}"#.to_string(),
+                        "/tok/lyrics?q=Song" | "/tok/lyrics?q=Song&title=Song&artist=A&album=Alb&duration=240.5" => r#"{"lyrics":[{"syncedLyrics":"[00:01.00]Line","source":"Mock"}]}"#.to_string(),
                         "/tok/translate?q=Line" => r#"{"translation":"Translated"}"#.to_string(),
                         "/tok/album/7" | "/tok/artist/7" => r#"{"tracks":[{"id":7,"title":"Song","artist":"A"}]}"#.to_string(),
+                        "/tok/auth/status" => r#"{"ok":true,"authenticated":true,"provider":"mock"}"#.to_string(),
+                        "/tok/auth/login" => r#"{"ok":true,"authenticated":true}"#.to_string(),
+                        "/tok/auth/logout" => r#"{"ok":true,"authenticated":false}"#.to_string(),
                         "/tok/big" => format!("\"{}\"", "a".repeat(3 * 1024 * 1024)),
                         _ => String::new(),
                     };
@@ -398,7 +550,15 @@ mod tests {
 
         let m = fetch_manifest(&c, &base).await.unwrap();
         assert_eq!(m.id, "com.test.mock");
+        assert_eq!(m.description.as_deref(), Some("Mock addon"));
         assert_eq!(m.icon, None, "non-http icon dropped");
+        let auth = m.auth.expect("manifest auth spec");
+        assert_eq!(auth.auth_type, "credentials");
+        assert_eq!(auth.label.as_deref(), Some("Login"));
+        assert_eq!(auth.help_text.as_deref(), Some("Enter key"));
+        assert_eq!(auth.fields.len(), 1);
+        assert_eq!(auth.fields[0].key, "apiKey");
+        assert_eq!(auth.fields[0].required, Some(true));
 
         let tracks = search(&c, &m.id, &base, "hello world").await.unwrap();
         assert_eq!(tracks.len(), 1, "malformed item skipped, not fatal");
@@ -406,15 +566,22 @@ mod tests {
         assert_eq!(tracks[0].duration, Some(240));
         assert_eq!(tracks[0].cover_url.as_deref(), Some("https://x/y.jpg"));
         assert_eq!(tracks[0].recording_evidence.isrc.as_deref(), Some("USRC12345678"));
+        assert_eq!(tracks[0].recording_evidence.upc.as_deref(), Some("001234567890"));
+        assert_eq!(tracks[0].recording_evidence.version.as_deref(), Some("Remastered"));
+        assert_eq!(tracks[0].recording_evidence.explicit, Some(true));
+        assert_eq!(tracks[0].catalog_quality.lossless, Some(true));
+        assert_eq!(tracks[0].catalog_quality.sample_rate, Some(96000.0));
+        assert_eq!(tracks[0].catalog_quality.bit_depth, Some(24));
+        assert_eq!(tracks[0].catalog_quality.codec.as_deref(), Some("flac"));
 
-        let s = resolve(&c, &base, "track 1").await.unwrap();
+        let s = resolve(&c, &base, "track 1", Some(crate::sources::StreamingQuality::BestAvailable)).await.unwrap();
         assert_eq!(s.url, "https://cdn.example/a.flac");
         assert_eq!(s.quality.lossless, Some(true));
         assert_eq!((s.quality.sample_rate, s.quality.bit_depth), (Some(96000.0), Some(24)));
 
         // A local addon may hand back LAN stream URLs; error text must not echo the token URL.
-        assert!(resolve(&c, &base, "leak").await.is_ok());
-        let err = resolve(&c, &base, "missing").await.unwrap_err();
+        assert!(resolve(&c, &base, "leak", None).await.is_ok());
+        let err = resolve(&c, &base, "missing", None).await.unwrap_err();
         assert!(!err.contains("tok"), "error leaked URL: {err}");
 
         let big = get_json::<serde_json::Value>(&c, endpoint(&base, &["big"]), Duration::from_secs(5)).await;
@@ -425,11 +592,21 @@ mod tests {
     async fn extension_resources_and_catalog_routes() {
         let c = build_client(true);
         let base = base_from_manifest_url(&mock_server().await).unwrap();
-        assert_eq!(lyrics(&c, &base, "Song").await.unwrap()[0]["source"], "Mock");
+        assert_eq!(lyrics(&c, &base, "Song", None, None, None, None).await.unwrap()[0]["source"], "Mock");
+        assert_eq!(
+            lyrics(&c, &base, "Song", Some("Song"), Some("A"), Some("Alb"), Some(240.5)).await.unwrap()[0]["source"],
+            "Mock"
+        );
         assert_eq!(translate(&c, &base, "Line").await.unwrap(), "Translated");
         for resource in ["album", "artist"] {
             assert_eq!(catalog(&c, "com.test.mock", &base, resource, "7").await.unwrap()[0].id, "com.test.mock:7");
         }
+        assert_eq!(auth_status(&c, &base).await.unwrap()["authenticated"], true);
+        assert_eq!(
+            auth_login(&c, &base, serde_json::json!({"apiKey": "secret"})).await.unwrap()["authenticated"],
+            true
+        );
+        assert_eq!(auth_logout(&c, &base).await.unwrap()["authenticated"], false);
     }
 
     #[test]

@@ -310,9 +310,13 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
             syncBonus = 0.15;
           }
 
-          // Provider cascade priority bonus: BiniLyrics / Better Lyrics / Unison (1) > Kugou (2) > QQMusic (3) > LRCLIB (4) > NetEase (5 - last choice)
+          // Provider cascade priority bonus: BiniLyrics / Better Lyrics / Unison (1) > Kugou / Synced Addon (2) > QQMusic / Plain Addon (3) > LRCLIB (4) > NetEase (5 - last choice)
           let sourceBonus = 0.0;
+          const sourceLower = (r.source || '').toLowerCase();
+          const isAddonSource = sourceLower.includes('.') && !['lrclib.net', 'lyrics.ovh'].includes(sourceLower);
+          const hasSynced = Boolean(r.synced || raw.includes('[') || hasWordTiming);
           if (r.source === 'BiniLyrics' || r.source === 'Better Lyrics' || r.source === 'Unison') sourceBonus = 0.25;
+          else if (isAddonSource) sourceBonus = hasSynced ? 0.20 : 0.14;
           else if (r.source === 'Kugou') sourceBonus = 0.20;
           else if (r.source === 'QQMusic') sourceBonus = 0.15;
           else if (r.source === 'LRCLIB') sourceBonus = 0.10;

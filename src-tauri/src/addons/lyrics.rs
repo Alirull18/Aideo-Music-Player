@@ -64,7 +64,7 @@ impl LyricsAddon for EclipseLyricsAddon {
         _album: Option<String>,
         _duration: Option<f64>,
     ) -> Result<Vec<SearchResult>, String> {
-        let rows = super::eclipse::lyrics(super::eclipse::client(), &self.base, &query).await?;
+        let rows = super::eclipse::lyrics(super::eclipse::client(), &self.base, &query, _title.as_deref(), _artist.as_deref(), _album.as_deref(), _duration).await?;
         Ok(rows
             .into_iter()
             .filter_map(|row| external_search_result(&self.id, row))
@@ -181,7 +181,7 @@ pub async fn search_lyrics_online(
     let internal = async {
         if super::is_enabled("org.aideo.lyrics") {
             InternalLyricsAddon
-                .search(query.clone(), title, artist, album, duration)
+                .search(query.clone(), title.clone(), artist.clone(), album.clone(), duration)
                 .await
                 .unwrap_or_default()
         } else {
@@ -191,7 +191,7 @@ pub async fn search_lyrics_online(
     let external_results = futures::future::join_all(external.iter().map(|addon| async {
         tokio::time::timeout(
             PROVIDER_TIMEOUT,
-            addon.search(query.clone(), None, None, None, None),
+            addon.search(query.clone(), title.clone(), artist.clone(), album.clone(), duration),
         )
         .await
         .ok()
@@ -1238,6 +1238,42 @@ mod tests {
         ] {
             assert!(external_search_result("com.example.lyrics", value).is_none());
         }
+    }
+
+    #[test]
+    fn external_lyrics_addon_constructs_cleanly() {
+        let u = url::Url::parse("http://127.0.0.1:7011").unwrap();
+        let a = EclipseLyricsAddon { id: "com.test.lyrics".into(), base: u };
+        assert_eq!(a.id, "com.test.lyrics");
+    }
+
+    #[tokio::test]
+    async fn eclipse_lyrics_addon_forwards_metadata_query_parameters() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            let Ok((mut s, _)) = l.accept().await else { return };
+            let mut buf = vec![0u8; 2048];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let path = req.split_whitespace().nth(1).unwrap_or("");
+            let body = if path == "/lyrics?q=Artist+-+Song&title=Song&artist=Artist&album=Album&duration=185.5" {
+                r#"{"lyrics":[{"id":"1","title":"Song","artist":"Artist","syncedLyrics":"[00:01.00]Hello"}]}"#
+            } else {
+                r#"{"lyrics":[]}"#
+            };
+            let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+            let _ = s.shutdown().await;
+        });
+        let addon = EclipseLyricsAddon {
+            id: "com.test.lyrics".into(),
+            base: url::Url::parse(&format!("http://127.0.0.1:{}", addr.port())).unwrap(),
+        };
+        let results = addon.search("Artist - Song".into(), Some("Song".into()), Some("Artist".into()), Some("Album".into()), Some(185.5)).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "com.test.lyrics:1");
+        assert!(results[0].synced);
     }
 
     #[test]

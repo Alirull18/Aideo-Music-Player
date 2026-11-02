@@ -148,7 +148,7 @@ describe('AddonsCard Component', () => {
     render(<AddonsCard />);
 
     const input = screen.getByPlaceholderText('https://example.com/manifest.json') as HTMLInputElement;
-    const installBtn = screen.getByRole('button', { name: /install/i });
+    const installBtn = screen.getByRole('button', { name: /^install$/i });
 
     // Initially empty and button disabled
     expect(input.value).toBe('');
@@ -337,5 +337,99 @@ describe('AddonsCard Component', () => {
 
     expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:7013/auth/poll', { method: 'POST' });
     expect(screen.getByText('Connected (US)')).toBeInTheDocument();
+  });
+
+  it('renders Featured Addons Catalog, supports 1-click install, and hides already-installed featured addons', () => {
+    const installedTidal: AddonInfo = {
+      id: 'org.aideo.tidal',
+      name: 'Tidal HiFi / MAX',
+      version: '1.0.0',
+      origin: 'http://127.0.0.1:7013',
+      resources: ['search', 'stream'],
+      builtin: false,
+      enabled: true,
+    };
+
+    useStore.setState({ addons: [installedTidal] });
+    render(<AddonsCard />);
+
+    expect(screen.getByText('Featured Addons')).toBeInTheDocument();
+    // Tidal is already installed so its catalog install button should be hidden
+    expect(screen.queryByRole('button', { name: 'Install Tidal HiFi / MAX' })).not.toBeInTheDocument();
+
+    // Qobuz is uninstalled so its catalog install button should be present
+    const qobuzInstallBtn = screen.getByRole('button', { name: 'Install Qobuz Studio' });
+    expect(qobuzInstallBtn).toBeInTheDocument();
+
+    fireEvent.click(qobuzInstallBtn);
+    expect(mockInstallAddon).toHaveBeenCalledWith('http://127.0.0.1:7014/manifest.json');
+  });
+
+  it('supports manifest-driven credentials authentication flow', async () => {
+    const qobuzAddon: AddonInfo = {
+      id: 'org.aideo.qobuz',
+      name: 'Qobuz',
+      version: '1.0.0',
+      description: '24-bit / 192 kHz Studio Masters streaming',
+      origin: 'http://127.0.0.1:7014',
+      resources: ['search', 'stream'],
+      builtin: false,
+      enabled: true,
+      auth: {
+        type: 'credentials',
+        label: 'Configure Qobuz',
+        helpText: 'Enter your Qobuz credentials',
+        fields: [
+          { key: 'appId', label: 'App ID', type: 'text', required: true },
+          { key: 'userAuthToken', label: 'User Auth Token', type: 'password', required: true },
+        ],
+      },
+    };
+
+    const mockFetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === 'http://127.0.0.1:7014/auth/login' && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            provider: 'qobuz',
+            authenticated: true,
+          }),
+        } as Response;
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    useStore.setState({ addons: [qobuzAddon] });
+    render(<AddonsCard />);
+
+    const configBtn = screen.getByRole('button', { name: 'Configure Qobuz' });
+    fireEvent.click(configBtn);
+
+    const appIdInput = screen.getByLabelText('App ID');
+    const tokenInput = screen.getByLabelText('User Auth Token');
+    fireEvent.change(appIdInput, { target: { value: '950096963' } });
+    fireEvent.change(tokenInput, { target: { value: 'secret-token-123' } });
+
+    const saveBtn = screen.getByRole('button', { name: 'Save Qobuz credentials' });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:7014/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          credentials: {
+            appId: '950096963',
+            userAuthToken: 'secret-token-123',
+          },
+        }),
+      });
+    });
+
+    expect(await screen.findByRole('button', { name: 'Qobuz Connected' })).toBeInTheDocument();
   });
 });

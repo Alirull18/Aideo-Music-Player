@@ -34,18 +34,86 @@ export function loadConfig(env = process.env) {
 const text = (value, fallback) => typeof value === 'string' && value ? value : fallback;
 const number = (value, fallback = 0) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
 
+export function manifestAuthSpec(provider) {
+  switch (provider) {
+    case 'tidal':
+      return {
+        description: 'Lossless & Hi-Res FLAC streaming with OAuth Device Login',
+        auth: {
+          type: 'device_code',
+          label: 'Connect Tidal Account',
+          helpText: 'Sign in with your Tidal account via device code or paste an OAuth token.',
+          fields: [
+            { key: 'clientId', label: 'Client ID (Optional)', type: 'text' },
+            { key: 'clientSecret', label: 'Client Secret (Optional)', type: 'password' },
+            { key: 'accessToken', label: 'Access Token (Optional)', type: 'password' },
+          ],
+        },
+      };
+    case 'qobuz':
+      return {
+        description: '24-bit / 192 kHz Studio Masters streaming',
+        auth: {
+          type: 'credentials',
+          label: 'Connect Qobuz Account',
+          fields: [
+            { key: 'appId', label: 'App ID', type: 'text', required: true },
+            { key: 'userAuthToken', label: 'User Auth Token (or use Email + Password below)', type: 'password' },
+            { key: 'email', label: 'Email / Username', type: 'text' },
+            { key: 'password', label: 'Password', type: 'password' },
+          ],
+        },
+      };
+    case 'subsonic':
+      return {
+        description: 'Personal cloud music server (Subsonic / Navidrome API)',
+        auth: {
+          type: 'credentials',
+          label: 'Connect Subsonic / Navidrome Server',
+          fields: [
+            { key: 'host', label: 'Server URL', type: 'url', placeholder: 'https://music.example.com', required: true },
+            { key: 'user', label: 'Username', type: 'text', required: true },
+            { key: 'pass', label: 'Password', type: 'password', required: true },
+          ],
+        },
+      };
+    case 'jellyfin':
+      return {
+        description: 'Self-hosted Jellyfin media library',
+        auth: {
+          type: 'credentials',
+          label: 'Connect Jellyfin Server',
+          fields: [
+            { key: 'host', label: 'Server URL', type: 'url', placeholder: 'https://jellyfin.example.com', required: true },
+            { key: 'apiKey', label: 'API Key', type: 'password', required: true },
+            { key: 'userId', label: 'User ID (Optional)', type: 'text' },
+          ],
+        },
+      };
+    default:
+      return {};
+  }
+}
+
 export function createAdapter(config, fetchUpstream = fetch) {
   if (['tidal', 'qobuz'].includes(config.provider)) return createPremiumAdapter(config, fetchUpstream);
-  const { provider, url: base, user, secret } = config;
+  const { provider } = config;
+  let base = config.url || '';
+  let user = config.user || '';
+  let secret = config.secret || '';
+  let token = config.token || '';
+  let salt = config.salt || '';
+  let userId = config.userId || '';
   const subsonic = provider === 'subsonic';
 
   async function request(path, params = {}, headers = {}) {
+    if (!base || (subsonic ? !user || (!secret && !(token && salt)) : !secret)) throw upstreamError();
     const url = new URL(path, base);
     const authHeaders = subsonic ? {} : { 'X-Emby-Token': secret };
     if (subsonic) {
-      const salt = randomBytes(16).toString('hex');
-      const token = createHash('md5').update(secret + salt).digest('hex');
-      for (const [key, value] of Object.entries({ u: user, t: token, s: salt, v: '1.16.1', c: 'aideo', f: 'json' })) {
+      const reqSalt = secret ? randomBytes(16).toString('hex') : salt;
+      const reqToken = secret ? createHash('md5').update(secret + reqSalt).digest('hex') : token;
+      for (const [key, value] of Object.entries({ u: user, t: reqToken, s: reqSalt, v: '1.16.1', c: 'aideo', f: 'json' })) {
         url.searchParams.set(key, value);
       }
     }
@@ -58,6 +126,58 @@ export function createAdapter(config, fetchUpstream = fetch) {
   }
 
   return {
+    status() {
+      if (subsonic) {
+        return {
+          ok: true,
+          provider: 'subsonic',
+          authenticated: Boolean(base && user && (secret || (token && salt))),
+          host: base || null,
+          user: user || null,
+        };
+      }
+      return {
+        ok: true,
+        provider: 'jellyfin',
+        authenticated: Boolean(base && secret),
+        host: base || null,
+        userId: userId || null,
+      };
+    },
+    async login(creds = {}) {
+      if (!creds || typeof creds !== 'object') throw invalid();
+      const rawHost = creds.host ?? creds.url;
+      if (typeof rawHost === 'string' && rawHost.trim()) {
+        let parsed;
+        try { parsed = new URL(rawHost.trim()); } catch { throw invalid(); }
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+          throw invalid();
+        }
+        base = `${parsed.href.replace(/\/+$/, '')}/`;
+      }
+      if (subsonic) {
+        if (typeof creds.user === 'string' && creds.user.trim()) user = creds.user.trim();
+        const pass = creds.pass ?? creds.password ?? creds.secret;
+        if (typeof pass === 'string' && pass) secret = pass;
+        if (typeof creds.token === 'string' && creds.token.trim()) token = creds.token.trim();
+        if (typeof creds.salt === 'string' && creds.salt.trim()) salt = creds.salt.trim();
+      } else {
+        const key = creds.apiKey ?? creds.secret ?? creds.token;
+        if (typeof key === 'string' && key.trim()) secret = key.trim();
+        if (typeof creds.userId === 'string') userId = creds.userId.trim();
+      }
+      return this.status();
+    },
+    async logout() {
+      if (subsonic) {
+        secret = '';
+        token = '';
+        salt = '';
+      } else {
+        secret = '';
+      }
+      return this.status();
+    },
     async catalog(query = '', offset = 0, limit = 100) {
       validateCatalog(query, offset, limit);
       const response = subsonic
@@ -136,6 +256,22 @@ async function proxy(adapter, id, cover, request, response) {
   await pipeline(Readable.fromWeb(upstream.body), response);
 }
 
+async function readRequestBody(request) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > 64 * 1024) throw invalid();
+    chunks.push(chunk);
+  }
+  if (size === 0) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw invalid();
+  }
+}
+
 export function createServer(config, fetchUpstream = fetch) {
   const adapter = createAdapter(config, fetchUpstream);
   const { provider } = config;
@@ -163,7 +299,7 @@ export function createServer(config, fetchUpstream = fetch) {
       response.setHeader('Access-Control-Allow-Origin', request.headers.origin);
       response.setHeader('Vary', 'Origin');
       response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      response.setHeader('Access-Control-Allow-Headers', 'Range');
+      response.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
       response.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
     }
     if (Date.now() - windowStart > 60_000) { windowStart = Date.now(); requests = 0; }
@@ -179,6 +315,28 @@ export function createServer(config, fetchUpstream = fetch) {
         if (provider !== 'tidal') throw invalid();
         send(response, 200, await adapter.pollDeviceAuth()); return;
       }
+      if (path === '/auth/login') {
+        const body = await readRequestBody(request);
+        const creds = body && typeof body === 'object' && body.credentials && typeof body.credentials === 'object'
+          ? body.credentials
+          : body;
+        if (!creds || typeof creds !== 'object' || Array.isArray(creds)) throw invalid();
+        let status;
+        try {
+          status = await adapter.login(creds);
+        } catch {
+          send(response, 400, { ok: false, authenticated: false, error: 'Authentication failed' });
+          return;
+        }
+        if (!status?.authenticated && !(provider === 'tidal' && typeof creds.clientId === 'string' && creds.clientId.trim())) {
+          send(response, 400, { ...status, ok: false, error: 'Authentication failed' });
+          return;
+        }
+        send(response, 200, status); return;
+      }
+      if (path === '/auth/logout') {
+        send(response, 200, await adapter.logout()); return;
+      }
       send(response, 405, { error: 'GET required' }); return;
     }
     if (request.method !== 'GET') { send(response, 405, { error: 'GET required' }); return; }
@@ -187,7 +345,12 @@ export function createServer(config, fetchUpstream = fetch) {
       send(response, 200, {
         id: `org.aideo.${provider}`, version: '1.0.0', name: `Aideo ${provider}`,
         resources: ['search', 'stream'], contentType: 'music',
+        ...manifestAuthSpec(provider),
       }); return;
+    }
+    if (path === '/auth/status') {
+      const status = adapter.status ? await adapter.status() : { ok: true, authenticated: true };
+      send(response, 200, status); return;
     }
     if (path === '/health') { await adapter.ping(); send(response, 200, { ok: true }); return; }
     if (path === '/search') {
@@ -196,6 +359,14 @@ export function createServer(config, fetchUpstream = fetch) {
       send(response, 200, { tracks: tracks.map(track => ({
         id: track.id, title: track.title, artist: track.artist, album: track.album, duration: track.duration,
         ...(track.coverId ? { artworkURL: `${base}/cover/${encodeURIComponent(`${provider}:${track.coverId}`)}` } : {}),
+        ...(track.isrc ? { isrc: track.isrc } : {}),
+        ...(track.upc ? { upc: track.upc } : {}),
+        ...(track.version ? { version: track.version } : {}),
+        ...(typeof track.explicit === 'boolean' ? { explicit: track.explicit } : {}),
+        ...(typeof track.lossless === 'boolean' ? { lossless: track.lossless } : {}),
+        ...(track.codec ? { codec: track.codec } : {}),
+        ...(Number.isFinite(track.sampleRate) && track.sampleRate > 0 ? { sampleRate: track.sampleRate } : {}),
+        ...(Number.isInteger(track.bitDepth) && track.bitDepth > 0 ? { bitDepth: track.bitDepth } : {}),
       })) }); return;
     }
     const stream = path.match(/^\/stream\/(.+)$/);
