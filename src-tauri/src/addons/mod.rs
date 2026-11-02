@@ -303,6 +303,177 @@ pub async fn addon_auth_logout(state: State<'_, AppState>, addon_id: String) -> 
     eclipse::auth_logout(eclipse::client(), &base).await
 }
 
+pub(crate) fn extract_qobuz_token_from_callback_url(url_str: &str) -> Option<String> {
+    let parsed = url::Url::parse(url_str).ok()?;
+    if !parsed.path().contains("aideo-auth-callback") {
+        return None;
+    }
+    parsed
+        .query_pairs()
+        .find(|(k, _)| k == "token")
+        .map(|(_, v)| v.to_string())
+        .filter(|t| !t.trim().is_empty())
+}
+
+#[tauri::command]
+pub async fn addon_open_browser_login(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    addon_id: String,
+) -> Result<serde_json::Value, String> {
+    use tauri::{Emitter, Manager};
+
+    let base = require_installed_base(&state, &addon_id).or_else(|_| {
+        let port = if addon_id.contains("qobuz") { 7014 } else { 7013 };
+        eclipse::base_from_manifest_url(&format!("http://127.0.0.1:{port}/manifest.json"))
+    })?;
+    eclipse::ensure_local_cloud_server(&base);
+
+    if addon_id.contains("qobuz") {
+        let label = "addon-qobuz-login";
+        if let Some(win) = app_handle.get_webview_window(label) {
+            let _ = win.show();
+            let _ = win.unminimize();
+            let _ = win.set_focus();
+            return Ok(serde_json::json!({ "ok": true, "mode": "webview" }));
+        }
+
+        let init_script = r#"
+(function() {
+    if (window.__aideoQobuzHooked) return;
+    window.__aideoQobuzHooked = true;
+    var captured = false;
+
+    function notifyRust(token) {
+        if (captured || !token || typeof token !== 'string' || token.length < 10) return;
+        captured = true;
+        window.location.href = 'https://play.qobuz.com/aideo-auth-callback?token=' + encodeURIComponent(token);
+    }
+
+    var origFetch = window.fetch;
+    window.fetch = function() {
+        var args = arguments;
+        var url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+        var opts = args[1] || {};
+        if (opts.headers) {
+            var h = opts.headers;
+            var tok = (typeof h.get === 'function') ? h.get('x-user-auth-token') : (h['x-user-auth-token'] || h['X-User-Auth-Token']);
+            if (tok) notifyRust(tok);
+        }
+        return origFetch.apply(this, args).then(function(response) {
+            if (url.indexOf('/user/login') !== -1 || url.indexOf('login') !== -1) {
+                response.clone().json().then(function(data) {
+                    if (data && data.user_auth_token) notifyRust(data.user_auth_token);
+                }).catch(function(){});
+            }
+            return response;
+        });
+    };
+
+    var origSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+        if (name && name.toLowerCase() === 'x-user-auth-token' && value) {
+            notifyRust(value);
+        }
+        return origSetHeader.apply(this, arguments);
+    };
+
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function() {
+        this.addEventListener('load', function() {
+            try {
+                var data = JSON.parse(this.responseText);
+                if (data && data.user_auth_token) notifyRust(data.user_auth_token);
+            } catch(e) {}
+        });
+        return origSend.apply(this, arguments);
+    };
+
+    var pollInterval = setInterval(function() {
+        if (captured) { clearInterval(pollInterval); return; }
+        try {
+            for (var i = 0; i < localStorage.length; i++) {
+                var key = localStorage.key(i);
+                var val = localStorage.getItem(key);
+                if (!val) continue;
+                if (key.toLowerCase().indexOf('token') !== -1 && val.length > 20 && val.length < 500 && val.indexOf('{') === -1) {
+                    notifyRust(val);
+                    return;
+                }
+                if (val.indexOf('user_auth_token') !== -1) {
+                    var parsed = JSON.parse(val);
+                    if (parsed.user_auth_token) {
+                        notifyRust(parsed.user_auth_token);
+                        return;
+                    }
+                }
+            }
+        } catch(e) {}
+    }, 1000);
+})();
+"#;
+
+        let app_clone = app_handle.clone();
+        let addon_id_clone = addon_id.clone();
+        let base_clone = base.clone();
+
+        let _login_window = tauri::WebviewWindowBuilder::new(
+            &app_handle,
+            label,
+            tauri::WebviewUrl::External(
+                "https://play.qobuz.com/login"
+                    .parse()
+                    .map_err(|e: url::ParseError| e.to_string())?,
+            ),
+        )
+        .title("Qobuz Login — Aideo")
+        .inner_size(520.0, 720.0)
+        .center()
+        .resizable(true)
+        .initialization_script(init_script)
+        .on_navigation(move |url| {
+            if let Some(token) = extract_qobuz_token_from_callback_url(url.as_str()) {
+                let app = app_clone.clone();
+                let id_for_task = addon_id_clone.clone();
+                let base_for_task = base_clone.clone();
+                tauri::async_runtime::spawn(async move {
+                    match eclipse::auth_login(
+                        eclipse::client(),
+                        &base_for_task,
+                        serde_json::json!({ "userAuthToken": token }),
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            if let Some(win) = app.get_webview_window("addon-qobuz-login") {
+                                let _ = win.close();
+                            }
+                            let _ = app.emit(
+                                "addon-auth-success",
+                                serde_json::json!({ "addonId": id_for_task, "provider": "qobuz" }),
+                            );
+                        }
+                        Err(err) => {
+                            let _ = app.emit(
+                                "addon-auth-error",
+                                serde_json::json!({ "addonId": id_for_task, "error": err }),
+                            );
+                        }
+                    }
+                });
+                return false;
+            }
+            true
+        })
+        .build()
+        .map_err(|e| format!("Failed to open Qobuz login window: {e}"))?;
+
+        return Ok(serde_json::json!({ "ok": true, "mode": "webview" }));
+    }
+
+    eclipse::auth_start_device(eclipse::client(), &base).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +500,21 @@ mod tests {
         assert!(!valid_source_id("com.x.y:"));
         assert!(!valid_source_id("c:\\music\\a.flac"), "Windows paths are not addon sources");
         assert!(!valid_source_id("com.x.y:a\nb"));
+    }
+
+    #[test]
+    fn extracts_qobuz_token_from_callback_url() {
+        assert_eq!(
+            extract_qobuz_token_from_callback_url("https://play.qobuz.com/aideo-auth-callback?token=qbz_secret_123"),
+            Some("qbz_secret_123".to_string())
+        );
+        assert_eq!(
+            extract_qobuz_token_from_callback_url("https://play.qobuz.com/login?token=qbz_secret_123"),
+            None
+        );
+        assert_eq!(
+            extract_qobuz_token_from_callback_url("https://play.qobuz.com/aideo-auth-callback?token="),
+            None
+        );
     }
 }

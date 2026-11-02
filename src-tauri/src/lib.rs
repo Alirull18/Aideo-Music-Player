@@ -3471,6 +3471,7 @@ pub fn run() {
             addons::addon_auth_poll_device,
             addons::addon_auth_login,
             addons::addon_auth_logout,
+            addons::addon_open_browser_login,
             sources::search_local_sources,
             set_source_queue_mode,
             update_playlist_source,

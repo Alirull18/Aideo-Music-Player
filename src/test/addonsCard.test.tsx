@@ -432,4 +432,37 @@ describe('AddonsCard Component', () => {
 
     expect(await screen.findByRole('button', { name: 'Qobuz Connected' })).toBeInTheDocument();
   });
+
+  it('supports 1-click Qobuz Browser Login via addon_open_browser_login', async () => {
+    const qobuzAddon: AddonInfo = {
+      id: 'org.aideo.qobuz',
+      name: 'Qobuz',
+      version: '1.0.0',
+      description: '24-bit / 192 kHz Studio Masters streaming',
+      origin: 'http://127.0.0.1:7014',
+      resources: ['search', 'stream'],
+      builtin: false,
+      enabled: true,
+      auth: {
+        type: 'credentials',
+        label: 'Configure Qobuz',
+        fields: [
+          { key: 'userAuthToken', label: 'User Auth Token', type: 'password', required: false },
+        ],
+      },
+    };
+
+    const invokeMock = vi.mocked(invoke);
+    invokeMock.mockResolvedValue({ ok: true, mode: 'webview' });
+
+    useStore.setState({ addons: [qobuzAddon] });
+    render(<AddonsCard />);
+
+    const browserBtn = screen.getByRole('button', { name: 'Sign in to Qobuz with Browser' });
+    fireEvent.click(browserBtn);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('addon_open_browser_login', { addonId: 'org.aideo.qobuz' });
+    });
+  });
 });

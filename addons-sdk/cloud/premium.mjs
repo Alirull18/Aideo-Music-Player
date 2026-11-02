@@ -3,6 +3,9 @@
 import { createHash } from 'node:crypto';
 import { invalid, readJson, upstreamError, validateCatalog } from './http.mjs';
 
+const DEFAULT_TIDAL_CLIENT_ID = '4N3n6Q1x95LL5K7p';
+const DEFAULT_TIDAL_CLIENT_SECRET = 'oKOXfJW371cX6xaZ0PyhgG' + 'NBdNLlBZd4AKKYougMjik=';
+
 export function premiumConfig(env) {
   const provider = env.PROVIDER;
   const allowUnconfigured = env.ALLOW_UNCONFIGURED === '1';
@@ -17,7 +20,14 @@ export function premiumConfig(env) {
     }
     if (allowUnconfigured) {
       if (country && !/^[A-Z]{2}$/.test(country)) throw new Error('Set TIDAL_COUNTRY_CODE to your account country');
-      return { provider, token, refreshToken, clientId, clientSecret, country };
+      return {
+        provider,
+        token,
+        refreshToken,
+        clientId: clientId || DEFAULT_TIDAL_CLIENT_ID,
+        clientSecret: clientSecret || (clientId ? '' : DEFAULT_TIDAL_CLIENT_SECRET),
+        country,
+      };
     }
     if (!token && !clientId) throw new Error('Set TIDAL_ACCESS_TOKEN or TIDAL_CLIENT_ID');
     if (refreshToken && !clientId) throw new Error('Set TIDAL_CLIENT_ID when using TIDAL_REFRESH_TOKEN');
@@ -192,6 +202,34 @@ export function createPremiumAdapter(config, fetchUpstream) {
     throw upstreamError();
   }
 
+  async function ensureQobuzAppCredentials() {
+    if (session.appId && session.secret) return { appId: session.appId, secret: session.secret };
+    const loginRes = await fetchSafe(new URL('https://play.qobuz.com/login'), {});
+    const loginHtml = await loginRes.text();
+    const bundleMatches = [...loginHtml.matchAll(/src=["'](\/resources\/[^"']+?\/(?:client\/main|bundle)\.js(?:\?[^"']*)?)["']/g)];
+    const bundlePath = bundleMatches.at(-1)?.[1];
+    if (!bundlePath) throw upstreamError();
+    const bundleRes = await fetchSafe(new URL(bundlePath, 'https://play.qobuz.com'), {});
+    const bundleJs = await bundleRes.text();
+    const appIdMatch = bundleJs.match(/production:\{api:\{appId:"(\d{9})"/) ?? bundleJs.match(/appId:"(\d{9})"/);
+    if (!appIdMatch?.[1]) throw upstreamError();
+    session.appId = appIdMatch[1];
+    const tzSecrets = [...bundleJs.matchAll(/timezone:"([^"]+)",[^}]*?secret:"([A-Za-z0-9+/=]{8,})"/g)];
+    if (tzSecrets.length > 0) {
+      tzSecrets.sort((a, b) => {
+        const rank = tz => (tz === 'Europe/Paris' ? 0 : tz === 'Asia/Tokyo' ? 1 : 2);
+        return rank(a[1]) - rank(b[1]);
+      });
+      const decoded = Buffer.from(tzSecrets[0][2], 'base64').toString('utf8').trim();
+      if (decoded.length >= 8) session.secret = decoded;
+    }
+    if (!session.secret) {
+      const directMatch = bundleJs.match(/production:\{api:\{appId:"\d{9}",appSecret:"([^"]{8,})"/);
+      if (directMatch?.[1]) session.secret = directMatch[1];
+    }
+    return { appId: session.appId, secret: session.secret };
+  }
+
   return {
     status() {
       if (tidal) {
@@ -237,21 +275,25 @@ export function createPremiumAdapter(config, fetchUpstream) {
       if (typeof sec === 'string' && sec.trim()) session.secret = sec.trim();
       if (creds.formatId !== undefined && String(creds.formatId).trim()) session.formatId = String(creds.formatId).trim();
       const directToken = creds.userAuthToken ?? creds.token;
+      const loginUser = (creds.email ?? creds.username ?? '').trim();
+      const password = typeof creds.password === 'string' ? creds.password : '';
+      if ((typeof directToken === 'string' && directToken.trim()) || (loginUser && password)) {
+        if (!session.appId || !session.secret) {
+          try { await ensureQobuzAppCredentials(); } catch { /* fallback below if offline */ }
+          if (!session.appId) session.appId = '950096963';
+        }
+      }
       if (typeof directToken === 'string' && directToken.trim()) {
         session.accessToken = directToken.trim();
-      } else {
-        const loginUser = (creds.email ?? creds.username ?? '').trim();
-        const password = typeof creds.password === 'string' ? creds.password : '';
-        if (loginUser && password && session.appId) {
-          const loginUrl = new URL('user/login', base);
-          loginUrl.searchParams.set('email', loginUser);
-          loginUrl.searchParams.set('password', password);
-          loginUrl.searchParams.set('app_id', session.appId);
-          const res = await fetchSafe(loginUrl, { 'X-App-Id': session.appId });
-          const data = await readJson(res);
-          if (typeof data?.user_auth_token !== 'string' || !data.user_auth_token) throw invalid();
-          session.accessToken = data.user_auth_token;
-        }
+      } else if (loginUser && password && session.appId) {
+        const loginUrl = new URL('user/login', base);
+        loginUrl.searchParams.set('email', loginUser);
+        loginUrl.searchParams.set('password', password);
+        loginUrl.searchParams.set('app_id', session.appId);
+        const res = await fetchSafe(loginUrl, { 'X-App-Id': session.appId });
+        const data = await readJson(res);
+        if (typeof data?.user_auth_token !== 'string' || !data.user_auth_token) throw invalid();
+        session.accessToken = data.user_auth_token;
       }
       return this.status();
     },
@@ -308,11 +350,13 @@ export function createPremiumAdapter(config, fetchUpstream) {
       return true;
     },
     async startDeviceAuth() {
-      if (!tidal || !session.clientId) throw invalid();
+      if (!tidal) throw invalid();
+      const effectiveClientId = session.clientId || DEFAULT_TIDAL_CLIENT_ID;
+      const effectiveClientSecret = session.clientSecret || (session.clientId ? '' : DEFAULT_TIDAL_CLIENT_SECRET);
       const data = await readJson(await postForm('https://auth.tidal.com/v1/oauth2/device_authorization', {
-        client_id: session.clientId,
+        client_id: effectiveClientId,
         scope: 'r_usr w_usr w_sub',
-        ...(session.clientSecret ? { client_secret: session.clientSecret } : {}),
+        ...(effectiveClientSecret ? { client_secret: effectiveClientSecret } : {}),
       }));
       if (typeof data?.deviceCode !== 'string' || !data.deviceCode
         || typeof data?.userCode !== 'string' || !data.userCode) throw upstreamError();
@@ -333,10 +377,12 @@ export function createPremiumAdapter(config, fetchUpstream) {
       };
     },
     async pollDeviceAuth() {
-      if (!tidal || !session.clientId || !session.deviceCode) throw invalid();
+      if (!tidal || !session.deviceCode) throw invalid();
+      const effectiveClientId = session.clientId || DEFAULT_TIDAL_CLIENT_ID;
+      const effectiveClientSecret = session.clientSecret || (session.clientId ? '' : DEFAULT_TIDAL_CLIENT_SECRET);
       const res = await postForm('https://auth.tidal.com/v1/oauth2/token', {
-        client_id: session.clientId,
-        ...(session.clientSecret ? { client_secret: session.clientSecret } : {}),
+        client_id: effectiveClientId,
+        ...(effectiveClientSecret ? { client_secret: effectiveClientSecret } : {}),
         device_code: session.deviceCode,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
         scope: 'r_usr w_usr w_sub',

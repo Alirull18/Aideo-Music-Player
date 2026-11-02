@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   Link,
   Plus,
@@ -178,6 +180,56 @@ export default function AddonsCard() {
   }, [loadAddons]);
 
   useEffect(() => {
+    let unlistenSuccess: (() => void) | undefined;
+    let unlistenError: (() => void) | undefined;
+
+    try {
+      void Promise.resolve(
+        listen<{ addonId?: string; provider?: string }>('addon-auth-success', (event) => {
+          const addonId = event.payload?.addonId;
+          if (!addonId) return;
+          setConnectedMap((prev) => ({ ...prev, [addonId]: true }));
+          setCredBusyMap((prev) => ({ ...prev, [addonId]: false }));
+          setCredErrorMap((prev) => ({ ...prev, [addonId]: null }));
+          setExpandedCreds((prev) => ({ ...prev, [addonId]: false }));
+          window.dispatchEvent(
+            new CustomEvent('ui-toast', {
+              detail: { message: 'Qobuz connected via browser login', type: 'success' },
+            })
+          );
+        })
+      )
+        .then((fn) => {
+          if (typeof fn === 'function') unlistenSuccess = fn;
+        })
+        .catch(() => {});
+
+      void Promise.resolve(
+        listen<{ addonId?: string; error?: string }>('addon-auth-error', (event) => {
+          const addonId = event.payload?.addonId;
+          if (!addonId) return;
+          setCredBusyMap((prev) => ({ ...prev, [addonId]: false }));
+          setCredErrorMap((prev) => ({
+            ...prev,
+            [addonId]: event.payload?.error || 'Browser login failed',
+          }));
+        })
+      )
+        .then((fn) => {
+          if (typeof fn === 'function') unlistenError = fn;
+        })
+        .catch(() => {});
+    } catch {
+      // Ignore if Tauri event bridge is unavailable in test environment
+    }
+
+    return () => {
+      unlistenSuccess?.();
+      unlistenError?.();
+    };
+  }, []);
+
+  useEffect(() => {
     if (tidalAuth.status !== 'polling') return;
     const { addonId, origin } = tidalAuth;
     let cancelled = false;
@@ -254,6 +306,7 @@ export default function AddonsCard() {
         userCode: data.userCode,
         verificationUriComplete: data.verificationUriComplete,
       });
+      void Promise.resolve(openUrl(data.verificationUriComplete)).catch(() => {});
     } catch (e: any) {
       if (e instanceof TypeError) {
         try {
@@ -269,6 +322,7 @@ export default function AddonsCard() {
               userCode: data.userCode,
               verificationUriComplete: data.verificationUriComplete,
             });
+            void Promise.resolve(openUrl(data.verificationUriComplete)).catch(() => {});
             return;
           }
         } catch (ipcErr: any) {
@@ -386,6 +440,23 @@ export default function AddonsCard() {
   const isCore = (a: AddonInfo) => Boolean(a.builtin || a.origin === 'internal');
   const isTidalAddon = (a: AddonInfo) =>
     !isCore(a) && (a.id === 'org.aideo.tidal' || a.id.endsWith('.tidal') || a.name.trim().toLowerCase() === 'tidal');
+  const isQobuzAddon = (a: AddonInfo) =>
+    !isCore(a) && (a.id === 'org.aideo.qobuz' || a.id.endsWith('.qobuz') || a.name.trim().toLowerCase() === 'qobuz');
+
+  const handleQobuzBrowserLogin = async (a: AddonInfo) => {
+    setCredBusyMap((prev) => ({ ...prev, [a.id]: true }));
+    setCredErrorMap((prev) => ({ ...prev, [a.id]: null }));
+    try {
+      await invoke('addon_open_browser_login', { addonId: a.id });
+    } catch (e: any) {
+      setCredErrorMap((prev) => ({
+        ...prev,
+        [a.id]: typeof e === 'string' ? e : e?.message || 'Failed to open Qobuz browser login',
+      }));
+    } finally {
+      setCredBusyMap((prev) => ({ ...prev, [a.id]: false }));
+    }
+  };
 
   const getEffectiveAuth = (a: AddonInfo): AddonAuthSpec | null => {
     if (isCore(a)) return null;
@@ -552,6 +623,20 @@ export default function AddonsCard() {
                 </a>
                 <button
                   type="button"
+                  aria-label="Open Tidal in Browser"
+                  className="settings-btn"
+                  onClick={() =>
+                    void Promise.resolve(openUrl(tidalAuth.verificationUriComplete)).catch(() => {})
+                  }
+                  style={{
+                    padding: '2px 8px',
+                    fontSize: 10,
+                  }}
+                >
+                  Open Browser
+                </button>
+                <button
+                  type="button"
                   aria-label="Cancel Tidal login"
                   className="settings-btn"
                   onClick={() => setTidalAuth({ status: 'idle' })}
@@ -664,24 +749,38 @@ export default function AddonsCard() {
                 )}
 
                 {isCredsOrToken && (
-                  <button
-                    type="button"
-                    className="settings-btn addons-auth-btn"
-                    onClick={() => toggleCredForm(a.id)}
-                    style={{
-                      padding: '6px 12px',
-                      fontSize: 11,
-                      ...(isConnected
-                        ? {
-                            background: 'rgba(16, 185, 129, 0.12)',
-                            color: '#34d399',
-                            border: '1px solid rgba(16, 185, 129, 0.28)',
-                          }
-                        : {}),
-                    }}
-                  >
-                    {isConnected ? `${a.name} Connected` : (authSpec?.label || `Configure ${a.name}`)}
-                  </button>
+                  <>
+                    {isQobuzAddon(a) && !isConnected && (
+                      <button
+                        type="button"
+                        className="settings-btn addons-auth-btn"
+                        aria-label="Sign in to Qobuz with Browser"
+                        disabled={credBusy}
+                        onClick={() => void handleQobuzBrowserLogin(a)}
+                        style={{ padding: '6px 12px', fontSize: 11 }}
+                      >
+                        {credBusy ? 'Opening Browser…' : 'Browser Login'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="settings-btn addons-auth-btn"
+                      onClick={() => toggleCredForm(a.id)}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: 11,
+                        ...(isConnected
+                          ? {
+                              background: 'rgba(16, 185, 129, 0.12)',
+                              color: '#34d399',
+                              border: '1px solid rgba(16, 185, 129, 0.28)',
+                            }
+                          : {}),
+                      }}
+                    >
+                      {isConnected ? `${a.name} Connected` : (authSpec?.label || `Configure ${a.name}`)}
+                    </button>
+                  </>
                 )}
 
                 <SlidingSwitch
