@@ -13,6 +13,7 @@ import { isRetiredCloudTrack, RETIRED_PROVIDER_MESSAGE } from './retiredProvider
 import { sampleListening, resetListeningBaseline, markListeningEnd } from '../utils/recommendations';
 
 let isPolling = false;
+let bufferingProbe: { key: string; pos: number; at: number } | null = null;
 let dspThrottleTimeout: any = null;
 let lastDspInvokeTime = 0;
 let pendingDspState: any = null;
@@ -826,7 +827,26 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (lastStopTime && Date.now() - lastStopTime < 3000
         && get().playback.status === 'Stopped' && status.status === 'Playing') return;
       if (get().currentTrack?.source_context && ((get().playback.is_buffering && status.status === 'Stopped') || get().playbackError)) return;
-      if (get().currentAttemptId && get().playback.is_buffering) return;
+      if (get().currentAttemptId && get().playback.is_buffering) {
+        // "Buffering" is normally cleared by the backend's playback-ready event. If that event is missed
+        // or filtered, the spinner would stay forever while sound plays, so also accept proof from the
+        // backend itself: the same track is Playing and its position advanced between two polls.
+        const live = get().playback;
+        const proofKey = `${live.attempt_id ?? ''}|${live.current_track ?? ''}`;
+        const advanced = status.status === 'Playing' && typeof status.position_secs === 'number'
+          && status.current_track && live.current_track && pathsEqual(status.current_track, live.current_track)
+          && bufferingProbe?.key === proofKey && Date.now() - bufferingProbe.at < 3000 && status.position_secs > bufferingProbe.pos + 0.15;
+        if (advanced) {
+          bufferingProbe = null;
+          set(s => ({ playback: { ...s.playback, is_buffering: false } }));
+          window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
+        } else {
+          bufferingProbe = { key: proofKey, pos: typeof status.position_secs === 'number' ? status.position_secs : 0, at: Date.now() };
+          return;
+        }
+      } else {
+        bufferingProbe = null;
+      }
 
       const prevTrack = get().playback.current_track;
       const newTrack = status.current_track;
