@@ -15,11 +15,15 @@ import { catalogTrack, groupRecordings, searchSources, extractPrimaryArtist, typ
 import { SongSources } from './aideo/HomeParts';
 import { discoveryTrack, unifyDiscoveryHub } from '../utils/discoveryFeed';
 import { TrackContextMenu } from './TrackContextMenu';
-import { LatestHubRequest, hubContext, hubTrack, filterRecommendationHub, rankRecommendationHub, addonHubTracks } from '../utils/recommendationHub';
+import { LatestHubRequest, hubContext, hubTrack, filterRecommendationHub, rankRecommendationHub, addonHubTracks, hubHasOnlineTracks } from '../utils/recommendationHub';
 import { sameRecommendationRecording, recommendationSourceKey } from '../utils/recommendations';
 import { bounded } from '../utils/unifiedSources';
 import { filterMusicSource, musicAddons, musicSearchOptions, enabledAddonKey } from '../utils/musicAddons';
 import type { DiscoveryHubData } from '../store/types';
+
+// The backend gives the hub 15s to reach its providers; wait a little longer than that before giving up.
+const HUB_BUDGET_MS = 16000;
+const HUB_MAX_RETRIES = 2;
 
 let rankedHubCache: { context: string; time: number; data: DiscoveryHubData } | undefined;
 
@@ -459,6 +463,8 @@ export function AideoView() {
 
   const [greeting, setGreeting] = useState('Good morning');
   const requestsRef = useRef(new LatestHubRequest());
+  const hubRetriesRef = useRef(0);
+  const hubRetryTimerRef = useRef<number | undefined>(undefined);
   const [isRefreshingRecs, setIsRefreshingRecs] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
@@ -795,6 +801,7 @@ export function AideoView() {
         const title = rec.recording?.name || rec.recording_name;
         return artist && title ? [`${artist} - ${title}`] : [];
       }) : [];
+      const outcome: { degraded: 'cached' | 'library' | null } = { degraded: null };
       const hubPromise = bounded(invoke<DiscoveryHubData>('get_personalized_discovery_hub', {
         seedArtists: topArtists, topArtists, libraryArtists: [...artistCounts.keys()], discoveryLevel: state.autoplayDiscoveryLevel,
         lastfmConnected: !local && !!state.lastfmSessionKey,
@@ -803,7 +810,14 @@ export function AideoView() {
         listenbrainzRecs: lbRecs,
         appMode: local ? 'local' : state.appMode,
         isOnline: online,
-      }), 8000).catch(() => localHub);
+      }), HUB_BUDGET_MS).catch(async (error) => {
+        console.warn('[discovery-hub] online hub unavailable:', error);
+        // Prefer the last online results over relabelling the whole library as "recommendations".
+        const cached = local ? null : await invoke<DiscoveryHubData | null>('get_cached_discovery_hub').catch(() => null);
+        if (cached && hubHasOnlineTracks(cached)) { outcome.degraded = 'cached'; return cached; }
+        outcome.degraded = local ? null : 'library';
+        return localHub;
+      });
       const addonPromise = online && topArtists.length
         ? addonHubTracks(state.addons, topArtists, (addonId, query) => invoke<any[]>('addon_search', { addonId, query }))
         : Promise.resolve([]);
@@ -813,9 +827,24 @@ export function AideoView() {
       const ranked = await rankRecommendationHub(retrieved, useStore.getState(), request.generation);
       if (!current()) return;
       const safe = filterRecommendationHub(ranked, useStore.getState());
-      rankedHubCache = { context: request.context, time: Date.now(), data: safe };
       setDiscoveryData(safe);
       setActiveDiscoveryTab('all');
+      if (!outcome.degraded) {
+        rankedHubCache = { context: request.context, time: Date.now(), data: safe };
+        hubRetriesRef.current = 0;
+      } else {
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: {
+          type: 'warning', dedupKey: 'discovery-hub-degraded',
+          message: outcome.degraded === 'cached'
+            ? 'Could not reach online sources. Showing your last online recommendations.'
+            : 'Could not load online recommendations. Showing your library for now.',
+        } }));
+        if (hubRetriesRef.current < HUB_MAX_RETRIES) {
+          hubRetriesRef.current += 1;
+          window.clearTimeout(hubRetryTimerRef.current);
+          hubRetryTimerRef.current = window.setTimeout(() => { void fetchRecommendations(); }, 6000 * hubRetriesRef.current);
+        }
+      }
     } catch (error) {
       console.error('Failed to load personalized discovery recommendations:', error);
       if (current()) {
@@ -833,7 +862,7 @@ export function AideoView() {
   const addonKey = enabledAddonKey(addons);
   useEffect(() => {
     void fetchRecommendations();
-    return () => { requestsRef.current.begin('unmounted'); };
+    return () => { requestsRef.current.begin('unmounted'); window.clearTimeout(hubRetryTimerRef.current); };
   }, [tracks, appMode, recommendationEngine, autoplayDiscoveryLevel, recommendationRevision, addonKey]);
 
   useEffect(() => {

@@ -3043,6 +3043,10 @@ pub(crate) fn generate_local_discovery_fallback(
     (recs, charts)
 }
 
+/// Charts, personalised recommendations and mixes each run several dependent network stages
+/// (Last.fm similar tracks, then similar artists, then their top tracks, then YouTube searches).
+const HUB_DEADLINE: std::time::Duration = std::time::Duration::from_secs(15);
+
 pub async fn get_personalized_discovery_hub_internal(
     seed_artists: Vec<String>,
     top_artists: Vec<String>,
@@ -3057,7 +3061,7 @@ pub async fn get_personalized_discovery_hub_internal(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<DiscoveryHubData, String> {
-    crate::sources::bounded_recommendation(async {
+    crate::sources::bounded_recommendation_for(HUB_DEADLINE, async {
 
     use rand::Rng;
     use rand::seq::SliceRandom;
@@ -3217,13 +3221,8 @@ pub async fn get_personalized_discovery_hub_internal(
             forgotten_gems,
             playlist_mixes,
         };
-        if let Ok(app_data) = app_handle.path().app_data_dir() {
-            let cache_file = app_data.join("discovery_cache.json");
-            if let Ok(json_str) = serde_json::to_string(&hub_data) {
-                let _ = std::fs::create_dir_all(&app_data);
-                let _ = std::fs::write(cache_file, json_str);
-            }
-        }
+        // Not cached: this branch is local-only, and writing it would replace the last online results
+        // that the front end falls back to when a later online refresh fails.
         return Ok(hub_data);
     }
 

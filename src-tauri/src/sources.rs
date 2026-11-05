@@ -96,9 +96,15 @@ pub struct ResolvedStream {
 
 /// Caps concurrency (3) and wall time (8s) of recommendation fan-out so a slow provider can't pile up requests.
 pub(crate) async fn bounded_recommendation<T>(work: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
+    bounded_recommendation_for(std::time::Duration::from_secs(8), work).await
+}
+
+/// Same gate with a caller-chosen deadline. The Discovery Hub fans out over several providers in
+/// sequential stages, so it needs longer than a single autoplay lookup.
+pub(crate) async fn bounded_recommendation_for<T>(deadline: std::time::Duration, work: impl std::future::Future<Output = Result<T, String>>) -> Result<T, String> {
     static GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
     let _permit = GATE.try_acquire().map_err(|_| "Recommendation requests are busy".to_string())?;
-    tokio::time::timeout(std::time::Duration::from_secs(8), work).await
+    tokio::time::timeout(deadline, work).await
         .map_err(|_| "Recommendation deadline exceeded".to_string())?
 }
 

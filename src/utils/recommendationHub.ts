@@ -24,6 +24,16 @@ function reference(value: object): number {
   if (!identities.has(value)) identities.set(value, ++identity);
   return identities.get(value)!;
 }
+const isOnlineUrl = (track: YoutubeTrack) => /^https?:\/\//i.test(track.url || track.path || '');
+
+/** True when any shelf holds a streamable (non-local) track; a local-only cache is not worth falling back to. */
+export function hubHasOnlineTracks(data: DiscoveryHubData | null | undefined): boolean {
+  if (!data) return false;
+  const shelves = [data.recommendations, data.global_charts, data.recently_played, data.heavy_rotation, data.forgotten_gems, data.tidal_hifi,
+    ...(data.mixed_for_you || []).map(mix => mix.tracks)];
+  return shelves.some(shelf => (shelf || []).some(isOnlineUrl));
+}
+
 export function hubContext(state: PlayerState, revision: number): string {
   return ['rank-v1', state.appMode, state.recommendationEngine, state.autoplayDiscoveryLevel,
     reference(state.tracks), revision, recommendationPreferenceRevision(), enabledAddonKey(state.addons || [])].join(':');
