@@ -976,8 +976,11 @@ async fn clean_missing_tracks(state: State<'_, AppState>) -> Result<usize, Strin
     }).await.map_err(|e| format!("Clean task panicked: {}", e))?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_track_to_library(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    if !std::path::Path::new(&path).is_file() || !scanner::is_supported_audio_path(&path) {
+        return Err("Only existing audio files can be added to the library".to_string());
+    }
     let track = match scanner::extract_metadata(std::path::Path::new(&path)) {
         Some(t) => t,
         None => {
@@ -1032,6 +1035,11 @@ fn add_track(
     cover_url: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // Stream entries only. Local files enter the library through the scanner, which keeps
+    // arbitrary paths out of `tracks` (delete_track trusts rows in that table).
+    if !path.contains("://") {
+        return Err("add_track only accepts stream URLs".to_string());
+    }
     let conn = safe_lock(&state.db);
     conn.execute(
         "INSERT OR IGNORE INTO tracks (path, title, artist, album, duration, format, loved, cover_url, bpm, energy, bass_ratio, treble_ratio)
@@ -1041,7 +1049,7 @@ fn add_track(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_cached_track(stream_url: String, state: State<'_, AppState>) -> Result<(), String> {
     let hash = format!("{:x}", md5::compute(stream_url.as_bytes()));
     let Some(data_dir) = dirs::data_dir() else {
@@ -1116,7 +1124,7 @@ fn reorder_playlist(playlist_id: i32, track_paths: Vec<String>, entry_ids: Optio
     db::reorder_playlist(&mut conn, playlist_id, &track_paths, entry_ids.as_deref()).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_playlist_tracks(playlist_id: i32, state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
     with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_playlist_entries(conn, playlist_id).map_err(|e| e.to_string()))
 }
@@ -1136,7 +1144,7 @@ fn update_playlist_source(entry_id: i64, source_context: db::RecordingSources, m
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_unified_favorites(state: State<'_, AppState>) -> Result<Vec<db::PlaylistEntry>, String> {
     with_db_reader(state.get_reader_conn(), &state.db, |conn| {
         let id = conn.query_row("SELECT id FROM playlists WHERE name = 'Favorite Songs'", [], |r| r.get::<_, i32>(0));
@@ -1148,12 +1156,12 @@ fn get_unified_favorites(state: State<'_, AppState>) -> Result<Vec<db::PlaylistE
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_library(state: State<'_, AppState>) -> Result<Vec<db::Track>, String> {
     with_db_reader(state.get_reader_conn(), &state.db, |conn| db::get_all_tracks(conn).map_err(|e| e.to_string()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_library_page(
     state: State<'_, AppState>,
     offset: u32,
@@ -1167,7 +1175,7 @@ fn get_library_page(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_library_count(
     state: State<'_, AppState>,
     search: Option<String>,
@@ -1223,7 +1231,7 @@ pub fn verify_authorized_library_track(conn: &rusqlite::Connection, path: &str) 
     Ok(canonical_target)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_track(state: State<'_, AppState>, path: String) -> Result<(), String> {
     let mut conn = safe_lock(&state.db);
 
@@ -1271,6 +1279,9 @@ fn delete_track(state: State<'_, AppState>, path: String) -> Result<(), String> 
     // 3. Canonicalize path and verify containment within library directories
     let audio_path = std::path::Path::new(&path);
     if audio_path.exists() {
+        if !scanner::is_supported_audio_path(&path) {
+            return Err("Only audio files can be deleted from the library".to_string());
+        }
         let canonical_target = verify_authorized_library_track(&conn, &path)?;
 
         // 4. Atomic database transaction with filesystem deletion rollback
@@ -1407,7 +1418,7 @@ pub fn is_safe_text_file_path(path: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     is_safe_text_file_path(&path).map_err(|e| e.to_string())?;
     std::fs::write(&path, content).map_err(|e| e.to_string())
@@ -1965,7 +1976,7 @@ pub struct ListeningInsightsPayload {
     pub source_distribution: Vec<SourceDistribution>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_listening_insights(range: String, state: State<'_, AppState>) -> Result<ListeningInsightsPayload, String> {
     with_db_reader(state.get_reader_conn(), &state.db, |conn| {
     
@@ -2443,12 +2454,12 @@ fn set_global_shortcuts(
     hotkeys::apply_shortcuts(&app_handle, &list)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn export_playlist_m3u(playlist_id: i32, dest_path: String, state: State<'_, AppState>) -> Result<usize, String> {
     with_db_reader(state.get_reader_conn(), &state.db, |conn| m3u::export_playlist_m3u(conn, playlist_id, &dest_path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn import_playlist_m3u(src_path: String, playlist_name: Option<String>, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mut conn = safe_lock(&state.db);
     let name = playlist_name.unwrap_or_else(|| {
@@ -2466,11 +2477,28 @@ fn pre_resolve_youtube_url(url: String, app_handle: tauri::AppHandle) {
     player::pre_resolve_youtube_url(url, app_handle);
 }
 
+/// Edits title/artist/album. For local files the tags are written into the file first; a
+/// database-only edit would be reverted by the next scan, which re-reads the file's tags.
 #[tauri::command]
-fn update_track_metadata(path: String, title: String, artist: String, album: String, state: State<'_, AppState>) -> Result<(), String> {
+async fn update_track_metadata(path: String, title: String, artist: String, album: String, state: State<'_, AppState>) -> Result<(), String> {
+    let is_local_file = !path.contains("://") && std::path::Path::new(&path).is_file();
+    if is_local_file {
+        verify_authorized_library_track(&safe_lock(&state.db), &path)?;
+        let update = tag_editor::AudioTagUpdate {
+            title: Some(title.clone()),
+            artist: Some(artist.clone()),
+            album: Some(album.clone()),
+            ..Default::default()
+        };
+        let file_path = path.clone();
+        tokio::task::spawn_blocking(move || tag_editor::write_tags(&file_path, &update))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("Could not write tags to the file: {}", e))?;
+        artwork::invalidate_cover_cache(&path);
+    }
     let conn = safe_lock(&state.db);
-    db::update_track_metadata(&conn, &path, &title, &artist, &album).map_err(|e| e.to_string())?;
-    Ok(())
+    db::update_track_metadata(&conn, &path, &title, &artist, &album).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2701,7 +2729,7 @@ fn open_logs_folder(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn export_debug_report(app: AppHandle) -> Result<String, String> {
     let logs_dir = match app.path().app_data_dir() {
         Ok(d) => d.join("logs"),
@@ -2939,7 +2967,7 @@ async fn get_similar_tracks(state: State<'_, AppState>, path: String, excluded_p
     rank_similar_tracks(all_tracks, &path, excluded_paths.as_deref().unwrap_or(&[]))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn clear_application_cache() -> Result<(), String> {
     // 1. Delete Cloud Stream Cache
     if let Some(data_dir) = dirs::data_dir() {
@@ -2975,7 +3003,7 @@ fn clear_application_cache() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_cache_size_info(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let mut total_bytes: u64 = 0;
     let mut file_count: usize = 0;
@@ -3056,7 +3084,7 @@ fn open_cache_folder() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn check_files_exist(paths: Vec<String>) -> Vec<bool> {
     paths.into_iter().map(|p| std::path::Path::new(&p).exists()).collect()
 }
@@ -3163,6 +3191,7 @@ async fn write_audio_tags(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<db::Track, String> {
+    verify_authorized_library_track(&safe_lock(&state.db), &path)?;
     let path_clone = path.clone();
     let update_clone = update.clone();
 
@@ -3198,6 +3227,12 @@ async fn batch_update_tags(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
+    {
+        let conn = safe_lock(&state.db);
+        for p in &paths {
+            verify_authorized_library_track(&conn, p)?;
+        }
+    }
     let paths_clone = paths.clone();
     let update_clone = update.clone();
 

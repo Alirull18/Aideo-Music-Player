@@ -1270,6 +1270,26 @@ pub trait AudioNode {
     fn update_params(&mut self, dsp: &DSPState, sample_rate: f32);
 }
 
+/// The live playback DSP chain, in processing order. Every control exposed in the
+/// Audio Control Center must have a node here; `dsp_tests` locks that in.
+pub(crate) fn build_dsp_chain(channels: usize, sample_rate: f32) -> Vec<Box<dyn AudioNode + Send>> {
+    vec![
+        Box::new(PreampNode::new()),
+        Box::new(SaturationNode::new()),
+        Box::new(PhaseResponseNode::new()),
+        Box::new(EqNode::new()),
+        Box::new(AideoFilterNode::new()),
+        Box::new(SubsonicNode::new()),
+        Box::new(CrossfeedNode::new()),
+        Box::new(SpatializerNode::new()),
+        Box::new(ConvolutionNode::new()),
+        Box::new(WidthNode::new()),
+        Box::new(CompressorNode::new()),
+        Box::new(NormalizerNode::new()),
+        Box::new(LimiterNode::new(channels, 2.0, sample_rate)),
+    ]
+}
+
 pub struct PreampNode {
     enabled: bool,
     gain_linear: f32,
@@ -3555,16 +3575,7 @@ fn play_file(
         is_bp_mode, route.fallback_reason,
     );
 
-    // Create persistent DSP filter and delay line instances
-    let mut nodes: Vec<Box<dyn AudioNode + Send>> = vec![
-        Box::new(PreampNode::new()),
-        Box::new(EqNode::new()),
-        Box::new(SubsonicNode::new()),
-        Box::new(CrossfeedNode::new()),
-        Box::new(ConvolutionNode::new()),
-        Box::new(NormalizerNode::new()),
-        Box::new(LimiterNode::new(use_ch, 2.0, dev_rate as f32)),
-    ];
+    let mut nodes = build_dsp_chain(use_ch, dev_rate as f32);
 
     for node in &mut nodes {
         node.update_params(&current_dsp, dev_rate as f32);

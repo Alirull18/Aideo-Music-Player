@@ -166,6 +166,11 @@ export function setOnlineTrackCache(key: string, track: any) {
   saveOnlineTrackCache();
 }
 
+/** Normalized lookup key matching the exact-path branch of `pathsEqual`. */
+export function pathKey(p: string): string {
+  return (resolvedPathMap.get(p) ?? p).replace(/\\/g, '/').toLowerCase();
+}
+
 export function pathsEqual(p1: string | null | undefined, p2: string | null | undefined): boolean {
   if (!p1 || !p2) return false;
   

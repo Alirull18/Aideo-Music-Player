@@ -18,6 +18,13 @@ pub const SUPPORTED_AUDIO_EXTENSIONS: &[&str] = &[
     "flac", "wav", "m4a", "mp3", "ogg", "opus", "aac", "alac", "aiff", "ape", "wma", "dsf", "dff",
 ];
 
+pub fn is_supported_audio_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| SUPPORTED_AUDIO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
 pub fn scan_directory_chunked<F>(
     dir: &str,
     app_handle: &AppHandle,

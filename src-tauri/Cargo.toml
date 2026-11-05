@@ -93,5 +93,7 @@ quick-xml = "0.39"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# Must stay "unwind": the scanner and artwork extractor use catch_unwind to survive decoder
+# panics on malformed files. With "abort" one bad file terminates the whole app.
+panic = "unwind"
 strip = true

@@ -482,7 +482,6 @@ export function SettingsView() {
     recommendationEngine, setRecommendationEngine,
     setShowOnboarding, setOnboardingCompleted,
     cacheSizeLimit, setCacheSizeLimit,
-    discoverCastDevices,
     resetDislikedTracks,
     colorScheme, setColorScheme, shortcuts, setShortcut,
     albumArtFit, setAlbumArtFit,
@@ -564,7 +563,6 @@ export function SettingsView() {
     setOnboardingCompleted: s.setOnboardingCompleted,
     cacheSizeLimit: s.cacheSizeLimit,
     setCacheSizeLimit: s.setCacheSizeLimit,
-    discoverCastDevices: s.discoverCastDevices,
     resetDislikedTracks: s.resetDislikedTracks,
     colorScheme: s.colorScheme,
     setColorScheme: s.setColorScheme,
@@ -734,12 +732,6 @@ export function SettingsView() {
       if (timer) clearTimeout(timer);
     };
   }, []);
-
-  useEffect(() => {
-    if (activeTab === 'system') {
-      discoverCastDevices();
-    }
-  }, [activeTab]);
 
   // Connected services loading
   const [lfmLoading, setLfmLoading] = useState(false);

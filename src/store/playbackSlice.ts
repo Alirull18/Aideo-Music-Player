@@ -900,7 +900,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
         // If there are explicit tracks remaining in the queue, advance to next track
         if (freshState.queue.length > 0) {
-          console.log('[playback] Stopped status recovery: advancing to next queued track...');
           set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
           await get().playNext();
           return;
@@ -915,7 +914,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         const supportsNaturalEnd = typeof duration === 'number' && duration > 10 && (pos >= duration - 4 || pos >= duration * 0.95);
 
         if (supportsNaturalEnd && freshState.autoplayEnabled) {
-          console.log('[playback] Stopped status recovery: prior position indicates natural completion, calling playNext()...');
           set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
           await get().playNext();
           return;
@@ -2085,163 +2083,4 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     get().setDSP({ low_spec_mode: next });
   },
 
-  discoverCastDevices: async () => {
-    set({ chromecast_scanning: true });
-    try {
-      const devices = await invoke<any[]>('chromecast_discover');
-      set({ chromecast_devices: devices, chromecast_scanning: false });
-    } catch (e) {
-      console.error('Failed to discover Chromecast devices:', e);
-      set({ chromecast_scanning: false });
-    }
-  },
-
-  connectCastDevice: async (device: { name: string; ip: string; port: number }) => {
-    try {
-      const activeTrack = get().currentTrack;
-      const startPos = get().playback.position_secs;
-      const wasPaused = get().playback.status === 'Paused';
-      cancelSourcePlayback();
-      if (get().upnp_connected) {
-        await invoke('upnp_control', { action: 'stop' });
-        await invoke('upnp_disconnect');
-        set({ upnp_active_device: null, upnp_connected: false });
-      }
-      if (get().chromecast_connected) {
-        await invoke('chromecast_control', { action: 'stop' });
-        await invoke('chromecast_disconnect');
-        set({ chromecast_active_device: null, chromecast_connected: false });
-      }
-      await invoke('stop_track');
-      await invoke('chromecast_connect', { ip: device.ip, port: device.port });
-      set(s => ({ chromecast_active_device: device.ip, chromecast_connected: true,
-        currentAttemptId: undefined,
-        playback: { ...s.playback, attempt_id: undefined, effective_audio_path: null } }));
-
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: `Connected to ${device.name}`, type: 'success' }
-      }));
-
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, startPos);
-        if (wasPaused && get().playback.status === 'Playing' && get().chromecast_connected) await get().pauseTrack();
-      } else {
-        set({ playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 }, currentTrack: null, coverArt: null });
-      }
-    } catch (e) {
-      console.error('Failed to connect to Chromecast:', e);
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: 'Failed to connect to Chromecast', type: 'error' }
-      }));
-    }
-  },
-
-  disconnectCastDevice: async () => {
-    try {
-      // Capture currently playing track, status, and position before disconnecting
-      const activeTrack = get().currentTrack;
-      const currentPos = get().playback.position_secs;
-      const wasPlaying = get().playback.status === 'Playing';
-
-      if (get().chromecast_connected) {
-        await invoke('chromecast_control', { action: 'stop' });
-        await invoke('chromecast_disconnect');
-      }
-      set({
-        chromecast_active_device: null,
-        chromecast_connected: false,
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: 'Disconnected from Chromecast', type: 'info' }
-      }));
-
-      // Seamlessly transfer playback back to local player
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, currentPos);
-        if (!wasPlaying) {
-          await get().pauseTrack();
-        }
-      }
-    } catch (e) {
-      console.error('Failed to disconnect from Chromecast:', e);
-    }
-  },
-
-  discoverUpnpDevices: async () => {
-    set({ upnp_scanning: true });
-    try {
-      const devices = await invoke<any[]>('upnp_discover');
-      set({ upnp_devices: devices, upnp_scanning: false });
-    } catch (e) {
-      console.error('Failed to discover UPnP devices:', e);
-      set({ upnp_scanning: false });
-    }
-  },
-
-  connectUpnpDevice: async (device: any) => {
-    try {
-      const activeTrack = get().currentTrack;
-      const startPos = get().playback.position_secs;
-      const wasPaused = get().playback.status === 'Paused';
-      cancelSourcePlayback();
-      if (get().chromecast_connected) {
-        await invoke('chromecast_control', { action: 'stop' });
-        await invoke('chromecast_disconnect');
-        set({ chromecast_active_device: null, chromecast_connected: false });
-      }
-      if (get().upnp_connected) {
-        await invoke('upnp_control', { action: 'stop' });
-        await invoke('upnp_disconnect');
-        set({ upnp_active_device: null, upnp_connected: false });
-      }
-      await invoke('stop_track');
-      await invoke('upnp_connect', { deviceId: device.id });
-      set(s => ({ upnp_active_device: device.id, upnp_connected: true,
-        currentAttemptId: undefined,
-        playback: { ...s.playback, attempt_id: undefined, effective_audio_path: null } }));
-
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: `Connected to ${device.name} [Hi-Res Lossless DLNA]`, type: 'success' }
-      }));
-
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, startPos);
-        if (wasPaused && get().playback.status === 'Playing' && get().upnp_connected) await get().pauseTrack();
-      } else {
-        set({ playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 }, currentTrack: null, coverArt: null });
-      }
-    } catch (e) {
-      console.error('Failed to connect to UPnP device:', e);
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: `Failed to connect to ${device.name}: ${e}`, type: 'error' }
-      }));
-    }
-  },
-
-  disconnectUpnpDevice: async () => {
-    try {
-      const activeTrack = get().currentTrack;
-      const currentPos = get().playback.position_secs;
-      const wasPlaying = get().playback.status === 'Playing';
-
-      await invoke('upnp_control', { action: 'stop' });
-      await invoke('upnp_disconnect');
-      set({
-        upnp_active_device: null,
-        upnp_connected: false,
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: 'Disconnected from UPnP MediaRenderer', type: 'info' }
-      }));
-
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, currentPos);
-        if (!wasPlaying) {
-          await get().pauseTrack();
-        }
-      }
-    } catch (e) {
-      console.error('Failed to disconnect UPnP device:', e);
-    }
-  },
 });

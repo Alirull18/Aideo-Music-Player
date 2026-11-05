@@ -535,6 +535,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
         active: true
       }
     });
+    // Count against a wall-clock deadline: WebView2 throttles timers while the window is
+    // minimized or in the tray, so ticks cannot be trusted to arrive once per second.
+    const deadline = Date.now() + durationSeconds * 1000;
     sleepTimerInterval = setInterval(() => {
       const current = get().sleepTimer;
       if (!current.active) {
@@ -544,7 +547,8 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
         }
         return;
       }
-      if (current.remaining <= 1) {
+      const remaining = Math.ceil((deadline - Date.now()) / 1000);
+      if (remaining <= 0) {
         clearInterval(sleepTimerInterval);
         sleepTimerInterval = null;
         set({
@@ -557,7 +561,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
         set({
           sleepTimer: {
             ...current,
-            remaining: current.remaining - 1
+            remaining
           }
         });
       }

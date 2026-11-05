@@ -6,7 +6,7 @@ import { StateCreator } from 'zustand';
 import { PlayerState, Track } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { extractDominantColor } from './types';
-import { pathsEqual, baseName, parseDuration, parseStreamMetadata, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
+import { pathsEqual, pathKey, baseName, parseDuration, parseStreamMetadata, setOnlineTrackCache, isStreamTrack, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines } from '../utils';
 import { chainQueueOperation } from './playbackSlice';
 import { safeSetStorage, safeRemoveStorage } from '../utils/storage';
 import { pickShuffleIndex, markShufflePlayed } from '../utils/shuffle';
@@ -155,6 +155,29 @@ const fetchTrackMetadataAndLyrics = async (
   });
 };
 
+/**
+ * SQLite `library_directories` is the source of truth for library folders. localStorage is only a
+ * cache: it seeds the database once (legacy installs) and is otherwise overwritten from it, so a
+ * cleared WebView profile can no longer wipe the saved folders.
+ */
+async function reconcileLibraryDirectories(
+  get: () => PlayerState,
+  set: (partial: Partial<PlayerState>) => void,
+): Promise<void> {
+  try {
+    const result = await invoke<string[] | null>('get_library_directories');
+    const stored = Array.isArray(result) ? result : [];
+    const dirs = stored.length > 0 ? stored : get().scanDirs;
+    if (stored.length > 0 && JSON.stringify(stored) !== JSON.stringify(get().scanDirs)) {
+      safeSetStorage('aideo_scan_dirs', JSON.stringify(stored));
+      set({ scanDirs: stored });
+    }
+    if (dirs.length > 0) await invoke('sync_watch_folders', { dirs });
+  } catch (e) {
+    console.error('Failed to reconcile library folders:', e);
+  }
+}
+
 export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, get) => ({
   tracks: [],
   currentTrackIndex: -1,
@@ -287,12 +310,14 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const newDirs = Array.from(new Set([...get().scanDirs, dir]));
     localStorage.setItem('aideo_scan_dirs', JSON.stringify(newDirs));
     set({ scanDirs: newDirs });
+    invoke('sync_watch_folders', { dirs: newDirs }).catch(console.error);
   },
 
   removeScanDir: (dir: string) => {
     const newDirs = get().scanDirs.filter(d => d !== dir);
     localStorage.setItem('aideo_scan_dirs', JSON.stringify(newDirs));
     set({ scanDirs: newDirs });
+    invoke('sync_watch_folders', { dirs: newDirs }).catch(console.error);
   },
 
   scanLibrary: async () => {
@@ -329,14 +354,28 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       const library: Track[] = await invoke('get_library');
       const saved: Track[] = await invoke<Track[]>('get_unified_favorites').catch(() => [] as Track[]);
       const tracks = [...library.map(applySourcePreference), ...(saved || []).map(applySourcePreference)];
-      set({ tracks });
-      invoke('sync_watch_folders', { dirs: get().scanDirs }).catch(console.error);
+      const byPath = new Map<string, Track>();
+      for (const t of tracks) {
+        if (t.path && !byPath.has(pathKey(t.path))) byPath.set(pathKey(t.path), t);
+      }
+
+      // `tracks` is also the open playlist's play context; a library refresh must not replace it.
+      const openPlaylist = get().currentPlaylist;
+      if (!openPlaylist) {
+        set({ tracks });
+      } else if (openPlaylist.id > 0) {
+        await get().loadPlaylistTracks(openPlaylist.id);
+      } else {
+        set({ tracks: get().tracks.map(t => (!t.source_context && t.path && byPath.get(pathKey(t.path))) || t) });
+      }
+
+      await reconcileLibraryDirectories(get, set);
       get().fetchSmartPlaylists().catch(console.error);
 
       // Synchronize currently playing track tags instantly
       const current = get().currentTrack;
       if (current && !current.source_context) {
-        const updatedTrack = tracks.find(t => pathsEqual(t.path, current.path));
+        const updatedTrack = byPath.get(pathKey(current.path));
         if (updatedTrack) {
           set({ currentTrack: updatedTrack });
         }
@@ -356,12 +395,15 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       // Synchronize queued tracks tags instantly
       const currentQueue = get().queue;
       if (currentQueue.length > 0) {
+        let changed = false;
         const updatedQueue = currentQueue.map(q => {
-          if (q.source_context) return q;
-          const matched = tracks.find(t => pathsEqual(t.path, q.path));
-          return matched ? { ...q, title: matched.title, artist: matched.artist, album: matched.album } : q;
+          if (q.source_context || !q.path) return q;
+          const matched = byPath.get(pathKey(q.path));
+          if (!matched || (matched.title === q.title && matched.artist === q.artist && matched.album === q.album)) return q;
+          changed = true;
+          return { ...q, title: matched.title, artist: matched.artist, album: matched.album };
         });
-        set({ queue: updatedQueue });
+        if (changed && get().queue === currentQueue) set({ queue: updatedQueue });
       }
     } catch (e) { console.error('loadLibrary:', e); }
   },
@@ -1095,12 +1137,10 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       if (!isOnline) continue;
 
       if (track.path.includes("youtube.com") || track.path.includes("youtu.be") || track.format === 'YouTube Direct') {
-        console.log('[Pre-Cache] Pre-resolving YouTube track:', track.title);
         invoke('pre_resolve_youtube_url', { url: track.path }).catch(() => {});
       } 
       else if (isRetiredCloudTrack(track)) continue;
       else if (track.path.startsWith('http://') || track.path.startsWith('https://')) {
-        console.log('[Pre-Cache] Pre-caching Cloud/Subsonic track:', track.title);
         invoke('cache_cloud_track', { streamUrl: track.path }).catch(() => {});
       }
     }
@@ -1170,7 +1210,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const artistGeneric = isGenericStreamArtist(seedTrack.artist);
     const titleGeneric = isGenericStreamTitle(seedTrack.title);
     if (artistGeneric && titleGeneric) {
-      console.log('[autoplay] Seed metadata is generic/degraded — skipping radio fill to avoid irrelevant recommendations.');
       return;
     }
     const safeSeedArtist = artistGeneric ? 'Unknown Artist' : seedTrack.artist!;
@@ -1181,7 +1220,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
     const playbackSeq = playbackRequest();
 
     try {
-      console.log(`[autoplay] Generating upcoming radio queue using seed: '${safeSeedTitle}' by '${safeSeedArtist}'...`);
       let recommendedTracks: Track[] = [];
       const fetchYoutubeRadio = async (): Promise<Track[]> => {
         try {
@@ -1291,7 +1329,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
         || requested.autoplayDiscoveryLevel !== get().autoplayDiscoveryLevel) return;
 
       if (currentReqSeq !== autoplayReqSeq || playbackSeq !== playbackRequest() || playingPath !== get().currentTrack?.path) {
-        console.log('[autoplay] Stale recommendation request superseded, skipping queue update.');
         return;
       }
 
@@ -1315,7 +1352,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       }
 
       if (!get().autoplayEnabled || get().albumSession || get().stopBoundary || currentReqSeq !== autoplayReqSeq || playbackSeq !== playbackRequest() || playingPath !== get().currentTrack?.path) {
-        console.log('[autoplay] Autoplay disabled or stale request superseded, skipping queue update.');
         return;
       }
 
@@ -1328,7 +1364,6 @@ export const createLibrarySlice: StateCreator<PlayerState, [], [], any> = (set, 
       // 🚀 Background Pre-caching manager for the next 2 tracks
       get().preCacheNextTracks().catch(console.error);
 
-      console.log('[autoplay] Dynamically populated upcoming queue with recommendations!');
     } catch (err) {
       console.error('Autoplay background resolution failed:', err);
     }

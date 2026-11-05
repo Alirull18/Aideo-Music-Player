@@ -494,7 +494,6 @@ function AideoApp() {
         if (!payload?.path || !payload.attempt_id || !payload.previous_attempt_id
           || payload.previous_attempt_id !== state.currentAttemptId
           || (payload.previous_path && payload.previous_path !== state.playback.current_track)) return;
-        console.log('[App] Received track-transitioned event from native backend:', payload);
         markListeningEnd('completed');
         await state.handleNativeTrackTransition(payload.path, payload.attempt_id);
       });
@@ -510,17 +509,14 @@ function AideoApp() {
         if (!state.currentTrack || !currentAttempt || eventAttempt !== currentAttempt
           || (event?.payload?.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && event.payload.path !== state.playback.current_track)) return;
         if (eventAttempt && eventAttempt === lastHandledAttemptId) {
-          console.log('[App] Discarding duplicate track-ended event for attempt:', eventAttempt);
           return;
         }
         if (state.playback.status === 'Stopped') {
-          console.log('[App] Discarding track-ended event received while playback is stopped');
           return;
         }
         if (state.currentTrack?.source_context && state.playback.is_buffering) return;
         lastHandledAttemptId = currentAttempt;
         markListeningEnd('completed');
-        console.log('[App] Received track-ended event from backend. Applying end policy.');
         void state.handleNaturalTrackEnd();
       });
       if (isCancelled) { uEnded(); return; }
@@ -544,7 +540,9 @@ function AideoApp() {
         if (isCancelled) return;
         const state = useStore.getState();
         const incomingAttemptId = event.payload?.attempt_id;
-        if (!incomingAttemptId || !state.currentAttemptId || incomingAttemptId === state.currentAttemptId) {
+        // The backend sends "" when the cancelled attempt had no id; that cancel cannot belong to a
+        // live attempt, so it must not clear the current track's buffering indicator.
+        if (!state.currentAttemptId || incomingAttemptId === state.currentAttemptId) {
           useStore.setState((prev) => ({
             playback: { ...prev.playback, is_buffering: false }
           }));
@@ -553,13 +551,6 @@ function AideoApp() {
       });
       if (isCancelled) { uPlaybackCancelled(); return; }
       cleanups.push(uPlaybackCancelled);
-
-      const uPlaybackSuccess = await listen<string>('playback-success', (event) => {
-        if (isCancelled) return;
-        console.log('[App] Playback success:', event.payload);
-      });
-      if (isCancelled) { uPlaybackSuccess(); return; }
-      cleanups.push(uPlaybackSuccess);
 
       const uLib = await listen('library-updated', () => {
         if (isCancelled) return;

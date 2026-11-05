@@ -370,7 +370,6 @@ export const createMetadataSlice: StateCreator<PlayerState, [], [], any> = (set,
           }
         }
 
-        console.log('[lyrics] query=', query, 'results=', results?.length, 'bestMatch=', bestMatch?.title, 'lrc.len=', lrc?.length);
 
           if (lrc) {
             await get().saveLyrics(track.path, lrc);

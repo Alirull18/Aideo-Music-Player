@@ -1095,14 +1095,18 @@ export function LibraryView() {
   const applyMatch = async () => {
     if (!matchData) return;
     const { track, match } = matchData;
-    await invoke('update_track_metadata', { 
-      path: track.path, 
-      title: match.title, 
-      artist: match.artist, 
-      album: match.album 
-    });
-    setMatchData(null);
-    loadLibrary();
+    try {
+      await invoke('update_track_metadata', {
+        path: track.path,
+        title: match.title,
+        artist: match.artist,
+        album: match.album
+      });
+      setMatchData(null);
+      loadLibrary();
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: `Failed to apply match: ${err}`, type: 'error' } }));
+    }
   };
 
   const handleSaveMetadata = async () => {

@@ -27,7 +27,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
     // 1. Sync unsynced playback history logs
     const unsyncedLogs = await invoke<any[]>('get_unsynced_history');
     if (unsyncedLogs && unsyncedLogs.length > 0) {
-      console.log(`[Sync] Pushing ${unsyncedLogs.length} unsynced play logs to Supabase...`);
       const payload = unsyncedLogs.map(log => ({
         user_id: userId,
         track_path: log.track_path,
@@ -48,7 +47,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
       if (!error) {
         const ids = unsyncedLogs.map(log => log.id);
         await invoke('mark_history_synced', { ids });
-        console.log('[Sync] Play logs pushed and marked synced successfully.');
       } else {
         console.error('[Sync] Error pushing play logs:', error.message);
       }
@@ -56,7 +54,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
     // 2. Sync liked tracks
     const lovedTracks = state.tracks.filter(t => t.loved === 1);
-    console.log('[Sync] Found liked tracks in state.tracks:', lovedTracks.length);
     
     // First, sync local loved tracks
     if (lovedTracks.length > 0) {
@@ -77,8 +74,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
       if (error) {
         console.error('[Sync] Error syncing liked tracks to Supabase:', error.message, error);
-      } else {
-        console.log('[Sync] Liked tracks synced to Supabase successfully.');
       }
     }
 
@@ -190,8 +185,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
     if (settingsError) {
       console.error('[Sync] Error syncing settings:', settingsError.message);
-    } else {
-      console.log('[Sync] App settings synced successfully.');
     }
 
     // 5. Sync playCounts record mapping
@@ -249,13 +242,11 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
 
   try {
     if (syncLikes) {
-      console.log('[Sync] Pulling liked tracks from cloud...');
       const { data: cloudLikes, error: likesError } = await supabase
         .from('liked_tracks')
         .select('*')
         .eq('user_id', userId);
 
-      console.log('[Sync] Retrieved liked tracks from Supabase:', cloudLikes?.length, cloudLikes, likesError);
 
       if (!likesError && cloudLikes) {
         const currentTracks = get().tracks;
@@ -263,9 +254,7 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
         // 1. If liked in cloud but not locally, make it liked locally
         for (const t of cloudLikes) {
           const localTrack = currentTracks.find(lt => lt.path === t.track_path);
-          console.log('[Sync] Restoring liked track:', t.track_path, 'Local match:', localTrack);
           if (!localTrack || localTrack.loved !== 1) {
-            console.log('[Sync] Invoking toggle_love_track (love) for:', t.track_path);
             await invoke('toggle_love_track', {
               path: t.track_path,
               loved: true,
@@ -282,7 +271,6 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
     }
 
     if (syncSettings) {
-      console.log('[Sync] Pulling settings from cloud...');
       const { data: cloudSettings, error: settingsError } = await supabase
         .from('user_settings')
         .select('*')
@@ -312,7 +300,6 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
     }
 
     if (syncPlaylists) {
-      console.log('[Sync] Pulling playlists from cloud...');
       const { data: cloudPlaylists, error: plError } = await supabase
         .from('playlists')
         .select('*')
@@ -369,7 +356,6 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
     }
 
     if (syncPlayCounts) {
-      console.log('[Sync] Pulling track stats playCounts...');
       const { data: cloudStats, error: statsError } = await supabase
         .from('track_stats')
         .select('*')

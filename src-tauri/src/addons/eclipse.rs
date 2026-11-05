@@ -313,13 +313,15 @@ pub(crate) fn builtin_featured_manifest(base: &Url) -> Option<Manifest> {
     })
 }
 
+/// Development convenience only: starts `addons-sdk/cloud/server.mjs` with Node when the app runs
+/// from a repository checkout. Release builds never execute scripts from the working directory.
 pub(crate) fn ensure_local_cloud_server(base: &Url) {
-    #[cfg(test)]
+    #[cfg(any(test, not(debug_assertions)))]
     {
         let _ = base;
         return;
     }
-    #[cfg(not(test))]
+    #[cfg(all(not(test), debug_assertions))]
     {
         if !matches!(base.host_str(), Some("127.0.0.1") | Some("localhost")) {
             return;

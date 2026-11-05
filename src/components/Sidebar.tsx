@@ -56,8 +56,9 @@ export function Sidebar() {
   const [newPName, setNewPName] = useState('');
 
   const goLibrary = () => {
+    const leavingPlaylist = !!useStore.getState().currentPlaylist;
     useStore.setState({ currentPlaylist: null });
-    if (useStore.getState().tracks.length === 0) {
+    if (leavingPlaylist || useStore.getState().tracks.length === 0) {
       loadLibrary();
     }
     startTransition(() => {
@@ -189,8 +190,9 @@ export function Sidebar() {
             icon = <Heart size={18} />;
             isActive = view === 'loved_streams';
             onClick = () => {
+              const leavingPlaylist = !!useStore.getState().currentPlaylist;
               useStore.setState({ currentPlaylist: null });
-              if (useStore.getState().tracks.length === 0) {
+              if (leavingPlaylist || useStore.getState().tracks.length === 0) {
                 loadLibrary();
               }
               startTransition(() => setView('loved_streams'));

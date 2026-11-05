@@ -18,6 +18,9 @@ import {
 import { useStore } from '../store';
 import { FEATURED_ADDON_CATALOG, type AddonAuthSpec, type AddonInfo } from '../store/addonSlice';
 
+const devicePollIntervalMs = (seconds: number | undefined) =>
+  (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
+
 type TidalDeviceAuthState =
   | { status: 'idle' }
   | { status: 'starting'; addonId: string }
@@ -27,6 +30,8 @@ type TidalDeviceAuthState =
       origin: string;
       userCode: string;
       verificationUriComplete: string;
+      /** Poll spacing requested by the provider (OAuth device flow); never poll faster. */
+      intervalMs: number;
     }
   | { status: 'connected'; addonId: string; countryCode: string | null }
   | { status: 'error'; addonId: string; message: string };
@@ -231,10 +236,12 @@ export default function AddonsCard() {
 
   useEffect(() => {
     if (tidalAuth.status !== 'polling') return;
-    const { addonId, origin } = tidalAuth;
+    const { addonId, origin, intervalMs } = tidalAuth;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const timer = setInterval(async () => {
+    // Chained timeouts: the next poll is scheduled only after the previous one settles.
+    const poll = async () => {
       try {
         const res = await fetch(`${origin}/auth/poll`, { method: 'POST' });
         if (cancelled) return;
@@ -264,6 +271,7 @@ export default function AddonsCard() {
               detail: { message: 'Tidal connected', type: 'success' },
             })
           );
+          return;
         }
       } catch {
         if (!cancelled) {
@@ -273,12 +281,15 @@ export default function AddonsCard() {
             message: 'Tidal authorization expired or failed',
           });
         }
+        return;
       }
-    }, 2000);
+      if (!cancelled) timer = setTimeout(poll, intervalMs);
+    };
+    timer = setTimeout(poll, intervalMs);
 
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [tidalAuth]);
 
@@ -305,6 +316,7 @@ export default function AddonsCard() {
         origin: cleanOrigin,
         userCode: data.userCode,
         verificationUriComplete: data.verificationUriComplete,
+        intervalMs: devicePollIntervalMs(data.interval),
       });
       void Promise.resolve(openUrl(data.verificationUriComplete)).catch(() => {});
     } catch (e: any) {
@@ -321,6 +333,7 @@ export default function AddonsCard() {
               origin: cleanOrigin,
               userCode: data.userCode,
               verificationUriComplete: data.verificationUriComplete,
+              intervalMs: devicePollIntervalMs(undefined),
             });
             void Promise.resolve(openUrl(data.verificationUriComplete)).catch(() => {});
             return;
@@ -499,9 +512,11 @@ export default function AddonsCard() {
   const coreAddons = addons.filter(isCore);
   const externalAddons = addons.filter((a) => !isCore(a));
   const installedIds = new Set(addons.map((a) => a.id.toLowerCase()));
-  const uninstalledFeatured = FEATURED_ADDON_CATALOG.filter(
-    (item) => !installedIds.has(item.id.toLowerCase())
-  );
+  // The featured cloud addons talk to a local Node server (addons-sdk/cloud) that only dev builds
+  // can start. Offering them in a release build lets users "install" something that cannot connect.
+  const uninstalledFeatured = import.meta.env.DEV
+    ? FEATURED_ADDON_CATALOG.filter((item) => !installedIds.has(item.id.toLowerCase()))
+    : [];
 
   const renderAddonCard = (a: AddonInfo) => {
     const core = isCore(a);

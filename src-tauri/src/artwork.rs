@@ -272,18 +272,18 @@ mod tests {
         assert!(image_data_url(None, &jpeg).unwrap().starts_with("data:image/jpeg;base64,"));
         assert!(image_data_url(Some(""), &jpeg).unwrap().starts_with("data:image/jpeg;base64,"));
         assert!(image_data_url(Some("image/jpeg"), &png).unwrap().starts_with("data:image/png;base64,"));
-        let webp = *b"RIFF    WEBPVP8 ";
+        let webp = *b"RIFF\x00\x00\x00\x00WEBPVP8 ";
         assert!(image_data_url(None, &webp).unwrap().starts_with("data:image/webp;base64,"));
     }
 
     #[test]
     fn image_data_url_rejects_non_images() {
         assert_eq!(image_data_url(Some("text/html"), b"<html>not found</html>"), None);
-        assert_eq!(image_data_url(Some("audio/mpeg"), b"ID3"), None);
+        assert_eq!(image_data_url(Some("audio/mpeg"), b"ID3\x03"), None);
         assert_eq!(image_data_url(None, b""), None);
         // Unknown bytes are only accepted when the declared type is a sane image type.
-        assert!(image_data_url(Some("image/x-icon; charset=binary"), b"   ").unwrap().starts_with("data:image/x-icon;base64,"));
-        assert_eq!(image_data_url(Some("image/\"><script>"), b"   "), None);
+        assert!(image_data_url(Some("image/x-icon; charset=binary"), b"\x00\x00\x01\x00").unwrap().starts_with("data:image/x-icon;base64,"));
+        assert_eq!(image_data_url(Some("image/\"><script>"), b"\x00\x00\x01\x00"), None);
     }
 
     #[test]

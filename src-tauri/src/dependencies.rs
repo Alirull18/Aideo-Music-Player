@@ -55,6 +55,9 @@ pub fn parse_sha256sums_for_binary(text: &str, target_binary: &str) -> Option<St
     None
 }
 
+/// yt-dlp is executed by the app, so an install without a published checksum is refused.
+const YTDLP_UNVERIFIED: &str = "Could not fetch the yt-dlp checksum list; refusing to install an unverified binary. Check your connection and try again.";
+
 pub async fn fetch_ytdlp_expected_sha256() -> Option<String> {
     let client = crate::get_http_client();
     let res = client
@@ -68,6 +71,13 @@ pub async fn fetch_ytdlp_expected_sha256() -> Option<String> {
     }
     let text = res.text().await.ok()?;
     parse_sha256sums_for_binary(&text, "yt-dlp.exe")
+}
+
+/// Downloads the latest yt-dlp.exe to `dest`, verified against the published SHA-256 list.
+pub async fn install_verified_ytdlp(dest: &Path, app_handle: &tauri::AppHandle) -> Result<(), String> {
+    let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+    let expected_hash = fetch_ytdlp_expected_sha256().await.ok_or(YTDLP_UNVERIFIED)?;
+    download_with_progress_and_sha256(url, dest, "ytdlp", Some(&expected_hash), app_handle).await
 }
 
 pub async fn download_with_progress_and_sha256(
@@ -171,13 +181,11 @@ pub async fn install_dependency(app_handle: tauri::AppHandle, dep_id: String) ->
     match dep_id.as_str() {
         "ytdlp" => {
             let dest = aideo_dir.join("yt-dlp.exe");
-            let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "Downloading high-performance YouTube audio decoder in background...",
                 "type": "info"
             }));
-            let expected_hash = fetch_ytdlp_expected_sha256().await;
-            download_with_progress_and_sha256(url, &dest, "ytdlp", expected_hash.as_deref(), &app_handle).await?;
+            install_verified_ytdlp(&dest, &app_handle).await?;
             let _ = app_handle.emit("ui-toast", serde_json::json!({
                 "message": "YouTube audio decoder successfully installed!",
                 "type": "success"
@@ -329,9 +337,7 @@ pub async fn check_update_ytdlp(app_handle: tauri::AppHandle) -> Result<bool, St
 
     // Method 2 fallback: Re-download latest binary if -U failed
     let dest = aideo_dir.join("yt-dlp.exe");
-    let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
-    let expected_hash = fetch_ytdlp_expected_sha256().await;
-    download_with_progress_and_sha256(url, &dest, "ytdlp", expected_hash.as_deref(), &app_handle).await?;
+    install_verified_ytdlp(&dest, &app_handle).await?;
     
     let _ = app_handle.emit("ui-toast", serde_json::json!({
         "message": "yt-dlp binary successfully updated to latest release!",

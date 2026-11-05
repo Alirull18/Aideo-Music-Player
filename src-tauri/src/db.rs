@@ -551,14 +551,15 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
 }
 
 pub fn save_library_directories(conn: &Connection, dirs: &[String]) -> Result<()> {
-    let _ = conn.execute("DELETE FROM library_directories", []);
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM library_directories", [])?;
     for dir in dirs {
-        conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO library_directories (path) VALUES (?1)",
             rusqlite::params![dir],
         )?;
     }
-    Ok(())
+    tx.commit()
 }
 
 pub fn get_library_directories(conn: &Connection) -> Result<Vec<String>> {

@@ -542,9 +542,6 @@ export interface PlayerState {
   setTagEditorBatchTracks: (tracks: Track[]) => void;
   toggleDesktopLyrics: () => Promise<void>;
   toggleDesktopLyricsLocked: () => Promise<void>;
-  discoverUpnpDevices: () => Promise<void>;
-  connectUpnpDevice: (device: UpnpDevice) => Promise<void>;
-  disconnectUpnpDevice: () => Promise<void>;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
   setView: (view: ViewMode) => void;
@@ -740,10 +737,6 @@ export interface PlayerState {
     playCounts?: boolean;
   }) => Promise<void>;
 
-  // Chromecast Actions
-  discoverCastDevices: () => Promise<void>;
-  connectCastDevice: (device: { name: string; ip: string; port: number }) => Promise<void>;
-  disconnectCastDevice: () => Promise<void>;
 
   // Mini Player
   miniPlayerMode: boolean;

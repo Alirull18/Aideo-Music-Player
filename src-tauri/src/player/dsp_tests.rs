@@ -2031,4 +2031,67 @@ mod dsp_tests {
         assert_eq!(node_custom.crossfeed_level, -12.0);
         assert_eq!(node_custom.crossfeed_corner, 550.0);
     }
+
+    /// Runs `input` through the live playback chain built by `build_dsp_chain`.
+    fn run_live_chain(dsp: &DSPState, input: &[Vec<f32>]) -> Vec<Vec<f32>> {
+        let rate = 48_000.0;
+        let mut chain = crate::player::build_dsp_chain(input.len(), rate);
+        for node in &mut chain {
+            node.update_params(dsp, rate);
+        }
+        let mut out: Vec<Vec<f32>> = vec![Vec::new(); input.len()];
+        for start in (0..input[0].len()).step_by(1024) {
+            let end = (start + 1024).min(input[0].len());
+            let mut block: Vec<Vec<f32>> = input.iter().map(|ch| ch[start..end].to_vec()).collect();
+            for node in &mut chain {
+                node.process(&mut block, rate);
+            }
+            for (o, b) in out.iter_mut().zip(block) {
+                o.extend(b);
+            }
+        }
+        out
+    }
+
+    fn stereo_test_signal(amplitude: f32) -> Vec<Vec<f32>> {
+        let mut rng = XorShift(0x1234_5678);
+        let left: Vec<f32> = (0..8192).map(|_| rng.next_f32() * amplitude).collect();
+        let right: Vec<f32> = (0..8192).map(|_| rng.next_f32() * amplitude).collect();
+        vec![left, right]
+    }
+
+    fn max_abs_diff(a: &[Vec<f32>], b: &[Vec<f32>]) -> f32 {
+        a.iter().zip(b).flat_map(|(x, y)| x.iter().zip(y).map(|(p, q)| (p - q).abs())).fold(0.0, f32::max)
+    }
+
+    fn enabled_dsp() -> DSPState {
+        DSPState { enabled: true, ..DSPState::default() }
+    }
+
+    #[test]
+    fn live_chain_applies_every_exposed_effect() {
+        let input = stereo_test_signal(0.5);
+        let baseline = run_live_chain(&enabled_dsp(), &input);
+
+        let effects: Vec<(&str, DSPState)> = vec![
+            ("saturation", DSPState { saturation_enabled: true, saturation_drive: 0.8, ..enabled_dsp() }),
+            ("phase response", DSPState { resampler_phase_mode: "minimum".into(), ..enabled_dsp() }),
+            ("aideo filter", DSPState { aideo_filter_enabled: true, ..enabled_dsp() }),
+            ("spatializer", DSPState { spatial_enabled: true, spatial_wet: 0.5, ..enabled_dsp() }),
+            ("stereo width", DSPState { width: 1.8, ..enabled_dsp() }),
+            ("night mode", DSPState { night_mode_enabled: true, ..enabled_dsp() }),
+        ];
+        for (name, dsp) in effects {
+            let out = run_live_chain(&dsp, &input);
+            assert!(max_abs_diff(&out, &baseline) > 1e-3, "{name} has no audible effect in the live DSP chain");
+        }
+    }
+
+    #[test]
+    fn live_chain_width_zero_folds_to_mono() {
+        let input = stereo_test_signal(0.3);
+        let out = run_live_chain(&DSPState { width: 0.0, ..enabled_dsp() }, &input);
+        let diff = out[0].iter().zip(&out[1]).map(|(l, r)| (l - r).abs()).fold(0.0, f32::max);
+        assert!(diff < 1e-5, "width 0 must collapse L/R to mono, max L-R difference was {diff}");
+    }
 }
