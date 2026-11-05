@@ -1331,13 +1331,11 @@ async fn get_cover_art(path: String) -> Result<Option<String>, String> {
                     let content_type = res.headers()
                         .get(reqwest::header::CONTENT_TYPE)
                         .and_then(|v| v.to_str().ok())
-                        .unwrap_or("image/jpeg")
-                        .to_string();
+                        .map(str::to_string);
                     if let Ok(bytes) = res.bytes().await {
                         if bytes.len() <= 15 * 1024 * 1024 {
-                            use base64::Engine;
-                            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                            return Ok(Some(format!("data:{content_type};base64,{encoded}")));
+                            // Soft-404 pages and audio bodies are not artwork.
+                            return Ok(artwork::image_data_url(content_type.as_deref(), &bytes));
                         }
                     }
                 }
@@ -1348,8 +1346,11 @@ async fn get_cover_art(path: String) -> Result<Option<String>, String> {
         }
         return Ok(None);
     }
-    
-    Ok(artwork::get_cover_art(&path))
+
+    // Tag parsing, file reads and base64 are blocking; keep them off the async workers that serve other IPC.
+    tauri::async_runtime::spawn_blocking(move || artwork::get_cover_art(&path))
+        .await
+        .map_err(|e| format!("Artwork task failed: {e}"))
 }
 
 #[tauri::command]

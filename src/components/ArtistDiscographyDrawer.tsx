@@ -279,7 +279,7 @@ export function ArtistDiscographyDrawer({
                     >
                       <div style={{ width: '100%', paddingTop: '100%', position: 'relative', borderRadius: 8, overflow: 'hidden', marginBottom: 6, background: '#0e0e14' }}>
                         <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-                          <AlbumThumbnail sampleTrack={album.sampleTrack} title={album.title} style={{ transition: 'transform 0.4s ease' }} />
+                          <AlbumThumbnail sampleTrack={album.sampleTrack} tracks={album.tracks} title={album.title} style={{ transition: 'transform 0.4s ease' }} />
                         </div>
                       </div>
                       <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 1 }} title={album.title}>
