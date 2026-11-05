@@ -12,6 +12,8 @@ const MAX_TRACKS: usize = 200;
 pub(crate) const MANIFEST_BUDGET: Duration = Duration::from_secs(5);
 pub(crate) const SEARCH_BUDGET: Duration = Duration::from_secs(5);
 pub(crate) const STREAM_BUDGET: Duration = Duration::from_secs(3);
+/// Installing is a one-off, user-initiated step; free-tier hosts can take tens of seconds to wake.
+pub(crate) const INSTALL_BUDGET: Duration = Duration::from_secs(30);
 
 pub(crate) fn build_client(no_proxy: bool) -> reqwest::Client {
     let mut b = reqwest::Client::builder()
@@ -155,7 +157,8 @@ fn endpoint(base: &Url, segs: &[&str]) -> Url {
 
 pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(c: &reqwest::Client, u: Url, budget: Duration) -> Result<T, String> {
     let fut = async {
-        let mut res = c.get(u).send().await.map_err(|e| e.without_url().to_string())?;
+        // The per-request timeout replaces the client's 6s default so a longer budget can take effect.
+        let mut res = c.get(u).timeout(budget).send().await.map_err(|e| e.without_url().to_string())?;
         if !res.status().is_success() {
             return Err(format!("Addon returned HTTP {}", res.status().as_u16()));
         }
@@ -379,13 +382,17 @@ pub(crate) fn ensure_local_cloud_server(base: &Url) {
 
 pub(crate) async fn fetch_manifest(c: &reqwest::Client, base: &Url) -> Result<Manifest, String> {
     ensure_local_cloud_server(base);
-    let m: Manifest = match get_json(c, endpoint(base, &["manifest.json"]), MANIFEST_BUDGET).await {
+    let m: Manifest = match get_json(c, endpoint(base, &["manifest.json"]), INSTALL_BUDGET).await {
         Ok(m) => m,
         Err(e) => {
             if let Some(fallback) = builtin_featured_manifest(base) {
                 return Ok(fallback);
             }
-            return Err(e);
+            return Err(if e == "Addon timed out" {
+                "The addon did not respond. Hosts on free plans can take up to a minute to wake up, so try again shortly.".into()
+            } else {
+                e
+            });
         }
     };
     if !super::valid_addon_id(&m.id) || !clean(&m.name, 128) || !clean(&m.version, 64) {
@@ -689,8 +696,11 @@ mod tests {
                     let n = s.read(&mut buf).await.unwrap_or(0);
                     let req = String::from_utf8_lossy(&buf[..n]).to_string();
                     let path = req.split_whitespace().nth(1).unwrap_or("").to_string();
+                    if path.starts_with("/slow/") {
+                        tokio::time::sleep(Duration::from_millis(6500)).await;
+                    }
                     let body = match path.as_str() {
-                        "/tok/manifest.json" => r#"{"id":"com.test.mock","name":"Mock","version":"1.0.0","description":"Mock addon","resources":["search","stream"],"icon":"javascript:alert(1)","auth":{"type":"credentials","label":"Login","helpText":"Enter key","fields":[{"key":"apiKey","label":"API Key","type":"password","required":true}]}}"#.to_string(),
+                        "/tok/manifest.json" | "/slow/manifest.json" => r#"{"id":"com.test.mock","name":"Mock","version":"1.0.0","description":"Mock addon","resources":["search","stream"],"icon":"javascript:alert(1)","auth":{"type":"credentials","label":"Login","helpText":"Enter key","fields":[{"key":"apiKey","label":"API Key","type":"password","required":true}]}}"#.to_string(),
                         "/tok/search?q=hello+world" => r#"{"tracks":[{"id":7,"title":"Song","artist":"A","artworkURL":"https://x/y.jpg","isrc":"USRC12345678","upc":"001234567890","version":"Remastered","explicit":true,"format":"flac","sampleRate":96000,"bitDepth":24,"duration":240.7},{"id":"bad"}]}"#.to_string(),
                         "/tok/stream/track%201" | "/tok/stream/track%201?quality=best_available" => r#"{"url":"https://cdn.example/a.flac","codec":"flac","sampleRate":96000,"bitDepth":24}"#.to_string(),
                         "/tok/stream/leak" => r#"{"url":"http://10.0.0.5/a.flac"}"#.to_string(),
@@ -713,6 +723,18 @@ mod tests {
             }
         });
         format!("http://127.0.0.1:{}/tok/manifest.json", addr.port())
+    }
+
+    #[tokio::test]
+    async fn install_waits_for_a_sleeping_host_beyond_the_client_default() {
+        let c = build_client(true);
+        let tok = mock_server().await;
+        let slow = Url::parse(&tok.replace("/tok/", "/slow/")).unwrap();
+        let base = base_from_manifest_url(slow.as_str()).unwrap();
+        let started = std::time::Instant::now();
+        let m = fetch_manifest(&c, &base).await.expect("a 6.5s manifest must still install");
+        assert_eq!(m.id, "com.test.mock");
+        assert!(started.elapsed() > Duration::from_secs(6));
     }
 
     #[tokio::test]
