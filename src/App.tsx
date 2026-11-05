@@ -34,6 +34,7 @@ import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
 import { DownloadManager } from './components/DownloadManager';
 import { QueueView } from './components/QueueView';
+import { AudioControlCenter } from './components/AudioControlCenter';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { handlePlayerShortcut } from './utils/playerShortcuts';
 import { isStreamTrack, trackIdToStreamUrl } from './utils';
@@ -1036,6 +1037,7 @@ function AideoApp() {
       <DownloadManager />
       <AnimatePresence>
         <QueueView key="queue" />
+        <AudioControlCenter key="audio-cc" />
         {lastScrobble && (
           <motion.div
             key="scrobble-toast"

@@ -120,7 +120,7 @@ export function PlayerBar() {
     view, isMuted, toggleMute, coverArt, lyrics, lyricOffset,
     pauseTrack, resumeTrack, stopTrack, setVolume, seek, setView,
     playNext, playPrev, shuffle, toggleShuffle, repeat, toggleRepeat,
-    dsp, currentTrack, showQueue, toggleQueue,
+    dsp, currentTrack, showQueue, toggleQueue, toggleControlCenter,
     autoplayEnabled, toggleAutoplay, toggleLoveTrack, toggleDislikeTrack,
     setMiniPlayerMode, desktopLyricsOpen, toggleDesktopLyrics,
     desktopLyricsLocked, toggleDesktopLyricsLocked,
@@ -142,6 +142,7 @@ export function PlayerBar() {
     setVolume: s.setVolume,
     seek: s.seek,
     setView: s.setView,
+    toggleControlCenter: s.toggleControlCenter,
     playNext: s.playNext,
     playPrev: s.playPrev,
     shuffle: s.shuffle,
@@ -376,7 +377,7 @@ export function PlayerBar() {
             />
           )}
         </button>
-        <button className="pb-btn" onClick={() => setView('aideolab' as any)} title="Audio Engine Settings">
+        <button className="pb-btn" onClick={toggleControlCenter} title="Audio device and engine settings" aria-label="Audio device and engine settings">
           <SlidersHorizontal size={17} />
         </button>
         <button className="pb-btn" onClick={() => setMiniPlayerMode(true)} title="Mini Player">

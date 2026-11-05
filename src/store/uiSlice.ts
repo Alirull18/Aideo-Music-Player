@@ -366,7 +366,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
 
   toggleProMode: () => set(s => ({ showProMode: !s.showProMode })),
 
-  toggleControlCenter: () => get().setView('aideolab'),
+  toggleControlCenter: () => set(s => ({ showControlCenter: !s.showControlCenter })),
 
   setSidebarNavItems: (items: SidebarNavItemConfig[]) => {
     safeSetStorage('aideo-sidebar-nav-items', JSON.stringify(items));
