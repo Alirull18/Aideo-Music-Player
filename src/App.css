@@ -5346,12 +5346,6 @@ input[type=range] {
   border: 1px solid rgba(16, 185, 129, 0.18);
 }
 
-.discovery-source-badge.badge-tidal {
-  background: rgba(34, 211, 238, 0.08);
-  color: #22d3ee;
-  border: 1px solid rgba(34, 211, 238, 0.18);
-}
-
 .discovery-source-badge.badge-default {
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-dim);
@@ -9537,8 +9531,6 @@ html.light-theme .modal-overlay {
 }
 
 .insights-source-segment.local { background: #3b82f6; }
-.insights-source-segment.tidal { background: #06b6d4; }
-.insights-source-segment.qobuz { background: #6366f1; }
 .insights-source-segment.youtube,
 .insights-source-segment.webstream { background: #ef4444; }
 
@@ -9572,8 +9564,6 @@ html.light-theme .modal-overlay {
 }
 
 .source-dot.local { background: #3b82f6; }
-.source-dot.tidal { background: #06b6d4; }
-.source-dot.qobuz { background: #6366f1; }
 .source-dot.youtube,
 .source-dot.webstream { background: #ef4444; }
 

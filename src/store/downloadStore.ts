@@ -26,7 +26,7 @@ export function trackFromDownloadSource(source: PlaybackSource): Track {
     id: -1, path: source.provider === 'youtube' ? `https://www.youtube.com/watch?v=${source.id}` : source.id,
     title: source.metadata?.title ?? null, artist: source.metadata?.artist ?? null,
     album: source.metadata?.album, duration: source.metadata?.duration ?? null,
-    format: source.provider === 'tidal' ? 'Tidal FLAC' : source.provider === 'qobuz' ? 'Qobuz FLAC' : source.provider === 'youtube' ? 'YouTube Direct' : null,
+    format: source.provider === 'youtube' ? 'YouTube Direct' : null,
     lyric_offset: 0, catalog_quality: source.catalog_quality ?? undefined, recording_evidence: source.recording_evidence ?? undefined,
     cover_url: source.metadata?.cover_url,
   };

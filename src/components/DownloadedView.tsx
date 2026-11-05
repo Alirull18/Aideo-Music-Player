@@ -429,7 +429,7 @@ export function DownloadedView() {
             <DownloadCloud size={40} style={{ color: 'var(--text-dim)', opacity: 0.4 }} />
             <div style={{ fontSize: 15, fontWeight: 600 }}>No downloaded tracks found</div>
             <p style={{ fontSize: 12, color: 'var(--text-dim)', maxWidth: 400, margin: 0 }}>
-              Play music from Subsonic, Webstream, Tidal, or Qobuz, or use the download button to save it for offline playback.
+              Play music from a source addon or Webstream, then use the download button to save it for offline playback.
             </p>
           </div>
         ) : (
