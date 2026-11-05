@@ -15,10 +15,10 @@ import { catalogTrack, groupRecordings, searchSources, extractPrimaryArtist, typ
 import { SongSources } from './aideo/HomeParts';
 import { discoveryTrack, unifyDiscoveryHub } from '../utils/discoveryFeed';
 import { TrackContextMenu } from './TrackContextMenu';
-import { LatestHubRequest, hubContext, hubTrack, filterRecommendationHub, rankRecommendationHub } from '../utils/recommendationHub';
+import { LatestHubRequest, hubContext, hubTrack, filterRecommendationHub, rankRecommendationHub, addonHubTracks } from '../utils/recommendationHub';
 import { sameRecommendationRecording, recommendationSourceKey } from '../utils/recommendations';
 import { bounded } from '../utils/unifiedSources';
-import { filterMusicSource, musicAddons, musicSearchOptions } from '../utils/musicAddons';
+import { filterMusicSource, musicAddons, musicSearchOptions, enabledAddonKey } from '../utils/musicAddons';
 import type { DiscoveryHubData } from '../store/types';
 
 let rankedHubCache: { context: string; time: number; data: DiscoveryHubData } | undefined;
@@ -789,6 +789,7 @@ export function AideoView() {
       }
       const topArtists = [...artistCounts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([artist]) => artist);
       const local = state.appMode === 'local';
+      const online = !local && (typeof navigator === 'undefined' || navigator.onLine);
       const lbRecs = !local && Array.isArray(state.listenbrainzRecs) ? state.listenbrainzRecs.slice(0, 8).flatMap((rec: any) => {
         const artist = rec.artist?.name || rec.artist_credit_name || rec.recording?.artist_credit_name;
         const title = rec.recording?.name || rec.recording_name;
@@ -801,9 +802,13 @@ export function AideoView() {
         listenbrainzConnected: !local && !!state.listenbrainzToken,
         listenbrainzRecs: lbRecs,
         appMode: local ? 'local' : state.appMode,
-        isOnline: !local && (typeof navigator === 'undefined' || navigator.onLine),
+        isOnline: online,
       }), 8000).catch(() => localHub);
-      const retrieved = await hubPromise;
+      const addonPromise = online && topArtists.length
+        ? addonHubTracks(state.addons, topArtists, (addonId, query) => invoke<any[]>('addon_search', { addonId, query }))
+        : Promise.resolve([]);
+      const [hub, addonTracks] = await Promise.all([hubPromise, addonPromise]);
+      const retrieved = addonTracks.length ? { ...hub, tidal_hifi: [...(hub.tidal_hifi || []), ...addonTracks] } : hub;
       if (!current()) return;
       const ranked = await rankRecommendationHub(retrieved, useStore.getState(), request.generation);
       if (!current()) return;
@@ -825,10 +830,11 @@ export function AideoView() {
     }
   };
 
+  const addonKey = enabledAddonKey(addons);
   useEffect(() => {
     void fetchRecommendations();
     return () => { requestsRef.current.begin('unmounted'); };
-  }, [tracks, appMode, recommendationEngine, autoplayDiscoveryLevel, recommendationRevision]);
+  }, [tracks, appMode, recommendationEngine, autoplayDiscoveryLevel, recommendationRevision, addonKey]);
 
   useEffect(() => {
     const refresh = () => {

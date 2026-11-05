@@ -23,3 +23,5 @@ export function filterMusicSource(tracks: Track[], source: string): Track[] {
   return source === 'all' ? tracks : tracks.filter(track => track.source_context?.sources.some(candidate =>
     source === 'youtube' ? candidate.provider === 'youtube' : candidate.provider === 'addon' && candidate.id.startsWith(`${source}:`)));
 }
+
+export const enabledAddonKey = (addons: readonly AddonInfo[]): string => musicAddons(addons).map(addon => addon.id).sort().join(',');
