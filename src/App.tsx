@@ -8,8 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Radio, Download, X } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { Radio } from 'lucide-react';
 import './App.css';
 
 import { Sidebar } from './components/Sidebar';
@@ -32,6 +31,7 @@ import { PlayerBar } from './components/PlayerBar';
 import { ScrollToTopButton } from './components/ScrollToTopButton';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
+import UpdatePopup from './components/UpdatePopup';
 import { DownloadManager } from './components/DownloadManager';
 import { QueueView } from './components/QueueView';
 import { AudioControlCenter } from './components/AudioControlCenter';
@@ -1032,6 +1032,7 @@ function AideoApp() {
         {lastScrobble && (
           <motion.div
             key="scrobble-toast"
+            role="status"
             initial={{ opacity: 0, y: 50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 50, x: '-50%' }}
@@ -1044,126 +1045,16 @@ function AideoApp() {
 
 
         {updateModalOpen && updateInfo && (
-          <motion.div
+          <UpdatePopup
             key="update-popup"
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            style={{
-              position: 'fixed',
-              bottom: 24,
-              right: 24,
-              width: 340,
-              background: 'var(--glass)',
-              backdropFilter: 'blur(24px)',
-              border: '1px solid var(--glass-border)',
-              borderRadius: 16,
-              padding: 24,
-              boxShadow: '0 16px 40px rgba(0,0,0,0.5)',
-              zIndex: 10000,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ background: updateError ? '#ef4444' : 'var(--accent)', borderRadius: '50%', padding: 8, display: 'flex' }}>
-                  <Download size={18} color="white" />
-                </div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{updateError ? 'Update Failed' : 'Update Available'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Version {updateInfo.version}</div>
-                </div>
-              </div>
-              <button 
-                className="modal-close" 
-                style={{ padding: 8, margin: -8, cursor: 'pointer' }} 
-                onClick={(e) => { e.stopPropagation(); dismissModal(); }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            
-            {updateError ? (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, color: '#f87171', marginBottom: 10, lineHeight: 1.4 }}>
-                  The automatic installation encountered an issue: {updateError}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                  You can retry, or download and install the update manually.
-                </div>
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 16, maxHeight: 60, overflowY: 'auto', lineHeight: 1.5 }}>
-                {updateInfo.body || 'A new version of Aideo is ready to install.'}
-              </div>
-            )}
-
-            {updaterStatus === 'downloading' && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6, color: 'var(--text-dim)' }}>
-                  <span>Downloading update...</span>
-                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>{downloadProgress.percentage}%</span>
-                </div>
-                <div style={{ height: 6, background: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div 
-                    style={{ 
-                      height: '100%', 
-                      width: `${downloadProgress.percentage}%`, 
-                      background: 'var(--accent)', 
-                      transition: 'width 0.2s ease' 
-                    }} 
-                  />
-                </div>
-                {downloadProgress.totalBytes > 0 && (
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, textAlign: 'right' }}>
-                    {(downloadProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB / {(downloadProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {!updateError && (
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
-                  disabled={updaterStatus === 'downloading'}
-                  onClick={installUpdate}
-                >
-                  {updaterStatus === 'downloading' ? (
-                    'Downloading & Installing...'
-                  ) : updaterStatus === 'downloaded' ? (
-                    'Restarting Aideo...'
-                  ) : (
-                    <>
-                      <Download size={16} />
-                      Install Update Now
-                    </>
-                  )}
-                </button>
-              )}
-
-              <button
-                className={updateError ? "btn btn-primary" : "btn btn-secondary"}
-                style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
-                onClick={() => {
-                  openUrl('https://github.com/Alirull18/Aideo-Music-Player/releases/latest').catch(() => window.open('https://github.com/Alirull18/Aideo-Music-Player/releases/latest', '_blank'));
-                }}
-              >
-                <Download size={16} />
-                Download Manually from GitHub
-              </button>
-
-              {updateError && (
-                <button
-                  className="btn btn-secondary"
-                  style={{ width: '100%', padding: '10px 0' }}
-                  onClick={dismissModal}
-                >
-                  Dismiss
-                </button>
-              )}
-            </div>
-          </motion.div>
+            version={updateInfo.version}
+            body={updateInfo.body}
+            status={updaterStatus}
+            error={updateError}
+            downloadProgress={downloadProgress}
+            onInstall={installUpdate}
+            onDismiss={dismissModal}
+          />
         )}
 
         <AnimatePresence key="custom-prompt">
