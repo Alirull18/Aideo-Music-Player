@@ -3259,6 +3259,16 @@ async fn batch_update_tags(
     Ok(updated_count)
 }
 
+/// Shown when the library database cannot be opened and the app starts with a temporary empty one instead.
+fn library_open_failure_message(error: &str, db_path: &str) -> String {
+    format!(
+        "Aideo could not open your library: {error}\n\n\
+         Your library file has not been changed: {db_path}\n\n\
+         Aideo is running with a temporary empty library, and nothing you do now will be saved. \
+         Close Aideo, fix the problem above (for example by installing the latest version), and open it again."
+    )
+}
+
 pub fn run() {
     dotenvy::dotenv().ok();
 
@@ -3628,6 +3638,13 @@ pub fn run() {
                 }
                 Err(e) => {
                     eprintln!("[system] SQLite initialization failed ({}). Falling back to safe in-memory database configuration.", e);
+                    // Never fall back to an empty library silently: say what happened and that nothing will be saved.
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    app.dialog()
+                        .message(library_open_failure_message(&e.to_string(), &db_path_lossy))
+                        .title("Aideo could not open your library")
+                        .kind(MessageDialogKind::Error)
+                        .show(|_| {}); // non-blocking: setup runs on the main thread
                     (
                         db::init_db(":memory:").expect("Failed to initialize in-memory database fallback"),
                         None,
@@ -3825,6 +3842,20 @@ pub fn run() {
                 addons::sidecar::stop_all();
             }
         });
+}
+
+#[cfg(test)]
+mod library_open_failure_tests {
+    use super::library_open_failure_message;
+
+    #[test]
+    fn the_message_names_the_cause_the_file_and_that_nothing_will_be_saved() {
+        let message = library_open_failure_message("created by a newer version of Aideo", "C:/Users/me/AppData/aideo.db");
+        assert!(message.contains("created by a newer version of Aideo"));
+        assert!(message.contains("C:/Users/me/AppData/aideo.db"));
+        assert!(message.contains("has not been changed"));
+        assert!(message.contains("nothing you do now will be saved"));
+    }
 }
 
 #[cfg(test)]
