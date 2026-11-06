@@ -564,6 +564,21 @@ export function Visualizer({ mode: propMode, decayRate: propDecay }: VisualizerP
     };
   }, [accentColor, playbackStatus, lowSpecMode, effectiveMode, currentDecay]);
 
+  // With a fixed mode the canvas is decoration. Without one it is the style switcher, so it must work without a mouse.
+  const interactiveProps = propMode
+    ? ({ 'aria-hidden': true } as const)
+    : ({
+        role: 'button',
+        tabIndex: 0,
+        'aria-label': `Audio visualizer, ${effectiveMode} style. Press Enter to change the style.`,
+        onKeyDown: (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleCanvasClick();
+          }
+        },
+      } as const);
+
   return (
     <canvas
       ref={canvasRef}
@@ -575,6 +590,7 @@ export function Visualizer({ mode: propMode, decayRate: propDecay }: VisualizerP
         cursor: propMode ? 'default' : 'pointer',
       }}
       onClick={handleCanvasClick}
+      {...interactiveProps}
     />
   );
 }

@@ -516,15 +516,15 @@ export function StudioDeckLayout({
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.15fr', gap: 12, alignItems: 'center' }}>
             <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-              <canvas ref={leftCanvasRef} width={240} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
+              <canvas ref={leftCanvasRef} aria-hidden="true" width={240} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
             </div>
 
             <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-              <canvas ref={rightCanvasRef} width={240} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
+              <canvas ref={rightCanvasRef} aria-hidden="true" width={240} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
             </div>
 
             <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-              <canvas ref={oscCanvasRef} width={280} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
+              <canvas ref={oscCanvasRef} aria-hidden="true" width={280} height={145} style={{ width: '100%', height: 'auto', display: 'block' }} />
               <div style={{ position: 'absolute', top: 6, right: 8, display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--text-dim)' }}>
                 <Activity size={11} style={{ color: accentColor }} /> REALTIME SCOPE
               </div>

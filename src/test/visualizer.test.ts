@@ -212,6 +212,33 @@ describe('Modular Canvas Visualizer Engine Tests', () => {
       expect(canvas?.style.cursor).toBe('default');
     });
 
+    it('exposes the style switcher to keyboard and screen-reader users when no mode is fixed', () => {
+      useStore.setState({ visualizerMode: 'bars' });
+      const { container } = render(React.createElement(Visualizer));
+      const canvas = container.querySelector('canvas')!;
+
+      expect(canvas.getAttribute('role')).toBe('button');
+      expect(canvas.getAttribute('tabindex')).toBe('0');
+      expect(canvas.getAttribute('aria-label')).toMatch(/audio visualizer.*bars.*change/i);
+      expect(canvas.getAttribute('aria-hidden')).toBeNull();
+
+      fireEvent.keyDown(canvas, { key: 'Enter' });
+      expect(useStore.getState().visualizerMode).toBe('mirror');
+      fireEvent.keyDown(canvas, { key: ' ' });
+      expect(useStore.getState().visualizerMode).toBe('wave');
+      fireEvent.keyDown(canvas, { key: 'a' });
+      expect(useStore.getState().visualizerMode).toBe('wave');
+    });
+
+    it('hides a fixed-mode visualizer from assistive technology because it is decoration', () => {
+      const { container } = render(React.createElement(Visualizer, { mode: 'circle' }));
+      const canvas = container.querySelector('canvas')!;
+
+      expect(canvas.getAttribute('aria-hidden')).toBe('true');
+      expect(canvas.getAttribute('role')).toBeNull();
+      expect(canvas.getAttribute('tabindex')).toBeNull();
+    });
+
     it('should cycle store visualizerMode and dispatch ui-toast when clicked without propMode', () => {
       const toastListener = vi.fn();
       window.addEventListener('ui-toast', toastListener);
