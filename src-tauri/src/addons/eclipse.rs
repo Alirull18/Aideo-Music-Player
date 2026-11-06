@@ -230,6 +230,7 @@ fn http_url(s: &str) -> bool {
 /// and the frontend catalog, so ids, ports and auth forms are defined once.
 #[derive(Deserialize)]
 pub(crate) struct Featured {
+    #[cfg_attr(test, allow(dead_code))] // read by the sidecar launcher, which tests compile out
     pub provider: String,
     pub id: String,
     pub name: String,
