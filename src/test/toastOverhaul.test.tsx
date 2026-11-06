@@ -345,4 +345,28 @@ describe('Toast Notification System Overhaul', () => {
     });
     expect(useStore.getState().osNotifyBackgroundOnly).toBe(!initialBgOnly);
   });
+  it('announces errors as alerts and everything else as polite status updates', () => {
+    render(<ToastContainer />);
+
+    act(() => {
+      toast.error('The file could not be written', { title: 'Save failed' });
+      toast.success('Settings saved', { title: 'Configuration' });
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Save failed');
+    expect(screen.getByRole('status')).toHaveTextContent('Configuration');
+    // The wrapper stays a polite live region for anything added later.
+    expect(screen.getByRole('alert').closest('[aria-live]')).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('labels the dismiss button explicitly instead of relying on its tooltip', () => {
+    render(<ToastContainer />);
+
+    act(() => {
+      toast.info('Heads up', { title: 'Notice' });
+    });
+
+    expect(screen.getByRole('button', { name: 'Dismiss notification' })).toHaveAttribute('aria-label', 'Dismiss notification');
+  });
+
 });

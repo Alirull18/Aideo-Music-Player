@@ -1381,6 +1381,7 @@ export function AideoLabView() {
                 {/* Real-time spectrum waterfall overlay canvas */}
                 <canvas
                   ref={canvasRef}
+                  aria-hidden="true"
                   width={svgWidth}
                   height={svgHeight}
                   style={{

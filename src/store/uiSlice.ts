@@ -131,7 +131,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   sidebarCollapsed: safeGetStorage('aideo-sidebar-collapsed') === 'true',
   liquidBackgroundEnabled: safeGetStorage('aideo-liquid-bg') !== 'false',
   showSmartMixWidget: safeGetStorage('aideo-show-smart-mix') !== 'false',
-  qobuzExperimentalEnabled: safeGetStorage('aideo-qobuz-experimental') === 'true',
+  pendingSettingsTab: null,
   playbackError: null,
   playbackRecovery: null,
   playbackSuccess: null,
@@ -225,7 +225,10 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     return (stored as AlbumViewMode) || 'classic';
   })(),
   playerBarTransparent: safeGetStorage('aideo-playerbar-transparent') === 'true',
-  theaterModeDesign: (safeGetStorage('aideo-theater-design') as any) || (safeGetStorage('aideo-fullscreen-layout') as any) || 'stage',
+  theaterModeDesign: (() => {
+    const stored = safeGetStorage('aideo-theater-design') || safeGetStorage('aideo-fullscreen-layout');
+    return stored === 'zen' ? 'zen' : 'studio';
+  })(),
   theaterHudStyle: (safeGetStorage('aideo-theater-hud-style') as any) || 'capsule',
   canvasEnabled: safeGetStorage('aideo-canvas-enabled') !== 'false',
   canvasMode: (safeGetStorage('aideo-canvas-mode') as CanvasMode) || 'both',
@@ -281,10 +284,11 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   },
 
   setView: (view: any) => {
-    if (view && typeof view === 'string') {
-      safeSetStorage('aideo-last-view', view);
+    const normalized = view === 'aideolab' ? 'aideo_lab' : view;
+    if (normalized && typeof normalized === 'string') {
+      safeSetStorage('aideo-last-view', normalized);
     }
-    set({ view });
+    set({ view: normalized });
   },
 
   setDiscoveryData: (discoveryData: any) => set({ discoveryData }),
@@ -463,12 +467,6 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
     set({ showSmartMixWidget: next });
   },
 
-  toggleQobuzExperimental: () => {
-    const next = !get().qobuzExperimentalEnabled;
-    localStorage.setItem('aideo-qobuz-experimental', String(next));
-    set({ qobuzExperimentalEnabled: next });
-  },
-
   resetProMode: () => {
     get().setDSP({
       enabled: false,
@@ -537,6 +535,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
         active: true
       }
     });
+    // Count against a wall-clock deadline: WebView2 throttles timers while the window is
+    // minimized or in the tray, so ticks cannot be trusted to arrive once per second.
+    const deadline = Date.now() + durationSeconds * 1000;
     sleepTimerInterval = setInterval(() => {
       const current = get().sleepTimer;
       if (!current.active) {
@@ -546,7 +547,8 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
         }
         return;
       }
-      if (current.remaining <= 1) {
+      const remaining = Math.ceil((deadline - Date.now()) / 1000);
+      if (remaining <= 0) {
         clearInterval(sleepTimerInterval);
         sleepTimerInterval = null;
         set({
@@ -559,7 +561,7 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
         set({
           sleepTimer: {
             ...current,
-            remaining: current.remaining - 1
+            remaining
           }
         });
       }
@@ -607,8 +609,9 @@ export const createUISlice: StateCreator<PlayerState, [], [], any> = (set, get) 
   },
 
   setTheaterModeDesign: (design: any) => {
-    safeSetStorage('aideo-theater-design', design);
-    set({ theaterModeDesign: design });
+    const normalized = design === 'zen' ? 'zen' : 'studio';
+    safeSetStorage('aideo-theater-design', normalized);
+    set({ theaterModeDesign: normalized });
   },
 
   setTheaterHudStyle: (style: any) => {

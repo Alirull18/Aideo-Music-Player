@@ -1,7 +1,6 @@
 import { beforeEach, expect, it } from 'vitest';
 import { unifyDiscoveryHub, discoveryTrack } from '../utils/discoveryFeed';
 import { catalogTrack, groupRecordings } from '../utils/unifiedSources';
-import { mergeTidalIntoHub, tidalResultsToHubTracks } from '../utils/tidalHub';
 import type { DiscoveryHubData, Track, YoutubeTrack } from '../store/types';
 
 const web: YoutubeTrack = { id: 'gR_qbfGkwpc', url: 'https://www.youtube.com/watch?v=gR_qbfGkwpc', title: 'Tak Segampang Itu', artist: 'Anggi Marito', duration_raw: '3:52', cover_url: null };
@@ -9,18 +8,6 @@ const local: Track = { id: 1, path: 'C:/Music/song.m4a', title: web.title, artis
 const hub = (): DiscoveryHubData => ({ recommendations: [web], global_charts: [], mixed_for_you: [] });
 
 beforeEach(() => localStorage.clear());
-
-it('keeps matching Tidal copies and combines home cards with local and YouTube sources', () => {
-  const tidal = tidalResultsToHubTracks([{ id: 123, title: web.title, artist: web.artist, duration: 232 }]);
-  const merged = mergeTidalIntoHub(hub(), tidal);
-  expect(merged.tidal_hifi).toHaveLength(1);
-  const result = unifyDiscoveryHub(merged, [local])!;
-  expect(result.recommendations).toHaveLength(1);
-  expect(result.tidal_hifi).toEqual([]);
-  const song = discoveryTrack(result.recommendations[0]);
-  expect(song.source_context?.sources.map(source => source.provider).sort()).toEqual(['local', 'tidal', 'youtube']);
-  expect(hub().recommendations[0].source_context).toBeUndefined();
-});
 
 it('filters YouTube videos over 20 minutes in fresh search, cached home shelves and mixes', () => {
   const long = { ...web, duration_raw: '20:01' };

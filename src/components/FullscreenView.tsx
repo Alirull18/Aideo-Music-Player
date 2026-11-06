@@ -37,7 +37,7 @@ import { Visualizer, VisualizerMode } from './Visualizer';
 import { CanvasVideoPlayer } from './CanvasVideoPlayer';
 
 import { generateWaveformPeaks } from '../utils/waveform';
-import { TheaterModeDesign, TheaterHudStyle, LyricsDisplayMode, CanvasMode, CanvasResult } from '../store/types';
+import { TheaterModeDesign, TheaterHudStyle, LyricsDisplayMode, CanvasMode, CanvasResult, LyricLine, Track } from '../store/types';
 
 import { TheaterLayoutSwitch } from './theater/TheaterLayoutSwitch';
 import { TheaterQueueDrawer } from './theater/TheaterQueueDrawer';
@@ -45,12 +45,8 @@ import { TheaterSignalPathModal } from './theater/TheaterSignalPathModal';
 import { getAudioPathPresentation } from '../utils/audioPath';
 
 const THEATER_NAMES: Record<TheaterModeDesign, string> = {
-  stage: 'Stage View',
-  zen: 'Zen Mode',
   studio: 'Studio Deck',
-  vinyl: 'Vinyl Turntable',
-  poster: 'Poster',
-  scope: 'Scope',
+  zen: 'Zen Mode',
 };
 
 export const THEATER_HUD_NAMES: Record<TheaterHudStyle, string> = {
@@ -59,6 +55,166 @@ export const THEATER_HUD_NAMES: Record<TheaterHudStyle, string> = {
   minimal: 'Minimal',
   analog: 'Analog style',
 };
+
+function formatTime(secs: number) {
+  if (isNaN(secs) || secs < 0) return '0:00';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function FullscreenMainContent({
+  design,
+  currentTrack,
+  effectiveCover,
+  playbackCurrentTrack,
+  lyrics,
+  lyricStatus,
+  lyricsDisplayMode,
+  playbackStatus,
+  lyricOffset,
+  showRomaji,
+  showTranslation,
+  accentColor,
+  telemetryText,
+  albumArtFit,
+  vizMode,
+  seek,
+  scrollRef,
+  lowSpecMode,
+  canvas,
+  canvasMode,
+}: {
+  design: TheaterModeDesign;
+  currentTrack: Track | null;
+  effectiveCover: string;
+  playbackCurrentTrack: string | null;
+  lyrics: LyricLine[];
+  lyricStatus: 'idle' | 'loading' | 'found' | 'not_found';
+  lyricsDisplayMode: LyricsDisplayMode;
+  playbackStatus: 'Stopped' | 'Playing' | 'Paused';
+  lyricOffset: number;
+  showRomaji: boolean;
+  showTranslation: boolean;
+  accentColor: string;
+  telemetryText: string;
+  albumArtFit: 'cover' | 'contain';
+  vizMode: VisualizerMode;
+  seek: (secs: number) => void;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  lowSpecMode?: boolean;
+  canvas?: CanvasResult | null;
+  canvasMode: CanvasMode;
+}) {
+  const playbackPositionSecs = useStore(s => s.playback.position_secs);
+
+  const activeIdx = useMemo(() => {
+    if (!lyrics.length) return -1;
+    const now = playbackPositionSecs + lyricOffset / 1000;
+    let idx = -1;
+    for (let i = 0; i < lyrics.length; i++) {
+      if (lyrics[i].time_secs <= now) idx = i; else break;
+    }
+    return idx;
+  }, [lyrics, playbackPositionSecs, lyricOffset]);
+
+  useEffect(() => {
+    if (lyricsDisplayMode === 'static' || !scrollRef.current || activeIdx === -1) return;
+    const el = scrollRef.current.querySelector(`[data-idx="${activeIdx}"]`) as HTMLElement | null;
+    if (el) {
+      const container = scrollRef.current;
+      const targetTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
+      container.scrollTo({ top: targetTop, behavior: 'smooth' });
+    }
+  }, [activeIdx, design, lyricsDisplayMode, scrollRef]);
+
+  return (
+    <TheaterLayoutSwitch
+      design={design}
+      currentTrack={currentTrack}
+      effectiveCover={effectiveCover}
+      playbackCurrentTrack={playbackCurrentTrack}
+      lyrics={lyrics}
+      lyricStatus={lyricStatus}
+      lyricsDisplayMode={lyricsDisplayMode}
+      activeIdx={activeIdx}
+      playbackPositionSecs={playbackPositionSecs}
+      playbackStatus={playbackStatus}
+      lyricOffset={lyricOffset}
+      showRomaji={showRomaji}
+      showTranslation={showTranslation}
+      accentColor={accentColor}
+      telemetryText={telemetryText}
+      albumArtFit={albumArtFit}
+      vizMode={vizMode}
+      seek={seek}
+      scrollRef={scrollRef}
+      lowSpecMode={lowSpecMode}
+      canvas={canvas}
+      canvasMode={canvasMode}
+    />
+  );
+}
+
+function FullscreenHudProgress({
+  trackDuration,
+  waveformPeaks,
+  accentColor,
+  seek,
+}: {
+  trackDuration: number;
+  waveformPeaks: number[];
+  accentColor: string;
+  seek: (secs: number) => void;
+}) {
+  const playbackPositionSecs = useStore(s => s.playback.position_secs);
+  const progressPercent = trackDuration > 0 ? (playbackPositionSecs / trackDuration) * 100 : 0;
+
+  return (
+    <div className="fullscreen-hud-progress-wrap">
+      <span className="fullscreen-hud-time">{formatTime(playbackPositionSecs)}</span>
+      <div style={{ flex: 1, position: 'relative', height: 24, display: 'flex', alignItems: 'center' }}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, pointerEvents: 'none', padding: '0 2px' }}>
+          {waveformPeaks.map((peak, idx) => {
+            const barPct = (idx / waveformPeaks.length) * 100;
+            const isPlayed = barPct <= progressPercent;
+            return (
+              <div
+                key={idx}
+                style={{
+                  flex: 1,
+                  height: `${Math.max(15, peak * 100)}%`,
+                  backgroundColor: isPlayed ? accentColor : 'rgba(255, 255, 255, 0.15)',
+                  borderRadius: 1,
+                  transition: 'background-color 0.1s ease'
+                }}
+              />
+            );
+          })}
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={trackDuration || 100}
+          step={0.1}
+          value={playbackPositionSecs}
+          onChange={(e) => {
+            const val = parseFloat(e.target.value);
+            seek(val);
+          }}
+          className="fullscreen-hud-progress-bar"
+          style={{
+            background: 'transparent',
+            zIndex: 2,
+            opacity: 0,
+            position: 'relative'
+          }}
+        />
+      </div>
+      <span className="fullscreen-hud-time">{formatTime(trackDuration)}</span>
+    </div>
+  );
+}
 
 export function FullscreenView() {
   const {
@@ -92,11 +248,10 @@ export function FullscreenView() {
     setTheaterModeDesign,
     theaterHudStyle,
     setTheaterHudStyle,
-    playbackPositionSecs,
     playbackCurrentTrack,
     playbackStatus,
     playbackVolume,
-    playback,
+    playbackEffectiveAudioPath,
     chromecastConnected,
     playbackIsBuffering,
     queue,
@@ -114,12 +269,11 @@ export function FullscreenView() {
     cycleCanvasMode,
     setCurrentCanvas,
   } = useStore(useShallow(s => ({
-    playbackPositionSecs: s.playback.position_secs,
     playbackCurrentTrack: s.playback.current_track,
     playbackStatus: s.playback.status,
     playbackIsBuffering: Boolean(s.playback.is_buffering),
     playbackVolume: s.playback.volume,
-    playback: s.playback,
+    playbackEffectiveAudioPath: s.playback.effective_audio_path,
     chromecastConnected: s.chromecast_connected,
     isMuted: s.isMuted,
     toggleMute: s.toggleMute,
@@ -318,7 +472,7 @@ export function FullscreenView() {
         }
       } else if (key === 'l') {
         e.preventDefault();
-        const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+        const order: TheaterModeDesign[] = ['studio', 'zen'];
         const cur = useStore.getState().theaterModeDesign;
         const next = order[(order.indexOf(cur) + 1) % order.length];
         useStore.getState().setTheaterModeDesign(next);
@@ -419,7 +573,7 @@ export function FullscreenView() {
       if (fmtLower.includes('dsf') || fmtLower.includes('dff') || fmtLower.includes('dsd')) {
         return `DSD · ${currentTrack.format.toUpperCase()}`;
       }
-      const path = getAudioPathPresentation(playback);
+      const path = getAudioPathPresentation({ effective_audio_path: playbackEffectiveAudioPath, status: playbackStatus });
       if (path.badge) return path.badge.label;
       if (dsp.upsample_rate > 0) {
         return `UPSAMPLE REQUESTED · ${dsp.upsample_rate / 1000}kHz`;
@@ -428,28 +582,7 @@ export function FullscreenView() {
       return upperFmt === 'YOUTUBE DIRECT' ? 'WEB STREAM' : upperFmt;
     }
     return 'STANDARD AUDIO';
-  }, [currentTrack, playback, dsp.upsample_rate]);
-
-  // Lyrics indexing & smooth scroll
-  const activeIdx = useMemo(() => {
-    if (!lyrics.length) return -1;
-    const now = playbackPositionSecs + lyricOffset / 1000;
-    let idx = -1;
-    for (let i = 0; i < lyrics.length; i++) {
-      if (lyrics[i].time_secs <= now) idx = i; else break;
-    }
-    return idx;
-  }, [lyrics, playbackPositionSecs, lyricOffset]);
-
-  useEffect(() => {
-    if (lyricsDisplayMode === 'static' || !scrollRef.current || activeIdx === -1) return;
-    const el = scrollRef.current.querySelector(`[data-idx="${activeIdx}"]`) as HTMLElement | null;
-    if (el) {
-      const container = scrollRef.current;
-      const targetTop = el.offsetTop - (container.clientHeight / 2) + (el.clientHeight / 2);
-      container.scrollTo({ top: targetTop, behavior: 'smooth' });
-    }
-  }, [activeIdx, theaterModeDesign, lyricsDisplayMode]);
+  }, [currentTrack, playbackEffectiveAudioPath, playbackStatus, dsp.upsample_rate]);
 
   // Play/Pause handler
   const handlePlayPause = () => {
@@ -497,34 +630,21 @@ export function FullscreenView() {
     }
   };
 
-  // Safe track progress values
-  const progressPercent = trackDuration > 0 ? (playbackPositionSecs / trackDuration) * 100 : 0;
-
   const waveformPeaks = useMemo(() => {
     return generateWaveformPeaks(currentTrack?.path || currentTrack?.title || 'aideo-fs', 60);
   }, [currentTrack?.path, currentTrack?.title]);
 
-  // Simple formatting helper
-  const formatTime = (secs: number) => {
-    if (isNaN(secs) || secs < 0) return '0:00';
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
   return (
     <div className={`fullscreen-overlay ${isHUDHidden ? 'hud-hidden' : ''}`}>
       {/* Immersive backdrop visualizer or Motion Video Canvas */}
-      {theaterModeDesign !== 'scope' && (
-        canvasEnabled && !dsp.low_spec_mode && currentCanvas && (canvasMode === 'backdrop' || canvasMode === 'both') ? (
-          <CanvasVideoPlayer
-            canvas={currentCanvas}
-            isPlaying={playbackStatus === 'Playing'}
-            variant="backdrop"
-          />
-        ) : (
-          <LiquidBackground />
-        )
+      {canvasEnabled && !dsp.low_spec_mode && currentCanvas && (canvasMode === 'backdrop' || canvasMode === 'both') ? (
+        <CanvasVideoPlayer
+          canvas={currentCanvas}
+          isPlaying={playbackStatus === 'Playing'}
+          variant="backdrop"
+        />
+      ) : (
+        <LiquidBackground />
       )}
 
       {/* Floating Top Actions Bar */}
@@ -574,7 +694,7 @@ export function FullscreenView() {
         <button
           className="fullscreen-layout-toggle"
           onClick={() => {
-            const order: TheaterModeDesign[] = ['stage', 'zen', 'studio', 'vinyl', 'poster', 'scope'];
+            const order: TheaterModeDesign[] = ['studio', 'zen'];
             const next = order[(order.indexOf(theaterModeDesign) + 1) % order.length];
             setTheaterModeDesign(next);
           }}
@@ -595,7 +715,7 @@ export function FullscreenView() {
       </div>
 
       {/* Main Content Pane */}
-      <TheaterLayoutSwitch
+      <FullscreenMainContent
         design={theaterModeDesign}
         currentTrack={currentTrack}
         effectiveCover={effectiveCover}
@@ -603,8 +723,6 @@ export function FullscreenView() {
         lyrics={lyrics}
         lyricStatus={lyricStatus}
         lyricsDisplayMode={lyricsDisplayMode}
-        activeIdx={activeIdx}
-        playbackPositionSecs={playbackPositionSecs}
         playbackStatus={playbackStatus}
         lyricOffset={lyricOffset}
         showRomaji={showRomaji}
@@ -621,7 +739,7 @@ export function FullscreenView() {
       />
 
       {/* Sharp Glowing Neon Visualizer Baseline / Wave */}
-      {vizMode !== 'circle' && theaterModeDesign !== 'scope' && (
+      {vizMode !== 'circle' && (
         <div className="fullscreen-visualizer-container">
           <Visualizer mode={vizMode} />
         </div>
@@ -640,48 +758,12 @@ export function FullscreenView() {
         )}
 
         {/* Progress Bar & Durations */}
-        <div className="fullscreen-hud-progress-wrap">
-          <span className="fullscreen-hud-time">{formatTime(playbackPositionSecs)}</span>
-          <div style={{ flex: 1, position: 'relative', height: 24, display: 'flex', alignItems: 'center' }}>
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 2, pointerEvents: 'none', padding: '0 2px' }}>
-              {waveformPeaks.map((peak, idx) => {
-                const barPct = (idx / waveformPeaks.length) * 100;
-                const isPlayed = barPct <= progressPercent;
-                return (
-                  <div
-                    key={idx}
-                    style={{
-                      flex: 1,
-                      height: `${Math.max(15, peak * 100)}%`,
-                      backgroundColor: isPlayed ? accentColor : 'rgba(255, 255, 255, 0.15)',
-                      borderRadius: 1,
-                      transition: 'background-color 0.1s ease'
-                    }}
-                  />
-                );
-              })}
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={trackDuration || 100}
-              step={0.1}
-              value={playbackPositionSecs}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                seek(val);
-              }}
-              className="fullscreen-hud-progress-bar"
-              style={{
-                background: 'transparent',
-                zIndex: 2,
-                opacity: 0,
-                position: 'relative'
-              }}
-            />
-          </div>
-          <span className="fullscreen-hud-time">{formatTime(trackDuration)}</span>
-        </div>
+        <FullscreenHudProgress
+          trackDuration={trackDuration}
+          waveformPeaks={waveformPeaks}
+          accentColor={accentColor}
+          seek={seek}
+        />
 
         {/* HUD Controls Row */}
         <div className="fullscreen-hud-controls">

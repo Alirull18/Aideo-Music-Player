@@ -3,7 +3,7 @@ export type StreamingQuality = 'best_available' | 'standard_lossless' | 'data_sa
 export type MatchAssessment = 'equivalent' | 'candidate' | 'uncertain' | 'rejected';
 
 export interface PlaybackSource {
-  provider: 'local' | 'tidal' | 'qobuz' | 'youtube';
+  provider: 'local' | 'tidal' | 'qobuz' | 'youtube' | 'addon';
   // A local absolute path or a provider ID; never a resolved streaming URL.
   id: string;
   catalog_quality?: SourceQuality | null;
@@ -376,7 +376,7 @@ export interface NetworkTelemetry {
   active_stream_total_bytes: number;
 }
 
-export type ViewMode = 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'aideo' | 'settings' | 'aideo_lab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts' | 'downloaded';
+export type ViewMode = 'library' | 'albums' | 'nowplaying' | 'lastfm' | 'listenbrainz' | 'aideo' | 'settings' | 'aideo_lab' | 'aideolab' | 'fullscreen' | 'loved_streams' | 'insights' | 'charts' | 'downloaded';
 
 export type SidebarNavItemId = 
   | 'aideo'
@@ -414,6 +414,14 @@ export interface LibraryActions {
 }
 
 export interface PlayerState {
+  // Eclipse addons
+  addons: import('./addonSlice').AddonInfo[];
+  addonBusy: boolean;
+  loadAddons: () => Promise<void>;
+  installAddon: (manifestUrl: string) => Promise<void>;
+  removeAddon: (addonId: string) => Promise<void>;
+  setAddonEnabled: (addonId: string, enabled: boolean) => Promise<void>;
+
   view: ViewMode;
   networkTelemetry: NetworkTelemetry | null;
   tracks: Track[];
@@ -478,26 +486,7 @@ export interface PlayerState {
   showLyricsHeader: boolean;
   scrobbleEnabled: boolean;
   lastfmSessionKey: string | null;
-  tidalConnected: boolean;
-  tidalSearching: boolean;
-  tidalSearchResults: Track[];
   pendingSettingsTab: string | null;
-  checkTidalStatus: () => Promise<void>;
-  searchTidal: (query: string) => Promise<void>;
-  playTidalResult: (track: Track) => Promise<void>;
-  downloadTidalTrack: (track: Track) => Promise<void>;
-
-  // Qobuz Streaming (Experimental)
-  qobuzExperimentalEnabled: boolean;
-  toggleQobuzExperimental: () => void;
-  qobuzConnected: boolean;
-  qobuzSearching: boolean;
-  qobuzSearchResults: Track[];
-  checkQobuzStatus: () => Promise<void>;
-  openQobuzLoginWindow: () => Promise<void>;
-  searchQobuz: (query: string) => Promise<void>;
-  playQobuzResult: (track: Track) => Promise<void>;
-  downloadQobuzTrack: (track: Track) => Promise<void>;
   lastfmToken: string | null;
   scrobbledCurrent: boolean;
   lastScrobble: { artist: string; track: string } | null;
@@ -515,7 +504,7 @@ export interface PlayerState {
   currentHistoryId: number | null;
   autoplayEnabled: boolean;
   autoplayDiscoveryLevel: 'familiarity' | 'balanced' | 'discovery';
-  recommendationEngine: 'our' | 'youtube' | 'tidal';
+  recommendationEngine: 'our' | 'youtube';
   autoplaySeedTrack: Track | null;
   autoplaySessionHistory: Track[];
   recentlyClearedAutoplayPaths: string[];
@@ -553,9 +542,6 @@ export interface PlayerState {
   setTagEditorBatchTracks: (tracks: Track[]) => void;
   toggleDesktopLyrics: () => Promise<void>;
   toggleDesktopLyricsLocked: () => Promise<void>;
-  discoverUpnpDevices: () => Promise<void>;
-  connectUpnpDevice: (device: UpnpDevice) => Promise<void>;
-  disconnectUpnpDevice: () => Promise<void>;
   setPlaybackError: (err: string | null) => void;
   setPlaybackSuccess: (msg: string | null) => void;
   setView: (view: ViewMode) => void;
@@ -629,7 +615,7 @@ export interface PlayerState {
   toggleRepeat: () => void;
   toggleAutoplay: () => Promise<void>;
   setAutoplayDiscoveryLevel: (level: 'familiarity' | 'balanced' | 'discovery') => void;
-  setRecommendationEngine: (engine: 'our' | 'youtube' | 'tidal') => void;
+  setRecommendationEngine: (engine: 'our' | 'youtube') => void;
   triggerAutoplayRadio: (track: Track, forceReset?: boolean) => Promise<void>;
   pauseTrack: () => Promise<void>;
   resumeTrack: () => Promise<void>;
@@ -701,22 +687,6 @@ export interface PlayerState {
 
 
 
-  // Cloud Connections State
-  subsonicUrl: string;
-  subsonicUser: string;
-  subsonicPass: string;
-  subsonicConnected: boolean;
-  subsonicLoading: boolean;
-  jellyfinUrl: string;
-  jellyfinConnected: boolean;
-  jellyfinLoading: boolean;
-
-  // Cloud Connections Actions
-  connectSubsonic: (url: string, user: string, pass: string) => Promise<boolean>;
-  disconnectSubsonic: () => void;
-  loadSubsonicPassword: () => Promise<void>;
-  connectJellyfin: (url: string, apiKey: string) => Promise<boolean>;
-  disconnectJellyfin: () => void;
   batchDownloadProgress: BatchDownloadProgress | null;
   downloadBatchPlaylist: (items: BatchDownloadItem[], playlistName?: string) => Promise<number>;
 
@@ -767,10 +737,6 @@ export interface PlayerState {
     playCounts?: boolean;
   }) => Promise<void>;
 
-  // Chromecast Actions
-  discoverCastDevices: () => Promise<void>;
-  connectCastDevice: (device: { name: string; ip: string; port: number }) => Promise<void>;
-  disconnectCastDevice: () => Promise<void>;
 
   // Mini Player
   miniPlayerMode: boolean;
@@ -844,7 +810,7 @@ export type PlayerBarDesign = 'classic' | 'floating' | 'waveform' | 'minimal' | 
 export type AideoPageDesign = 'classic' | 'editorial' | 'command' | 'stage' | 'spotify' | 'apple';
 export type LibraryDesign = 'classic' | 'studio' | 'editorial' | 'crate' | 'ambient' | 'brutalist';
 export type AlbumViewMode = 'classic' | 'compact' | 'editorial';
-export type TheaterModeDesign = 'stage' | 'zen' | 'studio' | 'vinyl' | 'poster' | 'scope';
+export type TheaterModeDesign = 'studio' | 'zen';
 export type TheaterHudStyle = 'capsule' | 'master' | 'minimal' | 'analog';
 export type CanvasMode = 'off' | 'artwork' | 'backdrop' | 'both';
 

@@ -1,19 +1,19 @@
-import { applySourcePreference, createQueueOccurrenceId, isLocalUnifiedTrack, streamCacheKey } from '../utils/unifiedSources';
+import { applySourcePreference, createQueueOccurrenceId, isLocalUnifiedTrack } from '../utils/unifiedSources';
 import { cancelSourcePlayback, manageSourceQueue, playbackRequest } from './sourcePlayback';
 import { StateCreator } from 'zustand';
 import { PlayerState, DSPState, Track, StreamingQuality, extractDominantColor, EQBand } from './types';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import { getStreamName, baseName, pathsEqual, parseStreamMetadata, rememberResolvedPath, resolvedPathMap, onlineTrackCache, trackIdToStreamUrl, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines, isStreamTrack } from '../utils';
+import { getStreamName, baseName, pathsEqual, parseStreamMetadata, resolvedPathMap, onlineTrackCache, cleanSearchQuery, setOnlineTrackCache, isGenericStreamTitle, isGenericStreamArtist, sortLyricLines, isStreamTrack } from '../utils';
 import { safeGetStorage, safeSetStorage } from '../utils/storage';
 import { toast } from '../utils/toast';
 import { readDeviceProfile, saveDeviceProfile, validateDeviceDsp, isAmbiguousDevice, type AutoEqIdentity } from '../utils/deviceProfiles';
 import { AUTO_EQ_PRESET_CATALOG, type AutoEqPreset } from '../utils/autoEqCatalog';
-import { notifyTidalAuthFailure } from './tidalSlice';
-import { notifyQobuzAuthFailure } from './qobuzSlice';
+import { isRetiredCloudTrack, RETIRED_PROVIDER_MESSAGE } from './retiredProviders';
 import { sampleListening, resetListeningBaseline, markListeningEnd } from '../utils/recommendations';
 
 let isPolling = false;
+let bufferingProbe: { key: string; pos: number; at: number } | null = null;
 let dspThrottleTimeout: any = null;
 let lastDspInvokeTime = 0;
 let pendingDspState: any = null;
@@ -104,10 +104,10 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   sourceQueueManaged: false,
   preferredSource: (() => {
     const saved = safeGetStorage('aideo_preferred_source');
-    return saved && ['local', 'youtube', 'tidal', 'qobuz'].includes(saved) ? saved : 'auto';
+    return saved && ['local', 'youtube'].includes(saved) ? saved : 'auto';
   })(),
   setPreferredSource: (source: PlayerState['preferredSource']) => {
-    if (!['auto', 'local', 'youtube', 'tidal', 'qobuz'].includes(source)) return;
+    if (!['auto', 'local', 'youtube'].includes(source)) return;
     localStorage.setItem('aideo_preferred_source', source);
     set({ preferredSource: source });
   },
@@ -827,7 +827,26 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       if (lastStopTime && Date.now() - lastStopTime < 3000
         && get().playback.status === 'Stopped' && status.status === 'Playing') return;
       if (get().currentTrack?.source_context && ((get().playback.is_buffering && status.status === 'Stopped') || get().playbackError)) return;
-      if (get().currentAttemptId && get().playback.is_buffering) return;
+      if (get().currentAttemptId && get().playback.is_buffering) {
+        // "Buffering" is normally cleared by the backend's playback-ready event. If that event is missed
+        // or filtered, the spinner would stay forever while sound plays, so also accept proof from the
+        // backend itself: the same track is Playing and its position advanced between two polls.
+        const live = get().playback;
+        const proofKey = `${live.attempt_id ?? ''}|${live.current_track ?? ''}`;
+        const advanced = status.status === 'Playing' && typeof status.position_secs === 'number'
+          && status.current_track && live.current_track && pathsEqual(status.current_track, live.current_track)
+          && bufferingProbe?.key === proofKey && Date.now() - bufferingProbe.at < 3000 && status.position_secs > bufferingProbe.pos + 0.15;
+        if (advanced) {
+          bufferingProbe = null;
+          set(s => ({ playback: { ...s.playback, is_buffering: false } }));
+          window.dispatchEvent(new CustomEvent('ui-stream-buffering', { detail: { active: false } }));
+        } else {
+          bufferingProbe = { key: proofKey, pos: typeof status.position_secs === 'number' ? status.position_secs : 0, at: Date.now() };
+          return;
+        }
+      } else {
+        bufferingProbe = null;
+      }
 
       const prevTrack = get().playback.current_track;
       const newTrack = status.current_track;
@@ -881,7 +900,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
         // If there are explicit tracks remaining in the queue, advance to next track
         if (freshState.queue.length > 0) {
-          console.log('[playback] Stopped status recovery: advancing to next queued track...');
           set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
           await get().playNext();
           return;
@@ -896,7 +914,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
         const supportsNaturalEnd = typeof duration === 'number' && duration > 10 && (pos >= duration - 4 || pos >= duration * 0.95);
 
         if (supportsNaturalEnd && freshState.autoplayEnabled) {
-          console.log('[playback] Stopped status recovery: prior position indicates natural completion, calling playNext()...');
           set(s => ({ playback: { ...s.playback, backend_stop_detected_at: 0 } }));
           await get().playNext();
           return;
@@ -1775,51 +1792,22 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   addToQueue: async (track: Track) => {
-    const requestedQuality = get().streamingQuality;
     try {
       const occurrenceTrack: Track = {
         ...applySourcePreference(track),
         queue_occurrence_id: track.queue_occurrence_id || createQueueOccurrenceId(),
       };
-      const requiresSourceQueue = track.source_context ? !isLocalUnifiedTrack(occurrenceTrack) : get().sourceQueueManaged;
+      if (!occurrenceTrack.source_context && isRetiredCloudTrack(occurrenceTrack)) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: RETIRED_PROVIDER_MESSAGE, type: 'warning' } }));
+        return;
+      }
+      const requiresSourceQueue = occurrenceTrack.source_context ? !isLocalUnifiedTrack(occurrenceTrack) : get().sourceQueueManaged;
       if (requiresSourceQueue) {
         await manageSourceQueue(set);
         const queue = [...get().queue, occurrenceTrack];
         set({ queue });
         localStorage.setItem('aideo_queue', JSON.stringify(queue));
         return true;
-      }
-
-      let finalPath = track.path;
-      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
-        try {
-          const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(track, requestedQuality));
-          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
-            finalPath = cachedResolved.url;
-            console.log('[Streaming] Using pre-resolved stream URL for track in addToQueue:', track.title);
-          } else {
-            const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            finalPath = await invoke<string>(resolver, { trackId: track.path, requestedQuality });
-            trackIdToStreamUrl.set(streamCacheKey(track, requestedQuality), { url: finalPath, resolvedAt: Date.now() });
-          }
-          rememberResolvedPath(finalPath, track.path);
-          setOnlineTrackCache(finalPath, track);
-        } catch (err) {
-          trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
-          console.error('Failed to resolve stream in addToQueue:', err);
-          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err, set)) ||
-                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err, set));
-          if (!notified) {
-            window.dispatchEvent(new CustomEvent('ui-toast', {
-              detail: { message: `Cannot queue track: ${err}`, type: 'error' }
-            }));
-          }
-          return;
-        }
-      }
-
-      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !finalPath.startsWith('http://') && !finalPath.startsWith('https://')) {
-        return;
       }
 
       const newQueue = [...get().queue, occurrenceTrack];
@@ -1835,51 +1823,22 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
   },
 
   playNextInQueue: async (track: Track) => {
-    const requestedQuality = get().streamingQuality;
     try {
       const occurrenceTrack: Track = {
         ...applySourcePreference(track),
         queue_occurrence_id: track.queue_occurrence_id || createQueueOccurrenceId(),
       };
-      const requiresSourceQueue = track.source_context ? !isLocalUnifiedTrack(occurrenceTrack) : get().sourceQueueManaged;
+      if (!occurrenceTrack.source_context && isRetiredCloudTrack(occurrenceTrack)) {
+        window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: RETIRED_PROVIDER_MESSAGE, type: 'warning' } }));
+        return;
+      }
+      const requiresSourceQueue = occurrenceTrack.source_context ? !isLocalUnifiedTrack(occurrenceTrack) : get().sourceQueueManaged;
       if (requiresSourceQueue) {
         await manageSourceQueue(set);
         const queue = [occurrenceTrack, ...get().queue];
         set({ queue });
         localStorage.setItem('aideo_queue', JSON.stringify(queue));
         return true;
-      }
-
-      let finalPath = track.path;
-      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !track.path.startsWith('http://') && !track.path.startsWith('https://')) {
-        try {
-          const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(track, requestedQuality));
-          if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
-            finalPath = cachedResolved.url;
-            console.log('[Streaming] Using pre-resolved stream URL for track in playNextInQueue:', track.title);
-          } else {
-            const resolver = track.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-            finalPath = await invoke<string>(resolver, { trackId: track.path, requestedQuality });
-            trackIdToStreamUrl.set(streamCacheKey(track, requestedQuality), { url: finalPath, resolvedAt: Date.now() });
-          }
-          rememberResolvedPath(finalPath, track.path);
-          setOnlineTrackCache(finalPath, track);
-        } catch (err) {
-          trackIdToStreamUrl.delete(streamCacheKey(track, requestedQuality));
-          console.error('Failed to resolve stream in playNextInQueue:', err);
-          const notified = (track.format === 'Tidal FLAC' && notifyTidalAuthFailure(err, set)) ||
-                           (track.format === 'Qobuz FLAC' && notifyQobuzAuthFailure(err, set));
-          if (!notified) {
-            window.dispatchEvent(new CustomEvent('ui-toast', {
-              detail: { message: `Cannot queue next: ${err}`, type: 'error' }
-            }));
-          }
-          return;
-        }
-      }
-
-      if ((track.format === 'Tidal FLAC' || track.format === 'Qobuz FLAC') && !finalPath.startsWith('http://') && !finalPath.startsWith('https://')) {
-        return;
       }
 
       const newQueue = [occurrenceTrack, ...get().queue];
@@ -1996,7 +1955,6 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
       await manageSourceQueue(set);
       return;
     }
-    const requestedQuality = get().streamingQuality;
     try {
       const saved = localStorage.getItem('aideo_queue');
       if (saved) {
@@ -2010,7 +1968,7 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
           return;
         }
         if (parsed.length > 0) {
-          const localTracks = parsed.filter(t => !t.path.startsWith('http://') && !t.path.startsWith('https://') && t.format !== 'Tidal FLAC' && t.format !== 'Qobuz FLAC');
+          const localTracks = parsed.filter(t => !t.path.startsWith('http://') && !t.path.startsWith('https://') && !isRetiredCloudTrack(t));
           let validTracks = parsed;
 
           const isAutoplayEnabled = localStorage.getItem('aideo_autoplay') !== 'false';
@@ -2048,36 +2006,8 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
 
           await invoke('clear_queue');
           if (validTracks.length > 0) {
-            // Resolve Tidal/Qobuz track IDs to stream URLs first — the backend queue
-            // stores raw paths and cannot resolve provider IDs itself.
-            const paths: string[] = [];
-            for (const t of validTracks) {
-              let p = t.path;
-              if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
-                try {
-                  const cachedResolved = trackIdToStreamUrl.get(streamCacheKey(t, requestedQuality));
-                  if (cachedResolved && (Date.now() - cachedResolved.resolvedAt < 30 * 1000)) {
-                    p = cachedResolved.url;
-                  } else {
-                    const resolver = t.format === 'Qobuz FLAC' ? 'qobuz_get_stream_url' : 'tidal_get_stream_url';
-                    p = await invoke<string>(resolver, { trackId: t.path, requestedQuality });
-                    trackIdToStreamUrl.set(streamCacheKey(t, requestedQuality), { url: p, resolvedAt: Date.now() });
-                  }
-                  rememberResolvedPath(p, t.path);
-                  setOnlineTrackCache(p, t);
-                } catch (err) {
-                  trackIdToStreamUrl.delete(streamCacheKey(t, requestedQuality));
-                  console.error('Failed to resolve stream in initializeQueue:', err);
-                  notifyTidalAuthFailure(err, set);
-                  notifyQobuzAuthFailure(err, set);
-                  continue;
-                }
-              }
-              if ((t.format === 'Tidal FLAC' || t.format === 'Qobuz FLAC') && !p.startsWith('http://') && !p.startsWith('https://')) {
-                continue;
-              }
-              paths.push(p);
-            }
+            // Retired Tidal/Qobuz entries have no resolvable stream; keep them out of the backend queue.
+            const paths = validTracks.filter(t => !isRetiredCloudTrack(t)).map(t => t.path);
             await invoke('add_to_queue_bulk', { paths });
           }
           set({ queue: validTracks });
@@ -2153,163 +2083,4 @@ export const createPlaybackSlice: StateCreator<PlayerState, [], [], any> = (set,
     get().setDSP({ low_spec_mode: next });
   },
 
-  discoverCastDevices: async () => {
-    set({ chromecast_scanning: true });
-    try {
-      const devices = await invoke<any[]>('chromecast_discover');
-      set({ chromecast_devices: devices, chromecast_scanning: false });
-    } catch (e) {
-      console.error('Failed to discover Chromecast devices:', e);
-      set({ chromecast_scanning: false });
-    }
-  },
-
-  connectCastDevice: async (device: { name: string; ip: string; port: number }) => {
-    try {
-      const activeTrack = get().currentTrack;
-      const startPos = get().playback.position_secs;
-      const wasPaused = get().playback.status === 'Paused';
-      cancelSourcePlayback();
-      if (get().upnp_connected) {
-        await invoke('upnp_control', { action: 'stop' });
-        await invoke('upnp_disconnect');
-        set({ upnp_active_device: null, upnp_connected: false });
-      }
-      if (get().chromecast_connected) {
-        await invoke('chromecast_control', { action: 'stop' });
-        await invoke('chromecast_disconnect');
-        set({ chromecast_active_device: null, chromecast_connected: false });
-      }
-      await invoke('stop_track');
-      await invoke('chromecast_connect', { ip: device.ip, port: device.port });
-      set(s => ({ chromecast_active_device: device.ip, chromecast_connected: true,
-        currentAttemptId: undefined,
-        playback: { ...s.playback, attempt_id: undefined, effective_audio_path: null } }));
-
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: `Connected to ${device.name}`, type: 'success' }
-      }));
-
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, startPos);
-        if (wasPaused && get().playback.status === 'Playing' && get().chromecast_connected) await get().pauseTrack();
-      } else {
-        set({ playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 }, currentTrack: null, coverArt: null });
-      }
-    } catch (e) {
-      console.error('Failed to connect to Chromecast:', e);
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: 'Failed to connect to Chromecast', type: 'error' }
-      }));
-    }
-  },
-
-  disconnectCastDevice: async () => {
-    try {
-      // Capture currently playing track, status, and position before disconnecting
-      const activeTrack = get().currentTrack;
-      const currentPos = get().playback.position_secs;
-      const wasPlaying = get().playback.status === 'Playing';
-
-      if (get().chromecast_connected) {
-        await invoke('chromecast_control', { action: 'stop' });
-        await invoke('chromecast_disconnect');
-      }
-      set({
-        chromecast_active_device: null,
-        chromecast_connected: false,
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: 'Disconnected from Chromecast', type: 'info' }
-      }));
-
-      // Seamlessly transfer playback back to local player
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, currentPos);
-        if (!wasPlaying) {
-          await get().pauseTrack();
-        }
-      }
-    } catch (e) {
-      console.error('Failed to disconnect from Chromecast:', e);
-    }
-  },
-
-  discoverUpnpDevices: async () => {
-    set({ upnp_scanning: true });
-    try {
-      const devices = await invoke<any[]>('upnp_discover');
-      set({ upnp_devices: devices, upnp_scanning: false });
-    } catch (e) {
-      console.error('Failed to discover UPnP devices:', e);
-      set({ upnp_scanning: false });
-    }
-  },
-
-  connectUpnpDevice: async (device: any) => {
-    try {
-      const activeTrack = get().currentTrack;
-      const startPos = get().playback.position_secs;
-      const wasPaused = get().playback.status === 'Paused';
-      cancelSourcePlayback();
-      if (get().chromecast_connected) {
-        await invoke('chromecast_control', { action: 'stop' });
-        await invoke('chromecast_disconnect');
-        set({ chromecast_active_device: null, chromecast_connected: false });
-      }
-      if (get().upnp_connected) {
-        await invoke('upnp_control', { action: 'stop' });
-        await invoke('upnp_disconnect');
-        set({ upnp_active_device: null, upnp_connected: false });
-      }
-      await invoke('stop_track');
-      await invoke('upnp_connect', { deviceId: device.id });
-      set(s => ({ upnp_active_device: device.id, upnp_connected: true,
-        currentAttemptId: undefined,
-        playback: { ...s.playback, attempt_id: undefined, effective_audio_path: null } }));
-
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: `Connected to ${device.name} [Hi-Res Lossless DLNA]`, type: 'success' }
-      }));
-
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, startPos);
-        if (wasPaused && get().playback.status === 'Playing' && get().upnp_connected) await get().pauseTrack();
-      } else {
-        set({ playback: { ...get().playback, status: 'Stopped', current_track: null, position_secs: 0 }, currentTrack: null, coverArt: null });
-      }
-    } catch (e) {
-      console.error('Failed to connect to UPnP device:', e);
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: `Failed to connect to ${device.name}: ${e}`, type: 'error' }
-      }));
-    }
-  },
-
-  disconnectUpnpDevice: async () => {
-    try {
-      const activeTrack = get().currentTrack;
-      const currentPos = get().playback.position_secs;
-      const wasPlaying = get().playback.status === 'Playing';
-
-      await invoke('upnp_control', { action: 'stop' });
-      await invoke('upnp_disconnect');
-      set({
-        upnp_active_device: null,
-        upnp_connected: false,
-      });
-      window.dispatchEvent(new CustomEvent('ui-toast', {
-        detail: { message: 'Disconnected from UPnP MediaRenderer', type: 'info' }
-      }));
-
-      if (activeTrack) {
-        await get().playTrack(activeTrack, true, false, undefined, currentPos);
-        if (!wasPlaying) {
-          await get().pauseTrack();
-        }
-      }
-    } catch (e) {
-      console.error('Failed to disconnect UPnP device:', e);
-    }
-  },
 });

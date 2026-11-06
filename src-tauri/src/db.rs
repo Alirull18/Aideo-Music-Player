@@ -88,6 +88,8 @@ pub enum SourceProvider {
     Tidal,
     Qobuz,
     Youtube,
+    /// Runtime-installed Eclipse addon; id is `<addonId>:<trackId>`.
+    Addon,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -153,6 +155,7 @@ impl RecordingSources {
                     && match source.provider {
                         SourceProvider::Local => std::path::Path::new(&source.id).is_absolute(),
                         SourceProvider::Tidal | SourceProvider::Qobuz => source.id.bytes().all(|b| b.is_ascii_digit()),
+                        SourceProvider::Addon => crate::addons::valid_source_id(&source.id),
                         SourceProvider::Youtube => source.id.len() == 11
                             && source.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
                     }
@@ -198,6 +201,45 @@ pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> boo
     false
 }
 
+/// Bumped whenever `init_db` gains a migration that older builds must not run against. Stored in `PRAGMA user_version`.
+/// Version 0 is a database from before versioning; its migrations are the idempotent probes in `init_db`.
+pub const SCHEMA_VERSION: i64 = 1;
+
+fn schema_error(message: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(message)))
+}
+
+/// Refuses a database that a newer build has already migrated: running older migrations against a schema that has
+/// moved on could silently drop or misread data.
+fn ensure_schema_not_newer(conn: &Connection) -> Result<()> {
+    let found: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if found > SCHEMA_VERSION {
+        return Err(schema_error(format!(
+            "This library database was created by a newer version of Aideo (schema {found}, this build understands \
+             {SCHEMA_VERSION}). Update Aideo to open it."
+        )));
+    }
+    Ok(())
+}
+
+/// Adds each `(name, definition)` column that `table` lacks. Errors are returned: a swallowed failure leaves a schema
+/// the rest of the app then queries as if the column existed. `table` and the names are compile-time constants.
+pub(crate) fn add_missing_columns(conn: &Connection, table: &str, columns: &[(&str, &str)]) -> Result<()> {
+    for (name, definition) in columns {
+        if !column_exists(conn, table, name) {
+            conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {name} {definition}"), [])?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn create_indexes(conn: &Connection, statements: &[&str]) -> Result<()> {
+    for statement in statements {
+        conn.execute(statement, [])?;
+    }
+    Ok(())
+}
+
 pub fn init_db(db_path: &str) -> Result<Connection> {
     let mut conn = Connection::open(db_path)?;
     
@@ -205,6 +247,7 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     let _ = conn.execute("PRAGMA journal_mode = WAL", []);
     let _ = conn.execute("PRAGMA synchronous = NORMAL", []);
     conn.execute("PRAGMA foreign_keys = ON", [])?;
+    ensure_schema_not_newer(&conn)?;
     
     // Create base table if missing
     conn.execute(
@@ -263,6 +306,19 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     if !column_exists(&conn, "tracks", "sonic_profile") {
         conn.execute("ALTER TABLE tracks ADD COLUMN sonic_profile TEXT", [])?;
     }
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS addons (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            manifest_json TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            installed_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute("CREATE TABLE IF NOT EXISTS addon_preferences (id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1)", [])?;
 
     // Create playlist tables
     conn.execute(
@@ -389,13 +445,15 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     )?;
 
     // Migration: Add synced, genre, and playback_source columns if they don't exist
-    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN synced INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN genre TEXT", []);
-    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN playback_source TEXT", []);
-    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN sample_rate INTEGER", []);
-    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN bit_depth INTEGER", []);
-    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN bit_perfect INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE playback_history ADD COLUMN completion_rate REAL", []);
+    add_missing_columns(&conn, "playback_history", &[
+        ("synced", "INTEGER DEFAULT 0"),
+        ("genre", "TEXT"),
+        ("playback_source", "TEXT"),
+        ("sample_rate", "INTEGER"),
+        ("bit_depth", "INTEGER"),
+        ("bit_perfect", "INTEGER DEFAULT 0"),
+        ("completion_rate", "REAL"),
+    ])?;
 
     // Migration: Recover missing playlist tracks
     if let Ok(mut stmt) = conn.prepare(
@@ -521,28 +579,36 @@ pub fn init_db(db_path: &str) -> Result<Connection> {
     }
 
     // Add high-performance indexes for library filtering and analytics
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_order ON tracks(album, disc_number, track_number)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_loved ON tracks(loved)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_path_hash ON tracks(path_hash)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON playback_history(timestamp)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_history_path ON playback_history(track_path)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position)", []);
+    create_indexes(&conn, &[
+        "CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist)",
+        "CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album)",
+        "CREATE INDEX IF NOT EXISTS idx_tracks_album_order ON tracks(album, disc_number, track_number)",
+        "CREATE INDEX IF NOT EXISTS idx_tracks_loved ON tracks(loved)",
+        "CREATE INDEX IF NOT EXISTS idx_tracks_path_hash ON tracks(path_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_history_timestamp ON playback_history(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_history_path ON playback_history(track_path)",
+        "CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position)",
+    ])?;
 
     crate::recommendations::init_schema(&conn)?;
+    // Stamp last: a run that failed part-way leaves the version unchanged and is retried on the next start.
+    let found: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if found < SCHEMA_VERSION {
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    }
     Ok(conn)
 }
 
 pub fn save_library_directories(conn: &Connection, dirs: &[String]) -> Result<()> {
-    let _ = conn.execute("DELETE FROM library_directories", []);
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM library_directories", [])?;
     for dir in dirs {
-        conn.execute(
+        tx.execute(
             "INSERT OR IGNORE INTO library_directories (path) VALUES (?1)",
             rusqlite::params![dir],
         )?;
     }
-    Ok(())
+    tx.commit()
 }
 
 pub fn get_library_directories(conn: &Connection) -> Result<Vec<String>> {

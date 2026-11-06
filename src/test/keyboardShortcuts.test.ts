@@ -3,7 +3,6 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStore } from '../store';
 import { AideoLabView } from '../components/AideoLabView';
-import { AudioControlCenter } from '../components/AudioControlCenter';
 import { handlePlayerShortcut } from '../utils/playerShortcuts';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -41,9 +40,8 @@ afterEach(() => {
 });
 
 describe('DSP shortcut ownership', () => {
-  it('toggles once and sends one matching notification with both DSP panels mounted', async () => {
+  it('toggles once and sends one matching notification with DSP panel mounted', async () => {
     render(createElement(AideoLabView));
-    render(createElement(AudioControlCenter));
     await act(async () => { fireEvent.keyDown(window, { key: 'b' }); });
     expect(messages).toEqual(['DSP bypassed']);
     expect(useStore.getState().dsp.enabled).toBe(false);

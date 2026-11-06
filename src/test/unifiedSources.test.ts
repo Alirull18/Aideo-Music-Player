@@ -93,19 +93,20 @@ describe('Unified recordings and resolution', () => {
     vi.mocked(invoke).mockImplementation(async cmd => {
       if (cmd === 'search_local_sources') return [local];
       if (cmd === 'search_youtube') return new Promise(resolve => { finishYoutube = resolve; });
-      return [
-        { id: '123', title: 'Song', artist: 'Artist', duration: 232, recording_evidence: { isrc: 'USAAA2600001' } },
-        { id: '456', title: 'Song', artist: 'Artist', duration: 231, recording_evidence: { isrc: 'USAAA2600001' } },
+      if (cmd === 'addon_search') return [
+        { id: 'com.test.mock:123', title: 'Song', artist: 'Artist', duration: 232, recording_evidence: { isrc: 'USAAA2600001' } },
+        { id: 'com.test.mock:456', title: 'Song', artist: 'Artist', duration: 231, recording_evidence: { isrc: 'USAAA2600001' } },
       ];
+      return [];
     });
     const snapshots: Track[][] = [];
-    const search = searchSources('Artist', { tidal: true, qobuz: false }, result => snapshots.push(result.tracks));
+    const search = searchSources('Artist', { addons: ['com.test.mock'] }, result => snapshots.push(result.tracks));
     await vi.waitFor(() => expect(finishYoutube).toBeTypeOf('function'));
     finishYoutube([{ id: 'abcdefghijk', title: 'Artist - Song (Official Music Video)', artist: 'Artist', duration: 231, duration_raw: '3:51' }]);
     const result = await search;
     expect(result.tracks).toHaveLength(1);
     expect(result.tracks[0].source_context!.sources.map(sourceKey).sort()).toEqual([
-      'local:C:/Music/song.m4a', 'tidal:123', 'tidal:456', 'youtube:abcdefghijk',
+      'addon:com.test.mock:123', 'addon:com.test.mock:456', 'local:C:/Music/song.m4a', 'youtube:abcdefghijk',
     ]);
     expect(snapshots.every(rows => rows.length <= 1)).toBe(true);
     expect(localStorage.getItem('aideo_library_source_choices')).toBeNull();
@@ -160,14 +161,19 @@ describe('Unified recordings and resolution', () => {
     expect(rankSources([local, hires], 'data_saver')[0]).toBe(local);
   });
 
+  it('refuses to resolve a legacy Tidal source from an old saved queue', async () => {
+    await expect(resolveSource({ provider: 'tidal', id: '123' }, 'best_available')).rejects.toThrow('no longer built in');
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it('caches by provider, ID, and requested quality without inferring returned quality', async () => {
     vi.mocked(invoke).mockResolvedValue({ url: 'https://cdn.example/audio', quality: {} });
-    await resolveSource({ provider: 'tidal', id: '123' }, 'best_available');
-    await resolveSource({ provider: 'tidal', id: '123' }, 'best_available');
-    await resolveSource({ provider: 'qobuz', id: '123' }, 'best_available');
-    const result = await resolveSource({ provider: 'tidal', id: '123' }, 'data_saver');
+    await resolveSource({ provider: 'addon', id: 'com.test.a:123' }, 'best_available');
+    await resolveSource({ provider: 'addon', id: 'com.test.a:123' }, 'best_available');
+    await resolveSource({ provider: 'addon', id: 'com.test.b:123' }, 'best_available');
+    const result = await resolveSource({ provider: 'addon', id: 'com.test.a:123' }, 'data_saver');
     expect(invoke).toHaveBeenCalledTimes(3);
-    expect(invoke).toHaveBeenLastCalledWith('tidal_resolve_source', { trackId: '123', requestedQuality: 'data_saver' });
+    expect(invoke).toHaveBeenLastCalledWith('addon_resolve_source', { trackId: 'com.test.a:123', requestedQuality: 'data_saver' });
     expect(result.quality.lossless).toBeUndefined();
   });
 
@@ -175,17 +181,16 @@ describe('Unified recordings and resolution', () => {
     let finish!: (value: unknown) => void;
     vi.mocked(invoke).mockImplementation(async cmd => {
       if (cmd === 'search_local_sources') return [track('FLAC', 'C:/a.flac')];
-      if (cmd === 'tidal_search') throw new Error('Disconnected');
+      if (cmd === 'addon_search') throw new Error('Disconnected');
       return new Promise(resolve => { finish = resolve; });
     });
     const snapshots: string[][] = [];
-    const promise = searchSources('Song', { tidal: true, qobuz: false }, result => snapshots.push(result.tracks.map(t => t.path)));
+    const promise = searchSources('Song', { addons: ['com.test.mock'] }, result => snapshots.push(result.tracks.map(t => t.path)));
     await vi.waitFor(() => expect(snapshots.some(paths => paths.includes('C:/a.flac'))).toBe(true));
     finish([]);
     const result = await promise;
-    expect(result.errors.tidal).toContain('Disconnected');
+    expect(result.errors['addon:com.test.mock']).toContain('Disconnected');
     expect(result.pending).toEqual([]);
-    expect(invoke).not.toHaveBeenCalledWith('qobuz_search', expect.anything());
   });
 
   describe('deduplicateSourcesForDisplay', () => {

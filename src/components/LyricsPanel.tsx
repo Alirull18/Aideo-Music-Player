@@ -6,9 +6,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { RefreshCw, X, Tv2, ChevronUp, ChevronDown } from 'lucide-react';
 import { fmt, baseName, cleanSearchQuery, getVariantPenalty } from '../utils';
 import { LyricsDisplayMode } from '../store/types';
+import type { AddonInfo } from '../store/addonSlice';
 import { KaraokeActiveLine } from './KaraokeActiveLine';
 
-interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; duration?: number; }
+interface SearchResult { id: string; title: string; artist: string; source: string; content_id?: string; raw_lrc?: string; duration?: number; synced?: boolean; }
+
+export function formatLyricSourceName(source: string, addons: AddonInfo[]): string {
+  const matched = addons.find(a => a.id.toLowerCase() === source.toLowerCase());
+  return matched ? `${matched.name} Addon` : source;
+}
 
 export function LyricsPanel() {
   const {
@@ -20,7 +26,8 @@ export function LyricsPanel() {
     toggleDesktopLyricsLocked,
     playbackPositionSecs,
     playbackStatus,
-    playbackCurrentTrack
+    playbackCurrentTrack,
+    addons,
   } = useStore(useShallow(s => ({
     currentTrack: s.currentTrack,
     lyrics: s.lyrics,
@@ -49,6 +56,7 @@ export function LyricsPanel() {
     toggleDesktopLyrics: s.toggleDesktopLyrics,
     desktopLyricsLocked: s.desktopLyricsLocked,
     toggleDesktopLyricsLocked: s.toggleDesktopLyricsLocked,
+    addons: s.addons,
   })));
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -104,6 +112,7 @@ export function LyricsPanel() {
   const [showEditor, setShowEditor] = useState(false);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [providerFilter, setProviderFilter] = useState<string>('all');
   const [editContent, setEditContent] = useState('');
   const [showFallbackSearch, setShowFallbackSearch] = useState(false);
 
@@ -215,7 +224,11 @@ export function LyricsPanel() {
         }
 
         let sourceBonus = 0.0;
+        const sourceLower = (item.source || '').toLowerCase();
+        const isAddonSource = sourceLower.includes('.') && !['lrclib.net', 'lyrics.ovh'].includes(sourceLower);
+        const hasSynced = Boolean(item.synced || (item.raw_lrc && (item.raw_lrc.includes('[') || item.raw_lrc.includes('<span') || item.raw_lrc.includes('<tt'))));
         if (item.source === 'Unison' || item.source === 'BiniLyrics' || item.source === 'Better Lyrics') sourceBonus = 0.20;
+        else if (isAddonSource) sourceBonus = hasSynced ? 0.20 : 0.14;
         else if (item.source === 'Kugou') sourceBonus = 0.15;
         else if (item.source === 'QQMusic') sourceBonus = 0.10;
         else if (item.source === 'LRCLIB') sourceBonus = 0.05;
@@ -535,36 +548,101 @@ export function LyricsPanel() {
                 <button className="modal-close" onClick={() => setShowFinder(false)}>✕</button>
               </div>
               <div className="modal-body">
-                {searching && results.length === 0 && <div className="modal-empty">Searching…</div>}
-                {!searching && results.length === 0 && <div className="modal-empty">No results found.</div>}
-                {results.map((r, i) => (
-                  <div key={i} className="modal-item" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '12px 16px', borderRadius: 8, transition: 'background 0.2s' }}
-                    onClick={() => pickResult(r)}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="modal-item-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span>{r.title}</span>
-                        {r.duration && currentTrack?.duration && Math.abs(currentTrack.duration - r.duration) <= 2 && (
-                          <span style={{ padding: '1px 5px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', borderRadius: 4, fontSize: 9, fontWeight: 700 }}>Matches Duration</span>
-                        )}
-                        {r.duration && currentTrack?.duration && currentTrack.duration > r.duration + 2 && currentTrack.duration < r.duration + 120 && (
-                          <span style={{ padding: '1px 5px', background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4', borderRadius: 4, fontSize: 9, fontWeight: 700 }}>Suggests +{(currentTrack.duration - r.duration).toFixed(1)}s offset</span>
-                        )}
-                      </div>
-                      <div className="modal-item-sub">
-                        {r.artist} · {r.source}
-                        {r.duration ? ` · ${fmt(r.duration)}` : ''}
-                      </div>
-                    </div>
-                    <div>
-                      <button className="btn btn-primary" style={{ fontSize: 10, padding: '6px 12px' }}
-                        onClick={(e) => { e.stopPropagation(); pickResult(r); }}>
-                        🎵 Select
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                {(() => {
+                  const lyricAddons = addons.filter(a => !a.builtin && a.resources?.some(r => r === 'lyrics' || r === 'translate'));
+                  const addonSourcesInResults = Array.from(new Set(
+                    results
+                      .map(r => r.source)
+                      .filter(src => {
+                        const s = (src || '').toLowerCase();
+                        return s.includes('.') && !['lrclib.net', 'lyrics.ovh'].includes(s);
+                      })
+                  ));
+                  const providerOptions = new Map<string, string>();
+                  for (const a of lyricAddons) {
+                    providerOptions.set(a.id.toLowerCase(), a.name);
+                  }
+                  for (const src of addonSourcesInResults) {
+                    const key = src.toLowerCase();
+                    if (!providerOptions.has(key)) {
+                      providerOptions.set(key, formatLyricSourceName(src, addons));
+                    }
+                  }
+                  const showPills = results.length > 0 || lyricAddons.length > 0;
+                  const filteredResults = results.filter(r => {
+                    if (providerFilter === 'all') return true;
+                    const srcLower = (r.source || '').toLowerCase();
+                    const isAddon = srcLower.includes('.') && !['lrclib.net', 'lyrics.ovh'].includes(srcLower);
+                    if (providerFilter === 'builtin') return !isAddon;
+                    return srcLower === providerFilter.toLowerCase();
+                  });
+
+                  return (
+                    <>
+                      {showPills && (
+                        <div className="lyrics-provider-filter-bar" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                          <button
+                            type="button"
+                            className={`lyric-btn ${providerFilter === 'all' ? 'active' : ''}`}
+                            onClick={() => setProviderFilter('all')}
+                            style={{ fontSize: 11, padding: '4px 10px' }}
+                          >
+                            All
+                          </button>
+                          <button
+                            type="button"
+                            className={`lyric-btn ${providerFilter === 'builtin' ? 'active' : ''}`}
+                            onClick={() => setProviderFilter('builtin')}
+                            style={{ fontSize: 11, padding: '4px 10px' }}
+                          >
+                            Built-in
+                          </button>
+                          {Array.from(providerOptions.entries()).map(([id, label]) => (
+                            <button
+                              key={id}
+                              type="button"
+                              className={`lyric-btn ${providerFilter.toLowerCase() === id ? 'active' : ''}`}
+                              onClick={() => setProviderFilter(id)}
+                              style={{ fontSize: 11, padding: '4px 10px' }}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {searching && results.length === 0 && <div className="modal-empty">Searching…</div>}
+                      {!searching && filteredResults.length === 0 && <div className="modal-empty">No results found.</div>}
+                      {filteredResults.map((r, i) => (
+                        <div key={i} className="modal-item" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '12px 16px', borderRadius: 8, transition: 'background 0.2s' }}
+                          onClick={() => pickResult(r)}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div className="modal-item-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span>{r.title}</span>
+                              {r.duration && currentTrack?.duration && Math.abs(currentTrack.duration - r.duration) <= 2 && (
+                                <span style={{ padding: '1px 5px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', borderRadius: 4, fontSize: 9, fontWeight: 700 }}>Matches Duration</span>
+                              )}
+                              {r.duration && currentTrack?.duration && currentTrack.duration > r.duration + 2 && currentTrack.duration < r.duration + 120 && (
+                                <span style={{ padding: '1px 5px', background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4', borderRadius: 4, fontSize: 9, fontWeight: 700 }}>Suggests +{(currentTrack.duration - r.duration).toFixed(1)}s offset</span>
+                              )}
+                            </div>
+                            <div className="modal-item-sub">
+                              {r.artist} · <span className="lyrics-finder-source">{formatLyricSourceName(r.source, addons)}</span>
+                              {r.duration ? ` · ${fmt(r.duration)}` : ''}
+                            </div>
+                          </div>
+                          <div>
+                            <button className="btn btn-primary" style={{ fontSize: 10, padding: '6px 12px' }}
+                              onClick={(e) => { e.stopPropagation(); pickResult(r); }}>
+                              🎵 Select
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
               </div>
             </motion.div>
           </div>

@@ -67,7 +67,7 @@ beforeEach(() => {
       effective_audio_path: null,
     },
     chromecast_connected: false,
-    theaterModeDesign: 'stage',
+    theaterModeDesign: 'studio',
     theaterHudStyle: 'capsule',
     view: 'nowplaying',
   });
@@ -222,14 +222,14 @@ describe('NowPlayingView Interactive Artwork & Specs Overlay', () => {
   });
 });
 
-describe('FullscreenView Top Bar & Scope Mode Pitch Black Background', () => {
+describe('FullscreenView Top Bar', () => {
   it('renders floating top bar with layout, HUD style, and exit buttons without overlap', () => {
     const { container } = render(<FullscreenView />);
 
     const topBar = container.querySelector('.fullscreen-top-bar');
     expect(topBar).toBeInTheDocument();
 
-    expect(screen.getByTitle(/Current: Stage View/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/Current: Studio Deck/i)).toBeInTheDocument();
     expect(screen.getByTitle(/Exit Fullscreen Mode/i)).toBeInTheDocument();
   });
 
@@ -239,19 +239,5 @@ describe('FullscreenView Top Bar & Scope Mode Pitch Black Background', () => {
     expect(screen.getByRole('button', { name: 'Cast receiver volume unavailable' })).toBeDisabled();
     expect(container.querySelector('.fullscreen-hud-volume-slider')).toBeDisabled();
     expect(screen.getByText('Cast volume unavailable')).toBeInTheDocument();
-  });
-
-  it('renders Scope mode with pure black full-screen background and disables LiquidBackground', () => {
-    useStore.setState({ theaterModeDesign: 'scope' });
-    const { container } = render(<FullscreenView />);
-
-    // Scope canvas is rendered
-    const scopeCanvas = screen.getByTestId('pure-scope-canvas');
-    expect(scopeCanvas).toBeInTheDocument();
-
-    // Scope container has pure black background style
-    const scopeContainer = container.querySelector('.pure-scope-container') as HTMLElement;
-    expect(scopeContainer).toBeInTheDocument();
-    expect(scopeContainer.style.backgroundColor).toBe('rgb(0, 0, 0)');
   });
 });

@@ -130,7 +130,6 @@ export function NowPlayingView() {
     desktopLyricsOpen, toggleDesktopLyrics, desktopLyricsLocked, toggleDesktopLyricsLocked,
     setMiniPlayerMode,
     playbackCurrentTrack,
-    playback,
     playbackFileRate,
     playbackFileChannels,
     playbackFileFormat,
@@ -148,7 +147,6 @@ export function NowPlayingView() {
   } = useStore(useShallow(s => ({
     playbackCurrentTrack: s.playback.current_track,
     playbackStatus: s.playback.status,
-    playback: s.playback,
     playbackFileRate: s.playback.file_rate,
     playbackFileChannels: s.playback.file_ch,
     playbackFileFormat: s.playback.file_format,
@@ -239,7 +237,7 @@ export function NowPlayingView() {
     artworkMetadata?.bpm != null ? `${Math.round(artworkMetadata.bpm)} BPM` : null,
     formatArtworkRatio(artworkMetadata?.energy),
   ].filter((value): value is string => Boolean(value));
-  const audioPath = getAudioPathPresentation(playback);
+  const audioPath = getAudioPathPresentation({ effective_audio_path: playbackEffectiveAudioPath, status: playbackStatus });
   const artworkDevice = liveAudioPath?.engine?.toUpperCase() || 'Unknown';
   const artworkShareMode = liveAudioPath?.share_mode
     ? titleCaseTechnicalValue(liveAudioPath.share_mode)

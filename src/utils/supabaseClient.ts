@@ -1,14 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
 export const getSupabaseCredentials = () => {
   const localUrl = localStorage.getItem('aideo_supabase_url');
   const localKey = localStorage.getItem('aideo_supabase_key');
+  const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
   return { 
-    url: localUrl || SUPABASE_URL, 
-    key: localKey || SUPABASE_ANON_KEY 
+    url: localUrl || envUrl, 
+    key: localKey || envKey 
   };
 };
 

@@ -2,16 +2,21 @@ use reqwest::Client;
 use std::collections::BTreeMap;
 use serde_json::Value;
 
+/// Keys baked in at build time by build.rs from the environment or src-tauri/.env.
+pub(crate) mod build_keys {
+    include!(concat!(env!("OUT_DIR"), "/lastfm_keys.rs"));
+}
+
 // IMPORTANT: You MUST replace these with your actual Last.fm API Key and Secret
 // Get them here: https://www.last.fm/api/account/create
 fn get_api_key() -> String {
     std::env::var("LASTFM_API_KEY")
-        .unwrap_or_else(|_| option_env!("LASTFM_API_KEY").unwrap_or("YOUR_LASTFM_API_KEY").to_string())
+        .unwrap_or_else(|_| build_keys::API_KEY.unwrap_or("YOUR_LASTFM_API_KEY").to_string())
 }
 
 fn get_api_secret() -> String {
     std::env::var("LASTFM_API_SECRET")
-        .unwrap_or_else(|_| option_env!("LASTFM_API_SECRET").unwrap_or("YOUR_LASTFM_API_SECRET").to_string())
+        .unwrap_or_else(|_| build_keys::API_SECRET.unwrap_or("YOUR_LASTFM_API_SECRET").to_string())
 }
 const API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 

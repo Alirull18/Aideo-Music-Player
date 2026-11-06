@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store';
 import { isRadioStream, parseStreamMetadata, onlineTrackCache, resolvedPathMap, setOnlineTrackCache } from '../utils';
 
-describe('Track restoration and playbar resume metadata tests (YouTube, Tidal, Qobuz, Local, Radio)', () => {
+describe('Track restoration and playbar resume metadata tests (YouTube, retired providers, Local, Radio)', () => {
   beforeEach(() => {
     localStorage.clear();
     onlineTrackCache.clear();
@@ -196,88 +196,25 @@ describe('Track restoration and playbar resume metadata tests (YouTube, Tidal, Q
     expect(isRadioStream(useStore.getState().currentTrack)).toBe(false);
   });
 
-  it('resumes last played Tidal track by resolving stream URL and maintaining Tidal FLAC format', async () => {
-    const TIDAL_ID = '253975903';
-    const TIDAL_STREAM = 'https://sp-pr-cf.audio.tidal.com/stream/track.flac';
-    const playedPaths: string[] = [];
-
+  it.each([['Tidal FLAC', '253975903'], ['Qobuz FLAC', '98765432']])('does not try to play a retired %s track when resumed', async (format, id) => {
+    const toasts: string[] = [];
+    const onToast = (e: Event) => toasts.push((e as CustomEvent).detail.message);
+    window.addEventListener('ui-toast', onToast);
+    const played: string[] = [];
     vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd === 'tidal_get_stream_url') return TIDAL_STREAM;
-      if (cmd === 'play_track') {
-        playedPaths.push(args.path);
-        return null;
-      }
+      if (cmd === 'play_track') played.push(args.path);
       return null;
     });
-
-    const tidalTrack = {
-      id: -1,
-      path: TIDAL_ID,
-      title: 'Blue Valentine',
-      artist: 'NMIXX',
-      duration: 186,
-      format: 'Tidal FLAC',
-      cover_url: 'https://resources.tidal.com/images/cover.jpg',
-      lyric_offset: 0
-    };
-
     useStore.setState({
-      currentTrack: tidalTrack,
-      playback: {
-        ...useStore.getState().playback,
-        status: 'Stopped',
-        current_track: TIDAL_ID
-      }
+      currentTrack: { id: -1, path: id, title: 'Blue Valentine', artist: 'NMIXX', duration: 186, format, lyric_offset: 0 },
+      playback: { ...useStore.getState().playback, status: 'Stopped', current_track: id },
     });
 
     await useStore.getState().resumeTrack();
+    window.removeEventListener('ui-toast', onToast);
 
-    expect(playedPaths).toContain(TIDAL_STREAM);
-    expect(useStore.getState().currentTrack?.format).toBe('Tidal FLAC');
-    expect(useStore.getState().currentTrack?.title).toBe('Blue Valentine');
-    expect(isRadioStream(useStore.getState().currentTrack)).toBe(false);
-  });
-
-  it('resumes last played Qobuz track by resolving stream URL and maintaining Qobuz FLAC format', async () => {
-    const QOBUZ_ID = '98765432';
-    const QOBUZ_STREAM = 'https://streaming.qobuz.com/stream/track.flac';
-    const playedPaths: string[] = [];
-
-    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd === 'qobuz_get_stream_url') return QOBUZ_STREAM;
-      if (cmd === 'play_track') {
-        playedPaths.push(args.path);
-        return null;
-      }
-      return null;
-    });
-
-    const qobuzTrack = {
-      id: -2,
-      path: QOBUZ_ID,
-      title: 'After LIKE',
-      artist: 'IVE',
-      duration: 180,
-      format: 'Qobuz FLAC',
-      cover_url: 'https://static.qobuz.com/covers/cover.jpg',
-      lyric_offset: 0
-    };
-
-    useStore.setState({
-      currentTrack: qobuzTrack,
-      playback: {
-        ...useStore.getState().playback,
-        status: 'Stopped',
-        current_track: QOBUZ_ID
-      }
-    });
-
-    await useStore.getState().resumeTrack();
-
-    expect(playedPaths).toContain(QOBUZ_STREAM);
-    expect(useStore.getState().currentTrack?.format).toBe('Qobuz FLAC');
-    expect(useStore.getState().currentTrack?.title).toBe('After LIKE');
-    expect(isRadioStream(useStore.getState().currentTrack)).toBe(false);
+    expect(played).toEqual([]);
+    expect(toasts.some(m => m.includes('no longer built in'))).toBe(true);
   });
 
   it('resumes last played Local track and preserves format and artwork', async () => {

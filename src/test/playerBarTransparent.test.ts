@@ -37,24 +37,17 @@ describe('Player Bar Transparent Mode Contract', () => {
     cleanup();
   });
 
-  it('vinyl deck progress track supports hover scrubbing', () => {
-    useStore.getState().setPlayerBarDesign('vinyl');
-    render(createElement(PlayerBar));
-    expect(screen.getByTitle('Scrub Track')).toBeInTheDocument();
-    cleanup();
-  });
-
   // ---------------------------------------------------------------
-  // Stylesheet contract: Full-height sidebar & column 2 player bar
+  // Stylesheet contract: Floating glass sidebar rail & column 2 player bar
   // ---------------------------------------------------------------
-  it('sidebar spans full 100vh height across both grid rows in column 1', () => {
+  it('sidebar spans both grid rows in column 1 as a floating glass rail', () => {
     const sidebarRule = css.match(
       /\.app-sidebar\s*\{[^}]*\}/
     );
     expect(sidebarRule).not.toBeNull();
     expect(sidebarRule![0]).toMatch(/grid-row:\s*1\s*\/\s*3/);
     expect(sidebarRule![0]).toMatch(/grid-column:\s*1/);
-    expect(sidebarRule![0]).toMatch(/height:\s*100vh/);
+    expect(sidebarRule![0]).toMatch(/height:\s*calc\(100vh - 24px\)/);
   });
 
   it('all 5 player bar variants are docked in column 2 alongside the sidebar', () => {

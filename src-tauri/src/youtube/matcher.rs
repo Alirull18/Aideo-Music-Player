@@ -632,7 +632,8 @@ pub fn saved_track_source_id(track: &crate::db::Track) -> String {
 
 pub fn saved_track_provider(track: &crate::db::Track) -> crate::db::SourceProvider {
     let format = track.format.as_deref().unwrap_or("").to_ascii_lowercase();
-    if format.contains("qobuz") || track.path.starts_with("qobuz:") { crate::db::SourceProvider::Qobuz }
+    if format == "addon" && crate::addons::valid_source_id(&track.path) { crate::db::SourceProvider::Addon }
+    else if format.contains("qobuz") || track.path.starts_with("qobuz:") { crate::db::SourceProvider::Qobuz }
     else if format.contains("tidal") || track.path.starts_with("tidal:") { crate::db::SourceProvider::Tidal }
     else if format.contains("youtube") || extract_video_id(&track.path).is_some() { crate::db::SourceProvider::Youtube }
     else { crate::db::SourceProvider::Local }

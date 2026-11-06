@@ -386,6 +386,7 @@ fn validate(b: &Envelope) -> Result<()> {
                                 db::SourceProvider::Tidal => "tidal",
                                 db::SourceProvider::Qobuz => "qobuz",
                                 db::SourceProvider::Youtube => "youtube",
+                                db::SourceProvider::Addon => "addon",
                             },
                             src.id
                         ) == e.media.path

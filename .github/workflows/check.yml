@@ -29,13 +29,17 @@ jobs:
       - name: TypeScript Compilation Check
         run: npx tsc --noEmit
       - name: Frontend tests
-        run: npm test
+        run: npx vitest run src/test
+      - name: Cloud addon tests
+        run: node --test addons-sdk/cloud/server.test.mjs addons-sdk/cloud/premium.test.mjs addons-sdk/example/server.test.mjs
+      - name: Frontend Production Build (No .env)
+        run: npm run build
 
   check-backend:
     runs-on: windows-latest
     permissions:
       contents: read
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - name: Install Protoc
@@ -49,7 +53,16 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-      - name: Cargo Check
+      - name: Cargo Check (addon sidecar placeholder)
         run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build and smoke-test the addon sidecar
+        run: npm run build:sidecar
       - name: Cargo Test
         run: cargo test --manifest-path src-tauri/Cargo.toml

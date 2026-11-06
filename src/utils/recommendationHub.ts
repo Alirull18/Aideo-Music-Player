@@ -2,7 +2,9 @@ import type { DiscoveryHubData, PlayerState, Track, YoutubeTrack } from '../stor
 import { discoveryTrack, dedupeTracks } from './discoveryFeed';
 import { fmt } from '../utils';
 import { rankRecommendations, recommendationAllowed, sameRecommendationRecording, recommendationSourceKey, recommendationPreferenceRevision } from './recommendations';
-import { bounded, groupRecordings, sourceKey } from './unifiedSources';
+import { bounded, catalogTrack, groupRecordings, sourceKey } from './unifiedSources';
+import { musicAddons, enabledAddonKey } from './musicAddons';
+import type { AddonInfo } from '../store/addonSlice';
 
 export class LatestHubRequest {
   private generation = 0;
@@ -22,9 +24,19 @@ function reference(value: object): number {
   if (!identities.has(value)) identities.set(value, ++identity);
   return identities.get(value)!;
 }
+const isOnlineUrl = (track: YoutubeTrack) => /^https?:\/\//i.test(track.url || track.path || '');
+
+/** True when any shelf holds a streamable (non-local) track; a local-only cache is not worth falling back to. */
+export function hubHasOnlineTracks(data: DiscoveryHubData | null | undefined): boolean {
+  if (!data) return false;
+  const shelves = [data.recommendations, data.global_charts, data.recently_played, data.heavy_rotation, data.forgotten_gems, data.tidal_hifi,
+    ...(data.mixed_for_you || []).map(mix => mix.tracks)];
+  return shelves.some(shelf => (shelf || []).some(isOnlineUrl));
+}
+
 export function hubContext(state: PlayerState, revision: number): string {
   return ['rank-v1', state.appMode, state.recommendationEngine, state.autoplayDiscoveryLevel,
-    reference(state.tracks), revision, recommendationPreferenceRevision()].join(':');
+    reference(state.tracks), revision, recommendationPreferenceRevision(), enabledAddonKey(state.addons || [])].join(':');
 }
 
 export function hubTrack(track: Track, originals: YoutubeTrack[] = []): YoutubeTrack {
@@ -97,5 +109,23 @@ export async function rankRecommendationHub(data: DiscoveryHubData, state: Playe
     })),
   ]);
   if (preferenceRevision !== recommendationPreferenceRevision()) throw new Error('Recommendation preferences changed; refresh Home');
-  return { ...safe, recommendations, recently_played, heavy_rotation, forgotten_gems, mixed_for_you, tidal_hifi: [] };
+  return { ...safe, recommendations, recently_played, heavy_rotation, forgotten_gems, mixed_for_you, tidal_hifi: safe.tidal_hifi || [] };
+}
+
+export async function addonHubTracks(addons: readonly AddonInfo[], artists: string[],
+  search: (addonId: string, query: string) => Promise<any[]>, limit = 24): Promise<YoutubeTrack[]> {
+  const lists = await Promise.all(musicAddons(addons).flatMap(addon => artists.slice(0, 3).map(async artist => {
+    try {
+      const raw = await bounded(search(addon.id, artist), 5000);
+      return (Array.isArray(raw) ? raw : []).slice(0, 8).map((track): YoutubeTrack => ({
+        ...hubTrack(catalogTrack(track, 'addon')), catalog_quality: track.catalog_quality, recommendation_source: `Via ${addon.name}`,
+      } as YoutubeTrack));
+    } catch { return []; }
+  })));
+  // Round-robin so one addon or artist cannot fill every slot before the cap.
+  const interleaved: YoutubeTrack[] = [];
+  for (let i = 0; i < Math.max(0, ...lists.map(list => list.length)); i++) {
+    for (const list of lists) if (list[i]) interleaved.push(list[i]);
+  }
+  return dedupeTracks(interleaved).slice(0, limit);
 }

@@ -1,5 +1,39 @@
 # Reliability validation
 
+## Addon migration checkpoint — 26 October 2026
+
+Checked HEAD `320fdeb681d0a73b15713ebdd10aec8c3f696052` plus the existing uncommitted addon/provider migration; this is not a clean-checkout or release certification. The original staged deletions and untracked migration files were preserved.
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | Passed, exit 0 |
+| `npx vitest run src/test` | Root-only rerun: 120 files, 1,244 tests passed, exit 0 |
+| `node --test addons-sdk/cloud/server.test.mjs addons-sdk/cloud/premium.test.mjs` | 22 passed, 0 failed, exit 0 (local Node 24.15.0) |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | Passed, exit 0; 15 warnings |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | 368 passed, 0 failed, 4 ignored, exit 0 |
+| `npm run build` | Passed, exit 0; large-chunk warning remains |
+| `git diff --check` | Passed; line-ending conversion warnings remain |
+
+The first frontend run's four failures came from `.claude/worktrees/.../src/test`, not this checkout's test files. Vitest now has an explicit `src/test/**/*.test.{ts,tsx}` include, preserving TS/TSX coverage without collecting stale nested checkouts.
+
+The Ubuntu Node 22 workflow now also runs the cloud-addon Node tests; hosted execution of this change remains pending. Review of the added CI command, test-discovery boundary and roadmap checkpoint found no actionable issue. The addon tests use mocked upstream responses and loopback fixtures, not live provider credentials. No native app, real library, provider account or audio hardware was exercised, and no commit or push was made.
+
+Next acceptance: run a native addon install/search/playback cycle with an authorized account or personal server; verify disable/re-enable, restart persistence, local-only isolation and clear handling of legacy Tidal/Qobuz saved entries. This migration is the next completion boundary, not a reason to start the future UI-slot/theme/Wasm phases.
+
+### Continuation: addon reload failure
+
+A rejected `addon_list` previously replaced the last known registry with an empty list. `loadAddons` now preserves that registry and emits a generic error toast. The added regression failed before the fix and passed afterward (2 focused tests). Final rechecks passed: TypeScript; 1,245 frontend tests in 120 files; production build; Cargo check; 368 Rust tests (4 ignored); and 22 cloud-addon tests. Scoped code review found no concrete bug. Rust warnings and the Vite large-chunk warning remain.
+
+Native acceptance was attempted with a temporary configuration using a separate app identifier and webview data directory. The first launch stopped because port 1420 was occupied; reusing the existing frontend server reached Cargo but failed to replace `target/debug/aideo.exe` with Windows access error 5. An existing Aideo process held that executable. It was not terminated, and no native UI interaction or acceptance pass is claimed. The temporary configuration is outside the repository; no production configuration was changed.
+
+### Continuation: audit fixes — 26 October 2026
+
+Source-verified defects fixed, each with a regression test: external translation addons were never dispatched (`"translation"` vs manifest `"translate"`); desktop OAuth ignored the PKCE `?code=` callback (`src/utils/oauthCallback.ts`); cloud playlist push could empty a playlist and still report success (now restores the previous rows and reports failure); addon stream redirects to hostnames resolving to private/link-local/CGNAT addresses are refused (lookup failure fails closed); vitest raised to 4.1.12+ (`npm audit` 0 vulnerabilities).
+
+Addon tracks are deliberately not synced to the cloud: the cloud `playlist_tracks` table has no `source_context`/`metadata_json` columns, and a path-only pull creates rows the library hides. Add those columns, then sync them.
+
+Rechecked: TypeScript; 1,252 frontend tests in 121 files; Cargo check; 370 Rust tests (4 ignored); 22 cloud-addon tests; production build (run before the final sync edit). Not exercised: a real OAuth login, native addon install/playback/restart, hosted CI. Redirect hostnames are resolved once before connecting, so DNS rebinding between check and connect is not covered. Unverified audit candidates, not fixed: stale auto-lyric result writing to a different track, `playPrev` cancelling before its `isSkipping` guard, cancelled enrichment promises left in `inFlightEnrichments`.
+
 ## Verification refresh — 5 October 2026
 
 Checked checkpoint `be3a72eceb3f4cd43048cc8895afcedf95fad9d4` (0.9.11). The working tree was clean before verification; this record is the only source change from this run.

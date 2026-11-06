@@ -66,7 +66,7 @@ describe('Theater HUD Styles (Store & UI Integration)', () => {
         exclusive: true,
         effective_audio_path: null,
       },
-      theaterModeDesign: 'stage',
+      theaterModeDesign: 'studio',
       view: 'fullscreen',
     });
   });

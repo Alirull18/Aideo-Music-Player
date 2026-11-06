@@ -197,6 +197,8 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
 
   return (
     <motion.div
+      // Errors interrupt (alert); everything else waits its turn (status) inside the polite live region.
+      role={toast.type === 'error' ? 'alert' : 'status'}
       layout
       initial={{ opacity: 0, y: 16, scale: 0.94 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -300,6 +302,7 @@ function ToastCard({ toast, onDismiss }: ToastCardProps) {
         <button
           type="button"
           onClick={() => onDismiss(toast.id)}
+          aria-label="Dismiss notification"
           title="Dismiss notification"
           style={{
             background: 'none',
@@ -535,6 +538,7 @@ export function ToastContainer() {
         {bufferingState && (
           <motion.div
             key="stream-buffering-card"
+            role="status"
             layout
             initial={{ opacity: 0, y: 16, scale: 0.94 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}

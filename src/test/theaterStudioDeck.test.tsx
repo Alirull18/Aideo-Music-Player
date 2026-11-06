@@ -47,4 +47,15 @@ describe('StudioDeckLayout', () => {
     expect(screen.getByText('CH 2 · RIGHT')).toBeInTheDocument();
     expect(screen.getByText('Analog warmth in the headphones')).toBeInTheDocument();
   });
+
+  it('hides the meter and scope canvases from assistive technology; their channel labels are real text', () => {
+    const { container } = render(<StudioDeckLayout {...mockProps} />);
+    const canvases = Array.from(container.querySelectorAll('canvas')).filter((canvas) => canvas.width === 240 || canvas.width === 280);
+    expect(canvases).toHaveLength(3);
+    for (const canvas of canvases) {
+      expect(canvas).toHaveAttribute('aria-hidden', 'true');
+    }
+    expect(screen.getByText('CH 1 · LEFT')).toBeInTheDocument();
+    expect(screen.getByText(/REALTIME SCOPE/)).toBeInTheDocument();
+  });
 });

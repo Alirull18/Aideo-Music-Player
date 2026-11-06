@@ -76,10 +76,7 @@ export function DownloadChooser({ track }: { track: Track }) {
   const [collision, setCollision] = useState(false);
   const [error, setError] = useState('');
   const appMode = useStore(s => s.appMode);
-  const tidalConnected = useStore(s => s.tidalConnected);
-  const qobuzConnected = useStore(s => s.qobuzConnected && s.qobuzExperimentalEnabled);
-  const available = (source: PlaybackSource) => source.provider !== 'local' && appMode !== 'local'
-    && (source.provider === 'youtube' || (source.provider === 'tidal' ? tidalConnected : qobuzConnected));
+  const available = (source: PlaybackSource) => source.provider === 'youtube' && appMode !== 'local';
 
   useEffect(() => {
     dialog.current?.showModal();
@@ -92,8 +89,6 @@ export function DownloadChooser({ track }: { track: Track }) {
       if (active && settings) { setFolder(settings.folder); setConfigured(settings.configured); }
     }).catch(error => { if (active) setError(String(error)); });
     void searchSources(sourceSearchQuery(track), {
-      tidal: state.appMode !== 'local' && state.tidalConnected,
-      qobuz: state.appMode !== 'local' && state.qobuzConnected && state.qobuzExperimentalEnabled,
       youtube: state.appMode !== 'local',
     }, result => {
       if (!active) return;

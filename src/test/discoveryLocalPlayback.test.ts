@@ -109,13 +109,6 @@ describe('Discovery Hub Local Track Playback & Tag Resolution', () => {
     expect(current?.format).not.toBe('URL');
   });
 
-  it.each([
-    ['Tidal FLAC', '455738980', 'tidal'],
-    ['Qobuz FLAC', '138614268', 'qobuz'],
-  ] as const)('routes numeric %s catalog IDs to their provider resolver', (format, path, expected) => {
-    expect(classifyDiscoveryPlayback({ path, url: path, format })).toBe(expected);
-  });
-
   it('routes an unowned filesystem path as a local track', () => {
     expect(classifyDiscoveryPlayback({ path: 'E:/Unscanned/Acoustic Session.flac', format: 'FLAC' })).toBe('local');
   });

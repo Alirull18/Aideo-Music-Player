@@ -5,7 +5,7 @@ import { sameRecommendationRecording } from './recommendations';
 export function discoveryTrack(track: YoutubeTrack): Track {
   const path = track.path || track.url;
   const local = /^(?:[A-Za-z]:[\\/]|\/|\\\\)/.test(path);
-  const provider = track.format === 'Tidal FLAC' ? 'tidal' : track.format === 'Qobuz FLAC' ? 'qobuz' : 'youtube';
+  const provider = track.format === 'Tidal FLAC' ? 'tidal' : track.format === 'Qobuz FLAC' ? 'qobuz' : track.format === 'Addon' ? 'addon' : 'youtube';
   const converted = catalogTrack({ ...track, id: provider === 'youtube' ? track.id : path }, provider);
   return { ...converted, path, format: track.format || (local ? 'Local File' : converted.format), catalog_quality: local ? undefined : converted.catalog_quality, source_context: track.source_context };
 }
@@ -112,7 +112,7 @@ export function buildUnifiedTabs(data: DiscoveryHubData): UnifiedTabDef[] {
     { id: 'recent', label: 'Jump Back In', count: recent.length },
     { id: 'rotation', label: 'Heavy Rotation', count: rotation.length },
     { id: 'gems', label: 'Forgotten Gems', count: gems.length },
-    ...(tidal.length > 0 ? [{ id: 'tidal' as UnifiedTabId, label: 'Tidal HiFi', count: tidal.length }] : []),
+    ...(tidal.length > 0 ? [{ id: 'tidal' as UnifiedTabId, label: 'Addon HiFi', count: tidal.length }] : []),
     { id: 'charts', label: 'Global Charts', count: charts.length },
   ];
 }

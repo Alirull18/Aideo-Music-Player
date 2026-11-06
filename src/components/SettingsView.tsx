@@ -14,16 +14,14 @@ import {
   Trash2, Plus, Sparkles, LogOut, Zap, Puzzle, User, Keyboard,
   Disc, Layers, Activity, Minus, LayoutGrid, Copy, BarChart3, TrendingUp,
   Headphones, Heart, ArrowUp, ArrowDown, RotateCcw, Terminal, FolderOpen,
-  Tv2, Sliders, FileText, Type, Sun, Moon, Check, HardDrive, Globe
+  Tv2, Sliders, Type, Sun, Moon, Check, HardDrive, Globe
 } from 'lucide-react';
-import TidalConnectCard from './TidalConnectCard';
-import QobuzConnectCard from './QobuzConnectCard';
+import AddonsCard from './AddonsCard';
 import { DebugLogsModal } from './DebugLogsModal';
 import { LocalQRCode } from './LocalQRCode';
 import { logger } from '../utils/logger';
 import { getAudioPathPresentation } from '../utils/audioPath';
 import { LocalBackupControls } from './LocalBackupControls';
-import { RecommendationPreferences } from './RecommendationPreferences';
 import { filterAutomaticQueue, invalidateRecommendationPreferences } from '../utils/recommendations';
 import { parseWindowsAudioDevice } from '../utils/audioDeviceParser';
 import { AudioOutputPathSelector } from './AudioOutputPathSelector';
@@ -102,9 +100,6 @@ interface StreamingQualityControlProps {
   setStreamingQuality: (q: StreamingQuality) => void;
   preferredSource: PlaybackSource['provider'] | 'auto';
   setPreferredSource: (s: PlaybackSource['provider'] | 'auto') => void;
-  tidalConnected: boolean;
-  qobuzConnected: boolean;
-  qobuzExperimentalEnabled: boolean;
 }
 
 interface StreamingPresetTier {
@@ -148,9 +143,6 @@ export function StreamingQualityControl({
   setStreamingQuality,
   preferredSource,
   setPreferredSource,
-  tidalConnected,
-  qobuzConnected,
-  qobuzExperimentalEnabled,
 }: StreamingQualityControlProps) {
   const currentIndex = STREAMING_PRESET_TIERS.findIndex(t => t.id === streamingQuality);
   const safeIndex = currentIndex >= 0 ? currentIndex : 0;
@@ -193,8 +185,6 @@ export function StreamingQualityControl({
       case 'auto': return 'Automatic';
       case 'local': return 'Local files';
       case 'youtube': return 'Webstream';
-      case 'tidal': return 'Tidal';
-      case 'qobuz': return 'Qobuz';
       default: return src;
     }
   };
@@ -445,18 +435,6 @@ export function StreamingQualityControl({
           <label htmlFor="preferred-source" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
             Preferred source when quality is equal
           </label>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {tidalConnected && (
-              <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-                Tidal Connected
-              </span>
-            )}
-            {qobuzConnected && qobuzExperimentalEnabled && (
-              <span style={{ fontSize: 9, fontWeight: 650, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-                Qobuz Connected
-              </span>
-            )}
-          </div>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10, lineHeight: 1.4 }}>
           Determines which provider plays first when multiple sources offer identical audio resolution. Customizing this source turns the active quality profile into a Custom preset.
@@ -470,12 +448,6 @@ export function StreamingQualityControl({
           <option value="auto">Automatic (Smart Routing)</option>
           <option value="local">Local files</option>
           <option value="youtube">Webstream</option>
-          <option value="tidal" disabled={!tidalConnected}>
-            Tidal {!tidalConnected ? '(requires account connection)' : ''}
-          </option>
-          <option value="qobuz" disabled={!qobuzConnected || !qobuzExperimentalEnabled}>
-            Qobuz {!qobuzConnected || !qobuzExperimentalEnabled ? '(requires active integration)' : ''}
-          </option>
         </select>
       </div>
     </div>
@@ -487,8 +459,6 @@ export function SettingsView() {
   const setStreamingQuality = useStore(s => s.setStreamingQuality);
   const preferredSource = useStore(s => s.preferredSource);
   const setPreferredSource = useStore(s => s.setPreferredSource);
-  const tidalConnected = useStore(s => s.tidalConnected);
-  const qobuzConnected = useStore(s => s.qobuzConnected);
   const {
     scanDirs, addScanDir, removeScanDir, scanLibrary, scanStatus,
     toggleScrobble, setLastFmSession, lastfmSessionKey, lastfmToken,
@@ -496,7 +466,7 @@ export function SettingsView() {
     keepAwake, toggleKeepAwake,
     discordEnabled, toggleDiscord,
     lowSpecMode, toggleLowSpecMode,
-    dsp, setDSP, playback, playbackExclusive, playbackBitPerfect, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
+    dsp, setDSP, playbackStatus, playbackEffectiveAudioPath, playbackExclusive, playbackBitPerfect, toggleExclusive, devices, currentDevice, setAudioDevice, fetchDevices,
     listenbrainzToken, listenbrainzUsername, listenbrainzEnabled,
     validateAndSetListenbrainzToken, setListenbrainzToken, toggleListenbrainzScrobble,
     sidebarLastfmVisible, sidebarListenbrainzVisible,
@@ -504,19 +474,14 @@ export function SettingsView() {
     sidebarNavItems, toggleSidebarNavItemVisibility, moveSidebarNavItem, resetSidebarNavItems,
     liquidBackgroundEnabled, toggleLiquidBackground,
     showSmartMixWidget, toggleSmartMixWidget,
-    qobuzExperimentalEnabled, toggleQobuzExperimental,
     notificationsEnabled, developerNotifications,
     toggleNotificationsEnabled, toggleDeveloperNotifications,
     osTrackNotificationsEnabled, osNotifyBackgroundOnly,
     toggleOsTrackNotifications, toggleOsNotifyBackgroundOnly,
-    subsonicUrl, subsonicUser, subsonicPass, subsonicConnected, subsonicLoading,
-    jellyfinUrl, jellyfinConnected, jellyfinLoading,
-    connectSubsonic, disconnectSubsonic, connectJellyfin, disconnectJellyfin,
     autoplayDiscoveryLevel, setAutoplayDiscoveryLevel,
     recommendationEngine, setRecommendationEngine,
     setShowOnboarding, setOnboardingCompleted,
     cacheSizeLimit, setCacheSizeLimit,
-    discoverCastDevices,
     resetDislikedTracks,
     colorScheme, setColorScheme, shortcuts, setShortcut,
     albumArtFit, setAlbumArtFit,
@@ -557,7 +522,8 @@ export function SettingsView() {
     setDSP: s.setDSP,
     playbackExclusive: s.playback.exclusive,
     playbackBitPerfect: s.playback.bit_perfect,
-    playback: s.playback,
+    playbackStatus: s.playback.status,
+    playbackEffectiveAudioPath: s.playback.effective_audio_path,
     toggleExclusive: s.toggleExclusive,
     devices: s.devices,
     currentDevice: s.currentDevice,
@@ -581,8 +547,6 @@ export function SettingsView() {
     toggleLiquidBackground: s.toggleLiquidBackground,
     showSmartMixWidget: s.showSmartMixWidget,
     toggleSmartMixWidget: s.toggleSmartMixWidget,
-    qobuzExperimentalEnabled: s.qobuzExperimentalEnabled,
-    toggleQobuzExperimental: s.toggleQobuzExperimental,
     notificationsEnabled: s.notificationsEnabled,
     developerNotifications: s.developerNotifications,
     toggleNotificationsEnabled: s.toggleNotificationsEnabled,
@@ -591,18 +555,6 @@ export function SettingsView() {
     osNotifyBackgroundOnly: s.osNotifyBackgroundOnly,
     toggleOsTrackNotifications: s.toggleOsTrackNotifications,
     toggleOsNotifyBackgroundOnly: s.toggleOsNotifyBackgroundOnly,
-    subsonicUrl: s.subsonicUrl,
-    subsonicUser: s.subsonicUser,
-    subsonicPass: s.subsonicPass,
-    subsonicConnected: s.subsonicConnected,
-    subsonicLoading: s.subsonicLoading,
-    jellyfinUrl: s.jellyfinUrl,
-    jellyfinConnected: s.jellyfinConnected,
-    jellyfinLoading: s.jellyfinLoading,
-    connectSubsonic: s.connectSubsonic,
-    disconnectSubsonic: s.disconnectSubsonic,
-    connectJellyfin: s.connectJellyfin,
-    disconnectJellyfin: s.disconnectJellyfin,
     autoplayDiscoveryLevel: s.autoplayDiscoveryLevel,
     setAutoplayDiscoveryLevel: s.setAutoplayDiscoveryLevel,
     recommendationEngine: s.recommendationEngine,
@@ -611,7 +563,6 @@ export function SettingsView() {
     setOnboardingCompleted: s.setOnboardingCompleted,
     cacheSizeLimit: s.cacheSizeLimit,
     setCacheSizeLimit: s.setCacheSizeLimit,
-    discoverCastDevices: s.discoverCastDevices,
     resetDislikedTracks: s.resetDislikedTracks,
     colorScheme: s.colorScheme,
     setColorScheme: s.setColorScheme,
@@ -762,17 +713,6 @@ export function SettingsView() {
   };
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Subsonic / Navidrome local input states
-  const [subsonicUrlInput, setSubsonicUrlInput] = useState(subsonicUrl || '');
-  const [subsonicUserInput, setSubsonicUserInput] = useState(subsonicUser || '');
-  const [subsonicPassInput, setSubsonicPassInput] = useState(subsonicPass || '');
-  const [subsonicError, setSubsonicError] = useState('');
-
-  // Jellyfin local input states
-  const [jellyfinUrlInput, setJellyfinUrlInput] = useState(jellyfinUrl || '');
-  const [jellyfinApiKeyInput, setJellyfinApiKeyInput] = useState(localStorage.getItem('aideo_jellyfin_api_key') || '');
-  const [jellyfinError, setJellyfinError] = useState('');
-
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   useEffect(() => {
     let attempts = 0;
@@ -792,24 +732,6 @@ export function SettingsView() {
       if (timer) clearTimeout(timer);
     };
   }, []);
-
-  useEffect(() => {
-    if (activeTab === 'system') {
-      discoverCastDevices();
-    }
-  }, [activeTab]);
-
-  // Sync inputs with store values on change or reset
-  useEffect(() => {
-    setSubsonicUrlInput(subsonicUrl);
-    setSubsonicUserInput(subsonicUser);
-    setSubsonicPassInput(subsonicPass || '');
-  }, [subsonicUrl, subsonicUser, subsonicPass]);
-
-  useEffect(() => {
-    setJellyfinUrlInput(jellyfinUrl);
-    setJellyfinApiKeyInput(localStorage.getItem('aideo_jellyfin_api_key') || '');
-  }, [jellyfinUrl]);
 
   // Connected services loading
   const [lfmLoading, setLfmLoading] = useState(false);
@@ -868,7 +790,7 @@ export function SettingsView() {
     setSelectedFont('Outfit');
     setFontScale(100);
     setPlayerBarDesign('classic');
-    setTheaterModeDesign('stage');
+    setTheaterModeDesign('studio');
     setPlayerBarTransparent(false);
     if (!liquidBackgroundEnabled) toggleLiquidBackground();
     if (!sidebarLastfmVisible) toggleSidebarLastfmVisible();
@@ -882,10 +804,8 @@ export function SettingsView() {
 
   const resetLibrary = () => {
     scanDirs.forEach(dir => removeScanDir(dir));
-    disconnectSubsonic();
-    disconnectJellyfin();
-    window.dispatchEvent(new CustomEvent('ui-toast', { 
-      detail: { message: 'Library storage paths & cloud servers restored to defaults.', type: 'success' } 
+    window.dispatchEvent(new CustomEvent('ui-toast', {
+      detail: { message: 'Library storage paths restored to defaults.', type: 'success' }
     }));
   };
 
@@ -928,8 +848,6 @@ export function SettingsView() {
     if (keepAwake) await toggleKeepAwake();
     if (!discordEnabled) toggleDiscord();
     if (lowSpecMode) toggleLowSpecMode();
-    disconnectSubsonic();
-    disconnectJellyfin();
     setAutoplayDiscoveryLevel('balanced');
     setCacheSizeLimit(5.0);
     window.dispatchEvent(new CustomEvent('ui-toast', { 
@@ -1701,12 +1619,12 @@ export function SettingsView() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
             {[
               {
-                id: 'stage' as TheaterModeDesign,
-                name: 'Stage View',
-                badge: 'MODERN',
-                badgeColor: '#8b5cf6',
-                icon: <Tv2 size={18} color="#a78bfa" />,
-                desc: 'Album artwork beside synchronized lyrics.',
+                id: 'studio' as TheaterModeDesign,
+                name: 'Studio Deck',
+                badge: 'METERS',
+                badgeColor: '#f59e0b',
+                icon: <Sliders size={18} color="#fbbf24" />,
+                desc: 'Liquid glass capsule, synchronized lyrics, needle-style level meters, and an oscilloscope.',
               },
               {
                 id: 'zen' as TheaterModeDesign,
@@ -1715,38 +1633,6 @@ export function SettingsView() {
                 badgeColor: '#10b981',
                 icon: <Type size={18} color="#34d399" />,
                 desc: 'Centered lyrics with compact album artwork.',
-              },
-              {
-                id: 'studio' as TheaterModeDesign,
-                name: 'Studio Deck',
-                badge: 'METERS',
-                badgeColor: '#f59e0b',
-                icon: <Sliders size={18} color="#fbbf24" />,
-                desc: 'Needle-style level meters, audio path details, and an oscilloscope.',
-              },
-              {
-                id: 'vinyl' as TheaterModeDesign,
-                name: 'Vinyl Turntable',
-                badge: 'ROTATING ARTWORK',
-                badgeColor: '#ec4899',
-                icon: <Disc size={18} color="#f472b6" />,
-                desc: 'Rotating album artwork with a turntable-style progress indicator.',
-              },
-              {
-                id: 'poster' as TheaterModeDesign,
-                name: 'Poster',
-                badge: 'LARGE TEXT',
-                badgeColor: '#06b6d4',
-                icon: <FileText size={18} color="#22d3ee" />,
-                desc: 'Poster layout with large text, album artwork, and lyrics.',
-              },
-              {
-                id: 'scope' as TheaterModeDesign,
-                name: 'Scope',
-                badge: 'VISUALIZER',
-                badgeColor: '#a855f7',
-                icon: <Activity size={18} color="#c084fc" />,
-                desc: 'Full-screen audio visualizer with lyrics overlaid.',
               },
             ].map((d) => {
               const isSelected = theaterModeDesign === d.id;
@@ -3018,253 +2904,7 @@ export function SettingsView() {
     },
 
     { id: 'local-backup', title: 'Local backup and restore', description: 'Portable playlists, favorites, preferences and listening history.', keywords: 'backup restore offline portable rollback', tab: 'library', element: <LocalBackupControls /> },
-    { id: 'recommendation-preferences', title: 'Recommendation preferences', description: 'Manage excluded recordings and learned taste.', keywords: 'recommendations exclusion taste reset learning', tab: 'library', element: <RecommendationPreferences onAllow={track => useStore.getState().setRecommendationInterest(track, true)} onChanged={async () => {
-      const state = useStore.getState();
-      await state.loadLibrary();
-      const queue = state.queue.filter(t => !t.is_autoplay && !t.is_generated_mix);
-      useStore.setState({ queue, autoplaySessionHistory: [] });
-      localStorage.setItem('aideo_queue', JSON.stringify(queue));
-      await state.syncBackendQueue();
-    }} /> },
 
-    {
-      id: 'cloud-connections',
-      title: 'Self-Hosted Cloud Servers',
-      description: 'Connect Subsonic, Navidrome, or Jellyfin servers to search and stream your personal music library.',
-      keywords: 'cloud subsonic navidrome jellyfin self-hosted stream api private credentials server connection integration music host remote',
-      tab: 'library',
-      element: (
-        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-            {/* Subsonic / Navidrome Console */}
-            <div style={{ 
-              background: 'var(--glass)', 
-              border: '1px solid var(--glass-border)', 
-              borderRadius: 12, 
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between'
-            }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                  <div style={{ 
-                    width: 28, height: 28, borderRadius: 6, 
-                    background: 'linear-gradient(135deg, #6366f1, #4f46e5)', 
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 800, fontSize: 12, color: 'white' 
-                  }}>S</div>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>Subsonic / Navidrome</span>
-                </div>
-
-                {subsonicConnected ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 6, 
-                      background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)',
-                      borderRadius: 8, padding: '8px 12px', fontSize: 11, color: '#10b981'
-                    }}>
-                      <span className="settings-status-dot pulse" style={{ background: '#10b981', width: 6, height: 6, borderRadius: '50%' }} />
-                      Connected to {subsonicUrl}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                      Active User: <strong style={{ color: 'var(--text)' }}>{subsonicUser}</strong>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div>
-                      <label style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Server URL</label>
-                      <input 
-                        type="text" 
-                        placeholder="https://music.yourdomain.com"
-                        value={subsonicUrlInput}
-                        onChange={e => setSubsonicUrlInput(e.target.value)}
-                        className="settings-select"
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 12, background: 'rgba(0,0,0,0.2)' }}
-                      />
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      <div>
-                        <label style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Username</label>
-                        <input 
-                          type="text" 
-                          placeholder="admin"
-                          value={subsonicUserInput}
-                          onChange={e => setSubsonicUserInput(e.target.value)}
-                          className="settings-select"
-                          style={{ width: '100%', padding: '8px 12px', fontSize: 12, background: 'rgba(0,0,0,0.2)' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Password</label>
-                        <input 
-                          type="password" 
-                          placeholder="••••••••"
-                          value={subsonicPassInput}
-                          onChange={e => setSubsonicPassInput(e.target.value)}
-                          className="settings-select"
-                          style={{ width: '100%', padding: '8px 12px', fontSize: 12, background: 'rgba(0,0,0,0.2)' }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {subsonicError && (
-                <div style={{ color: '#ef4444', fontSize: 10, marginTop: 10, padding: 8, background: 'rgba(239, 68, 68, 0.08)', borderRadius: 6, border: '1px solid rgba(239, 68, 68, 0.15)' }}>
-                  {subsonicError}
-                </div>
-              )}
-
-              <div style={{ marginTop: 16 }}>
-                {subsonicConnected ? (
-                  <button 
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      disconnectSubsonic();
-                      window.dispatchEvent(new CustomEvent('ui-toast', { 
-                        detail: { message: 'Disconnected Subsonic server.', type: 'success' } 
-                      }));
-                    }}
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 12 }}
-                  >
-                    Disconnect Server
-                  </button>
-                ) : (
-                  <button 
-                    className="btn btn-primary"
-                    disabled={subsonicLoading || !subsonicUrlInput || !subsonicUserInput || !subsonicPassInput}
-                    onClick={async () => {
-                      setSubsonicError('');
-                      const ok = await connectSubsonic(subsonicUrlInput.trim(), subsonicUserInput.trim(), subsonicPassInput);
-                      if (ok) {
-                        window.dispatchEvent(new CustomEvent('ui-toast', { 
-                          detail: { message: 'Subsonic server connected successfully!', type: 'success' } 
-                        }));
-                      } else {
-                        setSubsonicError('Failed to ping server. Check URL, credentials or TLS configuration.');
-                      }
-                    }}
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 12 }}
-                  >
-                    {subsonicLoading ? 'Pinging Server...' : 'Verify & Connect'}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Jellyfin Console */}
-            <div style={{ 
-              background: 'var(--glass)', 
-              border: '1px solid var(--glass-border)', 
-              borderRadius: 12, 
-              padding: 16,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between'
-            }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                  <div style={{ 
-                    width: 28, height: 28, borderRadius: 6, 
-                    background: 'linear-gradient(135deg, #a855f7, #7c3aed)', 
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 800, fontSize: 12, color: 'white' 
-                  }}>J</div>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>Jellyfin Media Server</span>
-                </div>
-
-                {jellyfinConnected ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 6, 
-                      background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)',
-                      borderRadius: 8, padding: '8px 12px', fontSize: 11, color: '#10b981'
-                    }}>
-                      <span className="settings-status-dot pulse" style={{ background: '#10b981', width: 6, height: 6, borderRadius: '50%' }} />
-                      Connected to {jellyfinUrl}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-                      Connection Mode: <strong style={{ color: 'var(--text)' }}>Token (API Key)</strong>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div>
-                      <label style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Server URL</label>
-                      <input 
-                        type="text" 
-                        placeholder="http://192.168.1.50:8096"
-                        value={jellyfinUrlInput}
-                        onChange={e => setJellyfinUrlInput(e.target.value)}
-                        className="settings-select"
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 12, background: 'rgba(0,0,0,0.2)' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>API Key</label>
-                      <input 
-                        type="password" 
-                        placeholder="Paste your Jellyfin API Key..."
-                        value={jellyfinApiKeyInput}
-                        onChange={e => setJellyfinApiKeyInput(e.target.value)}
-                        className="settings-select"
-                        style={{ width: '100%', padding: '8px 12px', fontSize: 12, background: 'rgba(0,0,0,0.2)' }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {jellyfinError && (
-                <div style={{ color: '#ef4444', fontSize: 10, marginTop: 10, padding: 8, background: 'rgba(239, 68, 68, 0.08)', borderRadius: 6, border: '1px solid rgba(239, 68, 68, 0.15)' }}>
-                  {jellyfinError}
-                </div>
-              )}
-
-              <div style={{ marginTop: 16 }}>
-                {jellyfinConnected ? (
-                  <button 
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      disconnectJellyfin();
-                      window.dispatchEvent(new CustomEvent('ui-toast', { 
-                        detail: { message: 'Disconnected Jellyfin server.', type: 'success' } 
-                      }));
-                    }}
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 12 }}
-                  >
-                    Disconnect Server
-                  </button>
-                ) : (
-                  <button 
-                    className="btn btn-primary"
-                    disabled={jellyfinLoading || !jellyfinUrlInput || !jellyfinApiKeyInput}
-                    onClick={async () => {
-                      setJellyfinError('');
-                      const ok = await connectJellyfin(jellyfinUrlInput.trim(), jellyfinApiKeyInput.trim());
-                      if (ok) {
-                        window.dispatchEvent(new CustomEvent('ui-toast', { 
-                          detail: { message: 'Jellyfin connected successfully!', type: 'success' } 
-                        }));
-                      } else {
-                        setJellyfinError('Failed to ping server. Verify URL and API Key.');
-                      }
-                    }}
-                    style={{ width: '100%', padding: '8px 12px', fontSize: 12 }}
-                  >
-                    {jellyfinLoading ? 'Pinging Server...' : 'Verify & Connect'}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )
-    },
     {
       id: 'streaming-quality',
       title: 'Streaming Quality',
@@ -3277,57 +2917,18 @@ export function SettingsView() {
           setStreamingQuality={setStreamingQuality}
           preferredSource={preferredSource}
           setPreferredSource={setPreferredSource}
-          tidalConnected={tidalConnected}
-          qobuzConnected={qobuzConnected}
-          qobuzExperimentalEnabled={qobuzExperimentalEnabled}
         />
       ),
     },
     {
-      id: 'tidal-connect',
-      title: 'Tidal Hi-Res Streaming',
-      description: 'Connect your Tidal account via device-code pairing for lossless FLAC streaming and library import.',
-      keywords: 'tidal streaming connect login device code lossless hifi flac disconnect',
+      id: 'addons',
+      title: 'Source Addons',
+      description: 'Paste an Eclipse-compatible addon manifest URL to add a music source at runtime.',
+      keywords: 'addon plugin eclipse source manifest url extension stream provider',
       tab: 'plugins',
       element: (
         <div className="settings-ctrl-card">
-          {appMode === 'local' && (
-            <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', color: '#f59e0b', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={14} /> Inactive in Local Mode. Switch to Hybrid Mode in Settings &gt; Library to stream.
-            </div>
-          )}
-          <TidalConnectCard />
-        </div>
-      )
-    },
-    {
-      id: 'qobuz-connect',
-      title: 'Qobuz Streaming (Experimental)',
-      description: 'Connect Qobuz account via browser session token for studio-quality lossless streaming up to 192 kHz / 24-bit.',
-      keywords: 'qobuz streaming experimental connect login token lossless hifi flac studio hi-res',
-      tab: 'plugins',
-      element: (
-        <div className="settings-ctrl-card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {appMode === 'local' && (
-            <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', color: '#f59e0b', fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Info size={14} /> Inactive in Local Mode. Switch to Hybrid Mode in Settings &gt; Library to stream.
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Enable Qobuz Integration</div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
-                Experimental web session bridge. Requires active Qobuz subscription.
-              </div>
-            </div>
-            <SlidingSwitch
-              checked={qobuzExperimentalEnabled}
-              onChange={toggleQobuzExperimental}
-            />
-          </div>
-          {qobuzExperimentalEnabled && (
-            <QobuzConnectCard />
-          )}
+          <AddonsCard />
         </div>
       )
     },
@@ -3941,7 +3542,7 @@ export function SettingsView() {
                         requestedExclusive: playbackExclusive,
                         exclusiveTiming: dsp.exclusive_mode_timing,
                         requestedBitPerfect: playbackBitPerfect,
-                        effectiveAudioPath: playback.effective_audio_path,
+                        effectiveAudioPath: playbackEffectiveAudioPath,
                         audioProfile: dsp.audio_profile,
                         upsampleRate: dsp.upsample_rate,
                         dither: dsp.dither,
@@ -4038,7 +3639,7 @@ export function SettingsView() {
               <div>
                 <div className="settings-ctrl-title">Audio Output Path</div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
-                  Effective output: {getAudioPathPresentation(playback).hudLabel}
+                  Effective output: {getAudioPathPresentation({ effective_audio_path: playbackEffectiveAudioPath, status: playbackStatus }).hudLabel}
                 </div>
                 <AudioOutputPathSelector compact />
               </div>
@@ -4532,7 +4133,7 @@ export function SettingsView() {
       id: 'recommendation-engine',
       title: 'Recommendation & Radio Source',
       description: 'Choose which recommendation engine generates autoplay queues, artist radio, and music suggestions.',
-      keywords: 'recommendation engine radio source youtube tidal our aideo hybrid algorithm autoplay',
+      keywords: 'recommendation engine radio source youtube our aideo hybrid algorithm autoplay',
       tab: 'system',
       element: (
         <div className="settings-ctrl-card">
@@ -4548,11 +4149,6 @@ export function SettingsView() {
                 id: 'youtube', 
                 label: 'YouTube Music Radio', 
                 desc: 'Direct recommendations from YouTube Music curated track and artist radio',
-              },
-              { 
-                id: 'tidal', 
-                label: 'Tidal Radio', 
-                desc: 'Related songs from Last.fm matched to Tidal recordings; may return fewer tracks',
               }
             ].map(engine => {
               const active = (recommendationEngine || 'our') === engine.id;

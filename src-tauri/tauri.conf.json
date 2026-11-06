@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build:sidecar && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: https: http: data: blob:; media-src 'self' asset: https: http: data: blob:; style-src 'self' 'unsafe-inline' https:; font-src 'self' https: data:; connect-src 'self' ipc: http://ipc.localhost https: http: ws: wss:; script-src 'self' 'wasm-unsafe-eval';",
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: https: http: data: blob:; media-src 'self' asset: https: http: data: blob:; style-src 'self' 'unsafe-inline' https:; font-src 'self' https: data:; connect-src 'self' ipc: http://ipc.localhost https:; script-src 'self' 'wasm-unsafe-eval';",
       "capabilities": [
         "default"
       ]
@@ -50,6 +50,9 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "externalBin": [
+      "bin/aideo-addons"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

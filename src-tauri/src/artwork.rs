@@ -3,7 +3,6 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::formats::FormatOptions;
 use symphonia::default::get_probe;
-use base64::Engine;
 use lofty::probe::Probe;
 use lofty::prelude::*;
 use lofty::picture::PictureType;
@@ -31,6 +30,35 @@ pub fn normalize_audio_path(audio_path: &str) -> String {
         .unwrap_or_else(|_| clean.to_string())
 }
 
+/// Detects the real image type from its first bytes, so a missing or wrong tag mime cannot
+/// produce a data URL the webview refuses to draw.
+fn sniff_image_mime(bytes: &[u8]) -> Option<&'static str> {
+    match bytes {
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
+        [0x89, b'P', b'N', b'G', ..] => Some("image/png"),
+        [b'G', b'I', b'F', b'8', ..] => Some("image/gif"),
+        [b'B', b'M', ..] => Some("image/bmp"),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some("image/webp"),
+        _ if bytes.len() > 12 && &bytes[4..8] == b"ftyp" && matches!(&bytes[8..12], b"avif" | b"avis") => Some("image/avif"),
+        _ => None,
+    }
+}
+
+/// Builds a `data:` URL for image bytes. The sniffed type wins; the declared type is only
+/// trusted when it names an image. Anything else (an HTML error page, audio) yields `None`.
+pub fn image_data_url(declared_mime: Option<&str>, bytes: &[u8]) -> Option<String> {
+    use base64::Engine;
+    if bytes.is_empty() {
+        return None;
+    }
+    let declared = declared_mime
+        .and_then(|m| m.split(';').next())
+        .map(|m| m.trim().to_ascii_lowercase())
+        .filter(|m| m.starts_with("image/") && m.len() <= 40 && m.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'+' | b'.' | b'-')));
+    let mime = sniff_image_mime(bytes).map(str::to_string).or(declared)?;
+    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
 /// Extracts embedded cover art from an audio file and returns it as a data URL.
 pub fn get_cover_art(audio_path: &str) -> Option<String> {
     let normalized = normalize_audio_path(audio_path);
@@ -49,13 +77,16 @@ pub fn get_cover_art(audio_path: &str) -> Option<String> {
         .ok()
         .flatten();
 
-    if let Ok(mut cache) = COVER_CACHE.lock() {
-        if cache.len() >= 1000 {
-            cache.clear();
-        }
-        cache.insert(normalized.clone(), res.clone());
-        if audio_path != normalized {
-            cache.insert(audio_path.to_string(), res.clone());
+    // A miss for a file that is currently absent (unplugged drive, mid-copy) must not stick for the session.
+    if res.is_some() || Path::new(&normalized).exists() {
+        if let Ok(mut cache) = COVER_CACHE.lock() {
+            if cache.len() >= 1000 {
+                cache.clear();
+            }
+            cache.insert(normalized.clone(), res.clone());
+            if audio_path != normalized {
+                cache.insert(audio_path.to_string(), res.clone());
+            }
         }
     }
 
@@ -108,12 +139,7 @@ fn extract_art_lofty(path: &Path) -> Option<String> {
             })
         })?;
 
-    let mime_str = match pic.mime_type() {
-        Some(m) => m.as_str(),
-        None => "image/jpeg",
-    };
-    let encoded = base64::engine::general_purpose::STANDARD.encode(pic.data());
-    Some(format!("data:{mime_str};base64,{encoded}"))
+    image_data_url(pic.mime_type().map(|m| m.as_str()), pic.data())
 }
 
 fn extract_art_symphonia(audio_path: &str) -> Option<String> {
@@ -138,20 +164,16 @@ fn extract_art_symphonia(audio_path: &str) -> Option<String> {
 
     // Try inline metadata first (MP3, AAC)
     if let Some(meta) = probed.format.metadata().current() {
-        if let Some(v) = meta.visuals().first() {
-            let encoded = base64::engine::general_purpose::STANDARD.encode(&*v.data);
-            let mime = if v.media_type.is_empty() { "image/jpeg" } else { &v.media_type };
-            return Some(format!("data:{mime};base64,{encoded}"));
+        if let Some(art) = meta.visuals().iter().find_map(|v| image_data_url(Some(&v.media_type), &v.data)) {
+            return Some(art);
         }
     }
 
     // Fallback: metadata log (FLAC, OGG)
     if let Some(rev) = probed.metadata.get() {
         if let Some(meta) = rev.current() {
-            if let Some(v) = meta.visuals().first() {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(&*v.data);
-                let mime = if v.media_type.is_empty() { "image/jpeg" } else { &v.media_type };
-                return Some(format!("data:{mime};base64,{encoded}"));
+            if let Some(art) = meta.visuals().iter().find_map(|v| image_data_url(Some(&v.media_type), &v.data)) {
+                return Some(art);
             }
         }
     }
@@ -162,20 +184,20 @@ fn extract_art_symphonia(audio_path: &str) -> Option<String> {
 fn extract_folder_art(audio_path: &str) -> Option<String> {
     let parent = Path::new(audio_path).parent()?;
     let stem = Path::new(audio_path).file_stem().and_then(|s| s.to_str()).unwrap_or("cover");
-    let names = [
-        format!("{}.jpg", stem), format!("{}.png", stem), format!("{}.jpeg", stem),
-        "cover.jpg".to_string(), "cover.png".to_string(), "cover.jpeg".to_string(),
-        "folder.jpg".to_string(), "folder.png".to_string(),
-        "album.jpg".to_string(), "album.png".to_string(),
-        "front.jpg".to_string(), "front.png".to_string()
-    ];
-    for name in names {
-        let img_path = parent.join(&name);
-        if img_path.exists() {
-            if let Ok(bytes) = std::fs::read(&img_path) {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                let mime = if name.ends_with(".png") { "image/png" } else { "image/jpeg" };
-                return Some(format!("data:{mime};base64,{encoded}"));
+    for base in [stem, "cover", "folder", "album", "front"] {
+        for ext in ["jpg", "jpeg", "png", "webp"] {
+            let img_path = parent.join(format!("{base}.{ext}"));
+            if !img_path.is_file() {
+                continue;
+            }
+            // Folder images can be large scans; skip anything the webview would struggle to decode.
+            if std::fs::metadata(&img_path).map(|m| m.len() > 15 * 1024 * 1024).unwrap_or(true) {
+                continue;
+            }
+            // The file name already says "image", so fall back to its extension when the bytes are not recognised.
+            let by_extension = match ext { "png" => "image/png", "webp" => "image/webp", _ => "image/jpeg" };
+            if let Some(art) = std::fs::read(&img_path).ok().and_then(|bytes| image_data_url(Some(by_extension), &bytes)) {
+                return Some(art);
             }
         }
     }
@@ -241,5 +263,34 @@ mod tests {
         assert_eq!(normalize_audio_path("file://C:/Music/song.mp3"), "C:/Music/song.mp3");
         assert_eq!(normalize_audio_path("C:/Music/My%20Song%20%231.flac"), "C:/Music/My Song #1.flac");
         assert_eq!(normalize_audio_path("file:///C:/Music/My%20Song.mp3"), "C:/Music/My Song.mp3");
+    }
+
+    #[test]
+    fn image_data_url_trusts_bytes_over_a_wrong_or_missing_mime() {
+        let jpeg = [0xFFu8, 0xD8, 0xFF, 0xE0, 0, 0x10];
+        let png = [0x89u8, b'P', b'N', b'G', 0x0D, 0x0A];
+        assert!(image_data_url(None, &jpeg).unwrap().starts_with("data:image/jpeg;base64,"));
+        assert!(image_data_url(Some(""), &jpeg).unwrap().starts_with("data:image/jpeg;base64,"));
+        assert!(image_data_url(Some("image/jpeg"), &png).unwrap().starts_with("data:image/png;base64,"));
+        let webp = *b"RIFF\x00\x00\x00\x00WEBPVP8 ";
+        assert!(image_data_url(None, &webp).unwrap().starts_with("data:image/webp;base64,"));
+    }
+
+    #[test]
+    fn image_data_url_rejects_non_images() {
+        assert_eq!(image_data_url(Some("text/html"), b"<html>not found</html>"), None);
+        assert_eq!(image_data_url(Some("audio/mpeg"), b"ID3\x03"), None);
+        assert_eq!(image_data_url(None, b""), None);
+        // Unknown bytes are only accepted when the declared type is a sane image type.
+        assert!(image_data_url(Some("image/x-icon; charset=binary"), b"\x00\x00\x01\x00").unwrap().starts_with("data:image/x-icon;base64,"));
+        assert_eq!(image_data_url(Some("image/\"><script>"), b"\x00\x00\x01\x00"), None);
+    }
+
+    #[test]
+    fn a_miss_for_a_missing_file_is_not_remembered() {
+        let path = "definitely_missing_cover_cache_probe.flac";
+        invalidate_cover_cache(path);
+        assert_eq!(get_cover_art(path), None);
+        assert!(COVER_CACHE.lock().unwrap().get(path).is_none(), "absent file must not be cached as artless");
     }
 }

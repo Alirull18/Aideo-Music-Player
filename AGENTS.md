@@ -12,13 +12,13 @@ Tauri v2 desktop music player. Two separately-built halves: a React 19 + TypeScr
 - `npm run build` — runs `tsc` (typecheck, no emit) **then** `vite build` → `dist`. Type errors abort the build.
 - `npm test` — `vitest run src/test` (jsdom, globals on, setup `src/test/setup.ts`).
 - `npm run tauri` — passthrough to the Tauri CLI.
-- **No `lint` script and no ESLint config.** "Linting" is TypeScript's `tsc` strict checks (`noUnusedLocals`, `noUnusedParameters`). Do not run `npm run lint`.
+- **No ESLint config.** `npm run lint` is an alias for `tsc --noEmit`; "linting" means TypeScript's strict checks (`noUnusedLocals`, `noUnusedParameters`).
 
 ## Testing
 - Tests live **only** in `src/test/*.test.ts`; Vitest is configured to run that directory exclusively.
 - Single test: `npx vitest run src/test/<name>.test.ts`.
 - `src/test/setup.ts` is required (globals + jsdom) — do not remove it.
-- **CI does not run frontend tests.** `.github/workflows/check.yml` runs `npx tsc --noEmit` (frontend, Ubuntu) and `cargo check`/`cargo test` (backend, Windows) only. Run `npm test` yourself before relying on it.
+- CI (`.github/workflows/check.yml`) runs `npx tsc --noEmit`, `npx vitest run src/test`, the `addons-sdk/cloud` Node tests and `npm run build` on Ubuntu, and `cargo check`/`cargo test` on Windows.
 
 ## Rust backend build
 - Requires **Rust stable** + **protoc 25.1**. `src-tauri/bin/bin/protoc.exe` is bundled locally but gitignored, so a fresh clone needs protoc installed (CI uses `step-security/setup-protoc@v3`).
@@ -51,6 +51,7 @@ Fall back to Grep/Glob/Read only when the graph doesn't cover it.
 
 ## Verification gate
 - Never declare a fix done without running, all green: `npx tsc --noEmit`, `npx vitest run src/test`, `cargo check --manifest-path src-tauri/Cargo.toml`, `cargo test --manifest-path src-tauri/Cargo.toml`.
-- Audio/DSP/parse fixes ship with a unit test locking the behavior in (see `src-tauri/src/player/dsp_tests.rs`, `scanner.rs`, `updater.rs` tests).
+- Audio/DSP/parse fixes ship with a unit test locking the behavior in (see `src-tauri/src/player/dsp_tests.rs`, `scanner.rs`, `dependencies.rs` tests).
+- The live DSP chain is `build_dsp_chain` in `player/mod.rs`. Every control in the Audio Control Center must have a node there; the `live_chain_*` tests in `dsp_tests.rs` fail if one is dropped. Unit tests on a single node do not prove it is in the chain.
 - When auditing AI-generated changes: `git diff HEAD` is ground truth — never trust changelogs or "VERIFIED" labels without the snippet.
 - Run `git status` before verifying claims about the repo state — uncommitted working-tree changes have caused false "already fixed" conclusions before.

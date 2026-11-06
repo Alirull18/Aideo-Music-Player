@@ -10,7 +10,6 @@ describe('Autoplay & Recommendation Engine', () => {
     localStorage.clear();
     useStore.setState({
       recommendationEngine: 'our',
-      tidalConnected: true,
       appMode: 'hybrid',
       repeat: 'all',
       recordPlaybackTransition: useStore.getInitialState().recordPlaybackTransition,
@@ -99,9 +98,9 @@ describe('Autoplay & Recommendation Engine', () => {
     });
 
     it('does not silently fill online radio with local files when providers return nothing', async () => {
-      const seed: Track = { id: -1, path: '123', title: 'Seed', artist: 'Artist', duration: 180, format: 'Tidal FLAC', lyric_offset: 0 };
+      const seed: Track = { id: -1, path: 'https://www.youtube.com/watch?v=aaaaaaaaaaa', title: 'Seed', artist: 'Artist', duration: 180, format: 'YouTube Direct', lyric_offset: 0 };
       const local: Track = { ...seed, id: 2, path: 'C:/Music/local.flac', title: 'Local', format: 'FLAC' };
-      useStore.setState({ currentTrack: seed, tracks: [local], recommendationEngine: 'tidal' });
+      useStore.setState({ currentTrack: seed, tracks: [local], recommendationEngine: 'youtube' });
       vi.mocked(invoke).mockImplementation(async (command, args?: any) => {
         if (command === 'get_recommendations') return { tracks: args.request.candidates, generation: args.request.generation, reasons: {} };
         return null;
@@ -174,28 +173,6 @@ describe('Autoplay & Recommendation Engine', () => {
       expect(queue[1].title).toBe('Whenever You Need Somebody');
       expect(queue[1].is_autoplay).toBe(true);
     });
-    it('does not switch explicit Tidal radio to YouTube when no related Tidal recording matches', async () => {
-      vi.mocked(invoke).mockImplementation(async (cmd, args?: any) => {
-        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
-        if (cmd === 'get_tidal_autoplay_recommendations') return [];
-        return null;
-      });
-      const seed: Track = {
-        id: -1,
-        path: '12345',
-        title: 'Bukan Bang Toyib',
-        artist: 'Wali',
-        duration: 210,
-        format: 'Tidal FLAC',
-        lyric_offset: 0,
-      };
-      useStore.setState({ recommendationEngine: 'tidal', currentTrack: seed });
-      await useStore.getState().triggerAutoplayRadio(seed, true);
-
-      expect(useStore.getState().queue).toEqual([]);
-      expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'get_youtube_autoplay_recommendations')).toBe(false);
-    });
-
     it('should not commit a pending response after autoplay is disabled', async () => {
       let resolveRecommendations: ((value: unknown) => void) | undefined;
       vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
@@ -724,10 +701,6 @@ describe('Autoplay & Recommendation Engine', () => {
       expect(useStore.getState().recommendationEngine).toBe('youtube');
       expect(localStorage.getItem('aideo_recommendation_engine')).toBe('youtube');
 
-      useStore.getState().setRecommendationEngine('tidal');
-      expect(useStore.getState().recommendationEngine).toBe('tidal');
-      expect(localStorage.getItem('aideo_recommendation_engine')).toBe('tidal');
-
       useStore.getState().setRecommendationEngine('our');
       expect(useStore.getState().recommendationEngine).toBe('our');
     });
@@ -798,47 +771,6 @@ describe('Autoplay & Recommendation Engine', () => {
       const queue = useStore.getState().queue;
       expect(queue.length).toBe(1);
       expect(queue[0].title).toBe('YouTube Rec');
-    });
-
-    it('should query Tidal autoplay recommendations when engine is "tidal"', async () => {
-      useStore.setState({ recommendationEngine: 'tidal' });
-
-      let tidalCalled = false;
-
-      vi.mocked(invoke).mockImplementation(async (cmd: string, args?: any) => {
-        if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((t: Track) => !args.request.excluded_paths.includes(t.path) && t.disliked !== 1), generation: args.request.generation, reasons: {} };
-        if (cmd === 'get_tidal_autoplay_recommendations') {
-          tidalCalled = true;
-          return [
-            {
-              id: '999888',
-              title: 'Tidal Rec',
-              artist: 'Tidal Artist',
-              duration: 220,
-              cover_url: 'https://tidal.com/cover.jpg'
-            }
-          ];
-        }
-        return null;
-      });
-
-      const track: Track = {
-        id: 2,
-        path: 'C:\\Music\\song2.flac',
-        title: 'Song 2',
-        artist: 'Artist 2',
-        duration: 190,
-        format: 'FLAC',
-        lyric_offset: 0
-      };
-
-      await useStore.getState().triggerAutoplayRadio(track, true);
-
-      expect(tidalCalled).toBe(true);
-      const queue = useStore.getState().queue;
-      expect(queue.length).toBe(1);
-      expect(queue[0].title).toBe('Tidal Rec');
-      expect(queue[0].format).toBe('Tidal FLAC');
     });
 
   });

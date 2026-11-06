@@ -3,9 +3,10 @@ import { Search, X, History, Music, Play, Loader2, MoreVertical } from 'lucide-r
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import { pathsEqual } from '../../utils';
+import { musicAddons } from '../../utils/musicAddons';
 import { DiscoveryHubData, YoutubeTrack, LEGACY_AIDEO_PAGE_DESIGNS } from '../../store/types';
 import { SimpleLRU } from '../../utils/lruCache';
-import { discoveryTrack, trackSignature } from '../../utils/discoveryFeed';
+import { discoveryTrack } from '../../utils/discoveryFeed';
 import { SourceMenu } from '../SourceMenu';
 
 export function SongSources({ track }: { track: YoutubeTrack }) {
@@ -13,115 +14,6 @@ export function SongSources({ track }: { track: YoutubeTrack }) {
   return <div className="home-song-sources" onClick={event => event.stopPropagation()}>
     <SourceMenu track={discoveryTrack(track)} compact />
   </div>;
-}
-
-// ── Shelf model ─────────────────────────────────────────────
-
-export type ShelfId = 'recent' | 'rotation' | 'gems' | 'recs' | 'tidal' | 'charts';
-
-export interface ShelfMeta {
-  label: string;
-  reason: string;
-  color: string;
-}
-
-export const SHELVES: Record<ShelfId, ShelfMeta> = {
-  recent: { label: 'Recently played', reason: 'Your listening history', color: '#34d399' },
-  rotation: { label: 'Most played', reason: 'Your most repeated tracks', color: '#f59e0b' },
-  gems: { label: 'Older favorites', reason: 'Favorites you have not played lately', color: '#a855f7' },
-  recs: { label: 'Recommendations', reason: 'Based on your favorites and listening history', color: '#c084fc' },
-  tidal: { label: 'Tidal tracks', reason: 'FLAC matches from Tidal', color: '#22d3ee' },
-  charts: { label: 'Trending tracks', reason: 'Trending on Last.fm', color: '#f87171' },
-};
-
-const SHELF_ORDER: ShelfId[] = ['recent', 'rotation', 'gems', 'recs', 'tidal', 'charts'];
-
-export interface TaggedTrack {
-  track: YoutubeTrack;
-  shelf: ShelfId;
-}
-
-
-const SHELF_DATA_FIELD: Record<ShelfId, string> = {
-  recent: 'recently_played',
-  rotation: 'heavy_rotation',
-  gems: 'forgotten_gems',
-  recs: 'recommendations',
-  tidal: 'tidal_hifi',
-  charts: 'global_charts',
-};
-
-// Merge all discovery shelves into one deduped feed, tagging each track with
-// the shelf it came from (first shelf wins, matching buildMergedFeed order).
-export function buildTaggedFeed(data: DiscoveryHubData | null): TaggedTrack[] {
-  if (!data) return [];
-  const seen = new Set<string>();
-  const out: TaggedTrack[] = [];
-  for (const shelf of SHELF_ORDER) {
-    const tracks = (data as any)[SHELF_DATA_FIELD[shelf]] as YoutubeTrack[] | undefined;
-    for (const track of tracks || []) {
-      const key = trackSignature(track);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ track, shelf });
-    }
-  }
-  return out;
-}
-
-export function tracksForShelf(data: DiscoveryHubData | null, shelf: ShelfId): YoutubeTrack[] {
-  return buildTaggedFeed(data).filter(t => t.shelf === shelf).map(t => t.track);
-}
-
-export function isTrackLossless(t: any): boolean {
-  if (!t) return false;
-  const f = (t.format || '').toLowerCase();
-  const p = (t.path || t.url || '').toLowerCase();
-  const id = String(t.id || '').toLowerCase();
-  const recSource = (t.recommendation_source || '').toLowerCase();
-  if (
-    f.includes('flac') || f.includes('wav') || f.includes('alac') ||
-    f.includes('dsf') || f.includes('dff') || f.includes('dsd') ||
-    f.includes('lossless') || f.includes('hi_res') ||
-    p.endsWith('.flac') || p.endsWith('.wav') || p.endsWith('.alac') ||
-    p.endsWith('.dsf') || p.endsWith('.dff') || p.endsWith('.dsd') ||
-    recSource.includes('tidal') || recSource.includes('qobuz') ||
-    id.startsWith('tidal-') || id.startsWith('qobuz-')
-  ) {
-    return true;
-  }
-  if (t.source_context?.sources?.some((s: any) =>
-    s.catalog_quality?.lossless === true ||
-    s.provider === 'tidal' ||
-    s.provider === 'qobuz' ||
-    (s.provider === 'local' && (s.id?.toLowerCase().endsWith('.flac') || s.id?.toLowerCase().endsWith('.wav') || s.id?.toLowerCase().endsWith('.alac')))
-  )) {
-    return true;
-  }
-  if (t.provider === 'tidal' || t.provider === 'qobuz') {
-    return true;
-  }
-  return false;
-}
-
-export function getLosslessTracks(discoveryData: DiscoveryHubData | null, localTracks: any[] = []): any[] {
-  const fromDiscovery = buildTaggedFeed(discoveryData)
-    .map((t) => t.track)
-    .filter(isTrackLossless);
-  const fromTidalHub = (discoveryData?.tidal_hifi || []).filter(isTrackLossless);
-  const fromLocal = (localTracks || []).filter(isTrackLossless);
-
-  const candidates = [...fromTidalHub, ...fromDiscovery, ...fromLocal];
-  const seen = new Set<string>();
-  const out: any[] = [];
-  for (const t of candidates) {
-    const key = `${t.title || ''}::${t.artist || ''}`.toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(t);
-    }
-  }
-  return out;
 }
 
 // ── Cover art with graceful fallback ────────────────────────
@@ -272,11 +164,8 @@ export interface SearchBarProps {
   suggestions: string[];
   quickResults: any[];
   history: string[];
-  source: 'all' | 'youtube' | 'tidal' | 'qobuz';
-  onSourceChange: (s: 'all' | 'youtube' | 'tidal' | 'qobuz') => void;
-  tidalConnected: boolean;
-  qobuzEnabled: boolean;
-  qobuzConnected: boolean;
+  source: string;
+  onSourceChange: (s: string) => void;
   onSubmit: () => void;
   onPickQuery: (q: string) => void;
   onDeleteHistory: (e: React.MouseEvent, q: string) => void;
@@ -291,7 +180,7 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
   const {
     appMode,
     query, onQueryChange, focused, onFocusChange, suggestions, quickResults, history,
-    source, onSourceChange, tidalConnected, qobuzEnabled, qobuzConnected,
+    source, onSourceChange,
     onSubmit, onPickQuery, onDeleteHistory, onPlayQuickTrack, isSearching,
     onTrackContextMenu,
   } = props;
@@ -307,22 +196,14 @@ export function AideoSearchBar({ variant, props }: { variant: 'column' | 'rail' 
     return () => document.removeEventListener('mousedown', onDown);
   }, [onFocusChange]);
 
-  const sources: Array<{ id: 'all' | 'youtube' | 'tidal' | 'qobuz'; label: string; dot?: string }> = [
+  const addons = useStore(s => s.addons);
+  const sources = [
     { id: 'all', label: 'All sources' },
     { id: 'youtube', label: variant === 'pill' ? 'Web' : 'Webstream' },
-    { id: 'tidal', label: 'Tidal', dot: tidalConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' },
-    ...(qobuzEnabled ? [{ id: 'qobuz' as const, label: variant === 'pill' ? 'Qobuz' : 'Qobuz β', dot: qobuzConnected ? '#10b981' : 'rgba(239, 68, 68, 0.55)' }] : []),
+    ...musicAddons(addons).map(addon => ({ id: addon.id, label: addon.name })),
   ];
 
-  const pickSource = (id: 'all' | 'youtube' | 'tidal' | 'qobuz') => {
-    onSourceChange(id);
-    if (id === 'tidal' && !tidalConnected) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Tidal first in Settings > Library > Tidal.', type: 'warning' } }));
-    }
-    if (id === 'qobuz' && !qobuzConnected) {
-      window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: 'Connect to Qobuz first in Settings > Library > Qobuz (Experimental).', type: 'warning' } }));
-    }
-  };
+  const pickSource = (id: string) => onSourceChange(id);
 
   const showDropdown = focused && (history.length > 0 || suggestions.length > 0 || quickResults.length > 0);
 

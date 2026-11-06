@@ -4,6 +4,15 @@ This document outlines the architectural blueprint, design specifications, secur
 
 ---
 
+## Continuation checkpoint — 26 October 2026
+
+The phase lists below are the original design backlog, not a current completion ledger. Verify implementation against the working tree before starting a listed task.
+
+- **Committed:** PR-1 (`eac1512`) restored CI/build gates; PR-2 (`9c851d4`) reduced duplicate UI and parked modules; PR-3 (`e976c2b`) isolated playback-clock rendering and moved read-only queries to the WAL pool; PR-4a (`320fdeb`) added the runtime-installed Eclipse music-source host.
+- **In progress, uncommitted:** replace built-in Tidal/Qobuz integrations with external music addons; add server-side Subsonic/Jellyfin/Tidal/Qobuz adapters, persistent addon enablement and lyric-provider support. Legacy saved provider references retain explicit unavailable-provider handling rather than being rewritten into addon identities.
+- **Next:** finish the existing migration's verification before adding another extensibility layer. CI now includes the cloud adapters' Node tests alongside the frontend/native checks, and Vitest discovery is explicitly limited to this checkout's `src/test` tree rather than stale nested worktrees. Current local evidence belongs in `docs/reliability-validation.md`; live authentication, addon install/search/playback, disable/re-enable, restart and local-only behavior still need native acceptance.
+- **Not next:** reimplement the October 2 reliability/library plan; its ledger records tasks 0–12 as locally complete. Hardware, hosted-CI and listening acceptance remain separate open gates. UI slots, theme packs and Wasm are still future work, not prerequisites for finishing the HTTP addon migration.
+
 ## 1. Vision & Architecture Overview
 
 Aideo's modular plugin architecture decouples core playback and DSP services from third-party integrations, UI themes, metadata providers, and visualizers.

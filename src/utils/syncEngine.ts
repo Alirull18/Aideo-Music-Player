@@ -2,6 +2,13 @@ import { getSupabaseClient } from './supabaseClient';
 import { invoke } from '@tauri-apps/api/core';
 import type { PlayerState } from '../store/types';
 
+// Addon source ids look like `com.example.addon:track-1` (mirrors valid_source_id in addons/mod.rs).
+// The cloud playlist_tracks table has no source_context/metadata columns, so these entries can't
+// round-trip: a path-only pull would insert rows the library hides. Skip them in both directions.
+// ponytail: add source_context + metadata_json columns to cloud playlist_tracks, then sync addon tracks.
+const ADDON_SOURCE_PATH = /^[a-z0-9-]+(\.[a-z0-9-]+)+:[^\\/]/;
+export const isAddonSourcePath = (path: unknown): boolean => typeof path === 'string' && ADDON_SOURCE_PATH.test(path);
+
 export async function syncToCloud(get: () => PlayerState, set: (state: Partial<PlayerState>) => void): Promise<void> {
   if (localStorage.getItem('aideo_local_restore_sync')) {
     get().setPlaybackError('Local backup restored data is awaiting review. Resume cloud sync from Local backup settings.');
@@ -20,7 +27,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
     // 1. Sync unsynced playback history logs
     const unsyncedLogs = await invoke<any[]>('get_unsynced_history');
     if (unsyncedLogs && unsyncedLogs.length > 0) {
-      console.log(`[Sync] Pushing ${unsyncedLogs.length} unsynced play logs to Supabase...`);
       const payload = unsyncedLogs.map(log => ({
         user_id: userId,
         track_path: log.track_path,
@@ -41,7 +47,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
       if (!error) {
         const ids = unsyncedLogs.map(log => log.id);
         await invoke('mark_history_synced', { ids });
-        console.log('[Sync] Play logs pushed and marked synced successfully.');
       } else {
         console.error('[Sync] Error pushing play logs:', error.message);
       }
@@ -49,7 +54,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
     // 2. Sync liked tracks
     const lovedTracks = state.tracks.filter(t => t.loved === 1);
-    console.log('[Sync] Found liked tracks in state.tracks:', lovedTracks.length);
     
     // First, sync local loved tracks
     if (lovedTracks.length > 0) {
@@ -70,8 +74,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
       if (error) {
         console.error('[Sync] Error syncing liked tracks to Supabase:', error.message, error);
-      } else {
-        console.log('[Sync] Liked tracks synced to Supabase successfully.');
       }
     }
 
@@ -108,6 +110,7 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
     // 3. Sync Playlists
     const playlists = state.playlists;
+    let playlistFailures = 0;
     for (const pl of playlists) {
       const { data, error } = await supabase
         .from('playlists')
@@ -122,9 +125,19 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
       const cloudPlaylistId = data?.[0]?.id;
       if (cloudPlaylistId) {
         try {
-          const tracks = await invoke<any[]>('get_playlist_tracks', { playlistId: pl.id });
+          const tracks = (await invoke<any[]>('get_playlist_tracks', { playlistId: pl.id }) ?? [])
+            .filter(t => !t.source_context && !isAddonSourcePath(t.path));
+          // Keep a copy so a failed replacement insert can't leave the cloud playlist empty.
+          const { data: backupRows, error: backupError } = await supabase
+            .from('playlist_tracks').select('*').eq('playlist_id', cloudPlaylistId);
+          if (backupError) {
+            playlistFailures++;
+            console.error(`[Sync] Error reading cloud playlist ${pl.name} before replace:`, backupError.message);
+            continue;
+          }
           const { error: delError } = await supabase.from('playlist_tracks').delete().eq('playlist_id', cloudPlaylistId);
           if (delError) {
+            playlistFailures++;
             console.error(`[Sync] Error clearing cloud playlist tracks for ${pl.name}:`, delError.message);
             continue;
           }
@@ -139,10 +152,16 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
             const { error: insError } = await supabase.from('playlist_tracks').insert(trackPayload);
             if (insError) {
+              playlistFailures++;
               console.error(`[Sync] Error inserting cloud playlist tracks for ${pl.name}:`, insError.message);
+              if (backupRows && backupRows.length > 0) {
+                const { error: restoreError } = await supabase.from('playlist_tracks').insert(backupRows);
+                if (restoreError) console.error(`[Sync] Could not restore cloud playlist ${pl.name}:`, restoreError.message);
+              }
             }
           }
         } catch (e) {
+          playlistFailures++;
           console.error('[Sync] Error fetching playlist tracks:', e);
         }
       }
@@ -166,8 +185,6 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
 
     if (settingsError) {
       console.error('[Sync] Error syncing settings:', settingsError.message);
-    } else {
-      console.log('[Sync] App settings synced successfully.');
     }
 
     // 5. Sync playCounts record mapping
@@ -186,7 +203,11 @@ export async function syncToCloud(get: () => PlayerState, set: (state: Partial<P
       }
     }
 
-    state.setPlaybackSuccess('Sync to cloud complete!');
+    if (playlistFailures > 0) {
+      state.setPlaybackError(`Sync to cloud finished, but ${playlistFailures} playlist update(s) failed.`);
+    } else {
+      state.setPlaybackSuccess('Sync to cloud complete!');
+    }
   } catch (err: any) {
     console.error('[Sync] Sync to cloud failed:', err);
     state.setPlaybackError(`Sync to cloud failed: ${err.message || err}`);
@@ -221,13 +242,11 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
 
   try {
     if (syncLikes) {
-      console.log('[Sync] Pulling liked tracks from cloud...');
       const { data: cloudLikes, error: likesError } = await supabase
         .from('liked_tracks')
         .select('*')
         .eq('user_id', userId);
 
-      console.log('[Sync] Retrieved liked tracks from Supabase:', cloudLikes?.length, cloudLikes, likesError);
 
       if (!likesError && cloudLikes) {
         const currentTracks = get().tracks;
@@ -235,9 +254,7 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
         // 1. If liked in cloud but not locally, make it liked locally
         for (const t of cloudLikes) {
           const localTrack = currentTracks.find(lt => lt.path === t.track_path);
-          console.log('[Sync] Restoring liked track:', t.track_path, 'Local match:', localTrack);
           if (!localTrack || localTrack.loved !== 1) {
-            console.log('[Sync] Invoking toggle_love_track (love) for:', t.track_path);
             await invoke('toggle_love_track', {
               path: t.track_path,
               loved: true,
@@ -254,7 +271,6 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
     }
 
     if (syncSettings) {
-      console.log('[Sync] Pulling settings from cloud...');
       const { data: cloudSettings, error: settingsError } = await supabase
         .from('user_settings')
         .select('*')
@@ -284,7 +300,6 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
     }
 
     if (syncPlaylists) {
-      console.log('[Sync] Pulling playlists from cloud...');
       const { data: cloudPlaylists, error: plError } = await supabase
         .from('playlists')
         .select('*')
@@ -308,7 +323,7 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
 
             if (!tracksError && cloudTracks) {
               for (const ct of cloudTracks) {
-                if (!localPaths.has(ct.track_path)) {
+                if (!localPaths.has(ct.track_path) && !isAddonSourcePath(ct.track_path)) {
                   await invoke('add_to_playlist', { playlistId: localPl.id, path: ct.track_path });
                 }
               }
@@ -328,6 +343,7 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
 
               if (!tracksError && cloudTracks) {
                 for (const ct of cloudTracks) {
+                  if (isAddonSourcePath(ct.track_path)) continue;
                   await invoke('add_to_playlist', { playlistId: newLocalPl.id, path: ct.track_path });
                 }
               }
@@ -340,7 +356,6 @@ export async function syncFromCloud(get: () => PlayerState, set: (state: Partial
     }
 
     if (syncPlayCounts) {
-      console.log('[Sync] Pulling track stats playCounts...');
       const { data: cloudStats, error: statsError } = await supabase
         .from('track_stats')
         .select('*')

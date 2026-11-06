@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useStore } from '../store';
 import type { RecordingSources, SourceSelection, Track } from '../store/types';
 import { applySourcePreference, deduplicateSourcesForDisplay, groupRecordings, matchingSources, saveSourceChoice, searchSources, sourceFor, sourceKey, sourceName, sourceSearchQuery } from '../utils/unifiedSources';
+import { musicSearchOptions } from '../utils/musicAddons';
 import './UnifiedSources.css';
 
 export function SourceMenu({ track, compact = false, initialOpen = false, onChange, onClose, renderTrigger }: { track: Track; compact?: boolean; initialOpen?: boolean; onChange?: (track: Track) => void; onClose?: () => void; renderTrigger?: ((onClick: () => void) => React.ReactNode) | null }) {
@@ -14,10 +15,8 @@ export function SourceMenu({ track, compact = false, initialOpen = false, onChan
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
-  const tidalConnected = useStore(s => s.tidalConnected);
-  const qobuzConnected = useStore(s => s.qobuzConnected && s.qobuzExperimentalEnabled);
   const localOnly = useStore(s => s.appMode === 'local');
-  const available = (provider: string) => provider === 'local' || (!localOnly && (provider === 'youtube' || (provider === 'tidal' ? tidalConnected : qobuzConnected)));
+  const available = (provider: string) => provider === 'local' || (!localOnly && (provider === 'youtube' || provider === 'addon'));
 
   const recordingId = track.source_context?.recording_id;
   const registryContext = useStore(s => recordingId ? s.sourceRegistry[recordingId] : undefined);
@@ -102,10 +101,7 @@ export function SourceMenu({ track, compact = false, initialOpen = false, onChan
     setLoading(true); setError('');
     try {
       const state = useStore.getState();
-      await searchSources(sourceSearchQuery(track), {
-        tidal: state.appMode !== 'local' && state.tidalConnected,
-        qobuz: state.appMode !== 'local' && state.qobuzConnected && state.qobuzExperimentalEnabled, youtube: state.appMode !== 'local',
-      }, result => {
+      await searchSources(sourceSearchQuery(track), musicSearchOptions(state.appMode, state.addons), result => {
         if (token !== request.current) return;
         if (initial) {
           const matched = matchingSources(selected, result.tracks);

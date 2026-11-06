@@ -3,12 +3,12 @@ import { handleSourceFailure } from './store/sourcePlayback';
 import { useEffect, useState, lazy, Suspense } from 'react';
 import { useStore, Track } from './store';
 import { useUpdaterStore } from './store/updaterStore';
+import { purgeLegacyServerCredentials } from './store/cloudSlice';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Radio, Download, X } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { Radio } from 'lucide-react';
 import './App.css';
 
 import { Sidebar } from './components/Sidebar';
@@ -23,19 +23,18 @@ const ListenbrainzView = lazy(() => import('./components/ListenbrainzView').then
 const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
 const AideoLabView = lazy(() => import('./components/AideoLabView').then(m => ({ default: m.AideoLabView })));
 const FullscreenView = lazy(() => import('./components/FullscreenView').then(m => ({ default: m.FullscreenView })));
-const ListeningInsightsView = lazy(() => import('./components/ListeningInsightsView').then(m => ({ default: m.ListeningInsightsView })));
 const AlbumsView = lazy(() => import('./components/AlbumsView').then(m => ({ default: m.AlbumsView })));
-const ChartsView = lazy(() => import('./components/ChartsView').then(m => ({ default: m.ChartsView })));
 const DownloadedView = lazy(() => import('./components/DownloadedView').then(m => ({ default: m.DownloadedView })));
 
 import { PlaybackRecovery } from './components/PlaybackRecovery';
 import { PlayerBar } from './components/PlayerBar';
 import { ScrollToTopButton } from './components/ScrollToTopButton';
-import { AudioControlCenter } from './components/AudioControlCenter';
 import { AideoPrompt } from './components/AideoPrompt';
 import { ToastContainer } from './components/Toast';
+import UpdatePopup from './components/UpdatePopup';
 import { DownloadManager } from './components/DownloadManager';
 import { QueueView } from './components/QueueView';
+import { AudioControlCenter } from './components/AudioControlCenter';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { handlePlayerShortcut } from './utils/playerShortcuts';
 import { isStreamTrack, trackIdToStreamUrl } from './utils';
@@ -274,16 +273,14 @@ function AideoApp() {
   } = useUpdaterStore();
 
   useEffect(() => {
-    const { fetchDevices, initializeQueue, loadSubsonicPassword, checkSession, checkTidalStatus } = useStore.getState();
+    const { fetchDevices, initializeQueue, checkSession, loadAddons } = useStore.getState();
     loadLibrary();
     fetchPlaylists();
     fetchDevices();
     initializeQueue();
-    loadSubsonicPassword();
+    void purgeLegacyServerCredentials();
     checkSession().catch(e => console.error("checkSession error:", e));
-    // Restore Tidal session flag from backend keyring so tidalConnected is
-    // correct immediately after a webview reload, without visiting Settings.
-    checkTidalStatus();
+    void loadAddons();
 
     // Synchronize Windows Keep Awake status with backend on startup
     const initialKeepAwake = localStorage.getItem('aideo_keep_awake') === 'true';
@@ -357,29 +354,20 @@ function AideoApp() {
         if (isCancelled) return;
         const url = event.payload;
         try {
-          const hash = url.split('#')[1];
-          if (!hash) return;
-          const params = new URLSearchParams(hash);
-          const access_token = params.get('access_token');
-          const refresh_token = params.get('refresh_token');
-
-          if (access_token && refresh_token) {
-            const { getSupabaseClient } = await import('./utils/supabaseClient');
-            const client = getSupabaseClient();
-            if (client) {
-              const { data: { session }, error } = await client.auth.setSession({ access_token, refresh_token });
-              if (error) throw error;
-              if (session) {
-                useStore.setState({
-                  session,
-                  user: session.user ?? null,
-                  authLoading: false
-                });
-                window.dispatchEvent(new CustomEvent('ui-toast', { 
-                  detail: { message: 'Signed in successfully!', type: 'success' } 
-                }));
-              }
-            }
+          const { getSupabaseClient } = await import('./utils/supabaseClient');
+          const client = getSupabaseClient();
+          if (!client) return;
+          const { sessionFromOAuthCallback } = await import('./utils/oauthCallback');
+          const session = await sessionFromOAuthCallback(url, client);
+          if (session) {
+            useStore.setState({
+              session,
+              user: session.user ?? null,
+              authLoading: false
+            });
+            window.dispatchEvent(new CustomEvent('ui-toast', {
+              detail: { message: 'Signed in successfully!', type: 'success' }
+            }));
           }
         } catch (e: any) {
           console.error('Failed to resolve OAuth session from callback:', e);
@@ -465,16 +453,6 @@ function AideoApp() {
     cleanups.push(() => clearInterval(clockInterval));
 
     const setupListeners = async () => {
-      for (const provider of ['tidal', 'qobuz']) {
-        const unlisten = await listen<{ filename: string; track_id: string; error: string }>(`${provider}-download-error`, event => {
-          if (isCancelled) return;
-          window.dispatchEvent(new CustomEvent('ui-toast', {
-            detail: { message: `${provider === 'tidal' ? 'Tidal' : 'Qobuz'} download failed (${event.payload.filename}): ${event.payload.error}`, type: 'error' }
-          }));
-        });
-        if (isCancelled) { unlisten(); return; }
-        cleanups.push(unlisten);
-      }
       const uScannerError = await listen<string>('scanner-error', event => {
         if (isCancelled) return;
         window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message: event.payload, title: 'Library Scan', type: 'error' } }));
@@ -516,7 +494,6 @@ function AideoApp() {
         if (!payload?.path || !payload.attempt_id || !payload.previous_attempt_id
           || payload.previous_attempt_id !== state.currentAttemptId
           || (payload.previous_path && payload.previous_path !== state.playback.current_track)) return;
-        console.log('[App] Received track-transitioned event from native backend:', payload);
         markListeningEnd('completed');
         await state.handleNativeTrackTransition(payload.path, payload.attempt_id);
       });
@@ -532,17 +509,14 @@ function AideoApp() {
         if (!state.currentTrack || !currentAttempt || eventAttempt !== currentAttempt
           || (event?.payload?.path && (state.currentTrack.source_context || !isStreamTrack(state.currentTrack.path, state.currentTrack.format)) && event.payload.path !== state.playback.current_track)) return;
         if (eventAttempt && eventAttempt === lastHandledAttemptId) {
-          console.log('[App] Discarding duplicate track-ended event for attempt:', eventAttempt);
           return;
         }
         if (state.playback.status === 'Stopped') {
-          console.log('[App] Discarding track-ended event received while playback is stopped');
           return;
         }
         if (state.currentTrack?.source_context && state.playback.is_buffering) return;
         lastHandledAttemptId = currentAttempt;
         markListeningEnd('completed');
-        console.log('[App] Received track-ended event from backend. Applying end policy.');
         void state.handleNaturalTrackEnd();
       });
       if (isCancelled) { uEnded(); return; }
@@ -566,7 +540,9 @@ function AideoApp() {
         if (isCancelled) return;
         const state = useStore.getState();
         const incomingAttemptId = event.payload?.attempt_id;
-        if (!incomingAttemptId || !state.currentAttemptId || incomingAttemptId === state.currentAttemptId) {
+        // The backend sends "" when the cancelled attempt had no id; that cancel cannot belong to a
+        // live attempt, so it must not clear the current track's buffering indicator.
+        if (!state.currentAttemptId || incomingAttemptId === state.currentAttemptId) {
           useStore.setState((prev) => ({
             playback: { ...prev.playback, is_buffering: false }
           }));
@@ -575,13 +551,6 @@ function AideoApp() {
       });
       if (isCancelled) { uPlaybackCancelled(); return; }
       cleanups.push(uPlaybackCancelled);
-
-      const uPlaybackSuccess = await listen<string>('playback-success', (event) => {
-        if (isCancelled) return;
-        console.log('[App] Playback success:', event.payload);
-      });
-      if (isCancelled) { uPlaybackSuccess(); return; }
-      cleanups.push(uPlaybackSuccess);
 
       const uLib = await listen('library-updated', () => {
         if (isCancelled) return;
@@ -878,8 +847,6 @@ function AideoApp() {
     const prefetch = () => {
       import('./components/AlbumsView');
       import('./components/SettingsView');
-      import('./components/ChartsView');
-      import('./components/ListeningInsightsView');
       import('./components/LastfmView');
       import('./components/ListenbrainzView');
       import('./components/AideoLabView');
@@ -1017,34 +984,12 @@ function AideoApp() {
             </motion.div>
           )}
 
-          {view === 'aideo_lab' && (
+          {(view === 'aideo_lab' || view === 'aideolab') && (
             <motion.div key="aideo_lab" style={{ height: '100%' }}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <Suspense fallback={<ViewSkeleton type="generic" />}>
                 <ErrorBoundary name="Aideo Lab">
                   <AideoLabView />
-                </ErrorBoundary>
-              </Suspense>
-            </motion.div>
-          )}
-
-          {view === 'insights' && (
-            <motion.div key="insights" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Suspense fallback={<ViewSkeleton type="generic" />}>
-                <ErrorBoundary name="Insights">
-                  <ListeningInsightsView />
-                </ErrorBoundary>
-              </Suspense>
-            </motion.div>
-          )}
-
-          {view === 'charts' && (
-            <motion.div key="charts" style={{ height: '100%' }}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Suspense fallback={<ViewSkeleton type="charts" />}>
-                <ErrorBoundary name="Charts">
-                  <ChartsView />
                 </ErrorBoundary>
               </Suspense>
             </motion.div>
@@ -1087,6 +1032,7 @@ function AideoApp() {
         {lastScrobble && (
           <motion.div
             key="scrobble-toast"
+            role="status"
             initial={{ opacity: 0, y: 50, x: '-50%' }}
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 50, x: '-50%' }}
@@ -1099,126 +1045,16 @@ function AideoApp() {
 
 
         {updateModalOpen && updateInfo && (
-          <motion.div
+          <UpdatePopup
             key="update-popup"
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            style={{
-              position: 'fixed',
-              bottom: 24,
-              right: 24,
-              width: 340,
-              background: 'var(--glass)',
-              backdropFilter: 'blur(24px)',
-              border: '1px solid var(--glass-border)',
-              borderRadius: 16,
-              padding: 24,
-              boxShadow: '0 16px 40px rgba(0,0,0,0.5)',
-              zIndex: 10000,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ background: updateError ? '#ef4444' : 'var(--accent)', borderRadius: '50%', padding: 8, display: 'flex' }}>
-                  <Download size={18} color="white" />
-                </div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{updateError ? 'Update Failed' : 'Update Available'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Version {updateInfo.version}</div>
-                </div>
-              </div>
-              <button 
-                className="modal-close" 
-                style={{ padding: 8, margin: -8, cursor: 'pointer' }} 
-                onClick={(e) => { e.stopPropagation(); dismissModal(); }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            
-            {updateError ? (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, color: '#f87171', marginBottom: 10, lineHeight: 1.4 }}>
-                  The automatic installation encountered an issue: {updateError}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.4 }}>
-                  You can retry, or download and install the update manually.
-                </div>
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 16, maxHeight: 60, overflowY: 'auto', lineHeight: 1.5 }}>
-                {updateInfo.body || 'A new version of Aideo is ready to install.'}
-              </div>
-            )}
-
-            {updaterStatus === 'downloading' && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6, color: 'var(--text-dim)' }}>
-                  <span>Downloading update...</span>
-                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>{downloadProgress.percentage}%</span>
-                </div>
-                <div style={{ height: 6, background: 'rgba(255,255,255,0.1)', borderRadius: 3, overflow: 'hidden' }}>
-                  <div 
-                    style={{ 
-                      height: '100%', 
-                      width: `${downloadProgress.percentage}%`, 
-                      background: 'var(--accent)', 
-                      transition: 'width 0.2s ease' 
-                    }} 
-                  />
-                </div>
-                {downloadProgress.totalBytes > 0 && (
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4, textAlign: 'right' }}>
-                    {(downloadProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB / {(downloadProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {!updateError && (
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
-                  disabled={updaterStatus === 'downloading'}
-                  onClick={installUpdate}
-                >
-                  {updaterStatus === 'downloading' ? (
-                    'Downloading & Installing...'
-                  ) : updaterStatus === 'downloaded' ? (
-                    'Restarting Aideo...'
-                  ) : (
-                    <>
-                      <Download size={16} />
-                      Install Update Now
-                    </>
-                  )}
-                </button>
-              )}
-
-              <button
-                className={updateError ? "btn btn-primary" : "btn btn-secondary"}
-                style={{ width: '100%', padding: '10px 0', display: 'flex', justifyContent: 'center', gap: 8 }}
-                onClick={() => {
-                  openUrl('https://github.com/Alirull18/Aideo-Music-Player/releases/latest').catch(() => window.open('https://github.com/Alirull18/Aideo-Music-Player/releases/latest', '_blank'));
-                }}
-              >
-                <Download size={16} />
-                Download Manually from GitHub
-              </button>
-
-              {updateError && (
-                <button
-                  className="btn btn-secondary"
-                  style={{ width: '100%', padding: '10px 0' }}
-                  onClick={dismissModal}
-                >
-                  Dismiss
-                </button>
-              )}
-            </div>
-          </motion.div>
+            version={updateInfo.version}
+            body={updateInfo.body}
+            status={updaterStatus}
+            error={updateError}
+            downloadProgress={downloadProgress}
+            onInstall={installUpdate}
+            onDismiss={dismissModal}
+          />
         )}
 
         <AnimatePresence key="custom-prompt">

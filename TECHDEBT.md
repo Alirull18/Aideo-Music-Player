@@ -1,3 +1,35 @@
+# Aideo Audit — 2026-11-05
+
+Branch `fix/audit-2026-11-05` from `826bdce`. Static audit plus fixes; no audio hardware, installed build or live provider was exercised.
+Gate after fixes: `tsc` clean; vitest 131 files / 1307 tests; `cargo check` 1 pre-existing warning (was 15); `cargo test` 380 passed / 4 ignored.
+
+Fixed (each bug-specific test was run against the old code and failed first):
+- [x] **DSP chain regression.** `9c851d4` removed Saturation, PhaseResponse, Aideo filter, Spatializer, Width and Compressor (Night Mode) from the live chain while the UI kept their controls. Chain is now `build_dsp_chain`; `dsp_tests::live_chain_*` lock it.
+- [x] **Playlist context clobbered by library refresh.** `loadLibrary` replaced `tracks` (the open playlist's play context) with the whole library, so Next escaped the playlist and move up/down persisted library order. Leaving a playlist also kept its tracks as "the library". `libraryRefreshContext.test.ts`.
+- [x] **DB-only metadata edits reverted by scans.** `update_track_metadata` now writes tags into local files before updating SQLite.
+- [x] **`panic = "abort"`** disabled the scanner/artwork `catch_unwind`; release now unwinds.
+- [x] **Library folders had two sources of truth**; SQLite is authoritative, saved in one transaction, localStorage only seeds legacy installs.
+- [x] **Watcher re-read the whole library on any change**; now re-reads only changed files/moved-in folders and skips rebuilding unchanged watchers.
+- [x] **yt-dlp installs were unverified** (fail-open checksum, plus two unchecked download paths in `youtube/ytdlp.rs`); all go through `install_verified_ytdlp`, which refuses without a checksum.
+- [x] Featured cloud addons hidden and the Node launcher compiled out of release builds (the server is not bundled).
+- [x] Sleep timer counts against a deadline (`sleepTimer.test.ts`); WebView2 throttles hidden-window timers.
+- [x] 16 heavy synchronous commands moved off the main thread with `#[tauri::command(async)]`; `loadLibrary` queue sync is a Map lookup instead of O(queue × library).
+- [x] `add_track` accepts stream URLs only, `add_track_to_library` existing audio files only, `delete_track` deletes audio files only; tag writes check library containment.
+- [x] Device-auth polling honours the provider interval without overlapping requests; empty-attempt `playback-cancelled` no longer clears live buffering.
+- [x] Removed: orphaned `cloud.rs` (not compiled since `9a493be`), unreachable cast actions (Settings → System invoked the deleted `chromecast_discover`), 27 stray `console.log` calls. `artwork.rs` control bytes escaped so git diffs it as text.
+
+Still open:
+- [ ] `tracks` still doubles as library and play context; a real split (`libraryTracks` / `queueContext`) is a redesign across ~40 call sites.
+- [ ] Always-false `chromecast_connected` / `upnp_connected` branches remain in playback paths (~150 references, 10 test files).
+- [ ] `play_file` is still ~2,450 lines; only the DSP chain was extracted. Further splitting needs hardware verification.
+- [ ] Schema migrations are column probes without `PRAGMA user_version`; index creation errors are ignored.
+- [ ] Manual full scans re-read every file (no mtime/size skip; needs a schema column).
+- [ ] Local deletion is permanent (no Recycle Bin).
+- [ ] `SettingsView.tsx` 5.4k lines, `App.css` 10.6k lines, 1.6 MB main chunk, 557 KB `default_cover.png`.
+- [ ] The featured cloud addons need the Node server bundled (e.g. as a sidecar) before they can ship.
+
+---
+
 # Aideo Audit — 2026-09-30 (re-verified)
 
 Source revision checked: `86d3f36`. At final recheck, `git status --short` reports modified `AGENTS.md` and untracked `TECHDEBT.md`; the source working tree is not claimed to be wholly clean. `AGENTS.md` was not edited by this audit. Source line numbers will drift.
@@ -83,6 +115,7 @@ Real hardware-independent audio smoke ran Symphonia probing/decoding of syntheti
 - Before deleting a function or `generate_handler!` registration (`lib.rs` ~3934-4000), check dynamic command construction, variable dispatchers, backend/plugin callers and any external contract. Keyring and credential commands are not approved for blanket deletion.
 - `acoustid_identify_track` is the current sonic-profile writing path found in this inspection → see item 26 before touching it.
 - **Live, not dead** (my first draft wrongly listed them): `pre_resolve_youtube_url` (`librarySlice.ts:1108`), `update_playlist_source` (`unifiedSources.ts:1032`), `tidal_/qobuz_resolve_source` and `tidal_/qobuz_search` (templated: `unifiedSources.ts:1085,904`), `tidal_/qobuz_get_stream_url` (`resolver` variable).
+- **Correction (2026-11-05)**: `fetchLibraryPage` / `fetchLibraryCount` exist as store actions but nothing calls them; the library still loads in full through `get_library`. The rest of this resolution stands.
 - **Resolution (Batch B)**: Added frontend store actions (`fetchLibraryPage`, `fetchLibraryCount`) and wired UI components: Acoustic Fingerprint button calling `acoustid_identify_track` in `TagEditorModal.tsx`, `get_close_to_tray` sync on mount and `clean_missing_tracks` button in `SettingsView.tsx`. Pure database read commands migrated to concurrent `with_db_reader` pool in `lib.rs`.
 
 ---

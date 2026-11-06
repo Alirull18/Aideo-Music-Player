@@ -166,6 +166,11 @@ export function setOnlineTrackCache(key: string, track: any) {
   saveOnlineTrackCache();
 }
 
+/** Normalized lookup key matching the exact-path branch of `pathsEqual`. */
+export function pathKey(p: string): string {
+  return (resolvedPathMap.get(p) ?? p).replace(/\\/g, '/').toLowerCase();
+}
+
 export function pathsEqual(p1: string | null | undefined, p2: string | null | undefined): boolean {
   if (!p1 || !p2) return false;
   
@@ -459,15 +464,13 @@ export function cleanSearchQuery(artist: string | null | undefined, title: strin
   return { artist: cleanArtist, title: cleanTitle };
 }
 
-export type DiscoveryPlaybackRoute = 'tidal' | 'qobuz' | 'local' | 'stream';
+export type DiscoveryPlaybackRoute = 'local' | 'stream';
 
 export function classifyDiscoveryPlayback(
   track: { path?: string | null; url?: string | null; format?: string | null },
   hasLocalMatch = false,
 ): DiscoveryPlaybackRoute {
   if (hasLocalMatch) return 'local';
-  if (track.format === 'Tidal FLAC') return 'tidal';
-  if (track.format === 'Qobuz FLAC') return 'qobuz';
 
   const candidatePath = track.url || track.path || '';
   const isHttpUrl = candidatePath.startsWith('http://') || candidatePath.startsWith('https://');

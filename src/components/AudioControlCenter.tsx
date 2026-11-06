@@ -116,7 +116,7 @@ export function AudioControlCenter() {
     }))
   );
 
-  const [activeTab, setActiveTab] = useState<TabType>('dsp_eq');
+  const [activeTab, setActiveTab] = useState<TabType>('hardware_signal');
   const [devOpen, setDevOpen] = useState(false);
   const [hoveredBand, setHoveredBand] = useState<number | null>(null);
   const [showSignalPathModal, setShowSignalPathModal] = useState(false);

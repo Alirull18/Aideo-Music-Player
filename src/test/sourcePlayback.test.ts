@@ -14,9 +14,33 @@ import {
 import { clearSourceCache, groupRecordings, inFlightResolutions, resolveSource } from '../utils/unifiedSources';
 import { radioAllowsLocal } from '../utils/recommendations';
 
+// Two independent Eclipse addons offering the same recording (source ids are `<addonId>:<trackId>`).
+const A = 'com.test.alpha:123';
+const B = 'com.test.beta:123';
+const URL_A = 'https://alpha.example/audio';
+const URL_B = 'https://beta.example/audio';
+const srcA: PlaybackSource = { provider: 'addon', id: A };
+const srcB: PlaybackSource = { provider: 'addon', id: B };
+const srcYT: PlaybackSource = { provider: 'youtube', id: 'abcdefghijk' };
+type Handler = (args: any) => unknown;
+const ok = (url: string, quality: object = { lossless: true }): Handler => () => ({ url, quality });
+// Mocks addon_resolve_source per trackId (A -> URL_A, B -> URL_B, any other id -> a generic URL); `rest` handles every other command.
+const mockAddons = (resolvers: Record<string, Handler> = {}, rest: (cmd: string, args: any) => unknown = () => null) => {
+  const handlers: Record<string, Handler> = { [A]: ok(URL_A), [B]: ok(URL_B), ...resolvers };
+  vi.mocked(invoke).mockImplementation((async (cmd: string, args: any) =>
+    cmd === 'addon_resolve_source' ? (handlers[args.trackId] ?? ok('https://addon.example/audio'))(args) : rest(cmd, args)) as any);
+};
+const calls = (name: string) => vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === name);
+const baseState = () => ({
+  queue: [], tracks: [], currentTrack: null, playHistory: [], playCounts: {}, playbackError: null, appMode: 'hybrid' as const,
+  sourceQueueManaged: false, chromecast_connected: false, upnp_connected: false, streamingQuality: 'best_available' as const,
+  currentPlaylist: null,
+  recordPlaybackTransition: vi.fn().mockResolvedValue(undefined), autoFetchLyricsOnline: vi.fn().mockResolvedValue(undefined), updateDiscordPresence: vi.fn(),
+});
+
 const track: Track = {
-  id: 1, path: '123', title: 'Song', artist: 'Artist', duration: 180, format: 'Tidal FLAC', lyric_offset: 0,
-  source_context: { recording_id: 'recording', sources: [{ provider: 'tidal', id: '123' }, { provider: 'qobuz', id: '123' }], selection: { mode: 'explicit', source: { provider: 'tidal', id: '123' } } },
+  id: 1, path: A, title: 'Song', artist: 'Artist', duration: 180, format: 'Addon', lyric_offset: 0,
+  source_context: { recording_id: 'recording', sources: [srcA, srcB], selection: { mode: 'explicit', source: srcA } },
 };
 const realRecordPlaybackTransition = useStore.getState().recordPlaybackTransition;
 describe('Source playback fallback', () => {
@@ -24,80 +48,74 @@ describe('Source playback fallback', () => {
     const local: PlaybackSource = { provider: 'local', id: 'C:/Music/song.flac' };
     useStore.setState({ appMode: 'hybrid', recommendationEngine: 'our', autoplayEnabled: false, autoplaySeedTrack: null });
     await useStore.getState().playTrack({ ...track, path: local.id, format: 'FLAC',
-      source_context: { ...track.source_context!, sources: [local, { provider: 'tidal', id: '123' }] } });
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
-    expect(useStore.getState().autoplaySeedTrack?.active_source?.provider).toBe('tidal');
+      source_context: { ...track.source_context!, sources: [local, srcA] } });
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('addon');
+    expect(useStore.getState().autoplaySeedTrack?.active_source?.provider).toBe('addon');
     expect(radioAllowsLocal(useStore.getState().autoplaySeedTrack)).toBe(false);
-    expect(useStore.getState().autoplaySessionHistory[0].active_source?.provider).toBe('tidal');
+    expect(useStore.getState().autoplaySessionHistory[0].active_source?.provider).toBe('addon');
   });
 
   it.each([false, true])('applies online-radio local mixing to automatic source selection (%s)', async allowLocal => {
     localStorage.setItem('aideo_autoplay_local_for_cloud', String(allowLocal));
     const local: PlaybackSource = { provider: 'local', id: 'C:/Music/song.flac', catalog_quality: { lossless: true, sample_rate: 96000, bit_depth: 24 } };
-    useStore.setState({ appMode: 'hybrid', recommendationEngine: 'our', autoplayEnabled: false, autoplaySeedTrack: track, preferredSource: 'auto' });
-    vi.mocked(invoke).mockImplementation(async command => {
+    useStore.setState({ appMode: 'hybrid', recommendationEngine: 'our', autoplayEnabled: false, autoplaySeedTrack: { ...track, active_source: srcA }, preferredSource: 'auto' });
+    mockAddons({}, command => {
       if (command === 'check_files_exist') return [true];
       if (command === 'read_audio_tags') return { lossless: true, sample_rate: 96000, bit_depth: 24, format: 'FLAC' };
-      if (command === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
       return null;
     });
     await useStore.getState().playTrack({ ...track, is_autoplay: true,
-      source_context: { ...track.source_context!, sources: [local, { provider: 'tidal', id: '123' }], selection: { mode: 'auto' } } }, false, false);
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe(allowLocal ? 'local' : 'tidal');
+      source_context: { ...track.source_context!, sources: [local, srcA], selection: { mode: 'auto' } } }, false, false);
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe(allowLocal ? 'local' : 'addon');
   });
 
   beforeEach(() => {
     cancelSourcePlayback(); clearSourceCache(); clearEnrichmentState(); localStorage.clear();
-    useStore.setState({ queue: [], tracks: [], currentTrack: null, playHistory: [], playCounts: {}, playbackError: null,
-      tidalConnected: true, qobuzConnected: true, qobuzExperimentalEnabled: true, sourceQueueManaged: false,
-      chromecast_connected: false, upnp_connected: false, streamingQuality: 'best_available',
-      currentPlaylist: null,
-      recordPlaybackTransition: vi.fn().mockResolvedValue(undefined), autoFetchLyricsOnline: vi.fn().mockResolvedValue(undefined), updateDiscordPresence: vi.fn(),
-    });
-    vi.mocked(invoke).mockReset().mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-      return null;
-    });
+    useStore.setState(baseState());
+    vi.mocked(invoke).mockReset();
+    mockAddons();
+  });
+
+  it('never enables a legacy tidal source from an old saved queue and rejects its resolution', async () => {
+    const tidal: PlaybackSource = { provider: 'tidal', id: '123' };
+    await expect(resolveSource(tidal, 'best_available')).rejects.toThrow('Tidal is no longer built in. Install a source addon in Settings.');
+    await useStore.getState().playTrack({ ...track, path: '123', format: 'Tidal FLAC',
+      source_context: { recording_id: 'legacy', sources: [tidal], selection: { mode: 'auto' } } });
+    expect(useStore.getState().playback.status).toBe('Stopped');
+    expect(useStore.getState().playbackError).toContain('No source could play this recording');
+    expect(calls('play_track')).toHaveLength(0);
+    expect(calls('addon_resolve_source')).toHaveLength(0);
+    expect(vi.mocked(invoke).mock.calls.some(([cmd]) => String(cmd).startsWith('tidal_'))).toBe(false);
   });
 
   it('falls back after resolution failure while retaining the explicit preference', async () => {
     const notices = vi.spyOn(window, 'dispatchEvent');
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') throw new Error('Unavailable');
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-      return null;
-    });
+    mockAddons({ [A]: () => { throw new Error('Unavailable'); } });
     const row = groupRecordings([
-      track, { ...track, format: 'Qobuz FLAC', album: 'Album', cover_url: 'https://example.com/qobuz.jpg', duration: 181 },
+      track, { ...track, path: B, album: 'Album', cover_url: 'https://example.com/beta.jpg', duration: 181 },
     ], '')[0];
     await useStore.getState().playTrack({ ...row, source_context: { ...row.source_context!, selection: track.source_context!.selection } });
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz');
-    expect(useStore.getState().currentTrack).toMatchObject({ album: 'Album', duration: 181, cover_url: 'https://example.com/qobuz.jpg' });
-    expect(useStore.getState().coverArt).toBe('https://example.com/qobuz.jpg');
+    expect(useStore.getState().currentTrack?.active_source).toMatchObject({ provider: 'addon', id: B });
+    expect(useStore.getState().currentTrack).toMatchObject({ album: 'Album', duration: 181, cover_url: 'https://example.com/beta.jpg' });
+    expect(useStore.getState().coverArt).toBe('https://example.com/beta.jpg');
     expect(useStore.getState().currentTrack?.source_context?.selection).toEqual(track.source_context?.selection);
     expect(JSON.parse(localStorage.getItem('aideo_current_track')!).source_context.selection).toEqual(track.source_context?.selection);
-    expect(notices).toHaveBeenCalledWith(expect.objectContaining({ type: 'ui-toast', detail: expect.objectContaining({ message: expect.stringContaining('Source unavailable. Using Qobuz') }) }));
+    expect(notices).toHaveBeenCalledWith(expect.objectContaining({ type: 'ui-toast', detail: expect.objectContaining({ message: expect.stringContaining('Source unavailable. Using Addon') }) }));
     notices.mockRestore();
   });
 
   it.each(['is_autoplay', 'is_generated_mix'] as const)('keeps %s fallback inside the selected provider', async flag => {
-    useStore.setState({ recommendationEngine: 'tidal', appMode: 'hybrid', autoplayEnabled: false });
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') throw new Error('Unavailable');
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-      return null;
-    });
-    await useStore.getState().playTrack({ ...track, [flag]: true });
-    expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'qobuz_resolve_source')).toBe(false);
-    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
+    useStore.setState({ recommendationEngine: 'youtube', appMode: 'hybrid', autoplayEnabled: false });
+    mockAddons({ [A]: () => { throw new Error('Unavailable'); } });
+    await useStore.getState().playTrack({ ...track, [flag]: true, source_context: { ...track.source_context!, sources: [srcYT, srcA, srcB] } });
+    expect(calls('addon_resolve_source')).toHaveLength(0);
+    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://www.youtube.com/watch?v=abcdefghijk' }));
   });
 
   it('replaces the old queue and shows recommendations for a directly selected unified song', async () => {
     const old = { ...track, path: 'old', title: 'Old', source_context: undefined };
     const radio = { id: 'radio123456', title: 'Radio Song', artist: 'Radio Artist', duration_raw: '3:00', url: 'https://www.youtube.com/watch?v=radio123456' };
-    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
+    mockAddons({}, (cmd, args) => {
       if (cmd === 'get_youtube_autoplay_recommendations') return [radio];
       if (cmd === 'get_recommendations') return { tracks: args.request.candidates.filter((candidate: Track) => candidate.path === radio.url), generation: args.request.generation, reasons: {} };
       return null;
@@ -119,12 +137,12 @@ describe('Source playback fallback', () => {
   it('bounds native decoder fallback and stops after exhaustion', async () => {
     const notices = vi.spyOn(window, 'dispatchEvent');
     await useStore.getState().playTrack(track);
-    handleSourceFailure('https://tidal.example/audio', 'Decode failed');
-    await vi.waitFor(() => expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz'));
-    handleSourceFailure('https://qobuz.example/audio', 'Decode failed');
+    handleSourceFailure(URL_A, 'Decode failed');
+    await vi.waitFor(() => expect(useStore.getState().currentTrack?.active_source?.id).toBe(B));
+    handleSourceFailure(URL_B, 'Decode failed');
     await vi.waitFor(() => expect(useStore.getState().playback.status).toBe('Stopped'));
     expect(useStore.getState().playbackError).toContain('No source');
-    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(2);
+    expect(calls('play_track')).toHaveLength(2);
     expect(notices).toHaveBeenCalledWith(expect.objectContaining({ type: 'ui-toast', detail: expect.objectContaining({ type: 'error', message: expect.stringContaining('No source') }) }));
     notices.mockRestore();
   });
@@ -132,29 +150,25 @@ describe('Source playback fallback', () => {
   it('ignores a late failure from an older attempt at the same URL', async () => {
     await useStore.getState().playTrack(track);
     const currentAttemptId = useStore.getState().currentAttemptId;
-    handleSourceFailure('https://tidal.example/audio', 'Old decoder failed', 'previous-attempt');
+    handleSourceFailure(URL_A, 'Old decoder failed', 'previous-attempt');
     await Promise.resolve();
     expect(useStore.getState().currentAttemptId).toBe(currentAttemptId);
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+    expect(useStore.getState().currentTrack?.active_source?.id).toBe(A);
   });
 
   it('does not send an abandoned source play after stop-arm acknowledgement', async () => {
     let releaseArm!: () => void;
     const arm = new Promise<void>(resolve => { releaseArm = resolve; });
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
-      if (cmd === 'set_stop_after_path') return arm;
-      return null;
-    });
+    mockAddons({}, cmd => cmd === 'set_stop_after_path' ? arm : null);
     useStore.setState({ stopBoundary: { kind: 'track', path: track.path }, autoplayEnabled: false });
     const abandoned = useStore.getState().playTrack(track, undefined, false);
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('set_stop_after_path', { path: 'https://tidal.example/audio' }));
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('set_stop_after_path', { path: URL_A }));
     cancelSourcePlayback();
     useStore.setState({ stopBoundary: null });
     const replacement = useStore.getState().playTrack({ ...track, path: 'next', title: 'Next' }, undefined, false);
     releaseArm();
     await Promise.all([abandoned, replacement]);
-    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(1);
+    expect(calls('play_track')).toHaveLength(1);
     expect(useStore.getState().currentTrack?.title).toBe('Next');
   });
 
@@ -164,9 +178,9 @@ describe('Source playback fallback', () => {
       if (!next) await new Promise<void>(resolve => { finish = resolve; });
     }) });
     await useStore.getState().playTrack(track);
-    handleSourceFailure('https://tidal.example/audio', 'Decode failed');
-    await vi.waitFor(() => expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz'));
-    handleSourceFailure('https://qobuz.example/audio', 'Decode failed');
+    handleSourceFailure(URL_A, 'Decode failed');
+    await vi.waitFor(() => expect(useStore.getState().currentTrack?.active_source?.id).toBe(B));
+    handleSourceFailure(URL_B, 'Decode failed');
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
     const next = { ...track, title: 'Next', path: 'next' };
     await useStore.getState().playTrack(next);
@@ -182,30 +196,26 @@ describe('Source playback fallback', () => {
     useStore.setState({ playback: { ...useStore.getState().playback, position_secs: 83 }, queue: [track] });
     const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60000);
     try {
-      handleSourceFailure('https://tidal.example/audio', 'Stream URL expired');
-      await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(2));
-      expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+      handleSourceFailure(URL_A, 'Stream URL expired');
+      await vi.waitFor(() => expect(calls('play_track')).toHaveLength(2));
+      expect(useStore.getState().currentTrack?.active_source?.id).toBe(A);
       expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ startPos: 83 }));
       expect(useStore.getState().queue).toEqual([track]);
       expect(useStore.getState().recordPlaybackTransition).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'tidal_resolve_source')).toHaveLength(2);
+      expect(calls('addon_resolve_source')).toHaveLength(2);
     } finally { clock.mockRestore(); }
   });
 
   it('stops on permanent provider authentication failure and exposes reconnect', async () => {
     await useStore.getState().playTrack(track);
-    handleSourceFailure('https://tidal.example/audio', 'User is not authenticated with Tidal');
+    handleSourceFailure(URL_A, 'User is not authenticated with the addon');
     await vi.waitFor(() => expect(useStore.getState().playback.status).toBe('Stopped'));
     expect(useStore.getState().playbackError).toMatch(/reconnect/i);
-    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(1);
+    expect(calls('play_track')).toHaveLength(1);
   });
 
   it('does not substitute another provider when resolution rejects the session token', async () => {
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') throw new Error('User is not authenticated with Tidal');
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-      return null;
-    });
+    mockAddons({ [A]: () => { throw new Error('User is not authenticated with the addon'); } });
     await useStore.getState().playTrack(track);
     expect(useStore.getState().playback.status).toBe('Stopped');
     expect(useStore.getState().playbackError).toMatch(/reconnect/i);
@@ -214,16 +224,12 @@ describe('Source playback fallback', () => {
   });
 
   it.each([0, 800])('stops auto pre-resolution when preferred authentication rejects after %i ms', async delay => {
-    useStore.setState({ autoplayEnabled: false, preferredSource: 'tidal' });
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') {
-        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-        throw new Error('User is not authenticated with Tidal');
-      }
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-      return null;
-    });
-    await useStore.getState().playTrack({ ...track, source_context: { ...track.source_context!, selection: { mode: 'auto' } } });
+    useStore.setState({ autoplayEnabled: false, preferredSource: 'addon' });
+    mockAddons({ [A]: async () => {
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      throw new Error('User is not authenticated with the addon');
+    } });
+    await useStore.getState().playTrack({ ...track, source_context: { ...track.source_context!, sources: [srcYT, srcA], selection: { mode: 'auto' } } });
     expect(useStore.getState().playback.status).toBe('Stopped');
     expect(useStore.getState().playbackError).toMatch(/reconnect/i);
     expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
@@ -231,11 +237,7 @@ describe('Source playback fallback', () => {
 
   it('keeps the outgoing successful song skipped when the next recording never starts', async () => {
     useStore.setState({ recordPlaybackTransition: realRecordPlaybackTransition, currentHistoryId: null, autoplayEnabled: false });
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
-      if (cmd === 'log_playback_start') return 71;
-      return null;
-    });
+    mockAddons({}, cmd => cmd === 'log_playback_start' ? 71 : null);
     await useStore.getState().playTrack(track);
     expect(useStore.getState().currentHistoryId).toBe(71);
     clearSourceCache();
@@ -246,57 +248,55 @@ describe('Source playback fallback', () => {
     await useStore.getState().playTrack({ ...track, path: 'failed', title: 'Failed Song' });
     expect(useStore.getState().playback.status).toBe('Stopped');
     expect(invoke).toHaveBeenCalledWith('log_playback_end', expect.objectContaining({ historyId: 71, endReason: 'skipped' }));
-    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'log_playback_start')).toHaveLength(1);
+    expect(calls('log_playback_start')).toHaveLength(1);
     expect(useStore.getState().currentHistoryId).toBeNull();
   });
 
   it('bounds transport retries to one refresh per source before stopping', async () => {
     await useStore.getState().playTrack(track);
     for (const [path, count] of [
-      ['https://tidal.example/audio', 2], ['https://tidal.example/audio', 3], ['https://qobuz.example/audio', 4],
+      [URL_A, 2], [URL_A, 3], [URL_B, 4],
     ] as const) {
       handleSourceFailure(path, 'Network connection interrupted');
-      await vi.waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(count));
+      await vi.waitFor(() => expect(calls('play_track')).toHaveLength(count));
     }
-    handleSourceFailure('https://qobuz.example/audio', 'Network connection interrupted');
+    handleSourceFailure(URL_B, 'Network connection interrupted');
     await vi.waitFor(() => expect(useStore.getState().playback.status).toBe('Stopped'));
-    handleSourceFailure('https://qobuz.example/audio', 'Network connection interrupted');
+    handleSourceFailure(URL_B, 'Network connection interrupted');
     await new Promise(resolve => setTimeout(resolve, 0));
-    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'play_track')).toHaveLength(4);
+    expect(calls('play_track')).toHaveLength(4);
     expect(useStore.getState().playback.is_buffering).toBe(false);
   });
 
   it('abandons an expired URL refresh when the user rapidly selects another song', async () => {
     await useStore.getState().playTrack(track);
     let finish!: (value: unknown) => void;
-    vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
-      if (cmd === 'tidal_resolve_source') {
-        if (args.trackId === '123') return new Promise(resolve => { finish = resolve; });
-        return { url: 'https://tidal.example/next', quality: { lossless: true } };
-      }
-      return null;
+    const nextId = 'com.test.alpha:456';
+    mockAddons({
+      [A]: () => new Promise(resolve => { finish = resolve; }),
+      [nextId]: ok('https://alpha.example/next'),
     });
-    handleSourceFailure('https://tidal.example/audio', 'Stream URL expired');
+    handleSourceFailure(URL_A, 'Stream URL expired');
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
-    const next = { ...track, title: 'Next', path: '456', source_context: {
-      recording_id: 'next', sources: [{ provider: 'tidal' as const, id: '456' }],
-      selection: { mode: 'explicit' as const, source: { provider: 'tidal' as const, id: '456' } },
+    const next = { ...track, title: 'Next', path: nextId, source_context: {
+      recording_id: 'next', sources: [{ provider: 'addon' as const, id: nextId }],
+      selection: { mode: 'explicit' as const, source: { provider: 'addon' as const, id: nextId } },
     } };
     await useStore.getState().playTrack(next);
-    finish({ url: 'https://tidal.example/refreshed-old', quality: { lossless: true } });
+    finish({ url: 'https://alpha.example/refreshed-old', quality: { lossless: true } });
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(useStore.getState().currentTrack?.title).toBe('Next');
-    expect(useStore.getState().playback.current_track).toBe('https://tidal.example/next');
-    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/refreshed-old' }));
+    expect(useStore.getState().playback.current_track).toBe('https://alpha.example/next');
+    expect(invoke).not.toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://alpha.example/refreshed-old' }));
   });
 
   it('prevents a late resolution from playing after stop', async () => {
     let finish!: (v: unknown) => void;
-    vi.mocked(invoke).mockImplementation(async cmd => cmd === 'tidal_resolve_source' ? new Promise(resolve => { finish = resolve; }) : null);
+    mockAddons({ [A]: () => new Promise(resolve => { finish = resolve; }) });
     const pending = useStore.getState().playTrack(track);
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
     await useStore.getState().stopTrack();
-    finish({ url: 'https://tidal.example/audio', quality: {} });
+    finish({ url: URL_A, quality: {} });
     await pending;
     expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
     expect(useStore.getState().playback.status).toBe('Stopped');
@@ -304,11 +304,11 @@ describe('Source playback fallback', () => {
 
   it('does not start audio when paused during source resolution', async () => {
     let finish!: (v: unknown) => void;
-    vi.mocked(invoke).mockImplementation(async cmd => cmd === 'tidal_resolve_source' ? new Promise(resolve => { finish = resolve; }) : null);
+    mockAddons({ [A]: () => new Promise(resolve => { finish = resolve; }) });
     const pending = useStore.getState().playTrack(track);
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
     await useStore.getState().pauseTrack();
-    finish({ url: 'https://tidal.example/audio', quality: {} });
+    finish({ url: URL_A, quality: {} });
     await pending;
     expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
     expect(useStore.getState().playback.status).toBe('Paused');
@@ -332,30 +332,29 @@ describe('Source playback fallback', () => {
   });
 
   it('selects actual lossless audio when a higher catalog resolution resolves to lossy', async () => {
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: false } };
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true, sample_rate: 44100, bit_depth: 16 } };
-      return null;
+    mockAddons({
+      [A]: ok(URL_A, { lossless: false }),
+      [B]: ok(URL_B, { lossless: true, sample_rate: 44100, bit_depth: 16 }),
     });
     await useStore.getState().playTrack({ ...track, source_context: {
       ...track.source_context!, selection: { mode: 'auto' }, sources: [
-        { provider: 'tidal', id: '123', catalog_quality: { lossless: true, sample_rate: 192000, bit_depth: 24 } },
-        { provider: 'qobuz', id: '123', catalog_quality: { lossless: true, sample_rate: 44100, bit_depth: 16 } },
+        { ...srcA, catalog_quality: { lossless: true, sample_rate: 192000, bit_depth: 24 } },
+        { ...srcB, catalog_quality: { lossless: true, sample_rate: 44100, bit_depth: 16 } },
       ],
     } });
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('qobuz');
-    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://qobuz.example/audio', startPos: 0 }));
+    expect(useStore.getState().currentTrack?.active_source?.id).toBe(B);
+    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: URL_B, startPos: 0 }));
   });
 
   it('switches source at the current position without starting a new playback session', async () => {
     const lyrics = [{ time_secs: 0, text: 'Line' }];
     const history = [{ ...track, id: 2 }];
     useStore.setState({ currentTrack: track, playHistory: history, playCounts: { recording: 4 }, lyrics, lyricStatus: 'found', scrobbledCurrent: true });
-    const qobuzTrack = { ...track, source_context: { ...track.source_context!, selection: { mode: 'explicit' as const, source: { provider: 'qobuz' as const, id: '123' } } } };
+    const switchTrack = { ...track, source_context: { ...track.source_context!, selection: { mode: 'explicit' as const, source: srcB } } };
 
-    await useStore.getState().playTrack(qobuzTrack, true, false, undefined, 83, true);
+    await useStore.getState().playTrack(switchTrack, true, false, undefined, 83, true);
 
-    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://qobuz.example/audio', startPos: 83 }));
+    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: URL_B, startPos: 83 }));
     expect(useStore.getState().recordPlaybackTransition).not.toHaveBeenCalled();
     expect(useStore.getState()).toMatchObject({ playHistory: history, playCounts: { recording: 4 }, lyrics, lyricStatus: 'found', scrobbledCurrent: true });
   });
@@ -363,19 +362,15 @@ describe('Source playback fallback', () => {
   it('keeps the upcoming queue when switching the current song source', async () => {
     const next: Track = { ...track, id: 2, path: 'next', title: 'Next', source_context: undefined };
     const radio = { id: 'radio123456', title: 'Radio Song', artist: 'Radio Artist', duration_raw: '3:00', url: 'https://www.youtube.com/watch?v=radio123456' };
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
-      if (cmd === 'get_youtube_autoplay_recommendations') return [radio];
-      return null;
-    });
+    mockAddons({}, cmd => cmd === 'get_youtube_autoplay_recommendations' ? [radio] : null);
     useStore.setState({ currentTrack: track, queue: [next], autoplayEnabled: true, recommendationEngine: 'youtube', appMode: 'hybrid' });
-    const qobuzTrack = { ...track, source_context: { ...track.source_context!, selection: { mode: 'explicit' as const, source: { provider: 'qobuz' as const, id: '123' } } } };
+    const switchTrack = { ...track, source_context: { ...track.source_context!, selection: { mode: 'explicit' as const, source: srcB } } };
 
-    await useStore.getState().playTrack(qobuzTrack, true, false, undefined, 83, true);
+    await useStore.getState().playTrack(switchTrack, true, false, undefined, 83, true);
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(useStore.getState().queue.map(t => t.path)).toEqual([next.path]);
-    expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'clear_queue')).toBe(false);
+    expect(calls('clear_queue')).toHaveLength(0);
   });
 
   it('seeks UPnP after switching source because UPnP play has no start position', async () => {
@@ -383,7 +378,7 @@ describe('Source playback fallback', () => {
 
     await useStore.getState().playTrack(track, true, false, undefined, 83, true);
 
-    expect(invoke).toHaveBeenCalledWith('upnp_play', expect.objectContaining({ path: 'https://tidal.example/audio' }));
+    expect(invoke).toHaveBeenCalledWith('upnp_play', expect.objectContaining({ path: URL_A }));
     expect(invoke).toHaveBeenCalledWith('upnp_control', { action: 'seek', value: 83 });
   });
 
@@ -396,31 +391,25 @@ describe('Source playback fallback', () => {
 
   it('falls back from a missing local file and keeps that explicit preference', async () => {
     const local = { provider: 'local' as const, id: 'C:/missing.flac' };
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'check_files_exist') return [false];
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
-      return null;
-    });
-    await useStore.getState().playTrack({ ...track, source_context: { ...track.source_context!, sources: [local, { provider: 'tidal', id: '123' }], selection: { mode: 'explicit', source: local } } });
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
+    mockAddons({}, cmd => cmd === 'check_files_exist' ? [false] : null);
+    await useStore.getState().playTrack({ ...track, source_context: { ...track.source_context!, sources: [local, srcA], selection: { mode: 'explicit', source: local } } });
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('addon');
     expect(useStore.getState().currentTrack?.source_context?.selection).toEqual({ mode: 'explicit', source: local });
   });
 
   it('cannot overwrite the active fallback when an older metadata update finishes late', async () => {
     let finish!: () => void;
     let metadataCalls = 0;
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
-      if (cmd === 'qobuz_resolve_source') return { url: 'https://qobuz.example/audio', quality: { lossless: true } };
+    mockAddons({}, async cmd => {
       if (cmd === 'update_media_metadata' && metadataCalls++ === 0) await new Promise<void>(r => { finish = r; });
       return null;
     });
     const pending = useStore.getState().playTrack(track);
     await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
-    handleSourceFailure('https://tidal.example/audio', 'Decode failed');
-    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem('aideo_current_track')!).active_source?.provider).toBe('qobuz'));
+    handleSourceFailure(URL_A, 'Decode failed');
+    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem('aideo_current_track')!).active_source?.id).toBe(B));
     finish(); await pending;
-    expect(JSON.parse(localStorage.getItem('aideo_current_track')!).active_source.provider).toBe('qobuz');
+    expect(JSON.parse(localStorage.getItem('aideo_current_track')!).active_source.id).toBe(B);
   });
 });
 
@@ -430,26 +419,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     clearSourceCache();
     localStorage.clear();
     vi.mocked(invoke).mockReset();
-    useStore.setState({
-      queue: [],
-      tracks: [],
-      currentTrack: null,
-      playHistory: [],
-      playCounts: {},
-      playbackError: null,
-      appMode: 'hybrid',
-      tidalConnected: true,
-      qobuzConnected: false,
-      qobuzExperimentalEnabled: false,
-      sourceQueueManaged: false,
-      chromecast_connected: false,
-      upnp_connected: false,
-      streamingQuality: 'best_available',
-      currentPlaylist: null,
-      recordPlaybackTransition: vi.fn().mockResolvedValue(undefined),
-      autoFetchLyricsOnline: vi.fn().mockResolvedValue(undefined),
-      updateDiscordPresence: vi.fn(),
-    });
+    useStore.setState(baseState());
   });
 
   it('does NOT trigger attempt(), does NOT interrupt audio, and does NOT fire mid-song switch toasts when background discovery finds higher-quality sources', async () => {
@@ -483,21 +453,11 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     const discoveryPromise = new Promise(r => { resolveDiscoverySearch = r; });
 
     vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_search') {
+      if (cmd === 'search_youtube') {
         await discoveryPromise;
-        return [{
-          id: '99988877',
-          title: 'Midnight City',
-          artist: 'M83',
-          duration: 244,
-          catalog_quality: { lossless: true, sample_rate: 96000, bit_depth: 24 },
-        }];
+        return [{ id: '99988877abc', title: 'Midnight City', artist: 'M83', duration: 244 }];
       }
-      if (cmd === 'search_youtube') return [];
       if (cmd === 'search_local_sources') return [];
-      if (cmd === 'tidal_resolve_source') {
-        return { url: 'https://tidal.example/m83.flac', quality: { lossless: true, sample_rate: 96000, bit_depth: 24 } };
-      }
       if (cmd === 'play_track') return null;
       if (cmd === 'stop_track') return null;
       if (cmd === 'set_source_queue_mode') return null;
@@ -511,7 +471,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     // Initial state: playing YouTube
     expect(useStore.getState().currentTrack?.active_source?.provider).toBe('youtube');
     expect(useStore.getState().currentTrack?.active_source?.id).toBe('11111111111');
-    const playTrackCallsBefore = vi.mocked(invoke).mock.calls.filter(([c]) => c === 'play_track').length;
+    const playTrackCallsBefore = calls('play_track').length;
     expect(playTrackCallsBefore).toBe(1);
     const noticesBeforeDiscovery = notices.length;
 
@@ -525,7 +485,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     });
 
     // 1. Verify audio was NOT interrupted: play_track was NOT called again
-    const playTrackCallsAfter = vi.mocked(invoke).mock.calls.filter(([c]) => c === 'play_track').length;
+    const playTrackCallsAfter = calls('play_track').length;
     expect(playTrackCallsAfter).toBe(1);
 
     // 2. Active source remains YouTube (audio not switched mid-song)
@@ -537,15 +497,15 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
 
     // 4. Discovered source IS appended to currentTrack.source_context.sources for manual picker
     const currentSources = useStore.getState().currentTrack?.source_context?.sources || [];
-    expect(currentSources.some(s => s.provider === 'tidal' && s.id === '99988877')).toBe(true);
+    expect(currentSources.some(s => s.provider === 'youtube' && s.id === '99988877abc')).toBe(true);
 
     // 5. Discovered source IS appended to queued track copies with matching recording_id
     const updatedQueue = useStore.getState().queue;
-    expect(updatedQueue[0].source_context?.sources.some(s => s.provider === 'tidal' && s.id === '99988877')).toBe(true);
+    expect(updatedQueue[0].source_context?.sources.some(s => s.provider === 'youtube' && s.id === '99988877abc')).toBe(true);
 
     // 6. Persisted to localStorage
     const savedChoices = JSON.parse(localStorage.getItem('aideo_library_source_choices') || '{}');
-    expect(savedChoices['source:tidal:99988877']?.recording_id).toBe('rec_m83_midnight');
+    expect(savedChoices['source:youtube:99988877abc']?.recording_id).toBe('rec_m83_midnight');
 
     window.removeEventListener('ui-toast', listener);
   });
@@ -563,25 +523,20 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
         recording_id: 'rec_m83_midnight',
         sources: [
           { provider: 'youtube', id: '11111111111', catalog_quality: { lossless: false } },
-          { provider: 'tidal', id: '99988877', catalog_quality: { lossless: true, sample_rate: 96000, bit_depth: 24 } },
+          { provider: 'addon', id: 'com.test.alpha:99988877', catalog_quality: { lossless: true, sample_rate: 96000, bit_depth: 24 } },
         ],
         selection: { mode: 'auto' },
       },
     };
 
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') {
-        return { url: 'https://tidal.example/m83.flac', quality: { lossless: true, sample_rate: 96000, bit_depth: 24 } };
-      }
-      return null;
-    });
+    mockAddons({ 'com.test.alpha:99988877': ok('https://alpha.example/m83.flac', { lossless: true, sample_rate: 96000, bit_depth: 24 }) });
 
-    // When this enriched track is played on the *next* play, auto-mode selects the higher-quality Tidal source
+    // When this enriched track is played on the *next* play, auto-mode selects the higher-quality addon source
     await useStore.getState().playTrack(trackWithDiscovered);
 
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
-    expect(useStore.getState().currentTrack?.active_source?.id).toBe('99988877');
-    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/m83.flac', startPos: 0 }));
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('addon');
+    expect(useStore.getState().currentTrack?.active_source?.id).toBe('com.test.alpha:99988877');
+    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://alpha.example/m83.flac', startPos: 0 }));
   });
 
   it('preserves user manual explicit source selection made while background discovery is in-flight', async () => {
@@ -604,9 +559,9 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     };
 
     vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_search') {
+      if (cmd === 'search_youtube') {
         await discoveryPromise;
-        return [{ id: '88877766', title: 'Song', artist: 'Artist', duration: 180 }];
+        return [{ id: '88877766abc', title: 'Song', artist: 'Artist', duration: 180 }];
       }
       return null;
     });
@@ -657,39 +612,34 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
         recording_id: 'rec_manual_switch',
         sources: [
           { provider: 'youtube', id: '11111111111' },
-          { provider: 'tidal', id: '88877766' },
+          { provider: 'addon', id: 'com.test.alpha:88877766' },
         ],
         selection: { mode: 'auto' },
       },
     };
 
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') {
-        return { url: 'https://tidal.example/song.flac', quality: { lossless: true } };
-      }
-      return null;
-    });
+    mockAddons({ 'com.test.alpha:88877766': ok('https://alpha.example/song.flac') });
 
     useStore.setState({
       currentTrack: playingTrack,
       playback: { ...useStore.getState().playback, status: 'Playing', position_secs: 52 },
     });
 
-    // Trigger manual switch to tidal at position 52 preserving session
+    // Trigger manual switch to the addon source at position 52 preserving session
     const manualSwitchTrack: Track = {
       ...playingTrack,
       source_context: {
         ...playingTrack.source_context!,
-        selection: { mode: 'explicit', source: { provider: 'tidal', id: '88877766' } },
+        selection: { mode: 'explicit', source: { provider: 'addon', id: 'com.test.alpha:88877766' } },
       },
     };
 
     await useStore.getState().playTrack(manualSwitchTrack, true, false, undefined, 52, true);
 
-    // Switched to tidal at position 52
-    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('tidal');
-    expect(useStore.getState().currentTrack?.active_source?.id).toBe('88877766');
-    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://tidal.example/song.flac', startPos: 52 }));
+    // Switched to the addon at position 52
+    expect(useStore.getState().currentTrack?.active_source?.provider).toBe('addon');
+    expect(useStore.getState().currentTrack?.active_source?.id).toBe('com.test.alpha:88877766');
+    expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({ path: 'https://alpha.example/song.flac', startPos: 52 }));
 
     window.removeEventListener('ui-toast', listener);
   });
@@ -711,7 +661,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     };
 
     vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_search') throw new Error('Network timeout during discovery');
+      if (cmd === 'search_youtube') throw new Error('Network timeout during discovery');
       return null;
     });
 
@@ -758,10 +708,10 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     };
 
     vi.mocked(invoke).mockImplementation(async (cmd, _args: any) => {
-      if (cmd === 'tidal_search') {
-        if (_args?.query?.includes('Song A')) {
+      if (cmd === 'search_youtube') {
+        if (_args?.query?.includes('song a')) {
           await songADiscoveryPromise;
-          return [{ id: '99988877', title: 'Song A', artist: 'Artist A', duration: 180 }];
+          return [{ id: '99988877abc', title: 'Song A', artist: 'Artist A', duration: 180 }];
         }
         return [];
       }
@@ -808,15 +758,15 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     };
 
     vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_search') {
+      if (cmd === 'search_youtube') {
         await discoveryPromise;
-        return [{ id: '99988877', title: 'Song', artist: 'Artist', duration: 180 }];
+        return [{ id: '99988877abc', title: 'Song', artist: 'Artist', duration: 180 }];
       }
       return null;
     });
 
     await useStore.getState().playTrack(track);
-    const playTrackCalls = vi.mocked(invoke).mock.calls.filter(([c]) => c === 'play_track').length;
+    const playTrackCalls = calls('play_track').length;
 
     // User stops playback
     await useStore.getState().stopTrack();
@@ -828,23 +778,23 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
 
     // Must remain stopped, play_track must not be called again
     expect(useStore.getState().playback.status).toBe('Stopped');
-    expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === 'play_track').length).toBe(playTrackCalls);
+    expect(calls('play_track').length).toBe(playTrackCalls);
   });
 
   it('enforces 32-source durable ceiling when combined with discovered sources', async () => {
     // Generate 30 initial sources
     const initialSources: PlaybackSource[] = Array.from({ length: 30 }, (_, i) => ({
-      provider: 'tidal' as const,
-      id: `100000${i.toString().padStart(2, '0')}`,
+      provider: 'addon' as const,
+      id: `com.test.alpha:100000${i.toString().padStart(2, '0')}`,
     }));
 
     const track: Track = {
       id: 80,
-      path: '10000000',
+      path: 'com.test.alpha:10000000',
       title: 'Song',
       artist: 'Artist',
       duration: 180,
-      format: 'Tidal FLAC',
+      format: 'Addon',
       lyric_offset: 0,
       source_context: {
         recording_id: 'rec_ceiling',
@@ -853,12 +803,11 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
       },
     };
 
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/audio', quality: { lossless: true } };
-      if (cmd === 'tidal_search') {
+    mockAddons({}, cmd => {
+      if (cmd === 'search_youtube') {
         // Return 10 more distinct sources
         return Array.from({ length: 10 }, (_, i) => ({
-          id: `200000${i.toString().padStart(2, '0')}`,
+          id: `2000000000${i}`,
           title: 'Song',
           artist: 'Artist',
           duration: 180,
@@ -890,16 +839,16 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
         recording_id: 'rec_dedup',
         sources: [
           { provider: 'youtube', id: '11111111111' },
-          { provider: 'tidal', id: '99988877' },
+          { provider: 'addon', id: A },
         ],
         selection: { mode: 'auto' },
       },
     };
 
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_search') {
+    mockAddons({}, cmd => {
+      if (cmd === 'search_youtube') {
         // Return the exact same source that is already present
-        return [{ id: '99988877', title: 'Song', artist: 'Artist', duration: 180 }];
+        return [{ id: '11111111111', title: 'Song', artist: 'Artist', duration: 180 }];
       }
       return null;
     });
@@ -930,12 +879,12 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     };
 
     vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_search') {
+      if (cmd === 'search_youtube') {
         // Return acoustic version (version qualifier mismatch) and live version (mismatch)
         return [
-          { id: '11122233', title: 'Everlong (Acoustic)', artist: 'Foo Fighters', duration: 250 },
-          { id: '44455566', title: 'Everlong (Live)', artist: 'Foo Fighters', duration: 250 },
-          { id: '77788899', title: 'Everlong', artist: 'Different Artist', duration: 250 },
+          { id: '11122233abc', title: 'Everlong (Acoustic)', artist: 'Foo Fighters', duration: 250 },
+          { id: '44455566abc', title: 'Everlong (Live)', artist: 'Foo Fighters', duration: 250 },
+          { id: '77788899abc', title: 'Everlong', artist: 'Different Artist', duration: 250 },
         ];
       }
       return null;
@@ -970,7 +919,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
 
     const searchSpy = vi.fn();
     vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_search' || cmd === 'search_youtube') searchSpy();
+      if (cmd === 'search_youtube') searchSpy();
       return null;
     });
 
@@ -988,7 +937,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     let resolve3: (v: any) => void;
 
     vi.mocked(invoke).mockImplementation(async (cmd, args: any) => {
-      if (cmd === 'tidal_search') {
+      if (cmd === 'search_youtube') {
         if (args?.query === 'Song 1') return new Promise(r => { resolve1 = r; });
         if (args?.query === 'Song 2') return new Promise(r => { resolve2 = r; });
         if (args?.query === 'Song 3') return new Promise(r => { resolve3 = r; });
@@ -997,17 +946,17 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     });
 
     // Launch first two jobs: both should become active (limit 2)
-    const p1a = boundedSearchSources('Song 1', { tidal: true, qobuz: false });
-    const p1b = boundedSearchSources('Song 1', { tidal: true, qobuz: false }); // Identical: coalesced
+    const p1a = boundedSearchSources('Song 1', { youtube: true });
+    const p1b = boundedSearchSources('Song 1', { youtube: true }); // Identical: coalesced
     expect(p1a).toBe(p1b); // Exact same promise returned
 
-    const p2 = boundedSearchSources('Song 2', { tidal: true, qobuz: false });
+    const p2 = boundedSearchSources('Song 2', { youtube: true });
     expect(getActiveEnrichmentCount()).toBe(2);
     expect(getEnrichmentQueueLength()).toBe(0);
 
     // Launch third job: must be queued because max concurrent jobs = 2
     let p3Resolved = false;
-    const p3 = boundedSearchSources('Song 3', { tidal: true, qobuz: false }).then(res => {
+    const p3 = boundedSearchSources('Song 3', { youtube: true }).then(res => {
       p3Resolved = true;
       return res;
     });
@@ -1060,7 +1009,7 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
 
     const discoveredSources: PlaybackSource[] = [
       { provider: 'local', id: 'C:/music/track.flac' }, // duplicate, should dedupe
-      { provider: 'tidal', id: 'tidal_99', catalog_quality: { lossless: true } },
+      { provider: 'addon', id: 'com.test.alpha:99', catalog_quality: { lossless: true } },
       { provider: 'youtube', id: 'yt_99_video' },
     ];
 
@@ -1070,12 +1019,12 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
     const registryEntry = useStore.getState().sourceRegistry['rec_reactive_99'];
     expect(registryEntry).toBeDefined();
     expect(registryEntry.sources).toHaveLength(3);
-    expect(registryEntry.sources.map(s => s.provider)).toEqual(['local', 'tidal', 'youtube']);
+    expect(registryEntry.sources.map(s => s.provider)).toEqual(['local', 'addon', 'youtube']);
 
     // 2. Check currentTrack reactive update
     const updatedCurrent = useStore.getState().currentTrack;
     expect(updatedCurrent?.source_context?.sources).toHaveLength(3);
-    expect(updatedCurrent?.source_context?.sources.some(s => s.provider === 'tidal')).toBe(true);
+    expect(updatedCurrent?.source_context?.sources.some(s => s.provider === 'addon')).toBe(true);
 
     // 3. Check queue reactive update
     const updatedQueue = useStore.getState().queue;
@@ -1083,8 +1032,8 @@ describe('Milestone 1: Background discovery and non-interruption lifecycle', () 
 
     // 4. Test 32 sources cap
     const manySources: PlaybackSource[] = Array.from({ length: 40 }, (_, i) => ({
-      provider: 'tidal' as const,
-      id: `tidal_batch_${i}`,
+      provider: 'addon' as const,
+      id: `com.test.alpha:batch${i}`,
     }));
     useStore.getState().registerDiscoveredSources(manySources, 'rec_reactive_99');
     expect(useStore.getState().sourceRegistry['rec_reactive_99'].sources.length).toBe(32);
@@ -1099,34 +1048,11 @@ describe('Milestone 3: Playback attempt lifecycle, cancellation, 15s deadline & 
     clearEnrichmentState();
     localStorage.clear();
     vi.mocked(invoke).mockReset();
-    useStore.setState({
-      queue: [],
-      tracks: [],
-      currentTrack: null,
-      playHistory: [],
-      playCounts: {},
-      playbackError: null,
-      appMode: 'hybrid',
-      tidalConnected: true,
-      qobuzConnected: true,
-      qobuzExperimentalEnabled: true,
-      sourceQueueManaged: false,
-      chromecast_connected: false,
-      upnp_connected: false,
-      streamingQuality: 'best_available',
-      currentPlaylist: null,
-      recordPlaybackTransition: vi.fn().mockResolvedValue(undefined),
-      autoFetchLyricsOnline: vi.fn().mockResolvedValue(undefined),
-      updateDiscordPresence: vi.fn(),
-    });
+    useStore.setState(baseState());
   });
 
   it('Feature 24: generates runtime attempt ID and passes attempt_id to play_track', async () => {
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return { url: 'https://tidal.example/stream', quality: { lossless: true } };
-      if (cmd === 'play_track') return null;
-      return null;
-    });
+    mockAddons({ [A]: ok('https://alpha.example/stream') });
 
     await useStore.getState().playTrack(track);
 
@@ -1135,24 +1061,21 @@ describe('Milestone 3: Playback attempt lifecycle, cancellation, 15s deadline & 
     expect(currentAttemptId).toMatch(/^attempt_\d+_\d+_\d+$/);
     expect(useStore.getState().playback.attempt_id).toBe(currentAttemptId);
     expect(invoke).toHaveBeenCalledWith('play_track', expect.objectContaining({
-      path: 'https://tidal.example/stream',
+      path: 'https://alpha.example/stream',
       attemptId: currentAttemptId,
     }));
   });
 
   it('Feature 25: playPrev() immediately cancels in-flight playback resolution', async () => {
     let finishResolve!: (v: any) => void;
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return new Promise(r => { finishResolve = r; });
-      return null;
-    });
+    mockAddons({ [A]: () => new Promise(r => { finishResolve = r; }) });
 
     const pending = useStore.getState().playTrack(track);
     await vi.waitFor(() => expect(finishResolve).toBeTypeOf('function'));
 
     // Calling playPrev cancels the in-flight resolution
     await useStore.getState().playPrev();
-    finishResolve({ url: 'https://tidal.example/stream', quality: {} });
+    finishResolve({ url: 'https://alpha.example/stream', quality: {} });
     await pending;
 
     expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
@@ -1160,11 +1083,7 @@ describe('Milestone 3: Playback attempt lifecycle, cancellation, 15s deadline & 
 
   it('Feature 25: setAppMode("local") cancels in-flight resolution and stops active stream', async () => {
     let finishResolve!: (v: any) => void;
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') return new Promise(r => { finishResolve = r; });
-      if (cmd === 'stop_track') return null;
-      return null;
-    });
+    mockAddons({ [A]: () => new Promise(r => { finishResolve = r; }) });
 
     const pending = useStore.getState().playTrack(track);
     await vi.waitFor(() => expect(finishResolve).toBeTypeOf('function'));
@@ -1173,7 +1092,7 @@ describe('Milestone 3: Playback attempt lifecycle, cancellation, 15s deadline & 
     useStore.getState().setAppMode('local');
     expect(useStore.getState().appMode).toBe('local');
 
-    finishResolve({ url: 'https://tidal.example/stream', quality: {} });
+    finishResolve({ url: 'https://alpha.example/stream', quality: {} });
     await pending;
 
     expect(invoke).not.toHaveBeenCalledWith('play_track', expect.anything());
@@ -1193,12 +1112,7 @@ describe('Milestone 3: Playback attempt lifecycle, cancellation, 15s deadline & 
 
   it('Feature 26: 15-second overall deadline aborts across multiple hanging fallback sources', async () => {
     vi.useFakeTimers();
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source' || cmd === 'qobuz_resolve_source') {
-        return new Promise(() => {}); // never resolves
-      }
-      return null;
-    });
+    mockAddons({ [A]: () => new Promise(() => {}), [B]: () => new Promise(() => {}) }); // never resolve
 
     const pending = useStore.getState().playTrack(track);
     vi.advanceTimersByTime(15001);
@@ -1211,30 +1125,27 @@ describe('Milestone 3: Playback attempt lifecycle, cancellation, 15s deadline & 
 
   it('Feature 27: inFlightResolutions coalesces concurrent calls to the same source', async () => {
     let callCount = 0;
-    vi.mocked(invoke).mockImplementation(async cmd => {
-      if (cmd === 'tidal_resolve_source') {
-        callCount++;
-        await new Promise(r => setTimeout(r, 50));
-        return { url: 'https://tidal.example/audio', quality: { lossless: true } };
-      }
-      return null;
-    });
+    mockAddons({ 'com.test.alpha:coalesce': async () => {
+      callCount++;
+      await new Promise(r => setTimeout(r, 50));
+      return { url: URL_A, quality: { lossless: true } };
+    } });
 
-    const s: PlaybackSource = { provider: 'tidal', id: 'coalesce_test' };
+    const s: PlaybackSource = { provider: 'addon', id: 'com.test.alpha:coalesce' };
     const p1 = resolveSource(s, 'best_available');
     const p2 = resolveSource(s, 'best_available');
-    expect(inFlightResolutions.has('tidal:coalesce_test:best_available')).toBe(true);
+    expect(inFlightResolutions.has('addon:com.test.alpha:coalesce:best_available')).toBe(true);
 
     const [r1, r2] = await Promise.all([p1, p2]);
-    expect(r1.url).toBe('https://tidal.example/audio');
-    expect(r2.url).toBe('https://tidal.example/audio');
+    expect(r1.url).toBe(URL_A);
+    expect(r2.url).toBe(URL_A);
     expect(callCount).toBe(1);
-    expect(inFlightResolutions.has('tidal:coalesce_test:best_available')).toBe(false);
+    expect(inFlightResolutions.has('addon:com.test.alpha:coalesce:best_available')).toBe(false);
   });
 
   it('Feature 27: clearSourceCache empties inFlightResolutions and result cache', () => {
     vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
-    const s: PlaybackSource = { provider: 'tidal', id: 'clear_test' };
+    const s: PlaybackSource = { provider: 'addon', id: 'com.test.alpha:clear_test' };
     const p = resolveSource(s, 'best_available');
     p.catch(() => {});
     expect(inFlightResolutions.size).toBeGreaterThan(0);

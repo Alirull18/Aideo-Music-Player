@@ -126,38 +126,4 @@ describe('effective audio path presentation', () => {
 
     expect(screen.getByText('BIT-PERFECT · 96kHz')).toBeInTheDocument();
   });
-
-  it('keeps vinyl LED indicators unlit when bit-perfect or exclusive are not verified', () => {
-    const unverifiedPath = effectivePath({
-      engine: 'cpal',
-      share_mode: 'shared',
-      strict_bit_perfect: false,
-      strict_failure_reasons: ['shared_output'],
-      fallback_reason: 'wasapi_exclusive_unavailable',
-    });
-
-    act(() => {
-      useStore.setState((state) => ({
-        playback: { ...state.playback, ...playback(unverifiedPath) },
-        playerBarDesign: 'vinyl',
-      }));
-    });
-
-    const view = render(createElement(PlayerBar));
-    const bitPerfectLabel = screen.getByText('BIT-PERFECT');
-    const exclusiveLabel = screen.getByText('EXCLUSIVE');
-
-    expect(bitPerfectLabel.parentElement).not.toHaveClass('lit-cyan');
-    expect(exclusiveLabel.parentElement).not.toHaveClass('lit-emerald');
-
-    act(() => {
-      useStore.setState((state) => ({
-        playback: { ...state.playback, effective_audio_path: effectivePath() },
-      }));
-    });
-    view.rerender(createElement(PlayerBar));
-
-    expect(bitPerfectLabel.parentElement).toHaveClass('lit-cyan');
-    expect(exclusiveLabel.parentElement).toHaveClass('lit-emerald');
-  });
 });

@@ -16,7 +16,7 @@ const formatRate = (sampleRate: number): string => {
   return Number.isInteger(rateKhz) ? `${rateKhz}kHz` : `${rateKhz.toFixed(1)}kHz`;
 };
 
-export const getAudioPathPresentation = (playback: PlaybackState): AudioPathPresentation => {
+export const getAudioPathPresentation = (playback: Pick<PlaybackState, 'effective_audio_path' | 'status'>): AudioPathPresentation => {
   const path = playback.effective_audio_path;
   const isBitPerfect = Boolean(path?.active && path.strict_bit_perfect);
   const isExclusive = Boolean(

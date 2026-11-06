@@ -318,19 +318,7 @@ pub async fn download_track_internal(
     // Download yt-dlp.exe if it doesn't exist
     if !ytdlp_path.exists() {
         println!("[youtube] yt-dlp.exe not found. Downloading latest version...");
-        let response = reqwest::get("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe")
-            .await.map_err(|e| format!("Failed to download yt-dlp: {}", e))?;
-        if !response.status().is_success() {
-            return Err(format!("Failed to download yt-dlp: HTTP status {}", response.status()));
-        }
-        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-        if bytes.len() < 1_000_000 {
-            return Err("Downloaded yt-dlp.exe is invalid or too small.".to_string());
-        }
-
-        let mut file = std::fs::File::create(&ytdlp_path).map_err(|e| format!("Failed to create yt-dlp.exe: {}", e))?;
-        use std::io::Write;
-        file.write_all(&bytes).map_err(|e| format!("Failed to write yt-dlp.exe: {}", e))?;
+        crate::dependencies::install_verified_ytdlp(&ytdlp_path, &app_handle).await?;
         println!("[youtube] Successfully downloaded yt-dlp.exe!");
     }
 
@@ -691,19 +679,10 @@ pub async fn check_and_download_ytdlp_internal(app_handle: tauri::AppHandle) -> 
         "type": "info"
     }));
 
-    let response = reqwest::get("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe")
-        .await
-        .map_err(|e| format!("Failed to download yt-dlp: {}", e))?;
-
-    let bytes = response.bytes().await.map_err(|e| format!("Failed to read yt-dlp bytes: {}", e))?;
-
     if !aideo_dir.exists() {
         std::fs::create_dir_all(&aideo_dir).map_err(|e| format!("Failed to create Aideo directory: {}", e))?;
     }
-
-    let mut file = std::fs::File::create(&ytdlp_path).map_err(|e| format!("Failed to create yt-dlp.exe: {}", e))?;
-    use std::io::Write;
-    file.write_all(&bytes).map_err(|e| format!("Failed to write yt-dlp.exe: {}", e))?;
+    crate::dependencies::install_verified_ytdlp(&ytdlp_path, &app_handle).await?;
 
     println!("[dependencies] Successfully downloaded yt-dlp.exe!");
     let _ = app_handle.emit("ui-toast", serde_json::json!({

@@ -1,8 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { PlaybackSource, RecordingSources, SourceMetadata, SourceQuality, SourceSelection, StreamingQuality, Track } from '../store/types';
 
-export const streamCacheKey = (track: Pick<Track, 'format' | 'path'>, quality: StreamingQuality, id = track.path) => `${track.format === 'Qobuz FLAC' ? 'qobuz' : 'tidal'}:${id}:${quality}`;
-
 export async function bounded<T>(promise: Promise<T>, timeoutMs = 15000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -12,6 +10,8 @@ export async function bounded<T>(promise: Promise<T>, timeoutMs = 15000): Promis
   } finally { clearTimeout(timer); }
 }
 
+// `<addonId>:<trackId>`; addon ids need a dot so this can never match a Windows path.
+const ADDON_SOURCE_ID = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+:[^\x00-\x1f]{1,512}$/;
 export const sourceKey = (source: PlaybackSource) => `${source.provider}:${source.id}`;
 
 export function normalizeText(s?: string | null): string {
@@ -501,7 +501,25 @@ export const sourceSearchQuery = (track: Track) => {
   }
   return `${normalizeArtist(artist)} ${matchingTitle(track)}`.trim();
 };
-export const sourceName = (source: PlaybackSource) => ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'Webstream' })[source.provider];
+const addonDisplayNames = new Map<string, string>();
+
+export function registerAddonNames(addons: readonly { id: string; name: string; builtin?: boolean }[]): void {
+  addonDisplayNames.clear();
+  for (const addon of addons) {
+    if (!addon.builtin && addon.id?.trim() && addon.name?.trim() && addon.name.trim().toLowerCase() !== 'addon') {
+      addonDisplayNames.set(addon.id.trim().toLowerCase(), addon.name.trim());
+    }
+  }
+}
+
+export const sourceName = (source: PlaybackSource) => {
+  if (source.provider === 'addon') {
+    const addonId = source.id.split(':')[0]?.trim().toLowerCase() ?? '';
+    const customName = addonId ? addonDisplayNames.get(addonId) : undefined;
+    return customName ? `Addon (${customName})` : 'Addon';
+  }
+  return ({ local: 'Local file', tidal: 'Tidal', qobuz: 'Qobuz', youtube: 'Webstream' })[source.provider];
+};
 
 export const sourceMetadata = (track: SourceMetadata): SourceMetadata => ({
   title: track.title, artist: track.artist, album: track.album ?? null, duration: track.duration,
@@ -510,6 +528,7 @@ export const sourceMetadata = (track: SourceMetadata): SourceMetadata => ({
 });
 
 export function sourceFor(track: Track): PlaybackSource | null {
+  if (track.format === 'Addon') return ADDON_SOURCE_ID.test(track.path) ? { provider: 'addon', id: track.path, catalog_quality: track.catalog_quality, recording_evidence: track.recording_evidence } : null;
   if (track.format === 'Tidal FLAC') return /^\d+$/.test(track.path) ? { provider: 'tidal', id: track.path, catalog_quality: track.catalog_quality, recording_evidence: track.recording_evidence } : null;
   if (track.format === 'Qobuz FLAC') return /^\d+$/.test(track.path) ? { provider: 'qobuz', id: track.path, catalog_quality: track.catalog_quality, recording_evidence: track.recording_evidence } : null;
   try {
@@ -841,10 +860,10 @@ export function groupRecordings(tracks: Track[], query: string, existingGroups?:
   return groups.map(g => applySourcePreference(g.row)).sort((a, b) => relevance(b) - relevance(a));
 }
 
-export function catalogTrack(raw: any, provider: 'tidal' | 'qobuz' | 'youtube'): Track {
+export function catalogTrack(raw: any, provider: 'tidal' | 'qobuz' | 'youtube' | 'addon'): Track {
   const label = String(raw.quality || '');
   const quality: SourceQuality = { ...raw.catalog_quality };
-  if (provider !== 'youtube' && quality.lossless == null && /^(LOSSLESS|HI_RES_LOSSLESS|HI_RES_192)$/.test(label)) quality.lossless = true;
+  if (provider !== 'youtube' && provider !== 'addon' && quality.lossless == null && /^(LOSSLESS|HI_RES_LOSSLESS|HI_RES_192)$/.test(label)) quality.lossless = true;
   if (provider === 'youtube') quality.lossless = false;
   const durationText = typeof raw.duration_raw === 'string' ? raw.duration_raw.trim() : '';
   const parsedDuration = /^(?:\d+:)?\d+:[0-5]\d$/.test(durationText)
@@ -856,7 +875,7 @@ export function catalogTrack(raw: any, provider: 'tidal' | 'qobuz' | 'youtube'):
     path: provider === 'youtube' ? raw.url || `https://www.youtube.com/watch?v=${raw.id}` : String(raw.id),
     title: raw.title ?? null, artist: raw.artist ?? null, album: raw.album ?? null,
     duration: Number.isFinite(duration) && duration > 0 ? duration : null,
-    duration_raw: raw.duration_raw, format: provider === 'tidal' ? 'Tidal FLAC' : provider === 'qobuz' ? 'Qobuz FLAC' : 'YouTube Direct',
+    duration_raw: raw.duration_raw, format: provider === 'tidal' ? 'Tidal FLAC' : provider === 'qobuz' ? 'Qobuz FLAC' : provider === 'addon' ? 'Addon' : 'YouTube Direct',
     lyric_offset: 0, cover_url: raw.cover_url || null,
     track_number: raw.track_number ?? null, disc_number: raw.disc_number ?? null,
     recording_evidence: raw.recording_evidence, catalog_quality: quality,
@@ -869,10 +888,10 @@ export interface SourceSearch {
   errors: Record<string, string>;
 }
 
-export async function searchSources(query: string, enabled: { tidal: boolean; qobuz: boolean; youtube?: boolean }, update: (result: SourceSearch) => void): Promise<SourceSearch> {
+export async function searchSources(query: string, enabled: { youtube?: boolean; addons?: string[] }, update: (result: SourceSearch) => void): Promise<SourceSearch> {
   const parsed = parseMusicSearchQuery(query);
   const cleanQuery = parsed.cleanQuery;
-  const providers = ['local', ...(enabled.youtube !== false ? ['youtube'] : []), ...(enabled.tidal ? ['tidal'] : []), ...(enabled.qobuz ? ['qobuz'] : [])];
+  const providers = ['local', ...(enabled.youtube !== false ? ['youtube'] : []), ...(enabled.addons || []).map(id => `addon:${id}`)];
   const found: Track[] = [];
   const pending = new Set(providers);
   const errors: Record<string, string> = {};
@@ -900,9 +919,12 @@ export async function searchSources(query: string, enabled: { tidal: boolean; qo
       } else if (provider === 'youtube') {
         const youtube = await bounded(invoke<any[]>('search_youtube', { query: cleanQuery }));
         register('youtube', (youtube || []).map(t => catalogTrack(t, 'youtube')));
+      } else if (provider.startsWith('addon:')) {
+        const addonId = provider.slice('addon:'.length);
+        const found = await bounded(invoke<any[]>('addon_search', { addonId, query: cleanQuery }));
+        register(provider, (found || []).map(t => catalogTrack(t, 'addon')));
       } else {
-        const catalog = await bounded(invoke<any[]>(`${provider}_search`, { query: cleanQuery }));
-        register(provider, (catalog || []).map(t => catalogTrack(t, provider as 'tidal' | 'qobuz')));
+        throw new Error(`Unknown source provider: ${provider}`);
       }
     } catch (error) { fail(provider, error); }
   }));
@@ -920,7 +942,7 @@ function validMetadata(value: any): boolean {
 function validCandidateSource(s: any): boolean {
   return s && typeof s.id === 'string' && s.id.length > 0 && s.id.length <= 32768
     && !/[\x00-\x1f]/.test(s.id)
-    && ['local', 'tidal', 'qobuz', 'youtube'].includes(s.provider);
+    && ['local', 'tidal', 'qobuz', 'youtube', 'addon'].includes(s.provider);
 }
 
 function validContext(value: any): value is RecordingSources {
@@ -928,7 +950,8 @@ function validContext(value: any): value is RecordingSources {
     && value.recording_id.length <= 512 && Array.isArray(value.sources) && value.sources.length > 0 && value.sources.length <= 32
     && value.sources.every((s: any) => s && validMetadata(s.metadata) && typeof s.id === 'string' && s.id.length > 0 && s.id.length <= 32768
       && !/[\x00-\x1f]/.test(s.id) && (s.provider === 'local' ? /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(s.id)
-        : s.provider === 'youtube' ? /^[\w-]{11}$/.test(s.id) : ['tidal', 'qobuz'].includes(s.provider) && /^\d{1,32}$/.test(s.id)))
+        : s.provider === 'youtube' ? /^[\w-]{11}$/.test(s.id) : s.provider === 'addon' ? ADDON_SOURCE_ID.test(s.id)
+        : ['tidal', 'qobuz'].includes(s.provider) && /^\d{1,32}$/.test(s.id)))
     && new Set(value.sources.map(sourceKey)).size === value.sources.length
     && (value.display_candidates == null || (Array.isArray(value.display_candidates) && value.display_candidates.every(validCandidateSource)))
     && (value.selection?.mode === 'auto' || (value.selection?.mode === 'explicit' && value.selection.source
@@ -1061,6 +1084,7 @@ export const inFlightResolutions = new Map<string, Promise<ResolvedSource>>();
 export const clearSourceCache = () => {
   cache.clear();
   inFlightResolutions.clear();
+  addonDisplayNames.clear();
 };
 
 export async function resolveSource(source: PlaybackSource, quality: StreamingQuality, fresh = false, timeoutMs = 15000): Promise<ResolvedSource> {
@@ -1082,7 +1106,8 @@ export async function resolveSource(source: PlaybackSource, quality: StreamingQu
         return { url: source.id, quality: { lossless: tags?.lossless, sample_rate: tags?.sample_rate, bit_depth: tags?.bit_depth, codec: tags?.format } };
       }
       if (source.provider === 'youtube') return { url: `https://www.youtube.com/watch?v=${source.id}`, quality: { lossless: false } };
-      const result = await bounded(invoke<ResolvedSource>(`${source.provider}_resolve_source`, { trackId: source.id, requestedQuality: quality }), timeoutMs);
+      if (source.provider !== 'addon') throw new Error(`${sourceName(source)} is no longer built in. Install a source addon in Settings.`);
+      const result = await bounded(invoke<ResolvedSource>('addon_resolve_source', { trackId: source.id, requestedQuality: quality }), timeoutMs);
       if (!result || typeof result.url !== 'string' || !/^https?:\/\//.test(result.url) || !result.quality) throw new Error('Invalid stream response');
       if (cache.size >= 200) cache.delete(cache.keys().next().value!);
       cache.set(key, { at: Date.now(), result });
@@ -1122,8 +1147,16 @@ export function deduplicateSourcesForDisplay(sources: PlaybackSource[], selectio
   const result: PlaybackSource[] = [];
   const seenKeys = new Set<string>();
 
+  const displayBucketKey = (source: PlaybackSource): string => {
+    if (source.provider === 'addon') {
+      const prefix = source.id.split(':')[0]?.trim().toLowerCase();
+      return prefix && prefix.includes('.') ? `addon:${prefix}` : 'addon';
+    }
+    return source.provider;
+  };
+
   const groupSignature = (s: PlaybackSource): string => {
-    const provider = s.provider;
+    const provider = displayBucketKey(s);
     const lossless = s.catalog_quality?.lossless ? '1' : '0';
     const rate = s.catalog_quality?.sample_rate || 0;
     const depth = s.catalog_quality?.bit_depth || 0;
@@ -1141,7 +1174,7 @@ export function deduplicateSourcesForDisplay(sources: PlaybackSource[], selectio
       return `local:${s.id}`;
     }
 
-    // Streaming catalog (Tidal, Qobuz)
+    // Streaming catalog (Tidal, Qobuz, Addons)
     const album = normalizeText(s.metadata?.album || '');
     return `${provider}:${album}:${qKey}:${version}:${explicit}`;
   };
@@ -1168,7 +1201,7 @@ export function deduplicateSourcesForDisplay(sources: PlaybackSource[], selectio
   for (const [, candidates] of groups) {
     const selectedItem = candidates.find(c => sourceKey(c) === selectedKey);
     const chosen = selectedItem || candidates[0];
-    const provider = chosen.provider;
+    const provider = displayBucketKey(chosen);
     const count = providerCounts.get(provider) || 0;
     const max = maxPerProvider[provider] ?? 4;
 
