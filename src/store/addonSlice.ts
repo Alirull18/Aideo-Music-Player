@@ -2,6 +2,7 @@ import { StateCreator } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { PlayerState } from './types';
 import { registerAddonNames } from '../utils/unifiedSources';
+import featuredAddons from '../../addons-sdk/cloud/featured.json';
 
 export interface AddonAuthField {
   key: string;
@@ -16,6 +17,8 @@ export interface AddonAuthSpec {
   label?: string | null;
   helpText?: string | null;
   fields?: AddonAuthField[];
+  /** Set by the desktop host (never by the addon) when it can sign in through a browser window. */
+  browserLogin?: boolean;
 }
 
 export interface AddonAuthStatus {
@@ -35,6 +38,7 @@ export interface FeaturedAddonCatalogItem {
   resources: string[];
   description: string;
   authType: 'device_code' | 'credentials' | 'token';
+  auth: AddonAuthSpec;
 }
 
 export interface AddonInfo {
@@ -50,40 +54,16 @@ export interface AddonInfo {
   auth?: AddonAuthSpec | null;
 }
 
-export const FEATURED_ADDON_CATALOG: readonly FeaturedAddonCatalogItem[] = [
-  {
-    id: 'org.aideo.tidal',
-    name: 'Tidal HiFi / MAX',
-    manifestUrl: 'http://127.0.0.1:7013/manifest.json',
-    resources: ['search', 'stream'],
-    description: 'Lossless & Hi-Res FLAC streaming with OAuth Device Login',
-    authType: 'device_code',
-  },
-  {
-    id: 'org.aideo.qobuz',
-    name: 'Qobuz Studio',
-    manifestUrl: 'http://127.0.0.1:7014/manifest.json',
-    resources: ['search', 'stream'],
-    description: '24-bit / 192 kHz Studio Masters streaming',
-    authType: 'credentials',
-  },
-  {
-    id: 'org.aideo.subsonic',
-    name: 'Subsonic / Navidrome',
-    manifestUrl: 'http://127.0.0.1:7011/manifest.json',
-    resources: ['search', 'stream'],
-    description: 'Personal cloud music server (Subsonic / Navidrome API)',
-    authType: 'credentials',
-  },
-  {
-    id: 'org.aideo.jellyfin',
-    name: 'Jellyfin Audio',
-    manifestUrl: 'http://127.0.0.1:7012/manifest.json',
-    resources: ['search', 'stream'],
-    description: 'Self-hosted Jellyfin media library',
-    authType: 'credentials',
-  },
-];
+/** Derived from `addons-sdk/cloud/featured.json`, which the Node adapter and the Rust host also read. */
+export const FEATURED_ADDON_CATALOG: readonly FeaturedAddonCatalogItem[] = featuredAddons.map((item) => ({
+  id: item.id,
+  name: item.name,
+  manifestUrl: `http://127.0.0.1:${item.port}/manifest.json`,
+  resources: item.resources,
+  description: item.description,
+  authType: item.auth.type as FeaturedAddonCatalogItem['authType'],
+  auth: item.auth,
+}));
 
 const toast = (message: string, type: 'success' | 'error') =>
   window.dispatchEvent(new CustomEvent('ui-toast', { detail: { message, type } }));

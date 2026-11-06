@@ -12,6 +12,13 @@ use std::sync::{OnceLock, RwLock};
 pub const YOUTUBE: &str = "org.aideo.youtube";
 pub const LYRICS: &str = "org.aideo.lyrics";
 pub const TRANSLATION: &str = "org.aideo.translation";
+const QOBUZ: &str = "org.aideo.qobuz";
+
+/// Addons the host can sign in through an embedded browser window. Matched on the exact id so a
+/// look-alike addon can never receive a token captured from the provider's site.
+pub(crate) fn supports_browser_login(addon_id: &str) -> bool {
+    addon_id == QOBUZ
+}
 
 fn disabled() -> &'static RwLock<HashSet<String>> {
     static DISABLED: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
@@ -73,6 +80,11 @@ fn builtins() -> Vec<AddonInfo> {
 
 fn info(m: eclipse::Manifest, origin: String) -> AddonInfo {
     let enabled = is_enabled(&m.id);
+    let browser_login = supports_browser_login(&m.id);
+    let auth = m.auth.map(|mut auth| {
+        auth.browser_login = browser_login;
+        auth
+    });
     AddonInfo {
         id: m.id,
         name: m.name,
@@ -81,7 +93,7 @@ fn info(m: eclipse::Manifest, origin: String) -> AddonInfo {
         icon: m.icon,
         resources: m.resources,
         content_type: m.content_type,
-        auth: m.auth,
+        auth,
         origin,
         builtin: false,
         enabled,
@@ -323,22 +335,21 @@ pub async fn addon_open_browser_login(
 ) -> Result<serde_json::Value, String> {
     use tauri::{Emitter, Manager};
 
-    let base = require_installed_base(&state, &addon_id).or_else(|_| {
-        let port = if addon_id.contains("qobuz") { 7014 } else { 7013 };
-        eclipse::base_from_manifest_url(&format!("http://127.0.0.1:{port}/manifest.json"))
-    })?;
+    if !supports_browser_login(&addon_id) {
+        return Err("Browser login is not available for this addon".into());
+    }
+    let base = require_installed_base(&state, &addon_id)?;
     eclipse::ensure_local_cloud_server(&base);
 
-    if addon_id.contains("qobuz") {
-        let label = "addon-qobuz-login";
-        if let Some(win) = app_handle.get_webview_window(label) {
-            let _ = win.show();
-            let _ = win.unminimize();
-            let _ = win.set_focus();
-            return Ok(serde_json::json!({ "ok": true, "mode": "webview" }));
-        }
+    let label = "addon-qobuz-login";
+    if let Some(win) = app_handle.get_webview_window(label) {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+        return Ok(serde_json::json!({ "ok": true, "mode": "webview" }));
+    }
 
-        let init_script = r#"
+    let init_script = r#"
 (function() {
     if (window.__aideoQobuzHooked) return;
     window.__aideoQobuzHooked = true;
@@ -413,65 +424,62 @@ pub async fn addon_open_browser_login(
 })();
 "#;
 
-        let app_clone = app_handle.clone();
-        let addon_id_clone = addon_id.clone();
-        let base_clone = base.clone();
+    let app_clone = app_handle.clone();
+    let addon_id_clone = addon_id.clone();
+    let base_clone = base.clone();
 
-        let _login_window = tauri::WebviewWindowBuilder::new(
-            &app_handle,
-            label,
-            tauri::WebviewUrl::External(
-                "https://play.qobuz.com/login"
-                    .parse()
-                    .map_err(|e: url::ParseError| e.to_string())?,
-            ),
-        )
-        .title("Qobuz Login — Aideo")
-        .inner_size(520.0, 720.0)
-        .center()
-        .resizable(true)
-        .initialization_script(init_script)
-        .on_navigation(move |url| {
-            if let Some(token) = extract_qobuz_token_from_callback_url(url.as_str()) {
-                let app = app_clone.clone();
-                let id_for_task = addon_id_clone.clone();
-                let base_for_task = base_clone.clone();
-                tauri::async_runtime::spawn(async move {
-                    match eclipse::auth_login(
-                        eclipse::client(),
-                        &base_for_task,
-                        serde_json::json!({ "userAuthToken": token }),
-                    )
-                    .await
-                    {
-                        Ok(_) => {
-                            if let Some(win) = app.get_webview_window("addon-qobuz-login") {
-                                let _ = win.close();
-                            }
-                            let _ = app.emit(
-                                "addon-auth-success",
-                                serde_json::json!({ "addonId": id_for_task, "provider": "qobuz" }),
-                            );
+    let _login_window = tauri::WebviewWindowBuilder::new(
+        &app_handle,
+        label,
+        tauri::WebviewUrl::External(
+            "https://play.qobuz.com/login"
+                .parse()
+                .map_err(|e: url::ParseError| e.to_string())?,
+        ),
+    )
+    .title("Qobuz Login — Aideo")
+    .inner_size(520.0, 720.0)
+    .center()
+    .resizable(true)
+    .initialization_script(init_script)
+    .on_navigation(move |url| {
+        if let Some(token) = extract_qobuz_token_from_callback_url(url.as_str()) {
+            let app = app_clone.clone();
+            let id_for_task = addon_id_clone.clone();
+            let base_for_task = base_clone.clone();
+            tauri::async_runtime::spawn(async move {
+                match eclipse::auth_login(
+                    eclipse::client(),
+                    &base_for_task,
+                    serde_json::json!({ "userAuthToken": token }),
+                )
+                .await
+                {
+                    Ok(_) => {
+                        if let Some(win) = app.get_webview_window("addon-qobuz-login") {
+                            let _ = win.close();
                         }
-                        Err(err) => {
-                            let _ = app.emit(
-                                "addon-auth-error",
-                                serde_json::json!({ "addonId": id_for_task, "error": err }),
-                            );
-                        }
+                        let _ = app.emit(
+                            "addon-auth-success",
+                            serde_json::json!({ "addonId": id_for_task, "provider": "qobuz" }),
+                        );
                     }
-                });
-                return false;
-            }
-            true
-        })
-        .build()
-        .map_err(|e| format!("Failed to open Qobuz login window: {e}"))?;
+                    Err(err) => {
+                        let _ = app.emit(
+                            "addon-auth-error",
+                            serde_json::json!({ "addonId": id_for_task, "error": err }),
+                        );
+                    }
+                }
+            });
+            return false;
+        }
+        true
+    })
+    .build()
+    .map_err(|e| format!("Failed to open Qobuz login window: {e}"))?;
 
-        return Ok(serde_json::json!({ "ok": true, "mode": "webview" }));
-    }
-
-    eclipse::auth_start_device(eclipse::client(), &base).await
+    Ok(serde_json::json!({ "ok": true, "mode": "webview" }))
 }
 
 #[cfg(test)]
@@ -500,6 +508,27 @@ mod tests {
         assert!(!valid_source_id("com.x.y:"));
         assert!(!valid_source_id("c:\\music\\a.flac"), "Windows paths are not addon sources");
         assert!(!valid_source_id("com.x.y:a\nb"));
+    }
+
+    #[test]
+    fn browser_login_is_limited_to_the_exact_qobuz_addon() {
+        assert!(supports_browser_login("org.aideo.qobuz"));
+        for id in ["org.evil.qobuz", "com.example.qobuz-clone", "org.aideo.tidal", "org.aideo.qobuz.fake", ""] {
+            assert!(!supports_browser_login(id), "{id} must not get browser login");
+        }
+    }
+
+    #[test]
+    fn info_sets_browser_login_from_the_host_not_the_manifest() {
+        let manifest = |id: &str| eclipse::Manifest {
+            id: id.into(), name: "x".into(), version: "1".into(), description: None, icon: None,
+            resources: vec!["search".into(), "stream".into()], content_type: None,
+            auth: Some(eclipse::AddonAuthSpec {
+                auth_type: "credentials".into(), label: None, help_text: None, fields: vec![], browser_login: true,
+            }),
+        };
+        assert!(info(manifest("org.aideo.qobuz"), "http://127.0.0.1:7014".into()).auth.unwrap().browser_login);
+        assert!(!info(manifest("org.evil.qobuz"), "http://127.0.0.1:7014".into()).auth.unwrap().browser_login);
     }
 
     #[test]

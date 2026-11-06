@@ -277,7 +277,7 @@ describe('AddonsCard Component', () => {
     expect(invoke).toHaveBeenCalledWith('addon_remove', { addonId: 'org.real.addon' });
   });
 
-  it('drives the Connect Tidal device authorization and polling flow to completion', async () => {
+  it('drives the device authorization and polling flow through IPC to completion', async () => {
     vi.useFakeTimers();
 
     const tidalAddon: AddonInfo = {
@@ -288,34 +288,18 @@ describe('AddonsCard Component', () => {
       resources: ['search', 'stream'],
       builtin: false,
       enabled: true,
+      auth: { type: 'device_code', label: 'Connect Tidal' },
     };
 
-    const mockFetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url === 'http://127.0.0.1:7013/auth/device' && init?.method === 'POST') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            userCode: 'WXYZ-9876',
-            verificationUriComplete: 'https://link.tidal.com/WXYZ-9876',
-            interval: 2,
-          }),
-        } as Response;
-      }
-      if (url === 'http://127.0.0.1:7013/auth/poll' && init?.method === 'POST') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            authenticated: true,
-            countryCode: 'US',
-          }),
-        } as Response;
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
+    const mockFetch = vi.fn();
     globalThis.fetch = mockFetch as unknown as typeof fetch;
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'addon_auth_start_device') {
+        return { userCode: 'WXYZ-9876', verificationUriComplete: 'https://link.tidal.com/WXYZ-9876', interval: 2 };
+      }
+      if (command === 'addon_auth_poll_device') return { authenticated: true, countryCode: 'US' };
+      return undefined;
+    });
 
     useStore.setState({ addons: [tidalAddon] });
     render(<AddonsCard />);
@@ -325,18 +309,67 @@ describe('AddonsCard Component', () => {
       fireEvent.click(connectBtn);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:7013/auth/device', { method: 'POST' });
-    expect(screen.getByTestId('tidal-user-code')).toHaveTextContent('WXYZ-9876');
+    expect(invoke).toHaveBeenCalledWith('addon_auth_start_device', { addonId: 'org.aideo.tidal' });
+    expect(screen.getByTestId('device-user-code')).toHaveTextContent('WXYZ-9876');
 
-    const link = screen.getByRole('link', { name: 'Open Tidal Link' });
+    const link = screen.getByRole('link', { name: 'Open Tidal Hifi Link' });
     expect(link).toHaveAttribute('href', 'https://link.tidal.com/WXYZ-9876');
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
 
-    expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:7013/auth/poll', { method: 'POST' });
+    expect(invoke).toHaveBeenCalledWith('addon_auth_poll_device', { addonId: 'org.aideo.tidal' });
     expect(screen.getByText('Connected (US)')).toBeInTheDocument();
+    // The webview never talks to the addon server directly; everything goes through the Rust host.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the featured catalog auth spec for an installed addon whose manifest has none', () => {
+    useStore.setState({
+      addons: [{
+        id: 'org.aideo.tidal', name: 'Tidal', version: '1', origin: 'http://127.0.0.1:7013',
+        resources: ['search', 'stream'], builtin: false, enabled: true,
+      }],
+    });
+    render(<AddonsCard />);
+    expect(screen.getByRole('button', { name: 'Connect Tidal Account' })).toBeInTheDocument();
+  });
+
+  it('does not treat a look-alike addon as Tidal or Qobuz by id suffix or display name', () => {
+    useStore.setState({
+      addons: [
+        { id: 'com.evil.tidal', name: 'Tidal', version: '1', origin: 'https://evil.example', resources: ['search', 'stream'], builtin: false, enabled: true },
+        { id: 'com.evil.qobuz', name: 'Qobuz', version: '1', origin: 'https://evil.example', resources: ['search', 'stream'], builtin: false, enabled: true,
+          auth: { type: 'credentials', label: 'Configure Qobuz' } },
+      ],
+    });
+    render(<AddonsCard />);
+    expect(screen.queryByRole('button', { name: /^Connect/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in to Qobuz with Browser' })).not.toBeInTheDocument();
+  });
+
+  it('opens the credential form when starting device login reports missing credentials', async () => {
+    const addon: AddonInfo = {
+      id: 'org.aideo.tidal', name: 'Tidal', version: '1', origin: 'http://127.0.0.1:7013',
+      resources: ['search', 'stream'], builtin: false, enabled: true,
+      auth: { type: 'device_code', label: 'Connect Tidal', fields: [{ key: 'clientId', label: 'Client ID', type: 'text' }] },
+    };
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'addon_auth_start_device') {
+        throw 'Configure your Tidal Client ID or Access Token in Credentials first';
+      }
+      return undefined;
+    });
+    useStore.setState({ addons: [addon] });
+    render(<AddonsCard />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Tidal' }));
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Configure your Tidal Client ID');
+    expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
   });
 
   it('renders Featured Addons Catalog, supports 1-click install, and hides already-installed featured addons', () => {
@@ -386,22 +419,12 @@ describe('AddonsCard Component', () => {
       },
     };
 
-    const mockFetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url === 'http://127.0.0.1:7014/auth/login' && init?.method === 'POST') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            ok: true,
-            provider: 'qobuz',
-            authenticated: true,
-          }),
-        } as Response;
-      }
-      throw new Error(`Unexpected fetch: ${url}`);
-    });
+    const mockFetch = vi.fn();
     globalThis.fetch = mockFetch as unknown as typeof fetch;
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'addon_auth_login') return { ok: true, provider: 'qobuz', authenticated: true };
+      return undefined;
+    });
 
     useStore.setState({ addons: [qobuzAddon] });
     render(<AddonsCard />);
@@ -418,17 +441,12 @@ describe('AddonsCard Component', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith('http://127.0.0.1:7014/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          credentials: {
-            appId: '950096963',
-            userAuthToken: 'secret-token-123',
-          },
-        }),
+      expect(invoke).toHaveBeenCalledWith('addon_auth_login', {
+        addonId: 'org.aideo.qobuz',
+        credentials: { appId: '950096963', userAuthToken: 'secret-token-123' },
       });
     });
+    expect(mockFetch).not.toHaveBeenCalled();
 
     expect(await screen.findByRole('button', { name: 'Qobuz Connected' })).toBeInTheDocument();
   });
@@ -446,6 +464,7 @@ describe('AddonsCard Component', () => {
       auth: {
         type: 'credentials',
         label: 'Configure Qobuz',
+        browserLogin: true,
         fields: [
           { key: 'userAuthToken', label: 'User Auth Token', type: 'password', required: false },
         ],

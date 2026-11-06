@@ -21,13 +21,13 @@ import { FEATURED_ADDON_CATALOG, type AddonAuthSpec, type AddonInfo } from '../s
 const devicePollIntervalMs = (seconds: number | undefined) =>
   (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? seconds : 5) * 1000;
 
-type TidalDeviceAuthState =
+type DeviceAuthState =
   | { status: 'idle' }
   | { status: 'starting'; addonId: string }
   | {
       status: 'polling';
       addonId: string;
-      origin: string;
+      addonName: string;
       userCode: string;
       verificationUriComplete: string;
       /** Poll spacing requested by the provider (OAuth device flow); never poll faster. */
@@ -173,7 +173,7 @@ export default function AddonsCard() {
     }))
   );
   const [url, setUrl] = useState('');
-  const [tidalAuth, setTidalAuth] = useState<TidalDeviceAuthState>({ status: 'idle' });
+  const [deviceAuth, setDeviceAuth] = useState<DeviceAuthState>({ status: 'idle' });
   const [expandedCreds, setExpandedCreds] = useState<Record<string, boolean>>({});
   const [credInputs, setCredInputs] = useState<Record<string, Record<string, string>>>({});
   const [connectedMap, setConnectedMap] = useState<Record<string, boolean>>({});
@@ -199,7 +199,7 @@ export default function AddonsCard() {
           setExpandedCreds((prev) => ({ ...prev, [addonId]: false }));
           window.dispatchEvent(
             new CustomEvent('ui-toast', {
-              detail: { message: 'Qobuz connected via browser login', type: 'success' },
+              detail: { message: 'Connected via browser login', type: 'success' },
             })
           );
         })
@@ -235,32 +235,22 @@ export default function AddonsCard() {
   }, []);
 
   useEffect(() => {
-    if (tidalAuth.status !== 'polling') return;
-    const { addonId, origin, intervalMs } = tidalAuth;
+    if (deviceAuth.status !== 'polling') return;
+    const { addonId, addonName, intervalMs } = deviceAuth;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     // Chained timeouts: the next poll is scheduled only after the previous one settles.
     const poll = async () => {
       try {
-        const res = await fetch(`${origin}/auth/poll`, { method: 'POST' });
-        if (cancelled) return;
-        if (!res.ok) {
-          setTidalAuth({
-            status: 'error',
-            addonId,
-            message: 'Tidal authorization expired or failed',
-          });
-          return;
-        }
-        const data = (await res.json()) as {
+        const data = await invoke<{
           authenticated?: boolean;
           pending?: boolean;
           countryCode?: string | null;
-        };
+        } | null>('addon_auth_poll_device', { addonId });
         if (cancelled) return;
-        if (data.authenticated === true) {
-          setTidalAuth({
+        if (data?.authenticated === true) {
+          setDeviceAuth({
             status: 'connected',
             addonId,
             countryCode: data.countryCode ?? null,
@@ -268,17 +258,17 @@ export default function AddonsCard() {
           setConnectedMap((prev) => ({ ...prev, [addonId]: true }));
           window.dispatchEvent(
             new CustomEvent('ui-toast', {
-              detail: { message: 'Tidal connected', type: 'success' },
+              detail: { message: `${addonName} connected`, type: 'success' },
             })
           );
           return;
         }
       } catch {
         if (!cancelled) {
-          setTidalAuth({
+          setDeviceAuth({
             status: 'error',
             addonId,
-            message: 'Tidal authorization expired or failed',
+            message: 'Authorization expired or failed',
           });
         }
         return;
@@ -291,70 +281,37 @@ export default function AddonsCard() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [tidalAuth]);
+  }, [deviceAuth]);
 
-  const startTidalDeviceAuth = async (a: AddonInfo) => {
-    const cleanOrigin = a.origin.replace(/\/+$/, '');
-    setTidalAuth({ status: 'starting', addonId: a.id });
+  const startDeviceAuth = async (a: AddonInfo) => {
+    setDeviceAuth({ status: 'starting', addonId: a.id });
     try {
-      const res = await fetch(`${cleanOrigin}/auth/device`, { method: 'POST' });
-      if (!res.ok) {
-        const errData = (await res.json().catch(() => ({}))) as { error?: string };
-        if (res.status === 400) {
-          setExpandedCreds((prev) => ({ ...prev, [a.id]: true }));
-        }
-        throw new Error(errData.error || 'Failed to start Tidal device login');
-      }
-      const data = (await res.json()) as {
-        userCode: string;
-        verificationUriComplete: string;
+      const data = await invoke<{
+        userCode?: string;
+        verificationUriComplete?: string;
         interval?: number;
-      };
-      setTidalAuth({
+      } | null>('addon_auth_start_device', { addonId: a.id });
+      if (!data?.userCode || !data?.verificationUriComplete) {
+        throw new Error('Failed to start device login');
+      }
+      setDeviceAuth({
         status: 'polling',
         addonId: a.id,
-        origin: cleanOrigin,
+        addonName: a.name,
         userCode: data.userCode,
         verificationUriComplete: data.verificationUriComplete,
         intervalMs: devicePollIntervalMs(data.interval),
       });
       void Promise.resolve(openUrl(data.verificationUriComplete)).catch(() => {});
     } catch (e: any) {
-      if (e instanceof TypeError) {
-        try {
-          const data = await invoke<{
-            userCode?: string;
-            verificationUriComplete?: string;
-          } | null>('addon_auth_start_device', { addonId: a.id });
-          if (data?.userCode && data?.verificationUriComplete) {
-            setTidalAuth({
-              status: 'polling',
-              addonId: a.id,
-              origin: cleanOrigin,
-              userCode: data.userCode,
-              verificationUriComplete: data.verificationUriComplete,
-              intervalMs: devicePollIntervalMs(undefined),
-            });
-            void Promise.resolve(openUrl(data.verificationUriComplete)).catch(() => {});
-            return;
-          }
-        } catch (ipcErr: any) {
-          const msg = typeof ipcErr === 'string' ? ipcErr : ipcErr?.message;
-          if (msg && msg.includes('Credentials')) {
-            setExpandedCreds((prev) => ({ ...prev, [a.id]: true }));
-          }
-          setTidalAuth({
-            status: 'error',
-            addonId: a.id,
-            message: msg || 'Failed to start Tidal device login',
-          });
-          return;
-        }
+      const msg = typeof e === 'string' ? e : e?.message;
+      if (msg && msg.includes('Credentials')) {
+        setExpandedCreds((prev) => ({ ...prev, [a.id]: true }));
       }
-      setTidalAuth({
+      setDeviceAuth({
         status: 'error',
         addonId: a.id,
-        message: e?.message || 'Failed to start Tidal device login',
+        message: msg || 'Failed to start device login',
       });
     }
   };
@@ -373,36 +330,15 @@ export default function AddonsCard() {
 
   const handleSaveCredentials = async (a: AddonInfo) => {
     const credentials = credInputs[a.id] || {};
-    const cleanOrigin = a.origin ? a.origin.replace(/\/+$/, '') : '';
     setCredBusyMap((prev) => ({ ...prev, [a.id]: true }));
     setCredErrorMap((prev) => ({ ...prev, [a.id]: null }));
     try {
-      if (cleanOrigin && /^https?:\/\//i.test(cleanOrigin)) {
-        try {
-          const res = await fetch(`${cleanOrigin}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ credentials }),
-          });
-          const data = (await res.json().catch(() => ({}))) as { authenticated?: boolean; error?: string };
-          if (!res.ok || data.authenticated === false) {
-            throw new Error(data.error || `Failed to authenticate ${a.name}`);
-          }
-        } catch (fetchErr: any) {
-          if (fetchErr instanceof TypeError) {
-            const data = await invoke<{ authenticated?: boolean; error?: string } | null>('addon_auth_login', {
-              addonId: a.id,
-              credentials,
-            });
-            if (data && data.authenticated === false) {
-              throw new Error(data.error || `Failed to authenticate ${a.name}`);
-            }
-          } else {
-            throw fetchErr;
-          }
-        }
-      } else {
-        await invoke('addon_auth_login', { addonId: a.id, credentials });
+      const data = await invoke<{ authenticated?: boolean; error?: string } | null>('addon_auth_login', {
+        addonId: a.id,
+        credentials,
+      });
+      if (data && data.authenticated === false) {
+        throw new Error(data.error || `Failed to authenticate ${a.name}`);
       }
       setConnectedMap((prev) => ({ ...prev, [a.id]: true }));
       setExpandedCreds((prev) => ({ ...prev, [a.id]: false }));
@@ -414,7 +350,7 @@ export default function AddonsCard() {
     } catch (e: any) {
       setCredErrorMap((prev) => ({
         ...prev,
-        [a.id]: e?.message || `Failed to authenticate ${a.name}`,
+        [a.id]: (typeof e === 'string' ? e : e?.message) || `Failed to authenticate ${a.name}`,
       }));
     } finally {
       setCredBusyMap((prev) => ({ ...prev, [a.id]: false }));
@@ -422,19 +358,14 @@ export default function AddonsCard() {
   };
 
   const handleDisconnect = async (a: AddonInfo) => {
-    const cleanOrigin = a.origin ? a.origin.replace(/\/+$/, '') : '';
     try {
-      if (cleanOrigin && /^https?:\/\//i.test(cleanOrigin)) {
-        await fetch(`${cleanOrigin}/auth/logout`, { method: 'POST' });
-      } else {
-        await invoke('addon_auth_logout', { addonId: a.id });
-      }
+      await invoke('addon_auth_logout', { addonId: a.id });
     } catch {
       // Ignore logout network error
     }
     setConnectedMap((prev) => ({ ...prev, [a.id]: false }));
-    if (tidalAuth.status !== 'idle' && tidalAuth.addonId === a.id) {
-      setTidalAuth({ status: 'idle' });
+    if (deviceAuth.status !== 'idle' && deviceAuth.addonId === a.id) {
+      setDeviceAuth({ status: 'idle' });
     }
   };
 
@@ -451,12 +382,8 @@ export default function AddonsCard() {
   };
 
   const isCore = (a: AddonInfo) => Boolean(a.builtin || a.origin === 'internal');
-  const isTidalAddon = (a: AddonInfo) =>
-    !isCore(a) && (a.id === 'org.aideo.tidal' || a.id.endsWith('.tidal') || a.name.trim().toLowerCase() === 'tidal');
-  const isQobuzAddon = (a: AddonInfo) =>
-    !isCore(a) && (a.id === 'org.aideo.qobuz' || a.id.endsWith('.qobuz') || a.name.trim().toLowerCase() === 'qobuz');
 
-  const handleQobuzBrowserLogin = async (a: AddonInfo) => {
+  const handleBrowserLogin = async (a: AddonInfo) => {
     setCredBusyMap((prev) => ({ ...prev, [a.id]: true }));
     setCredErrorMap((prev) => ({ ...prev, [a.id]: null }));
     try {
@@ -464,7 +391,7 @@ export default function AddonsCard() {
     } catch (e: any) {
       setCredErrorMap((prev) => ({
         ...prev,
-        [a.id]: typeof e === 'string' ? e : e?.message || 'Failed to open Qobuz browser login',
+        [a.id]: typeof e === 'string' ? e : e?.message || `Failed to open ${a.name} browser login`,
       }));
     } finally {
       setCredBusyMap((prev) => ({ ...prev, [a.id]: false }));
@@ -473,9 +400,8 @@ export default function AddonsCard() {
 
   const getEffectiveAuth = (a: AddonInfo): AddonAuthSpec | null => {
     if (isCore(a)) return null;
-    if (a.auth) return a.auth;
-    if (isTidalAddon(a)) return { type: 'device_code', label: 'Connect Tidal' };
-    return null;
+    // Addons installed before manifests carried an auth spec: fall back to the catalog entry with the same id.
+    return a.auth ?? FEATURED_ADDON_CATALOG.find((item) => item.id === a.id)?.auth ?? null;
   };
 
   useEffect(() => {
@@ -490,8 +416,8 @@ export default function AddonsCard() {
             if (cancelled || !status) return;
             if (status.authenticated === true) {
               setConnectedMap((prev) => (prev[a.id] ? prev : { ...prev, [a.id]: true }));
-              if (isTidalAddon(a)) {
-                setTidalAuth((prev) =>
+              if (getEffectiveAuth(a)?.type === 'device_code') {
+                setDeviceAuth((prev) =>
                   prev.status === 'idle'
                     ? { status: 'connected', addonId: a.id, countryCode: status.countryCode ?? null }
                     : prev
@@ -521,13 +447,12 @@ export default function AddonsCard() {
   const renderAddonCard = (a: AddonInfo) => {
     const core = isCore(a);
     const isEnabled = a.enabled !== false;
-    const isTidal = isTidalAddon(a);
     const authSpec = getEffectiveAuth(a);
     const isDeviceCode = authSpec?.type === 'device_code';
     const isCredsOrToken = authSpec?.type === 'credentials' || authSpec?.type === 'token';
-    const isThisDeviceAuth = isDeviceCode && tidalAuth.status !== 'idle' && tidalAuth.addonId === a.id;
+    const isThisDeviceAuth = isDeviceCode && deviceAuth.status !== 'idle' && deviceAuth.addonId === a.id;
     const isCredExpanded = Boolean(expandedCreds[a.id]);
-    const isConnected = Boolean(connectedMap[a.id]) || (isThisDeviceAuth && tidalAuth.status === 'connected');
+    const isConnected = Boolean(connectedMap[a.id]) || (isThisDeviceAuth && deviceAuth.status === 'connected');
     const credError = credErrorMap[a.id];
     const credBusy = Boolean(credBusyMap[a.id]);
 
@@ -627,7 +552,7 @@ export default function AddonsCard() {
               </div>
             )}
 
-            {isThisDeviceAuth && tidalAuth.status === 'polling' && (
+            {isThisDeviceAuth && deviceAuth.status === 'polling' && (
               <div
                 style={{
                   marginTop: 4,
@@ -644,7 +569,7 @@ export default function AddonsCard() {
               >
                 <span style={{ color: 'var(--text-dim)' }}>Pair code:</span>
                 <code
-                  data-testid="tidal-user-code"
+                  data-testid="device-user-code"
                   style={{
                     fontWeight: 700,
                     color: '#38bdf8',
@@ -653,10 +578,10 @@ export default function AddonsCard() {
                     borderRadius: 4,
                   }}
                 >
-                  {tidalAuth.userCode}
+                  {deviceAuth.userCode}
                 </code>
                 <a
-                  href={tidalAuth.verificationUriComplete}
+                  href={deviceAuth.verificationUriComplete}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
@@ -665,14 +590,14 @@ export default function AddonsCard() {
                     textDecoration: 'underline',
                   }}
                 >
-                  Open Tidal Link
+                  Open {a.name} Link
                 </a>
                 <button
                   type="button"
-                  aria-label="Open Tidal in Browser"
+                  aria-label={`Open ${a.name} in Browser`}
                   className="settings-btn"
                   onClick={() =>
-                    void Promise.resolve(openUrl(tidalAuth.verificationUriComplete)).catch(() => {})
+                    void Promise.resolve(openUrl(deviceAuth.verificationUriComplete)).catch(() => {})
                   }
                   style={{
                     padding: '2px 8px',
@@ -683,9 +608,9 @@ export default function AddonsCard() {
                 </button>
                 <button
                   type="button"
-                  aria-label="Cancel Tidal login"
+                  aria-label={`Cancel ${a.name} login`}
                   className="settings-btn"
-                  onClick={() => setTidalAuth({ status: 'idle' })}
+                  onClick={() => setDeviceAuth({ status: 'idle' })}
                   style={{
                     padding: '2px 8px',
                     fontSize: 10,
@@ -696,7 +621,7 @@ export default function AddonsCard() {
               </div>
             )}
 
-            {isThisDeviceAuth && tidalAuth.status === 'error' && (
+            {isThisDeviceAuth && deviceAuth.status === 'error' && (
               <div
                 role="alert"
                 style={{
@@ -709,7 +634,7 @@ export default function AddonsCard() {
                   fontSize: 11,
                 }}
               >
-                {tidalAuth.message}
+                {deviceAuth.message}
               </div>
             )}
           </div>
@@ -730,7 +655,7 @@ export default function AddonsCard() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {isDeviceCode && (
                   <>
-                    {isThisDeviceAuth && tidalAuth.status === 'connected' ? (
+                    {isThisDeviceAuth && deviceAuth.status === 'connected' ? (
                       <>
                         <span
                           style={{
@@ -743,42 +668,40 @@ export default function AddonsCard() {
                             border: '1px solid rgba(16, 185, 129, 0.28)',
                           }}
                         >
-                          {tidalAuth.countryCode
-                            ? `Connected (${tidalAuth.countryCode})`
+                          {deviceAuth.countryCode
+                            ? `Connected (${deviceAuth.countryCode})`
                             : 'Connected'}
                         </span>
                         <button
                           type="button"
                           className="settings-btn"
-                          aria-label={isTidal ? 'Reconnect Tidal' : `Reconnect ${a.name}`}
-                          onClick={() => void startTidalDeviceAuth(a)}
+                          aria-label={`Reconnect ${a.name}`}
+                          onClick={() => void startDeviceAuth(a)}
                           style={{
                             padding: '6px 12px',
                             fontSize: 11,
                           }}
                         >
-                          {isTidal ? 'Reconnect Tidal' : `Reconnect ${a.name}`}
+                          {`Reconnect ${a.name}`}
                         </button>
                       </>
                     ) : (
                       <button
                         type="button"
                         className="settings-btn"
-                        aria-label={isTidal ? 'Connect Tidal' : (authSpec?.label || `Connect ${a.name}`)}
-                        disabled={tidalAuth.status === 'starting'}
-                        onClick={() => void startTidalDeviceAuth(a)}
+                        aria-label={authSpec?.label || `Connect ${a.name}`}
+                        disabled={deviceAuth.status === 'starting'}
+                        onClick={() => void startDeviceAuth(a)}
                         style={{
                           padding: '6px 12px',
                           fontSize: 11,
                         }}
                       >
-                        {tidalAuth.status === 'starting' && tidalAuth.addonId === a.id
+                        {deviceAuth.status === 'starting' && deviceAuth.addonId === a.id
                           ? 'Connecting…'
-                          : tidalAuth.status === 'polling' && tidalAuth.addonId === a.id
+                          : deviceAuth.status === 'polling' && deviceAuth.addonId === a.id
                             ? 'Restart Pair'
-                            : isTidal
-                              ? 'Connect Tidal'
-                              : (authSpec?.label || `Connect ${a.name}`)}
+                            : (authSpec?.label || `Connect ${a.name}`)}
                       </button>
                     )}
                     {authSpec?.fields && authSpec.fields.length > 0 && (
@@ -796,13 +719,13 @@ export default function AddonsCard() {
 
                 {isCredsOrToken && (
                   <>
-                    {isQobuzAddon(a) && !isConnected && (
+                    {authSpec?.browserLogin && !isConnected && (
                       <button
                         type="button"
                         className="settings-btn addons-auth-btn"
-                        aria-label="Sign in to Qobuz with Browser"
+                        aria-label={`Sign in to ${a.name} with Browser`}
                         disabled={credBusy}
-                        onClick={() => void handleQobuzBrowserLogin(a)}
+                        onClick={() => void handleBrowserLogin(a)}
                         style={{ padding: '6px 12px', fontSize: 11 }}
                       >
                         {credBusy ? 'Opening Browser…' : 'Browser Login'}

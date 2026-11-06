@@ -196,6 +196,9 @@ pub struct AddonAuthSpec {
     pub help_text: Option<String>,
     #[serde(default)]
     pub fields: Vec<AddonAuthField>,
+    /// Host capability, never taken from the addon: set by `addons::info` for ids the app can drive.
+    #[serde(default, skip_deserializing, rename = "browserLogin")]
+    pub browser_login: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -223,93 +226,45 @@ fn http_url(s: &str) -> bool {
     s.len() <= 2048 && Url::parse(s).is_ok_and(|u| matches!(u.scheme(), "http" | "https"))
 }
 
-fn field(key: &str, label: &str, field_type: &str, placeholder: Option<&str>, required: Option<bool>) -> AddonAuthField {
-    AddonAuthField {
-        key: key.into(),
-        label: label.into(),
-        field_type: Some(field_type.into()),
-        placeholder: placeholder.map(Into::into),
-        required,
-    }
+/// Featured local cloud addons. `addons-sdk/cloud/featured.json` is shared with the Node adapter
+/// and the frontend catalog, so ids, ports and auth forms are defined once.
+#[derive(Deserialize)]
+pub(crate) struct Featured {
+    pub provider: String,
+    pub id: String,
+    pub name: String,
+    pub port: u16,
+    pub description: String,
+    pub resources: Vec<String>,
+    pub auth: AddonAuthSpec,
 }
 
-pub(crate) fn builtin_featured_manifest(base: &Url) -> Option<Manifest> {
+pub(crate) fn featured() -> &'static [Featured] {
+    static FEATURED: OnceLock<Vec<Featured>> = OnceLock::new();
+    FEATURED.get_or_init(|| {
+        serde_json::from_str(include_str!("../../../addons-sdk/cloud/featured.json")).expect("valid featured.json")
+    })
+}
+
+fn featured_for_base(base: &Url) -> Option<&'static Featured> {
     if !matches!(base.host_str(), Some("127.0.0.1") | Some("localhost")) {
         return None;
     }
-    let (id, name, description, auth) = match base.port() {
-        Some(7011) => (
-            "org.aideo.subsonic",
-            "Aideo subsonic",
-            "Personal cloud music server (Subsonic / Navidrome API)",
-            AddonAuthSpec {
-                auth_type: "credentials".into(),
-                label: Some("Connect Subsonic / Navidrome Server".into()),
-                help_text: None,
-                fields: vec![
-                    field("host", "Server URL", "url", Some("https://music.example.com"), Some(true)),
-                    field("user", "Username", "text", None, Some(true)),
-                    field("pass", "Password", "password", None, Some(true)),
-                ],
-            },
-        ),
-        Some(7012) => (
-            "org.aideo.jellyfin",
-            "Aideo jellyfin",
-            "Self-hosted Jellyfin media library",
-            AddonAuthSpec {
-                auth_type: "credentials".into(),
-                label: Some("Connect Jellyfin Server".into()),
-                help_text: None,
-                fields: vec![
-                    field("host", "Server URL", "url", Some("https://jellyfin.example.com"), Some(true)),
-                    field("apiKey", "API Key", "password", None, Some(true)),
-                    field("userId", "User ID (Optional)", "text", None, None),
-                ],
-            },
-        ),
-        Some(7013) => (
-            "org.aideo.tidal",
-            "Aideo tidal",
-            "Lossless & Hi-Res FLAC streaming with OAuth Device Login",
-            AddonAuthSpec {
-                auth_type: "device_code".into(),
-                label: Some("Connect Tidal Account".into()),
-                help_text: Some("Sign in with your Tidal account via device code or paste an OAuth token.".into()),
-                fields: vec![
-                    field("clientId", "Client ID (Optional)", "text", None, None),
-                    field("clientSecret", "Client Secret (Optional)", "password", None, None),
-                    field("accessToken", "Access Token (Optional)", "password", None, None),
-                ],
-            },
-        ),
-        Some(7014) => (
-            "org.aideo.qobuz",
-            "Aideo qobuz",
-            "24-bit / 192 kHz Studio Masters streaming",
-            AddonAuthSpec {
-                auth_type: "credentials".into(),
-                label: Some("Connect Qobuz Account".into()),
-                help_text: None,
-                fields: vec![
-                    field("appId", "App ID", "text", None, Some(true)),
-                    field("userAuthToken", "User Auth Token (or use Email + Password below)", "password", None, None),
-                    field("email", "Email / Username", "text", None, None),
-                    field("password", "Password", "password", None, None),
-                ],
-            },
-        ),
-        _ => return None,
-    };
+    let port = base.port()?;
+    featured().iter().find(|entry| entry.port == port)
+}
+
+pub(crate) fn builtin_featured_manifest(base: &Url) -> Option<Manifest> {
+    let entry = featured_for_base(base)?;
     Some(Manifest {
-        id: id.into(),
-        name: name.into(),
+        id: entry.id.clone(),
+        name: entry.name.clone(),
         version: "1.0.0".into(),
-        description: Some(description.into()),
+        description: Some(entry.description.clone()),
         icon: None,
-        resources: vec!["search".into(), "stream".into()],
+        resources: entry.resources.clone(),
         content_type: Some("music".into()),
-        auth: Some(auth),
+        auth: Some(entry.auth.clone()),
     })
 }
 
@@ -326,14 +281,8 @@ pub(crate) fn ensure_local_cloud_server(base: &Url) {
         if !matches!(base.host_str(), Some("127.0.0.1") | Some("localhost")) {
             return;
         }
-        let Some(port) = base.port() else { return };
-        let provider = match port {
-            7011 => "subsonic",
-            7012 => "jellyfin",
-            7013 => "tidal",
-            7014 => "qobuz",
-            _ => return,
-        };
+        let Some(entry) = featured_for_base(base) else { return };
+        let (provider, port) = (entry.provider.as_str(), entry.port);
         let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
         if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
             return;
@@ -851,7 +800,10 @@ mod tests {
     }
 
     #[test]
-    fn builtin_featured_manifests_cover_all_four_local_cloud_ports() {
+    fn featured_manifests_come_from_the_shared_catalog() {
+        let catalog = featured();
+        assert_eq!(catalog.len(), 4);
+        assert_eq!(catalog.iter().map(|f| f.port).collect::<std::collections::HashSet<_>>().len(), 4);
         for (port, expected_id, expected_auth_type) in [
             (7011, "org.aideo.subsonic", "credentials"),
             (7012, "org.aideo.jellyfin", "credentials"),
@@ -861,13 +813,24 @@ mod tests {
             let u = Url::parse(&format!("http://127.0.0.1:{port}")).unwrap();
             let m = builtin_featured_manifest(&u).expect("featured manifest");
             assert_eq!(m.id, expected_id);
+            assert!(super::super::valid_addon_id(&m.id));
             assert!(m.description.is_some());
             assert_eq!(m.resources, vec!["search", "stream"]);
             let auth = m.auth.expect("auth spec");
             assert_eq!(auth.auth_type, expected_auth_type);
             assert!(!auth.fields.is_empty());
+            assert!(!auth.browser_login, "browser login is a host capability, not part of the catalog");
         }
         assert!(builtin_featured_manifest(&Url::parse("http://127.0.0.1:9999").unwrap()).is_none());
         assert!(builtin_featured_manifest(&Url::parse("https://example.com:7011").unwrap()).is_none());
+    }
+
+    #[test]
+    fn addon_supplied_manifest_cannot_enable_browser_login() {
+        let m: Manifest = serde_json::from_str(
+            r#"{"id":"com.evil.qobuz","name":"x","version":"1","resources":["search","stream"],
+                "auth":{"type":"credentials","browserLogin":true}}"#,
+        ).unwrap();
+        assert!(!m.auth.unwrap().browser_login);
     }
 }
