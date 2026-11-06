@@ -5,16 +5,24 @@ fn main() {
 
     let _ = dotenvy::dotenv();
     
-    // Pass Last.fm keys to the compiler so env! can see them
-    if let Ok(key) = std::env::var("LASTFM_API_KEY") {
-        println!("cargo:rustc-env=LASTFM_API_KEY={}", key);
-    }
-    if let Ok(secret) = std::env::var("LASTFM_API_SECRET") {
-        println!("cargo:rustc-env=LASTFM_API_SECRET={}", secret);
-    }
+    write_lastfm_keys();
 
     ensure_sidecar();
     tauri_build::build()
+}
+
+/// Bakes the Last.fm keys into the binary through a generated file in OUT_DIR. They deliberately do not go through
+/// `cargo:rustc-env=KEY=value`: cargo prints build-script output on a failed build and with `-vv`, which put the
+/// real key and secret into terminals, CI logs and shared transcripts.
+fn write_lastfm_keys() {
+    let constant = |name: &str, var: &str| match std::env::var(var) {
+        // `{:?}` yields a valid, escaped Rust string literal.
+        Ok(value) if !value.is_empty() => format!("pub const {name}: Option<&str> = Some({value:?});\n"),
+        _ => format!("pub const {name}: Option<&str> = None;\n"),
+    };
+    let out_dir = std::env::var("OUT_DIR").expect("cargo sets OUT_DIR");
+    let contents = constant("API_KEY", "LASTFM_API_KEY") + &constant("API_SECRET", "LASTFM_API_SECRET");
+    std::fs::write(std::path::Path::new(&out_dir).join("lastfm_keys.rs"), contents).expect("write lastfm_keys.rs");
 }
 
 /// Tauri refuses to build when a configured `externalBin` file is missing, which would break `cargo check` and

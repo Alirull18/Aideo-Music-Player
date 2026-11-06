@@ -5,7 +5,7 @@ const API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 
 fn get_api_key() -> String {
     env::var("LASTFM_API_KEY")
-        .unwrap_or_else(|_| option_env!("LASTFM_API_KEY").unwrap_or("YOUR_LASTFM_API_KEY").to_string())
+        .unwrap_or_else(|_| crate::lastfm::build_keys::API_KEY.unwrap_or("YOUR_LASTFM_API_KEY").to_string())
 }
 
 /// 🎵 Fetch similar tracks for a given track from Last.fm's collaborative scrobble database
