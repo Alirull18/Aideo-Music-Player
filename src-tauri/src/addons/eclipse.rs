@@ -268,67 +268,14 @@ pub(crate) fn builtin_featured_manifest(base: &Url) -> Option<Manifest> {
     })
 }
 
-/// Development convenience only: starts `addons-sdk/cloud/server.mjs` with Node when the app runs
-/// from a repository checkout. Release builds never execute scripts from the working directory.
+/// Starts the local adapter behind a featured loopback addon (bundled executable, or Node in debug builds).
 pub(crate) fn ensure_local_cloud_server(base: &Url) {
-    #[cfg(any(test, not(debug_assertions)))]
-    {
-        let _ = base;
-        return;
+    #[cfg(not(test))]
+    if let Some(entry) = featured_for_base(base) {
+        super::sidecar::ensure_running(&entry.provider, entry.port);
     }
-    #[cfg(all(not(test), debug_assertions))]
-    {
-        if !matches!(base.host_str(), Some("127.0.0.1") | Some("localhost")) {
-            return;
-        }
-        let Some(entry) = featured_for_base(base) else { return };
-        let (provider, port) = (entry.provider.as_str(), entry.port);
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-        if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
-            return;
-        }
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let candidates = [
-            cwd.join("addons-sdk").join("cloud").join("server.mjs"),
-            cwd.join("..").join("addons-sdk").join("cloud").join("server.mjs"),
-        ];
-        let Some(server_mjs) = candidates.into_iter().find(|p| p.is_file()) else {
-            return;
-        };
-        let mut cmd = std::process::Command::new("node");
-        if let Some(dir) = server_mjs.parent() {
-            let env_file = dir.join(format!("{provider}.env"));
-            if env_file.is_file() {
-                cmd.arg(format!("--env-file={}", env_file.display()));
-            }
-        }
-        if let Some(session_file) = dirs::data_dir().map(|d| d.join("Aideo").join("addon-sessions").join(format!("{provider}.json"))) {
-            if let Some(parent) = session_file.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            cmd.env("SESSION_FILE", session_file);
-        }
-        cmd.arg(&server_mjs)
-            .env("PROVIDER", provider)
-            .env("PORT", port.to_string())
-            .env("ALLOW_UNCONFIGURED", "1")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000);
-        }
-        if cmd.spawn().is_ok() {
-            for _ in 0..20 {
-                if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_ok() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
+    #[cfg(test)]
+    let _ = base;
 }
 
 pub(crate) async fn fetch_manifest(c: &reqwest::Client, base: &Url) -> Result<Manifest, String> {

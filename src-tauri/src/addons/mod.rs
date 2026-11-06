@@ -2,6 +2,7 @@
 //! (which may embed a user token) lives in the OS keyring and is never sent to the frontend.
 pub mod eclipse;
 pub mod lyrics;
+pub mod sidecar;
 
 use crate::{safe_lock, AppState};
 use serde::Serialize;

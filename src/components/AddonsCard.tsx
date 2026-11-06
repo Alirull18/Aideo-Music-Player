@@ -438,11 +438,9 @@ export default function AddonsCard() {
   const coreAddons = addons.filter(isCore);
   const externalAddons = addons.filter((a) => !isCore(a));
   const installedIds = new Set(addons.map((a) => a.id.toLowerCase()));
-  // The featured cloud addons talk to a local Node server (addons-sdk/cloud) that only dev builds
-  // can start. Offering them in a release build lets users "install" something that cannot connect.
-  const uninstalledFeatured = import.meta.env.DEV
-    ? FEATURED_ADDON_CATALOG.filter((item) => !installedIds.has(item.id.toLowerCase()))
-    : [];
+  // The featured cloud addons run as a local sidecar process (addons-sdk/cloud) that the app bundles and starts
+  // on demand, in release and dev builds alike.
+  const uninstalledFeatured = FEATURED_ADDON_CATALOG.filter((item) => !installedIds.has(item.id.toLowerCase()));
 
   const renderAddonCard = (a: AddonInfo) => {
     const core = isCore(a);
