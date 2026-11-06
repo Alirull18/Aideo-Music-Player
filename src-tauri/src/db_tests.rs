@@ -586,4 +586,125 @@ mod tests {
         drop(writer_conn);
         let _ = std::fs::remove_file(&db_path);
     }
+    fn migration_db_path(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "aideo-migration-{tag}-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ))
+    }
+
+    fn remove_db(path: &std::path::Path) {
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+    }
+
+    fn user_version(conn: &rusqlite::Connection) -> i64 {
+        conn.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn init_db_stamps_the_schema_version_and_is_idempotent() {
+        let path = migration_db_path("stamp");
+        let path_str = path.to_str().unwrap();
+
+        let conn = init_db(path_str).unwrap();
+        assert_eq!(user_version(&conn), crate::db::SCHEMA_VERSION);
+        drop(conn);
+
+        let again = init_db(path_str).unwrap();
+        assert_eq!(user_version(&again), crate::db::SCHEMA_VERSION, "reopening keeps the version");
+        drop(again);
+        remove_db(&path);
+    }
+
+    #[test]
+    fn init_db_refuses_a_database_written_by_a_newer_app() {
+        let path = migration_db_path("newer");
+        let path_str = path.to_str().unwrap();
+        {
+            let conn = init_db(path_str).unwrap();
+            conn.execute_batch(&format!("PRAGMA user_version = {}", crate::db::SCHEMA_VERSION + 1)).unwrap();
+        }
+
+        let error = init_db(path_str).unwrap_err().to_string();
+        assert!(error.contains("newer"), "unexpected error: {error}");
+
+        let conn = rusqlite::Connection::open(path_str).unwrap();
+        assert_eq!(user_version(&conn), crate::db::SCHEMA_VERSION + 1, "a refused database is left untouched");
+        drop(conn);
+        remove_db(&path);
+    }
+
+    #[test]
+    fn a_database_from_before_versioning_is_upgraded_in_place() {
+        let path = migration_db_path("legacy");
+        let path_str = path.to_str().unwrap();
+        {
+            // The oldest playback_history shape: none of the later columns, and user_version still 0.
+            let conn = rusqlite::Connection::open(path_str).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE playback_history (id INTEGER PRIMARY KEY AUTOINCREMENT, track_path TEXT NOT NULL, timestamp INTEGER NOT NULL);
+                 INSERT INTO playback_history (track_path, timestamp) VALUES ('kept', 7);",
+            ).unwrap();
+            assert_eq!(user_version(&conn), 0);
+        }
+
+        let conn = init_db(path_str).unwrap();
+        for column in ["synced", "genre", "playback_source", "sample_rate", "bit_depth", "bit_perfect", "completion_rate"] {
+            assert!(column_exists(&conn, "playback_history", column), "missing column {column}");
+        }
+        let kept: i64 = conn.query_row("SELECT timestamp FROM playback_history WHERE track_path = 'kept'", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 7, "existing rows survive the upgrade");
+        assert_eq!(user_version(&conn), crate::db::SCHEMA_VERSION);
+        drop(conn);
+        remove_db(&path);
+    }
+
+    #[test]
+    fn migration_failures_are_reported_instead_of_swallowed() {
+        let path = migration_db_path("blocked");
+        let path_str = path.to_str().unwrap();
+        {
+            // A view cannot gain columns, so the playback_history migration cannot succeed.
+            let conn = rusqlite::Connection::open(path_str).unwrap();
+            conn.execute_batch("CREATE VIEW playback_history AS SELECT 1 AS id, 'x' AS track_path, 1 AS timestamp;").unwrap();
+        }
+
+        assert!(init_db(path_str).is_err(), "a migration that cannot run must fail startup, not be ignored");
+        let conn = rusqlite::Connection::open(path_str).unwrap();
+        assert_eq!(user_version(&conn), 0, "a failed migration does not stamp the version");
+        drop(conn);
+        remove_db(&path);
+    }
+
+    #[test]
+    fn add_missing_columns_is_idempotent_and_reports_real_failures() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE history (id INTEGER PRIMARY KEY, kept TEXT)").unwrap();
+        conn.execute("INSERT INTO history (kept) VALUES ('row')", []).unwrap();
+
+        let columns = [("kept", "TEXT"), ("added", "INTEGER DEFAULT 0")];
+        crate::db::add_missing_columns(&conn, "history", &columns).unwrap();
+        crate::db::add_missing_columns(&conn, "history", &columns).unwrap(); // already there: not an error
+        assert!(column_exists(&conn, "history", "added"));
+        let kept: String = conn.query_row("SELECT kept FROM history", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, "row");
+
+        // The old `let _ =` hid this: there is no such table, so the column can never be added.
+        assert!(crate::db::add_missing_columns(&conn, "no_such_table", &[("x", "INTEGER")]).is_err());
+    }
+
+    #[test]
+    fn create_indexes_reports_a_statement_that_cannot_run() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (a TEXT)").unwrap();
+
+        crate::db::create_indexes(&conn, &["CREATE INDEX IF NOT EXISTS idx_t_a ON t(a)"]).unwrap();
+        crate::db::create_indexes(&conn, &["CREATE INDEX IF NOT EXISTS idx_t_a ON t(a)"]).unwrap();
+        let error = crate::db::create_indexes(&conn, &["CREATE INDEX IF NOT EXISTS idx_t_b ON t(b_missing)"]);
+        assert!(error.is_err(), "an index over a missing column must not pass silently");
+    }
+
 }
