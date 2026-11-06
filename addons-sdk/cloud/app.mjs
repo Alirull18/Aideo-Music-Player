@@ -1,5 +1,6 @@
 // Node >=22. Run: node --env-file=your-private.env addons-sdk/cloud/server.mjs
 // See the provider .env.example files for server-only credential names.
+import { createHmac } from 'node:crypto';
 import { createServer as httpServer } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -20,7 +21,10 @@ export function loadConfig(env = process.env) {
   if (!impl) throw new Error(`No adapter registered for ${featured.provider}`);
   const port = Number(env.PORT ?? featured.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be between 1 and 65535');
-  return Object.freeze({ ...impl.loadConfig(env, featured), port });
+  // The desktop app passes a per-launch secret so it can tell this process from anything else holding the port.
+  const sidecarSecret = typeof env.AIDEO_SIDECAR_SECRET === 'string' && env.AIDEO_SIDECAR_SECRET.length >= 32
+    ? env.AIDEO_SIDECAR_SECRET : '';
+  return Object.freeze({ ...impl.loadConfig(env, featured), port, sidecarSecret });
 }
 
 export function manifestFor(provider) {
@@ -168,6 +172,12 @@ export function createServer(config, fetchUpstream = fetch) {
     if (path === '/auth/status') {
       const status = adapter.status ? await adapter.status() : { ok: true, authenticated: true };
       send(response, 200, status); return;
+    }
+    if (path === '/sidecar-proof' && config.sidecarSecret) {
+      // Proof of possession of the launch secret: HMAC-SHA256(secret, nonce). The secret itself is never sent.
+      const nonce = new URL(request.url, base).searchParams.get('nonce') ?? '';
+      if (!/^[0-9a-f]{16,128}$/.test(nonce)) throw invalid();
+      send(response, 200, { proof: createHmac('sha256', config.sidecarSecret).update(nonce).digest('hex') }); return;
     }
     if (path === '/health') { await adapter.ping(); send(response, 200, { ok: true }); return; }
     if (path === '/search') {

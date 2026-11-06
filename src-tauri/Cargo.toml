@@ -81,6 +81,7 @@ keyring = { version = "3.0.0", features = ["windows-native", "apple-native", "li
 chromaprint-next = "0.1.0"
 tokio-tungstenite = "0.29.0"
 sha2 = "0.10"
+hmac = "0.12"
 hex = "0.4"
 rayon = "1.10"
 dunce = "1.0"

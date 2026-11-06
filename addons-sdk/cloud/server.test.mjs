@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { once } from 'node:events';
 import { request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -377,4 +377,75 @@ test('device auth is a Tidal-only capability declared by the adapter', async t =
       assert.deepEqual(await res.json(), { error: 'Invalid request' });
     }
   }
+});
+
+const SECRET = 'a'.repeat(64);
+const NONCE = 'b'.repeat(32);
+
+test('sidecar proof lets the app tell its own child from a process that merely holds the port', async t => {
+  const base = await serve(t, { ...subsonic, AIDEO_SIDECAR_SECRET: SECRET }, async () => json({}));
+  const body = await (await fetch(`${base}/sidecar-proof?nonce=${NONCE}`)).json();
+  assert.equal(body.proof, createHmac('sha256', SECRET).update(NONCE).digest('hex'));
+  assert.notEqual(body.proof, createHmac('sha256', 'c'.repeat(64)).update(NONCE).digest('hex'));
+
+  for (const bad of ['', 'zz', 'a'.repeat(15), 'a'.repeat(129), 'not-hex-not-hex-not-hex-not-hex-']) {
+    assert.equal((await fetch(`${base}/sidecar-proof?nonce=${bad}`)).status, 400, `nonce ${JSON.stringify(bad)}`);
+  }
+  assert.equal((await fetch(`${base}/sidecar-proof`)).status, 400);
+});
+
+test('sidecar proof is absent without a secret and never exposes it', async t => {
+  const plain = await serve(t, subsonic, async () => json({}));
+  assert.equal((await fetch(`${plain}/sidecar-proof?nonce=${NONCE}`)).status, 404);
+
+  assert.equal(loadConfig({ ...subsonic, AIDEO_SIDECAR_SECRET: 'short' }).sidecarSecret, '', 'weak secrets are ignored');
+  const base = await serve(t, { ...subsonic, AIDEO_SIDECAR_SECRET: SECRET }, async () => json({}));
+  for (const path of ['/manifest.json', '/auth/status', `/sidecar-proof?nonce=${NONCE}`]) {
+    assert.ok(!(await (await fetch(`${base}${path}`)).text()).includes(SECRET), path);
+  }
+});
+
+test('with AIDEO_EXIT_WITH_PARENT the adapter exits when its stdin closes (parent died)', async t => {
+  const serverFile = fileURLToPath(new URL('./server.mjs', import.meta.url));
+  const probe = createServer(loadConfig(subsonic));
+  probe.listen(0, '127.0.0.1');
+  await once(probe, 'listening');
+  const port = probe.address().port;
+  await new Promise(resolve => probe.close(resolve));
+
+  const child = spawn(process.execPath, [serverFile], {
+    env: { ...process.env, ...subsonic, PORT: String(port), AIDEO_EXIT_WITH_PARENT: '1' }, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  t.after(() => { child.kill(); });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('adapter failed to start')), 5000);
+    child.stdout.once('data', () => { clearTimeout(timer); resolve(); });
+    child.once('exit', () => { clearTimeout(timer); reject(new Error('adapter exited before startup')); });
+  });
+  assert.equal(child.exitCode, null, 'stays up while the parent holds stdin open');
+  child.stdin.end();
+  const [code] = await Promise.race([
+    once(child, 'exit'),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('adapter outlived its parent')), 5000)),
+  ]);
+  assert.equal(code, 0);
+});
+
+test('without AIDEO_EXIT_WITH_PARENT a closed stdin does not stop the adapter', async t => {
+  const serverFile = fileURLToPath(new URL('./server.mjs', import.meta.url));
+  const probe = createServer(loadConfig(subsonic));
+  probe.listen(0, '127.0.0.1');
+  await once(probe, 'listening');
+  const port = probe.address().port;
+  await new Promise(resolve => probe.close(resolve));
+  const child = spawn(process.execPath, [serverFile], {
+    env: { ...process.env, ...subsonic, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => { child.kill(); });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('adapter failed to start')), 5000);
+    child.stdout.once('data', () => { clearTimeout(timer); resolve(); });
+  });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(child.exitCode, null);
 });

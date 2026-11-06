@@ -168,6 +168,14 @@ per provider on its own port. Release builds bundle the adapter with Node as a s
 (about 88 MB, built by `npm run build:sidecar`, see `scripts/build-sidecar.mjs`). The app starts the right process on demand
 and stops them when it exits. Debug builds use the bundled executable if you built it, and otherwise run
 `node addons-sdk/cloud/server.mjs` from the checkout. Release builds never run scripts from the working directory.
+
+The featured ports are fixed, so the app checks that whatever answers on one is the process it started. It gives each
+adapter a random per-launch secret (`AIDEO_SIDECAR_SECRET`) and, before trusting the port, sends a fresh nonce to
+`GET /sidecar-proof?nonce=<hex>`; the adapter must reply `{ "proof": HMAC-SHA256(secret, nonce) }` in hex. If another
+program holds the port, the app refuses with "Port N is already in use by another program" instead of sending it
+credentials. While the app runs it keeps each adapter's stdin open, and an adapter started with `AIDEO_EXIT_WITH_PARENT=1`
+exits when that pipe closes, so a crashed app does not leave adapters behind. In a debug build you can run your own
+adapter on a featured port by setting `AIDEO_TRUST_EXTERNAL_ADDON_SERVERS=1`; release builds ignore that variable.
 Prefer an [external addon](#quick-start) unless the adapter needs to live here.
 
 1. **Catalog entry**: add the provider to `addons-sdk/cloud/featured.json` (`provider`, `id`, `name`, a unique `port`,

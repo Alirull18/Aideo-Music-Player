@@ -269,17 +269,21 @@ pub(crate) fn builtin_featured_manifest(base: &Url) -> Option<Manifest> {
 }
 
 /// Starts the local adapter behind a featured loopback addon (bundled executable, or Node in debug builds).
-pub(crate) fn ensure_local_cloud_server(base: &Url) {
+///
+/// Fails when another program holds the addon's port or the listener cannot prove it is the process this app started,
+/// so credentials and requests are never sent to an impostor.
+pub(crate) fn ensure_local_cloud_server(base: &Url) -> Result<(), String> {
     #[cfg(not(test))]
     if let Some(entry) = featured_for_base(base) {
-        super::sidecar::ensure_running(&entry.provider, entry.port);
+        return super::sidecar::ensure_running(&entry.provider, entry.port);
     }
     #[cfg(test)]
     let _ = base;
+    Ok(())
 }
 
 pub(crate) async fn fetch_manifest(c: &reqwest::Client, base: &Url) -> Result<Manifest, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     let m: Manifest = match get_json(c, endpoint(base, &["manifest.json"]), INSTALL_BUDGET).await {
         Ok(m) => m,
         Err(e) => {
@@ -364,7 +368,7 @@ fn non_empty(s: &str, max: usize) -> Option<String> {
 }
 
 pub(crate) async fn search(c: &reqwest::Client, addon_id: &str, base: &Url, q: &str) -> Result<Vec<AddonTrack>, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     let mut u = endpoint(base, &["search"]);
     u.query_pairs_mut().append_pair("q", q);
     let res: SearchResponse = get_json(c, u, SEARCH_BUDGET).await?;
@@ -490,7 +494,7 @@ pub(crate) async fn resolve(
     track_id: &str,
     requested_quality: Option<crate::sources::StreamingQuality>,
 ) -> Result<ResolvedStream, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     let mut req_url = endpoint(base, &["stream", track_id]);
     if let Some(q) = requested_quality {
         let q_str = match q {
@@ -547,17 +551,17 @@ async fn send_auth_json(req: reqwest::RequestBuilder, budget: Duration) -> Resul
 }
 
 pub(crate) async fn auth_status(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     send_auth_json(c.get(endpoint(base, &["auth", "status"])), MANIFEST_BUDGET).await
 }
 
 pub(crate) async fn auth_start_device(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     send_auth_json(c.post(endpoint(base, &["auth", "device"])), MANIFEST_BUDGET).await
 }
 
 pub(crate) async fn auth_poll_device(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     send_auth_json(c.post(endpoint(base, &["auth", "poll"])), MANIFEST_BUDGET).await
 }
 
@@ -566,7 +570,7 @@ pub(crate) async fn auth_login(
     base: &Url,
     credentials: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     let req = c
         .post(endpoint(base, &["auth", "login"]))
         .json(&serde_json::json!({ "credentials": credentials }));
@@ -574,7 +578,7 @@ pub(crate) async fn auth_login(
 }
 
 pub(crate) async fn auth_logout(c: &reqwest::Client, base: &Url) -> Result<serde_json::Value, String> {
-    ensure_local_cloud_server(base);
+    ensure_local_cloud_server(base)?;
     send_auth_json(c.post(endpoint(base, &["auth", "logout"])), MANIFEST_BUDGET).await
 }
 

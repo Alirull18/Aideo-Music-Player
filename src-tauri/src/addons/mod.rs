@@ -129,7 +129,8 @@ pub async fn addon_list(state: State<'_, AppState>) -> Result<Vec<AddonInfo>, St
     for row in rows {
         let (json, origin) = row.map_err(|e| e.to_string())?;
         if let Ok(u) = url::Url::parse(&origin) {
-            eclipse::ensure_local_cloud_server(&u);
+            // Listing must not fail because a featured port is taken; the error surfaces when the addon is used.
+            let _ = eclipse::ensure_local_cloud_server(&u);
         }
         if let Ok(manifest) = serde_json::from_str::<eclipse::Manifest>(&json) {
             entries.push(info(manifest, origin));
@@ -340,7 +341,7 @@ pub async fn addon_open_browser_login(
         return Err("Browser login is not available for this addon".into());
     }
     let base = require_installed_base(&state, &addon_id)?;
-    eclipse::ensure_local_cloud_server(&base);
+    eclipse::ensure_local_cloud_server(&base)?;
 
     let label = "addon-qobuz-login";
     if let Some(win) = app_handle.get_webview_window(label) {
