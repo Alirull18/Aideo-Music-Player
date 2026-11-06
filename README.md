@@ -420,6 +420,14 @@ Aideo is built on top of amazing open-source projects, libraries, and community 
 
 ---
 
+## 🤝 Contributing
+
+Contributions are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the checks every pull request must pass, and how to report a security issue privately.
+
+Want to add a music source, lyrics provider or translator? Addons are small HTTP servers that need no changes to this repository. See the [addon development guide](docs/ADDON_DEVELOPMENT.md) and the working example in [`addons-sdk/example/`](addons-sdk/example/).
+
+---
+
 ## 📄 License & Brand Policy
 
 * **Code License:** Distributed under the [GNU General Public License v3.0 (GPLv3)](LICENSE). All derivative works and forks must remain open-source under GPLv3.
