@@ -115,6 +115,21 @@ async fn translation_with_timeout(
 /// Manifest resource name for translation addons; must match `builtins()` and `eclipse.rs`.
 const TRANSLATE_RESOURCE: &str = "translate";
 
+fn kugou_search_url(query: &str) -> String {
+    format!(
+        "https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword={}&duration=&hash=",
+        urlencoding::encode(query)
+    )
+}
+
+fn kugou_download_url(id: &str, accesskey: &str) -> String {
+    format!(
+        "https://lyrics.kugou.com/download?ver=1&client=pc&id={}&accesskey={}&fmt=krc&charset=utf8",
+        urlencoding::encode(id),
+        urlencoding::encode(accesskey)
+    )
+}
+
 fn external_addons(state: &AppState, resource: &str) -> Vec<EclipseLyricsAddon> {
     super::enabled_bases(state, resource)
         .into_iter()
@@ -439,11 +454,7 @@ pub async fn get_kugou_krc(id: String, accesskey: String) -> Result<String, Stri
     }
     let client = get_http_client();
     let timeout_dur = std::time::Duration::from_millis(3500);
-    let url = format!(
-        "https://lyrics.kugou.com/download?ver=1&client=pc&id={}&accesskey={}&fmt=krc&charset=utf8",
-        urlencoding::encode(&id),
-        urlencoding::encode(&accesskey)
-    );
+    let url = kugou_download_url(&id, &accesskey);
 
     let fetch_fut = async {
         let resp = client
@@ -722,10 +733,7 @@ async fn search_internal(
     let kugou_song_fallback = song.clone();
     let kugou_fut = async {
         let mut results = Vec::new();
-        let kugou_url = format!(
-            "http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword={}&duration=&hash=",
-            urlencoding::encode(&kugou_search_query)
-        );
+        let kugou_url = kugou_search_url(&kugou_search_query);
         if let Ok(res) = client
             .get(&kugou_url)
             .header("User-Agent", "KuGou/10000")
@@ -742,11 +750,7 @@ async fn search_internal(
                         let dur = cand["duration"].as_f64().map(|ms| ms / 1000.0);
 
                         if !accesskey.is_empty() {
-                            let d_url = format!(
-                                "http://lyrics.kugou.com/download?ver=1&client=pc&id={}&accesskey={}&fmt=krc&charset=utf8",
-                                urlencoding::encode(&id),
-                                urlencoding::encode(&accesskey)
-                            );
+                            let d_url = kugou_download_url(&id, &accesskey);
                             if let Ok(d_res) = client
                                 .get(&d_url)
                                 .header("User-Agent", "KuGou/10000")
@@ -1086,6 +1090,18 @@ pub fn get_desktop_lyrics_status(app_handle: AppHandle) -> Result<bool, String> 
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn kugou_requests_use_https_and_encode_their_parameters() {
+        let search = kugou_search_url("adele & hello");
+        assert!(search.starts_with("https://lyrics.kugou.com/search?"), "{search}");
+        assert!(search.contains("keyword=adele%20%26%20hello"), "{search}");
+
+        let download = kugou_download_url("12 3", "key&x=1");
+        assert!(download.starts_with("https://lyrics.kugou.com/download?"), "{download}");
+        assert!(download.contains("id=12%203&accesskey=key%26x%3D1&"), "{download}");
+        assert!(!download.contains("&x=1"), "an access key must not inject query parameters");
+    }
 
     #[test]
     fn external_lyrics_prefer_synced_text_and_reject_empty_or_oversized() {
