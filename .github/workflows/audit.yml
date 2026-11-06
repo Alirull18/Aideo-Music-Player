@@ -1,0 +1,59 @@
+name: "Dependency Audit"
+
+# Advisories are published without any change to this repository, so besides pull requests and pushes that touch a
+# lockfile this also runs weekly. Accepted exceptions live in src-tauri/.cargo/audit.toml, each with a reason.
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/.cargo/audit.toml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/.cargo/audit.toml"
+      - ".github/workflows/audit.yml"
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: npm audit (high and critical fail the build)
+        run: npm audit --audit-level=high
+
+  cargo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit (known vulnerabilities fail the build; unmaintained crates only warn)
+        working-directory: src-tauri
+        run: cargo audit

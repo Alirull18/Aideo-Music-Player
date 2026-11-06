@@ -1,0 +1,19 @@
+# Read by `cargo audit` when run from src-tauri (see .github/workflows/audit.yml).
+# Every entry needs a reason that can be re-checked. Remove an entry as soon as its reason stops being true.
+
+[advisories]
+ignore = [
+    # ringbuf 0.2.8: double free / use-after-free in Consumer::skip and Consumer::clear, but only when an element's
+    # Drop panics. Our ring buffers carry plain f32 samples (player/output.rs, player/mod.rs), which have no Drop.
+    # Moving to ringbuf 0.5 changes the audio hot-path API and needs hardware verification; do it as its own change.
+    "RUSTSEC-2026-0293",
+
+    # wasapi 0.23.0: WaveFormat::parse can read past the end of a WAVEFORMATEX. Aideo never calls it on caller-supplied
+    # memory; formats come from the OS (get_mixformat / is_supported). Upgrading to >=0.25 changes the WASAPI engine
+    # API and needs exclusive-mode verification on real devices.
+    "RUSTSEC-2026-0332",
+
+    # glib 0.18.5: unsound VariantStrIter. Only compiled for Linux (Tauri's GTK backend); the app ships for Windows.
+    # Fixed upstream once Tauri moves to GTK4.
+    "RUSTSEC-2024-0429",
+]
