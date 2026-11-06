@@ -5,7 +5,8 @@ import { request as httpRequest } from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { createAdapter, createServer, loadConfig } from './server.mjs';
+import { createAdapter, createServer, FEATURED, loadConfig, manifestFor } from './server.mjs';
+import { PROVIDERS } from './providers.mjs';
 
 const subsonic = {
   PROVIDER: 'subsonic', SUBSONIC_URL: 'http://music.test/base/',
@@ -335,5 +336,45 @@ test('ALLOW_UNCONFIGURED=1 starts all 4 providers without pre-set credentials an
     assert.equal(status.ok, true);
     assert.equal(status.provider, provider);
     assert.equal(status.authenticated, false);
+  }
+});
+
+test('featured.json is the single source for provider ids, ports and manifests', () => {
+  assert.deepEqual(FEATURED.map(entry => entry.provider).sort(), ['jellyfin', 'qobuz', 'subsonic', 'tidal']);
+  assert.equal(new Set(FEATURED.map(entry => entry.port)).size, FEATURED.length);
+  for (const entry of FEATURED) {
+    assert.match(entry.id, /^org\.aideo\.[a-z]+$/);
+    assert.equal(loadConfig({ PROVIDER: entry.provider, ALLOW_UNCONFIGURED: '1' }).port, entry.port);
+    const manifest = manifestFor(entry.provider);
+    assert.equal(manifest.id, entry.id);
+    assert.equal(manifest.name, entry.name);
+    assert.deepEqual(manifest.auth, entry.auth);
+  }
+});
+
+test('every featured provider has a registered adapter and no adapter is unlisted', () => {
+  assert.deepEqual(Object.keys(PROVIDERS).sort(), FEATURED.map(entry => entry.provider).sort());
+  for (const [provider, impl] of Object.entries(PROVIDERS)) {
+    assert.equal(typeof impl.loadConfig, 'function', provider);
+    assert.equal(typeof impl.createAdapter, 'function', provider);
+    const config = loadConfig({ PROVIDER: provider, ALLOW_UNCONFIGURED: '1' });
+    assert.equal(config.provider, provider);
+    assert.equal(typeof createAdapter(config, async () => json({})).status, 'function', provider);
+  }
+});
+
+test('device auth is a Tidal-only capability declared by the adapter', async t => {
+  const tidal = createAdapter(loadConfig({ PROVIDER: 'tidal', TIDAL_ACCESS_TOKEN: 'authorized-token', TIDAL_COUNTRY_CODE: 'US' }), async () => json({}));
+  assert.equal(tidal.supportsDeviceAuth, true);
+  assert.match(tidal.deviceAuthHint, /Credentials/);
+
+  for (const env of [{ PROVIDER: 'qobuz', ALLOW_UNCONFIGURED: '1' }, { PROVIDER: 'subsonic', ALLOW_UNCONFIGURED: '1' }]) {
+    assert.ok(!createAdapter(loadConfig(env), async () => json({})).supportsDeviceAuth, env.PROVIDER);
+    const base = await serve(t, env, async () => json({}));
+    for (const path of ['/auth/device', '/auth/poll']) {
+      const res = await fetch(`${base}${path}`, { method: 'POST' });
+      assert.equal(res.status, 400, `${env.PROVIDER}${path}`);
+      assert.deepEqual(await res.json(), { error: 'Invalid request' });
+    }
   }
 });

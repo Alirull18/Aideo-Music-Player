@@ -1,33 +1,11 @@
 // Authorized-token subset of HEAD tidal.rs/qobuz.rs: search, quality fallback and signed streams.
 // ponytail: supply/rotate your own authorized tokens; add server-side OAuth refresh when unattended use requires it.
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { invalid, readJson, upstreamError, validateCatalog } from './http.mjs';
+import { readSessionFile, writeSessionFile } from './session.mjs';
 
 const DEFAULT_TIDAL_CLIENT_ID = '4N3n6Q1x95LL5K7p';
 const DEFAULT_TIDAL_CLIENT_SECRET = 'oKOXfJW371cX6xaZ0PyhgG' + 'NBdNLlBZd4AKKYougMjik=';
-
-function readSessionFile(filePath) {
-  if (typeof filePath !== 'string' || !filePath.trim()) return null;
-  try {
-    const raw = readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeSessionFile(filePath, data) {
-  if (typeof filePath !== 'string' || !filePath.trim()) return;
-  try {
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, JSON.stringify(data), { mode: 0o600 });
-  } catch {
-    // Ignore disk persistence errors so in-memory session continues working
-  }
-}
 
 export function premiumConfig(env) {
   const provider = env.PROVIDER;
@@ -484,6 +462,12 @@ export function createPremiumAdapter(config, fetchUpstream) {
       const response = await api(tidal ? 'sessions' : 'user/get');
       await readJson(response);
       return true;
+    },
+    supportsDeviceAuth: tidal,
+    deviceAuthHint: 'Configure your Tidal Client ID or Access Token in Credentials first',
+    /** Tidal accepts a client id alone: the device flow completes the sign-in afterwards. */
+    acceptsPartialLogin(creds) {
+      return tidal && typeof creds.clientId === 'string' && Boolean(creds.clientId.trim());
     },
     async startDeviceAuth() {
       if (!tidal) throw invalid();

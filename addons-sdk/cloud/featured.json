@@ -1,0 +1,144 @@
+[
+  {
+    "provider": "tidal",
+    "id": "org.aideo.tidal",
+    "name": "Tidal HiFi / MAX",
+    "port": 7013,
+    "description": "Lossless & Hi-Res FLAC streaming with OAuth Device Login",
+    "resources": [
+      "search",
+      "stream"
+    ],
+    "auth": {
+      "type": "device_code",
+      "label": "Connect Tidal Account",
+      "helpText": "Sign in with your Tidal account via device code or paste an OAuth token.",
+      "fields": [
+        {
+          "key": "clientId",
+          "label": "Client ID (Optional)",
+          "type": "text"
+        },
+        {
+          "key": "clientSecret",
+          "label": "Client Secret (Optional)",
+          "type": "password"
+        },
+        {
+          "key": "accessToken",
+          "label": "Access Token (Optional)",
+          "type": "password"
+        }
+      ]
+    }
+  },
+  {
+    "provider": "qobuz",
+    "id": "org.aideo.qobuz",
+    "name": "Qobuz Studio",
+    "port": 7014,
+    "description": "24-bit / 192 kHz Studio Masters streaming",
+    "resources": [
+      "search",
+      "stream"
+    ],
+    "auth": {
+      "type": "credentials",
+      "label": "Connect Qobuz Account",
+      "fields": [
+        {
+          "key": "appId",
+          "label": "App ID",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "userAuthToken",
+          "label": "User Auth Token (or use Email + Password below)",
+          "type": "password"
+        },
+        {
+          "key": "email",
+          "label": "Email / Username",
+          "type": "text"
+        },
+        {
+          "key": "password",
+          "label": "Password",
+          "type": "password"
+        }
+      ]
+    }
+  },
+  {
+    "provider": "subsonic",
+    "id": "org.aideo.subsonic",
+    "name": "Subsonic / Navidrome",
+    "port": 7011,
+    "description": "Personal cloud music server (Subsonic / Navidrome API)",
+    "resources": [
+      "search",
+      "stream"
+    ],
+    "auth": {
+      "type": "credentials",
+      "label": "Connect Subsonic / Navidrome Server",
+      "fields": [
+        {
+          "key": "host",
+          "label": "Server URL",
+          "type": "url",
+          "placeholder": "https://music.example.com",
+          "required": true
+        },
+        {
+          "key": "user",
+          "label": "Username",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "pass",
+          "label": "Password",
+          "type": "password",
+          "required": true
+        }
+      ]
+    }
+  },
+  {
+    "provider": "jellyfin",
+    "id": "org.aideo.jellyfin",
+    "name": "Jellyfin Audio",
+    "port": 7012,
+    "description": "Self-hosted Jellyfin media library",
+    "resources": [
+      "search",
+      "stream"
+    ],
+    "auth": {
+      "type": "credentials",
+      "label": "Connect Jellyfin Server",
+      "fields": [
+        {
+          "key": "host",
+          "label": "Server URL",
+          "type": "url",
+          "placeholder": "https://jellyfin.example.com",
+          "required": true
+        },
+        {
+          "key": "apiKey",
+          "label": "API Key",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "userId",
+          "label": "User ID (Optional)",
+          "type": "text"
+        }
+      ]
+    }
+  }
+]
