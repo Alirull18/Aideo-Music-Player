@@ -572,9 +572,11 @@ mod tests {
 
         assert_eq!(page.tracks.len(), 20);
         assert_eq!(single.replaygain_gain, Some(-4.5));
+        // A reader blocked by the open writer would wait out `busy_timeout` (5 s) and then fail. The bound only has to
+        // separate "not blocked" from "blocked"; a tight wall-clock limit just measures machine load.
         assert!(
-            elapsed < std::time::Duration::from_millis(5),
-            "Pooled WAL reader query took {:?}, expected < 5ms while writer transaction is open",
+            elapsed < std::time::Duration::from_secs(1),
+            "Pooled WAL reader query took {:?} while a writer transaction is open; it should not wait on the writer",
             elapsed
         );
 
